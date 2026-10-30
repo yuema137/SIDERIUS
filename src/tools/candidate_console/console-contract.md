@@ -225,6 +225,23 @@ SHA256SUMS; download and unpack the bundle again`, `<path> is missing, a symlink
 unreadable`, `SHA256SUMS line N is not '<sha256>  <path>'`, and invalid
 descriptors (`setup/setup.json is not a valid ... descriptor`).
 
+**Data generation** (`examples/console_bundle/fetch_data.py`, before `add-task`):
+the script removes its own directory from `sys.path` before non-stdlib imports
+so unlisted bundle-root modules cannot shadow the verifier's dependencies.
+This does not authenticate the running script itself; run `sha256sum -c
+SHA256SUMS` independently before execution.
+`render_shards` calls `read_bundle` on the selected package's parent before
+executing task code. `--package` must name the `task/` folder in an unpacked
+bundle. The generator (`task/plugins/_quickstart_task.py`) and data manifest
+(`task/declared/data_manifest.json`) must both be listed. Execution and manifest
+parsing use the verified in-memory bytes, without reopening these files.
+The CLI verifies once and uses the validated `BundleTask.task_id` from that
+bundle's verified `console-task.json` unless `--task-id` overrides it.
+Verification failures exit 2 with `fetch_data refused: ...` before task code
+executes or workspace data is written. Generated shard hashes are then checked
+against the verified data manifest before the existing write-once data writer
+runs. No task content, shard hashes or composition fingerprints change.
+
 **Pre-copy checks** (`plan_import`): console.json validates and resolves, has
 `workspace_root`, and `experiment_setups.browser_creatable` is true (else
 refused: the first setup could not be created); `task_id` (`--task-id`, else
@@ -345,7 +362,19 @@ before validating native `ProposalInput`, nullable `TaskCompositionRef`, or
 `task_composition_ref.parameter_rules` or the separate `TaskCompositionRef.parameter_rules`;
 training controls come from the captured settings' native launch schema, including
 its defaults. No task import or current editor/settings lookup occurs. Review
-refuses changed input bytes. The projection does not alter launch or its digest.
+refuses missing observations or changed input bytes with `reusable_preparation`.
+Multiple externals may supply task rules (across `proposal.input` and
+`optional.task-composition-ref`) or training settings when their extracted review
+values are equal. This includes one proposal input per proposer in independent
+proposal families. Conflicting extracted `ParameterRules` or `TrainingReview`
+values refuse with `reusable_preparation`; null rules are compared as a value.
+These errors use bounded messages without input paths or payloads.
+The projection does not alter launch or its digest.
+`TrainingReview.max_rounds` carries the captured native integer limit (10 when
+omitted), rendered as **Tuning rounds per body**. It is independent of the
+research-loop body count and cannot be replaced by a later editor draft.
+`tests/browser/tuning_rounds.mjs` witnesses the default 10, editing and saving 3,
+and preparing a run whose review facts and visible summary both show 3.
 
 The ordinary `#capture-summary` displays all three captured advice strings, Health
 mode (`observe_only`: Record only; `blocking`: Block on failure), trial/formal time
@@ -482,6 +511,19 @@ them; it never creates `data/<task_id>`. It finishes with the same load as `chec
 Under any umask it creates folders as 0700 and the token as 0600 (it sets umask
 077 for its own duration and `fchmod`s created folders). It never deletes, overwrites
 or follows a symlink. Refusals exit 2 and say which item failed:
+Refusals from `ensure_owned_directory` during `init` name the full offending
+path for the workspace root, fixed children and derived task output directories.
+Non-directories/symlinks are
+refused as such; foreign ownership names the owning uid and advises choosing
+a folder the caller owns. Only a group/other-write refusal suggests `chmod 700`
+on that path (parent and child paths are shell-quoted). The shared helper emits
+this command only when its optional `remedy: Path | None` keyword is an absolute
+path; `init` supplies it, while non-init callers with relative labels receive
+the diagnosis without a command. Ownership takes precedence when
+both ownership and mode fail. Existing directories are never repaired by `init`.
+For a writable workspace parent, the refusal also offers creating an owner-only
+subfolder with `mkdir -m 700 <base>/siderius` and selecting that folder with
+`--workspace`, preserving shared-parent permissions. Both paths are shell-quoted.
 `WorkspaceRefused` names the folder, or the refused file (`settings/console.json`
 or the library default profile, when it is a symlink, unreadable or has different
 bytes); `MissingSetting` from an existing console.json names the task field; an
@@ -491,7 +533,10 @@ parent check only a same-user process, which already owns the workspace, can swa
 a parent.
 
 CLI `init`/`check`/`serve` preserve Pydantic validation failures as one stderr
-line per error: `console.json is invalid at <location> (<type>)`, exit 2.
+line per error: `<source> is invalid at <location> (<type>)`, exit 2.
+Raw `ConsoleFile` failures name `console.json`; validation of the resolved
+configuration names `resolved console configuration (console.json, global settings,
+workspace layout)` because values may come from any of those layers.
 `config_errors.invalid_config_fields` derives its field vocabulary from
 `ConsoleFile`, `ConsoleConfig` and nested models; list positions use `[index]`.
 Mapping keys and unknown union labels are redacted; extra-field names are shown
@@ -499,7 +544,10 @@ only when identifier-shaped, bounded to 32 characters and not token-like
 (credential prefixes or long, mostly alphanumeric strings). Input values, exception
 messages and context are never displayed. Document-level failures use `(document)`.
 `MissingConfigFile` names a missing task manifest/LLM file or experiment setup source using
-the validated item ID and configured path (control characters escaped).
+the validated item ID and configured path (control characters escaped). Missing-file
+failures also print workspace-readiness guidance when the configuration resolves.
+Manifest-reference inspection failures use a fixed category and the task
+`task_manifest` location; nested exception text is never displayed.
 `check_setup_project` owns missing-source diagnostics for both registry setups and
 legacy editor projects, labelled `experiment setup <id>`. Init schema failures end
 with `Nothing was deleted.`. Other
@@ -984,6 +1032,26 @@ operations omit the field. `StatusView.successor_operation_id` forwards the
 operations readback for a segment that a Resume has continued; the segment keeps
 its own receipt.
 
+An authored-loop observation with `state="unknown", reason="loop_process_exiting"`
+reports that the wrapper exited but its remaining processes are not confirmed
+stopped. Monitor keeps the outcome unresolved, offers no End or Resume, and does
+not classify it as terminal/failed.
+
+For an authored-loop root or resume operation with `state="operation_failed"` and
+`reason="loop_process_exited"`, Monitor says the worker was interrupted without a
+result and that no final iteration count is available. A resumed segment directs the
+operator to the paused predecessor to end the loop once worker processes have
+stopped; a root explains that new work may start once those processes stop. It does
+not promise a future receipt or offer Resume again. The operations owner projects
+`reason="loop_successor_failed"` on the verified paused predecessor only after
+the abandoned successor's sessions ended. Monitor preserves the successor link
+and shows **End loop here**, while hiding **Review resume** and **Resume loop**.
+The Stop endpoint rechecks recovery under the store lock. After the run-wide Stop
+is recorded, Monitor says the loop was ended after the resumed segment was
+interrupted; the historical paused receipt remains unchanged. No status schema
+or endpoint is added. `tests/browser/dead_loop_successor.mjs` executes these
+renderers with an in-memory DOM/API to check the controls, request and wording.
+
 `CandidateConsole.request_loop_stop(UUID)` delegates once to
 `candidate_operations.request_loop_stop`, which owns admission, identity checks,
 idempotency and the write-once marker. HTTP POST `/api/operations/{UUID}/loop-stop`
@@ -1002,9 +1070,10 @@ before its running check); a 200 is therefore an idempotent acknowledgement,
 never evidence that the loop is still running.
 
 For an exited, verified paused tail, the same route records Stop after the
-operations owner checks its clean pause and absence of a successor under the
-admission lock. No receipt is rewritten and no new operation/status is invented.
-An existing successor refuses the request; a Stop recorded first blocks Resume.
+operations owner checks its clean pause and either absence of a successor or the
+verified abandoned-successor recovery above under the admission lock. No receipt
+is rewritten and no new operation/status is invented. Other existing successors
+refuse the request; a Stop recorded first blocks Resume.
 
 Monitor: `loop-control.js` owns `window.renderLoopControl` and
 `#loop-control`, rendered from each existing status poll (no extra polling).
@@ -1078,12 +1147,19 @@ Pending Stop and Resume requests disable competing actions. Success triggers a
 fresh Monitor read, including its status sentence and observation label; a
 reload derives the ended display from the durable marker. An unstopped paused
 receipt is labelled "Current status", not "Final status". A continued predecessor
-never offers End, even when a descendant later records Stop.
+offers End only for the verified abandoned-successor recovery above, never merely
+because a descendant later records Stop.
 
 The client generates one request UUID per reviewed digest
-and retains it in `localStorage` (`siderius.loop-resume.v1:<predecessor>`) before
-the POST; a retry reuses it, and the record is released once status shows the
-successor. After a review, `#loop-resume-advice` (a textarea, `maxlength=4000`) is
+and retains it in `localStorage` at
+`siderius.loop-resume.v2/<store>/<predecessor>` before the POST. `<store>` is the
+opaque operations store id; `<predecessor>` is the lowercase predecessor operation
+UUID. The JSON record contains `origin` (`location.origin`),
+`expected_receipt_digest` (the reviewed receipt digest), `request_id` (the generated
+UUID), and optional `operator_advice` (trimmed text, omitted when empty). Reuse
+requires a matching origin and receipt digest. A retry reuses the record, and the
+record is released once status shows the successor. After a review,
+`#loop-resume-advice` (a textarea, `maxlength=4000`) is
 shown. It is prefilled with the retained record's advice when one exists, otherwise
 with this paused segment's own `operator_advice`. The first Resume attempt trims the
 text and fixes it: the retained record stores the request UUID together with
@@ -1259,8 +1335,18 @@ or a creation), `GET /api/editor/projects` and `GET /api/tasks/<id>/setups` for 
 configured task. It hands `workflowEditor.useSetups(list, preferred)` the selected task's
 setups (option text = `label`), followed by an `optgroup` "Other workflows (no configured
 task)" holding legacy `editor_projects` that match no configured task (compatibility: they
-stay editable; a legacy project matched to another task is not listed). `useSetups` keeps
-the open setup when it is listed, else opens `preferred` or the first entry; pending edits
+stay editable; a legacy project matched to another task is not listed). The controller
+remembers the actual opened setup ID in localStorage at
+`siderius.setup.v1:<operations_store_id>:<task_id>`. On load an explicit preferred ID
+(including a newly created setup) takes precedence. Without an explicit preference,
+the listed open setup is kept; only when it is not listed does the controller consult
+the remembered ID. Thus another tab's stored selection cannot switch this tab's open
+setup on a list refresh. `useSetups` opens the supplied preferred ID only when listed,
+otherwise keeps the listed open setup or falls back to the first entry. Missing or
+unavailable browser storage uses the same fallback. A declined switch never remembers
+the refused destination, and a setup retained from another task never overwrites this
+task's preference. This is
+browser selection state only; no run payload or scientific identity changes. Pending edits
 are dropped only after "Discard pending edits and open another experiment setup?" (if
 declined, the open setup stays in its own group and task, labelled "<label> (unsaved
 edits)", and `experimentSetups.current` still names it). A task change clears the old
@@ -1883,7 +1969,7 @@ control sections. `navigation.js` owns `/#home`, `/#task`, `/#workflow`, `/#run`
 `#monitor` route with `history.replaceState` before routing, so old links keep working); `document.title` names Task, Workflow and
 Run. Navigation reads Home · Task · Workflow · Run · Monitor · Settings; the step bar
 `#step-indicator` reads Task (`#task`) › Workflow (`#workflow`) › Run (`#run`) ›
-Results (`#monitor`), its current step follows the view and Task is marked done
+Monitor (`#monitor`, `data-step="monitor"`), its current step follows the view and Task is marked done
 when a task is selected.
 
 Task selection (`task-selection.js`, `window.consoleTask`) is browser session state:
@@ -2071,7 +2157,7 @@ opens the gallery; disabled until connected) and the tour as a secondary link
 until `.inspector-capability-heading` exists. The page-bar `#problems-chip` mirrors the
 `.editor-problem` count that `editor-problems.js` renders (MutationObserver; hidden at 0)
 and focuses the first problem. A step line (`#step-indicator`, `role="navigation"`, not a
-`<nav>` element) shows Task › Workflow › Run › Results on Workflow (Task until a source is
+`<nav>` element) shows Task › Workflow › Run › Monitor on Workflow (Task until a source is
 open), Run and Monitor, with `aria-current="step"` and a done mark for completed steps; it
 is hidden on Home and on the global Settings page. Witness: `tests/browser/page_guidance.mjs`.
 
@@ -2348,7 +2434,7 @@ the spec conformance pass to gate with the same attribute or `uiSettings.isEnabl
 | --- | --- | --- | --- | --- |
 | Shell | Logo, nav, Connect / Connected line, theme, Help, Settings | Beginner | shown | Needed to reach any page and to get help |
 | Shell | About this console | Beginner | shown | One-line orientation, collapsed |
-| Shell | Step line Task › Workflow › Run › Results | Beginner | shown | Tells a new user where they are |
+| Shell | Step line Task › Workflow › Run › Monitor | Beginner | shown | Tells a new user where they are |
 | Home | Hero: logo + one sentence | Beginner | shown | Says what SIDERIUS does |
 | Home | Entry cards: Start from a template, Open a workflow, Monitor runs | Beginner | shown | The three first actions |
 | Home | Run a configured native chain | Advanced | gated | Externally reviewed captures; not a first-use path |
@@ -2808,7 +2894,10 @@ States: `observing` (child running; poll the same URL), `ready`, `failed`
 `unavailable` (`unavailable: {reason, hint}`; `reason` is `sandbox_missing`,
 `data_root_missing`, `manifest_missing` or `llm_config_unreadable`). The model
 profile is read because the child resolves its planner strategy exactly as the
-editor's task observation does.
+editor's task observation does. Console-side exceptions and package scope/storage/sample-count exceptions use
+`tools.setup_review.summary_errors.summary_error_message`: fixed, bounded filesystem,
+invalid-value or unexpected-error categories. Raw exception text and task-defined
+exception class names are never included by this owner.
 
 Observation: the request thread reads the manifest digest and model profile, then
 builds `CompositionJob(summary=TaskSummaryRequest(data_root, count_samples))` with
@@ -2829,9 +2918,20 @@ View fields:
 - `data_root`, `run_policy` (`TaskChoice` timeouts, network, devices,
   `candidate_environment_names` as names only, `allowed_output_types`). No credential
   file is read; no secret value can appear.
-- `data_volume`: `{files, bytes, complete, entry_cap}` from a no-follow walk
+- `data_volume`: `{files, bytes, complete, entry_cap, incomplete_reason}` from a no-follow walk
   (`os.scandir`, symlinks counted as entries and never followed), capped at
-  100 000 entries; `complete=false` when the cap was reached.
+  100 000 entries and a five-second monotonic wall-time budget. Entries on a
+  different `st_dev` from the data root are skipped (including mounted
+  subdirectories). Entry/time caps, skipped devices and filesystem errors yield
+  `complete=false` with partial totals. `incomplete_reason` is `null` for complete
+  totals; otherwise `entry_cap`, `time_budget`, `other_device` or `unreadable`
+  (including vanished entries). A stopping cap/time budget takes precedence over
+  skipped-entry reasons; otherwise the first skip reason is retained. The Task tab
+  renders the reported reason and labels both totals as lower bounds.
+  An entry error skips only that entry; directory open/iteration errors skip the
+  remaining directory. The deadline is checked before visiting more entries or
+  directories, so completing the final entry after the deadline remains complete.
+  It cannot interrupt an already-blocked kernel call.
 - `package` (only when `ready`): `identity` (`semantic_fingerprint`,
   `task_data_path_id`, configured `task_revision`, `revision_matches`),
   `description` and `model_io` (the composed `task_description` and

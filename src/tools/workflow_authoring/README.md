@@ -1,7 +1,14 @@
-# Edit an ordinary workflow file
+# Edit your own workflow.py in the browser console (experimental)
 
-Open a dedicated `workflow.py`, edit its supported declaration in the console,
-review the Python diff, and save back to the same file used by your coding agent.
+Read on if you keep `workflow.py` in your own project folder (for example, one
+written by your coding agent) and also want to view or edit it on the console's
+**Workflow** tab.
+If you created the workflow in the console with **New setup…**, it is already
+set up; skip this page. The browser console is **experimental** in SIDERIUS
+1.1, and `workflow.py` on disk stays the authority for what runs.
+
+The console reads the file, lets you edit its supported declaration, shows the
+Python diff, and saves back to the same file your coding agent uses.
 This editor checks declaration structure. It does not execute a workflow or check
 whether referenced manifests, data or plugins exist.
 
@@ -9,8 +16,10 @@ whether referenced manifests, data or plugins exist.
    supported by [workflow definitions](../../workflows/definition/README.md).
    The source must be UTF-8, at most 32 KiB, owned by the current user and a regular
    file. Symlinks, hardlinks and special permission bits are unsupported.
-2. Create an existing owner-only recovery directory inside the same project,
-   separate from preparation and candidate output directories:
+2. Create a recovery folder that only you can read (mode `700`), inside the
+   same project but separate from your preparation and run output folders. The
+   editor keeps exact copies of the previous and saved file bytes there. The
+   folder must exist before the console starts:
 
    ```bash
    mkdir -m 700 /absolute/project/editor-recovery
@@ -33,7 +42,7 @@ whether referenced manifests, data or plugins exist.
    This is an addition to the console's other required fields. All three paths
    must be explicit absolute paths with existing parents. Restart the console
    after changing its configuration.
-4. Follow **Workflow Editor** from the console, enter its access token and choose
+4. Open the **Workflow** tab of the console, enter its access token and choose
    a project. Select a node to edit a supported binding, or edit task/external
    locations. The Python panel also accepts supported source changes, including
    adding nodes. Click **Save** to validate the graph; a save row opens (with
@@ -64,3 +73,19 @@ last comparison can be overwritten and may be missing from recovery copies.
 Use trusted local project directories. A lost connection leaves a save unconfirmed
 until you inspect disk again. See the [authoring contract](authoring-contract.md)
 for exact limits, refusals and concurrency behavior.
+
+## View a hand-written workflow.py without changing it
+
+To only look at the file as a canvas of nodes and their ports, complete steps
+1 to 4 above and do not press **Save**; viewing never changes the file.
+
+Caveats:
+
+- The editor is read-write. **Save** rewrites `workflow.py` from the editor's
+  canonical form, which can change formatting and comments. Before you save, keep
+  a copy or commit the file to version control. Version history keeps recovery
+  copies of the previous and proposed bytes, but `workflow.py` stays authoritative,
+  so these copies are not a substitute for version control.
+- Adaptor and LLM-judge declarations are not drawn. The console source has no
+  adaptor drawing, so a workflow that uses them shows only its nodes. Edit those
+  parts in the file itself and check them with the authoring contract.

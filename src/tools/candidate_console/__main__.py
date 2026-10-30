@@ -51,9 +51,10 @@ def _load(path: str) -> ResolvedConsole | None:
         print(error, file=sys.stderr)
     except (OSError, ValueError):
         print(INVALID, file=sys.stderr)
-        # Name unusable workspace folders when the file itself resolves.
-        with contextlib.suppress(OSError, ValueError):
-            _print_readiness(workspace_readiness(resolve_console(config_bytes(path))))
+    # Name unusable workspace folders when the file itself resolves, including
+    # missing configured resources. Resolution does not require those files.
+    with contextlib.suppress(OSError, ValueError):
+        _print_readiness(workspace_readiness(resolve_console(config_bytes(path))))
     return None
 
 

@@ -89,7 +89,7 @@ them. Dataset row counts are separate from physical-segment counts.
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `is_trial` | `bool` | No | `False` | `True` allows trial and formal rounds (the planner chooses; task-owned scopes for composed tasks). `False` makes every round `single_file` (`planning.py` mode resolution): no task-owned scopes, and the training child loads one TIDMAD training file by `file_index`. A composed run whose dataset profile declares no TIDMAD topology is therefore refused at startup (`runtime.validate_training_mode_startup`, right after `validate_watchdog_startup`, before any model call) with `execute_tools.dataset_config.single_file_mode_refusal`'s message. Un-composed and TIDMAD-topology runs are unchanged. |
+| `is_trial` | `bool` | No | `False` | `True` allows trial and formal rounds (the planner chooses; task-owned scopes for composed tasks). `False` makes every round `single_file` (`planning.py` mode resolution): no task-owned scopes, and the training child loads one TIDMAD training file by `file_index`. A composed run whose dataset profile declares no TIDMAD topology is therefore refused at startup (`runtime.validate_training_mode_startup`, after the `storage.local` check and `resolve_dataset_profile`, before any model call) with `execute_tools.dataset_config.single_file_mode_refusal`'s message. Un-composed and TIDMAD-topology runs are unchanged. |
 | `trial_strategy` | `Literal["snapshot", "anchors", "target"]` | No | `"snapshot"` | Sampling strategy: `snapshot` (all 20 files), `anchors` (files 0/10/19), `target` (specific files via `target_files`). |
 | `trial_portion` | `float \| None` | No | `None` (schema); CLI flag default `0.1` | Fraction of segments per file for the training scope. **TRANSIT ONLY (Lane F2)**: the tuner's executed trial workload never reads this input field — it reads the (possibly overridden) plan; the operator lock for portions is `plan_overrides` (this node's CLI bundles it under `--is_trial`; the chain's typed `--trial_portion` merges via `frozen_portion_overrides`). Its one real consumer chain is the proposer's resource-estimation preflight. The old `0.1` default shown here was doc drift — the schema default was always `None`. |
 | `target_files` | `list[int]` | No | `[]` | File indices to sample from. Required when `trial_strategy="target"`. |
@@ -266,7 +266,13 @@ Two consumers now SKIP rather than fabricate instead of dying:
 
 Under an un-composed legacy physical-data caller, every fact
 `AttemptTopologyFacts` reports and both legacy SampleSets remain unchanged.
-Composition presence, never a task name, selects the task-owned scope path.
+Composition presence, never a task name, selects the task-owned scope path
+for trial/formal rounds. Single-file rounds acquire no task-owned scopes.
+When no SampleSet is built, composed trial/formal attempts print the task-owned
+scope notice regardless of physical geometry. Single-file attempts print
+`Legacy mode: file_index=<index>` whether composed or uncomposed, because
+training uses that file index. This log distinction does not change mode
+selection or scope acquisition.
 
 ### Resource and time planning (Step-05b)
 
@@ -1696,6 +1702,74 @@ fingerprinted with the task composition and every changed field is attributed
 to `composition-declared parameter rules` in execution provenance. A rule may not
 target `loss_config` when the task declares an objective, because the objective
 is the sole authority for loss semantics.
+
+### Training batch fit before resource probing
+
+`training_batch_plan.resolve_training_batch_plan` runs once in `prepare_attempt`
+after role-specific task scope acquisition, parameter-rule enforcement and the
+composed Health coverage check (`validate_attempt_health_coverage`), before
+resource probing and construction of execution/record parameters. For a composed
+training scope it calls `workload_resolvers.resolve_task_training_rows`, the
+single dataset row-count owner. `probe_data.epoch_zero_training_sampling` builds
+the shared `EpochSamplingParams` from the resolved data root, first-epoch
+subsample seed, `TrialConfig.train_portion`, and `validation_max_train_samples`.
+Both structural preflight and GPU measurement use that same sampling helper.
+Dataset construction may eagerly read samples, including TIDMAD HDF5 data;
+counting is not a metadata-only operation. The parent constructs this dataset
+once during planning, retains only its count as
+`PreparedAttempt.resolved_training_rows`, and releases the dataset. Admission
+guardrails pass that count to `resolve_task_scope_training_workload` without
+constructing a second dataset. The count is attempt-local and already reflects
+task-owned portion/ceiling selection; it is never reused across attempts or
+subsampled again. Legacy standalone workload callers without a resolved count
+still construct through the same owner with their existing row-count seed.
+
+With `drop_last=True`, a nonempty scope smaller than the planned batch resolves
+an unlocked `train_config.batch_size` to its materialized row count: 12 rows and
+batch 32 become batch 12 for both probing and formal/trial execution. This is
+the largest batch that produces at least one full optimizer step. The same
+`optimizer_steps_for_rows` authority used by workload resolution determines
+whether the original batch produces zero steps. The same
+resolved config enters `PreparedAttempt.plan`, `active_params`, `record_params`,
+and downstream measurement identities. No reduced-batch measurement or memory
+extrapolation is introduced; existing admission and zero-step guards remain.
+
+Exact task or workflow parameter rules and an explicit operator
+`plan_overrides.train_config.batch_size` are locks. An oversized locked batch
+raises `TrainingBatchPlanError` (a `TrainingScopeError`) before probing, naming
+the lock, row count, role and batch size. Empty datasets always raise the same
+typed refusal; unsized datasets or a missing data root also refuse. Non-exact
+range/allowed/predicate rules are revalidated after clamping and retain their
+existing `ParameterRuleError` refusal if the adjusted value is disallowed.
+
+A clamp prints one `[training_batch]` line and records the authored/effective
+batch through execution provenance authority `training_scope_batch_fit`. For
+this field only, that final authority supersedes an earlier inheritance claim;
+other provenance remains unchanged. Fitting scopes (including large TIDMAD
+scopes) omit the optional `ExecutionProvenance.training_batch_fit` receipt.
+Clamped attempts retain that receipt's role, requested batch, resolved batch,
+and available sample count even if fitting restores the authored batch after
+inheritance, leaving no authored/effective disagreement event. The receipt is
+also persisted as `params.training_batch_fit` on attempt records; it is omitted
+when no adjustment occurred. Fitting scopes,
+nonempty `drop_last=False` scopes, and legacy uncomposed attempts keep
+their plan bytes unchanged and add no clamp event or log line. This resolution
+checks first-epoch geometry; the trainer still owns actual per-epoch zero-step
+refusal if a task later changes its materialized cardinality.
+
+A successful trial's persisted `params.train_config.batch_size` is its clamped
+value. Under `formal_round_strategy="full_clone"`, the existing winner
+inheritance copies that value into the formal plan. The formal role then checks
+its own scope: it retains the inherited batch if it fits, or applies this same
+lock-preserving resolution if it does not. No original oversized proposal is
+restored by inheritance.
+
+Regression evidence lives in `test_training_batch_plan.py`: real planning,
+full probe loading and a CPU optimizer step; task/workflow/operator locks;
+empty scope; sampling ceiling; tail policy; non-exact constraints; and
+byte-identical large-scope plans/measurement identities against the pre-fit path.
+The planning-to-admission regression counts dataset constructions and checks
+both probe routes' sampling against the request observed by the row-count owner.
 
 ## The reflector is told what RESOLVED, not what was proposed (Lane D / F15)
 

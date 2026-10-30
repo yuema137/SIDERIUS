@@ -116,6 +116,7 @@ def test_quickstart_summary_projects_owner_facts_and_counts_only_on_request(
         "bytes": view["data_volume"]["bytes"],
         "complete": True,
         "entry_cap": 100_000,
+        "incomplete_reason": None,
     }
     assert view["run_policy"]["candidate_environment_names"] == ["OPENAI_API_KEY"]
 
@@ -189,7 +190,9 @@ def test_data_walk_cap_reports_an_incomplete_volume(tmp_path):
     for index in range(5):
         (tmp_path / "nested" / f"f{index}").write_bytes(b"x" * 10)
     (tmp_path / "link").symlink_to(tmp_path / "nested")
-    assert walk_data_root(tmp_path, cap=3).complete is False
+    partial = walk_data_root(tmp_path, cap=3)
+    assert partial.complete is False
+    assert partial.incomplete_reason == "entry_cap"
     full = walk_data_root(tmp_path)
     # The symlinked directory is an entry, never followed: 5 files, not 10.
     assert (full.files, full.bytes, full.complete) == (5, 50, True)
@@ -238,3 +241,158 @@ def test_locked_parameters_keep_an_exact_null_lock():
         ("loss_config.reduction", "allowed", ["mean"]),
         ("train_config.batch_size", "exact", None),
     ]
+
+
+def test_console_failure_message_is_bounded(console_config):
+    """Defect: an observer exception produces an arbitrarily large console view."""
+    from tools.setup_review.composition_models import FAILURE_MESSAGE_MAX_CHARS
+
+    def fail(job, task):
+        raise RuntimeError("x" * (FAILURE_MESSAGE_MAX_CHARS + 100))
+
+    summaries = TaskSummaries(console_config.tasks, observer=fail, start=lambda work: work())
+    view = summaries.summary("synthetic")
+    assert view is not None and view.state == "failed" and view.failure is not None
+    assert view.failure.stage == "console"
+    assert view.failure.message == "Unexpected error while reading task summary facts."
+    assert len(view.failure.message) <= FAILURE_MESSAGE_MAX_CHARS
+
+
+@pytest.mark.parametrize("finish_at", ["stat", "close", "before_next"])
+def test_data_walk_deadline_tracks_remaining_work(tmp_path, monkeypatch, finish_at):
+    """Expiry after the last stat/close is complete; before another entry is partial.
+
+    Sparse 1 GiB shards model a 332-file scientific dataset without allocating data.
+    A clock driven by filesystem events avoids depending on monotonic call counts.
+    """
+    import os
+
+    from tools.candidate_console import task_summary
+
+    for index in range(332):
+        with (tmp_path / f"{index:03}.h5").open("wb") as stream:
+            stream.truncate(1024**3)
+    with os.scandir(tmp_path) as listing:
+        entries = sorted(listing, key=lambda entry: entry.name)
+    now = 0.0
+
+    class Entry:
+        def __init__(self, entry, index):
+            self.entry, self.index = entry, index
+            self.path = entry.path
+
+        def stat(self, **kwargs):
+            nonlocal now
+            if (finish_at == "stat" and self.index == 331) or (
+                finish_at == "before_next" and self.index == 0
+            ):
+                now = 10.0
+            return self.entry.stat(**kwargs)
+
+        def is_dir(self, **kwargs):
+            return self.entry.is_dir(**kwargs)
+
+        def is_file(self, **kwargs):
+            return self.entry.is_file(**kwargs)
+
+    class Listing:
+        def __enter__(self):
+            return iter(Entry(entry, index) for index, entry in enumerate(entries))
+
+        def __exit__(self, *args):
+            nonlocal now
+            if finish_at == "close":
+                now = 10.0
+
+    monkeypatch.setattr(task_summary.os, "scandir", lambda path: Listing())
+    monkeypatch.setattr(task_summary.time, "monotonic", lambda: now)
+    volume = walk_data_root(tmp_path, cap=332)
+    expected = 1 if finish_at == "before_next" else 332
+    assert (volume.files, volume.bytes) == (expected, expected * 1024**3)
+    assert volume.complete is (finish_at != "before_next")
+    assert volume.incomplete_reason == ("time_budget" if finish_at == "before_next" else None)
+
+
+@pytest.mark.parametrize("vanish_at", ["stat", "is_dir", "is_file"])
+def test_vanished_entry_does_not_hide_readable_siblings(tmp_path, monkeypatch, vanish_at):
+    """An OSError for one entry must retain later files in the same scandir listing."""
+    import os
+
+    from tools.candidate_console import task_summary
+
+    (tmp_path / "survivor").write_bytes(b"abc")
+    with os.scandir(tmp_path) as listing:
+        survivor = next(listing)
+
+    class Vanished:
+        def stat(self, **kwargs):
+            if vanish_at == "stat":
+                raise FileNotFoundError("vanished")
+            return survivor.stat(**kwargs)
+
+        def is_dir(self, **kwargs):
+            if vanish_at == "is_dir":
+                raise FileNotFoundError("vanished")
+            return False
+
+        def is_file(self, **kwargs):
+            raise FileNotFoundError("vanished")
+
+    class Listing:
+        def __enter__(self):
+            return iter([Vanished(), survivor])
+
+        def __exit__(self, *args):
+            pass
+
+    monkeypatch.setattr(task_summary.os, "scandir", lambda path: Listing())
+    volume = walk_data_root(tmp_path)
+    assert (volume.files, volume.bytes) == (1, 3)
+    assert volume.complete is False
+    assert volume.incomplete_reason == "unreadable"
+
+
+@pytest.mark.parametrize("kind", ["file", "directory"])
+def test_data_walk_skips_other_devices(tmp_path, monkeypatch, kind):
+    """Defect: a mount beneath data_root is traversed and reported as complete."""
+    import os
+    from types import SimpleNamespace
+
+    from tools.candidate_console import task_summary
+
+    mount = tmp_path / "mount"
+    if kind == "directory":
+        mount.mkdir()
+        (mount / "foreign").write_bytes(b"foreign")
+    else:
+        mount.write_bytes(b"foreign")
+    scandir = os.scandir
+    device = tmp_path.stat().st_dev
+
+    class ForeignEntry:
+        path = str(mount)
+
+        def stat(self, *, follow_symlinks):
+            return SimpleNamespace(st_dev=device + 1, st_size=7)
+
+        def is_dir(self, *, follow_symlinks):
+            return kind == "directory"
+
+        def is_file(self, *, follow_symlinks):
+            return kind == "file"
+
+    class Listing:
+        def __enter__(self):
+            return iter([ForeignEntry()])
+
+        def __exit__(self, *args):
+            pass
+
+    def listing(path):
+        return Listing() if Path(path) == tmp_path else scandir(path)
+
+    monkeypatch.setattr(task_summary.os, "scandir", listing)
+    volume = walk_data_root(tmp_path)
+    assert volume.complete is False
+    assert (volume.files, volume.bytes) == (0, 0)
+    assert volume.incomplete_reason == "other_device"

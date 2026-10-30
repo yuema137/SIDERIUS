@@ -170,9 +170,16 @@ def _admit_new(
         try:
             observed = fresh_preview(submission.request)
         except (OSError, ValueError) as error:
-            raise OperationFailure(
-                "candidate_preflight", "candidate inputs or routes changed; review again"
-            ) from error
+            message = "candidate inputs or routes changed; review again"
+            if (
+                isinstance(error, ValueError)
+                and submission.request.preview.document.definition.loop is not None
+                and submission.request.preview.execution_profile
+                != "native-interpretation-candidate/v1"
+            ):
+                # Use validated fields, never exception text that may contain raw inputs.
+                message = "research loops require the native-interpretation-candidate profile"
+            raise OperationFailure("candidate_preflight", message) from error
         try:
             require_credentials(
                 observed.selected_constructor_routes,
@@ -341,13 +348,19 @@ def request_loop_stop(config: OperationStoreConfig, operation_id: UUID) -> LoopS
             return marker
         snapshot = read_operation(config, operation_id)
         if snapshot.receipt is not None and snapshot.receipt.status == "paused":
-            # Same lock as Resume admission: only the clean paused tail can end,
-            # never a historical checkpoint whose successor already continues it.
-            review_locked(config, operation_id)
+            # A reserved successor may have died without a receipt. Ending is
+            # safe only once its sessions ended; Resume still cannot reuse it.
+            review_locked(config, operation_id, ending=True)
         elif snapshot.receipt_available or snapshot.process.status != "alive":
             raise OperationFailure("not_running", "candidate is terminal or not confirmed running")
         with directory(control) as descriptor:
             publish_bytes_write_once(
                 f"/proc/self/fd/{descriptor}/stop.json", encode_control(marker)
             )
+        # Successful paused Stop admission already proved this successor ended.
+        # Its sessions may have ended between the first snapshot and that review.
+        if snapshot.successor_operation_id is not None:
+            from .store import release_active
+
+            release_active(config, snapshot.successor_operation_id)
         return marker

@@ -795,10 +795,10 @@ class HyperparamTuningAgent:
         # Step 02b removed from sample-set construction and 05a removes from
         # the rest of the tuner.
         #
-        # Placement cannot move failure ordering: `resolve_dataset_profile`
-        # reads a ContextVar and falls back to the shipped TIDMAD profile, so
-        # it has no failure mode of its own and no phase moved to accommodate
-        # it.
+        # Resolution reads the bound ContextVar and raises
+        # DatasetProfileBindingError when no profile is bound; there is no
+        # implicit TIDMAD fallback. Keep it after the storage.local check so
+        # missing local storage is refused before a missing profile binding.
         run_profile = resolve_dataset_profile()
         # Before any planner call: a composed non-TIDMAD run with is_trial false
         # could only reach single_file rounds, which cannot train it.

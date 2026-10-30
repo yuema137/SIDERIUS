@@ -1,16 +1,185 @@
 # Get started with your coding agent
 
-We recommend preparing your task and experiment with a coding agent. In
-**Assistant** mode, describe your problem and data in one sentence; the agent
-follows the [setup skill](../agent-reference/siderius-setup-review/SKILL.md)
-and guides you from environment setup to saved task and experiment files.
-For example: "I have MNIST images and labels in `/data/mnist`; help me build and
-evaluate a digit classifier." In **Professional** mode, you lead
-the choices and use your agent to read contracts, edit files and check the setup.
-Both use the same framework; these names do not select a CLI flag or force a
-review. Handwritten setup is supported, but is not the recommended first route.
+SIDERIUS 1.1 has two main ways of working, and both use a coding agent (for
+example Claude Code or Codex) opened in this checkout:
 
-## Your first hour: from the example to your own task
+- **Professional**: you lead the research plan. The agent reads the contracts,
+  writes the files you ask for and checks the setup.
+- **Assistant**: you describe your problem and data in one sentence. The agent
+  follows the [setup skill](../agent-reference/siderius-setup-review/SKILL.md)
+  and guides you through each choice. For example: "I have MNIST images and
+  labels in `/data/mnist`; help me build and evaluate a digit classifier."
+
+Both produce the same files in a project folder you own: a task package, a
+**workflow declaration** (`workflow.py`, a short Python file that says which
+research steps run and with which settings) and an LLM profile. Both run them
+with the same command-line tools. These names do not select a CLI flag or force
+a review. Writing the files by hand is also supported.
+
+A browser console is also included. It is **experimental** in this release:
+see [Try the browser console (experimental)](#try-the-browser-console-experimental).
+
+## Prepare your project
+
+1. Follow [installation](installation.md): use Python 3.12+ (this checkout pins
+   3.12) and uv, run
+   `uv sync --group dev --frozen` in this checkout, and use its `.venv/bin/python`.
+2. Open the checkout in your coding agent. Describe your research question,
+   dataset location and an external project directory. You do not need a
+   prepared manifest. Agree on the prediction target, splits, score and budgets;
+   the agent creates your [task package](../reference/task-composition.md) and
+   experiment files there. For an existing scientific task, start from a
+   [companion tutorial](https://github.com/yuema137/siderius-exp/blob/main/tutorials/README.md).
+3. Save a reviewed [LLM profile](../../configs/llm/README.md) in your project.
+   This JSON file selects the experiment's providers and models by role;
+   your coding agent's own model is a separate choice. Supply only credentials
+   required by those selected routes, using the launch route below.
+
+For example, keep task inputs, the workflow and run outputs in your external
+project. These are example names, not a layout the tools require:
+
+```text
+/absolute/project/                 # outside the SIDERIUS checkout
+  task.yaml                        # task manifest: ReusableTaskReferences(manifest="task.yaml")
+  task_plugins/                    # dataset/model/metric implementations
+  data/                            # dataset: ReusableTaskReferences(data_root="data")
+  workflow.py                      # workflow declaration: steps, advice, budgets, loop
+  llm.json                         # saved provider/model profile
+  reusable-request.json            # preparation request for one run
+  store.json                       # where detached operations keep their records
+/absolute/runs/                    # create it first; one folder per prepared run
+/absolute/operations/              # operation records; created by the first submit
+```
+
+The task manifest defines the science; `workflow.py` defines the experiment.
+Keep private key files outside version control, for example in a separate
+machine-owned directory.
+
+## Write and run a workflow declaration
+
+This is the recommended route for your own research runs. Your coding agent
+can do each step for you; the commands below are what it runs, so you can
+check them. You need Linux with bubblewrap, this checkout's `.venv/bin/python`,
+a task package and an NVIDIA GPU with CUDA for the training step.
+
+1. **Start `workflow.py` from an example.** Copy one file from
+   [`examples/workflow_declarations/`](../../examples/workflow_declarations/)
+   into your project as `workflow.py`:
+   [`reusable_training.py`](../../examples/workflow_declarations/reusable_training.py)
+   runs Propose → Implement → Validate → Train & tune once;
+   [`managed_reusable_candidate.py`](../../examples/workflow_declarations/managed_reusable_candidate.py)
+   stops after validation. Point its `ReusableTaskReferences(manifest=...,
+   data_root=...)` at your task package and data (relative paths resolve against
+   the `project_root` you choose in step 2, normally your project folder) and set
+   the advice and training settings you want. A research loop, a literature
+   review and LLM judges are also declared in this file; the
+   [declaration contract](../../src/workflows/definition/definition-contract.md)
+   lists every field.
+
+2. **Save the preparation request.** Your agent writes
+   `/absolute/project/reusable-request.json` with the
+   [request recipe](../../src/tools/candidate_prepare/candidate-prepare-contract.md#reusable-request-recipe).
+   It names `workflow.py`, the LLM profile, a runs folder, the time limits and
+   the environment variable names of the provider keys (never the key values).
+   The runs folder (`/absolute/runs` above) must already exist, outside your
+   task and data folders. You will list this folder in `store.json` in step 4.
+
+3. **Prepare the run.** This step is offline: no model is called and nothing
+   is trained.
+
+   ```bash
+   .venv/bin/python -m tools.candidate_prepare \
+     --reusable-request /absolute/project/reusable-request.json
+   ```
+
+   Success: exit status 0, and `receipt.json` in the new run folder reports
+   `status: "prepared"`. `workflow.py.snapshot` there is the exact workflow that
+   will run; later edits to `workflow.py` only affect future runs.
+
+4. **Launch it.** First save `store.json`: it tells the operations tool where
+   prepared runs may live (list the runs folder from step 2 in both
+   `preparation_roots` and `candidate_roots`) and where to keep its own records
+   (`state_root`, a separate folder such as `/absolute/operations`). Then ask
+   your coding agent to run the short Python
+   [operation recipe](../../src/tools/candidate_operations/candidate-operations-contract.md#shared-python-and-cli-recipe),
+   which selects the prepared run folder from step 3 and writes
+   `reusable-submission.json`. Read the task, workflow steps, models, time
+   limits and advice in that file before you continue. Then make your provider
+   keys available in this shell (see [API keys](installation.md#api-keys)) and
+   submit. This step calls paid APIs and uses the GPU:
+
+   ```bash
+   .venv/bin/python -m tools.candidate_operations submit \
+     --store-config /absolute/project/store.json \
+     --request /absolute/project/reusable-submission.json
+   ```
+
+   Save the `operation_id` it prints. Exit status 0 means the run was admitted,
+   not that it succeeded.
+
+5. **Follow it.** Read the state and the log with the operation ID:
+
+   ```bash
+   .venv/bin/python -m tools.candidate_operations status \
+     --store-config /absolute/project/store.json --operation-id OPERATION_UUID
+   .venv/bin/python -m tools.candidate_operations log \
+     --store-config /absolute/project/store.json --operation-id OPERATION_UUID \
+     --kind native --offset 0 --limit 65536
+   ```
+
+   For a research loop, `stop-loop`, `pause-loop` and `write-loop-resume`
+   (with an optional `--advice-file`) act between iterations; see
+   [Stop, pause or resume a research loop](../../src/tools/candidate_operations/README.md#stop-pause-or-resume-a-research-loop).
+
+[Read status and logs](../../src/tools/candidate_operations/README.md#read-status-and-logs)
+explains each status value. A finished run is not a scientific verdict: read
+its scores and Health results before you compare it with other runs.
+
+## Launch a native chain from the CLI
+
+The older chain launcher `scripts/launch/run_chain.sh` remains supported. The
+[companion tutorials](https://github.com/yuema137/siderius-exp/blob/main/tutorials/README.md)
+and paper tasks use it through saved launch scripts. For this route, use
+[first-run checks](first-run.md) and your external project's saved launch
+script. Have your agent show the saved settings, command and output directory
+before execution. An optional
+[setup review](../../src/tools/setup_review/README.md) produces an HTML report.
+
+This route reads credentials from the launch process: use a trusted external
+shell-compatible credential file or managed injection, with the name-only check
+in the [API-key procedure](installation.md#api-keys).
+
+Optionally, [capture a native chain](../../src/tools/native_chain/README.md)
+to record the settings for a fresh foreground multi-iteration CLI run before
+explicitly launching it. The original declaration and configuration files remain
+authoritative; capture does not certify scientific success. Follow the linked
+guide for prerequisites and path requirements.
+
+## Check your installation and other routes
+
+The [Quickstart pack](../../examples/quickstart/README.md) offers synthetic data
+preparation and component checks that run on CPU without provider calls. They
+check installation and task contracts, not scientific hardware or model
+performance. A real run, including a Quickstart research chain, needs an NVIDIA
+GPU with CUDA; the chain header and the console run review say so, and a launch
+on a machine without one stops before any model call.
+
+To let an LLM orchestrator choose the research steps instead of a fixed
+`workflow.py`, use the [external orchestration guide](../../src/tools/orchestration_setup/README.md).
+Choosing that execution route is separate from choosing Professional or
+Assistant collaboration. See [the documentation map](../README.md) for deeper
+references.
+
+## Try the browser console (experimental)
+
+The browser console is **experimental** in SIDERIUS 1.1: its pages and
+settings may change between releases, and it does not show every workflow
+feature (for example, literature-review aggregation is not drawn). Use it to
+see the steps once on a small example, or to view and run a `workflow.py` your
+agent wrote; the file stays the authority for what runs. Packaging a task still
+happens with your coding agent.
+
+### Your first hour: from the example to your own task
 
 This path has two stages. Stage 1 runs a small ready-made example in the browser
 console, so you see every step once. Stage 2 repeats the same steps with your
@@ -29,7 +198,7 @@ The commands use three example paths. Replace them with your own absolute paths:
 you own; the console workspace is created inside it) and
 `/absolute/private/credentials.json` (your private API key file).
 
-### Before you start
+#### Before you start
 
 - **A Linux machine with an NVIDIA GPU and CUDA** for the run itself. Every
   step before Launch works on CPU, but a launched run without a GPU stops
@@ -40,7 +209,7 @@ you own; the console workspace is created inside it) and
 - **Python 3.12+ and [uv](https://docs.astral.sh/uv/)**, and an OpenAI API key
   (the standard model profile uses OpenAI models).
 
-### Stage 1: run the example
+#### Stage 1: run the example
 
 1. **Install SIDERIUS.**
 
@@ -69,6 +238,8 @@ you own; the console workspace is created inside it) and
    `/absolute/downloads/siderius-example-quickstart-1.0.0.zip`, and `unzip`
    creates `/absolute/downloads/siderius-example-quickstart-<version>/`. The
    bundle holds a small synthetic task package and a ready experiment setup.
+   The number in the name is the package version from `pyproject.toml`; it may
+   differ from the release name.
 
 3. **Create your private key file and the console workspace.** The first
    command creates an empty key file that only you can read (mode `600`; its
@@ -90,8 +261,12 @@ you own; the console workspace is created inside it) and
    [Credentials](../../src/tools/candidate_console/README.md#credentials) explains
    the file formats and what happens when `console.json` already exists.
    The workspace's parent folder (`/absolute/project` above) must be owned by you
-   and not writable by group or others, or `init` refuses it; `mkdir -p` under a
-   umask of 002 creates such folders, so fix one with `chmod 700 /absolute/project`.
+   and not writable by group or others, or `init` refuses it. For a folder meant
+   only for you, use `chmod 700 /absolute/project`. On a shared HPC filesystem,
+   keep collaborators' access to the shared folder: create a private subfolder
+   with `mkdir -m 700 /absolute/project/siderius`, then rerun `init` with
+   `--workspace /absolute/project/siderius` and use
+   `/absolute/project/siderius/siderius_workspace` in the steps below.
 
 4. **Write the example data into the workspace.**
 
@@ -151,7 +326,7 @@ you own; the console workspace is created inside it) and
    each step reported. The example proves the path works end to end, not model
    quality.
 
-### Stage 2: bring your own task
+#### Stage 2: bring your own task
 
 1. **Package your task with your coding agent.** Open this checkout in your
    coding agent and describe your data and question, for example: "Use SIDERIUS
@@ -191,7 +366,7 @@ you own; the console workspace is created inside it) and
 5. **Build a workflow for it.** On **Task**, select your task and read the panel:
    it shows the splits, model input and output, main score and Health checks
    read from your package. On **Workflow**, select **New setup…**, start from
-   the research-loop template, add your advice, rounds and stop conditions, and
+   the research-loop template, add your advice, tuning rounds per iteration and stop conditions, and
    save a version. [Create an experiment setup and run it](../../src/tools/candidate_console/README.md#create-an-experiment-setup-and-run-it)
    walks through each control.
 
@@ -201,79 +376,24 @@ To change the package later, edit it with your coding agent and press
 **Refresh** on **Task**. To change time limits, network access or devices,
 edit the task's entry in `console.json` and restart the console.
 
-## Prepare your project
-
-1. Follow [installation](installation.md): use Python 3.12+ (this checkout pins
-   3.12) and uv, run
-   `uv sync --group dev --frozen` in this checkout, and use its `.venv/bin/python`.
-2. Open the checkout in your coding agent. Describe your research question,
-   dataset location and an external project directory. You do not need a
-   prepared manifest. Agree on the prediction target, splits, score and budgets;
-   the agent creates your [task package](../reference/task-composition.md) and
-   experiment files there. For an existing scientific task, start from a
-   [companion tutorial](https://github.com/yuema137/siderius-exp/blob/main/tutorials/README.md).
-3. Save a reviewed [LLM profile](../../configs/llm/README.md) in your project.
-   This JSON file selects the experiment's providers and models by role;
-   your coding agent's own model is a separate choice. Supply only credentials
-   required by those selected routes, using the launch route below.
-
-For example, keep task inputs and run outputs in your external project. These
-are example names; the browser does not generate this layout:
-
-```text
-/absolute/project/                 # outside the SIDERIUS checkout
-  task.yaml                        # task manifest; references your task plugins
-  task_plugins/                    # dataset/model/metric implementations
-  data/                            # existing dataset, or configure another external root
-  llm.json                         # saved provider/model profile
-  scripts/                         # reviewed experiment launch scripts
-  workspaces/                      # scientific run outputs
-  console.json                     # optional console paths, resources and time limits
-  preparations/                    # console only: create this output parent
-  candidates/                      # console only: create this separate output parent
-  operation-state/                 # console only: configured operation records
-```
-
-The task manifest defines the science; `console.json` connects those existing
-inputs to the console. The console creates fresh per-operation directories
-inside `preparations/` and `candidates/`; do not create those child workspaces
-yourself. Keep private token/key files outside version control, for example in
-a separate machine-owned directory.
-
-## Launch a research workflow from the CLI
-
-For training and scientific scores, use [first-run checks](first-run.md) and
-your external project's saved launch script. This route reads credentials from
-the launch process: use a trusted external shell-compatible credential file or
-managed injection, with the name-only check in the
-[API-key procedure](installation.md#api-keys). The browser console instead
-reads the `credential_file` named in its configuration. Have your agent show the saved settings, command
-and output directory before execution. An optional
-[setup review](../../src/tools/setup_review/README.md) produces an HTML report.
-
-Optionally, [capture a native chain](../../src/tools/native_chain/README.md)
-to record the settings for a fresh foreground multi-iteration CLI run before
-explicitly launching it. The original declaration and configuration files remain
-authoritative; capture does not certify scientific success. Follow the linked
-guide for prerequisites and path requirements.
-
-## Open the optional workflow console
+### Other console routes
 
 The browser console can prepare, review and launch a saved workflow, from **one
-candidate: Propose → Implement → Validate** up to an interpreted training workflow
-(Interpret → Propose → Implement → Validate → Train & Tune) repeated as a research
+candidate model** (Propose → Implement → Validate) up to an interpreted training workflow
+(Interpret → Propose → Implement → Validate → Train & tune) repeated as a research
 loop. Use the [training inspector guide](../../src/tools/candidate_console/README.md#edit-reusable-training-settings)
 to configure the training stage. Completion is not a scientific success verdict.
 Package your task with your coding agent first: the browser creates experiment
 setups, but it does not create or edit task packages or the console's task
 entries. It can also launch an
 externally configured native chain for multiple iterations, using the same
-backend as the CLI. Both routes are available whether you work in Professional
-or Assistant mode.
+backend as the CLI. Both routes work the same whichever way of working
+(Professional or Assistant) you chose.
 
-The [first-hour path](#your-first-hour-from-the-example-to-your-own-task) above
-sets up the console in order: `init --credential-file`, task data in
-`data/<task_id>/`, `add-task`, then `serve`. The
+Set up the console with the
+[first-hour path](#your-first-hour-from-the-example-to-your-own-task) above
+(`init --credential-file`, task data in `data/<task_id>/`, `add-task`, then
+`serve`). The
 [console setup](../../src/tools/candidate_console/README.md#set-up-and-open-the-console)
 describes every option, and the
 [configuration example](../../src/tools/candidate_console/console-contract.md#configuration)
@@ -287,8 +407,8 @@ matches your starting point:
 
 - **Configured task:** on Home, expand **Prepare configured task**, select the
   task and prepare its inputs. Review models and resources, then explicitly
-  **Launch candidate**. This route is independent of Workflow Editor edits.
-- **Saved reusable workflow:** in Workflow Editor, save your changes and select
+  **Launch candidate**. This route is independent of edits on the **Workflow** tab.
+- **Saved reusable workflow:** on the **Workflow** tab, save your changes and select
   **Next: Run**. On the Run page, use **New run** to select the
   configured task/resources, review and prepare the saved source. Open the
   prepared run, review it and explicitly launch. Each run has separate captured
@@ -303,7 +423,7 @@ matches your starting point:
   settings; this panel does not edit the chain or provide pause/resume (a saved
   workflow's research loop can be paused instead).
 
-To bind a reusable workflow in **Workflow builder**:
+To bind a reusable workflow on the **Workflow** tab:
 
 1. Choose a configured task package/version and **Update workflow references**.
 2. Press **Save**, inspect the task findings (and, with advanced tools on, the Python diff), confirm them and **Save version**.
@@ -311,24 +431,11 @@ To bind a reusable workflow in **Workflow builder**:
 
 Save pending edits before Update.
 An unbound workflow needs an explicit current-snapshot adoption confirmation.
-Bound edits need their matching configured choice for review. Professional and
-Assistant modes share this flow; see the [task-version guide](../../src/tools/candidate_console/README.md#bind-a-task-version).
+Bound edits need their matching configured choice for review. This flow is the
+same for Professional and Assistant work; see the [task-version guide](../../src/tools/candidate_console/README.md#bind-a-task-version).
 
 Follow the [saved-source recipe](../../src/tools/candidate_console/README.md#prepare-saved-source-or-open-an-existing-run)
 for the second route. Saving and preparation never launch automatically.
 Launching runs code and may make paid calls. Configuration checks and offline
 preparation do not prove provider access or candidate success. Keep the
 operation ID to reopen status and logs without selecting an editor project.
-
-The [Quickstart pack](../../examples/quickstart/README.md) offers synthetic data
-preparation and component checks that run on CPU without provider calls. They
-check installation and task contracts, not scientific hardware or model
-performance. A real run, including a Quickstart research chain, needs an NVIDIA
-GPU with CUDA; the chain header and the console run review say so, and a launch
-on a machine without one stops before any model call.
-
-The optional reviewed-launch route covers a fresh standard single iteration.
-For your own caller, use the [external orchestration guide](../../src/tools/orchestration_setup/README.md).
-Choosing that execution route is separate from choosing Professional or
-Assistant collaboration. See [the documentation map](../README.md) for deeper
-references.

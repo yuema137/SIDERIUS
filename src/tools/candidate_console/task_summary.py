@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +30,7 @@ from tools.setup_review.composition_models import (
     TaskSummaryRequest,
 )
 from tools.setup_review.composition_transport import manifest_digest
+from tools.setup_review.summary_errors import summary_error_message
 from tools.workflow_preview.models import PreviewModel
 from workflows.definition import TaskBinding
 from workflows.llm_config import parse_llm_config_bytes
@@ -36,6 +38,7 @@ from workflows.llm_config import parse_llm_config_bytes
 from .models import TaskChoice
 
 DATA_WALK_ENTRY_CAP = 100_000
+DATA_WALK_SECONDS = 5.0
 SummaryState = Literal["observing", "ready", "failed", "unavailable"]
 UnavailableReason = Literal[
     "sandbox_missing", "data_root_missing", "manifest_missing", "llm_config_unreadable"
@@ -61,13 +64,17 @@ class SummaryFailure(PreviewModel):
     message: str
 
 
+IncompleteReason = Literal["entry_cap", "time_budget", "other_device", "unreadable"]
+
+
 class DataVolume(PreviewModel):
-    """Regular files under ``data_root`` without following links; partial when capped."""
+    """Regular files under ``data_root`` without following links; partial when entries are skipped."""
 
     files: int
     bytes: int
     complete: bool
     entry_cap: int
+    incomplete_reason: IncompleteReason | None = None
 
 
 class RunPolicy(PreviewModel):
@@ -157,26 +164,54 @@ class TaskListView(PreviewModel):
 def walk_data_root(root: Path, cap: int = DATA_WALK_ENTRY_CAP) -> DataVolume:
     """Count regular files and bytes; symlinks are counted as entries, never followed.
 
-    An unreadable entry or subdirectory, like the cap, makes the result incomplete.
+    Entry/time caps, unreadable entries and other devices make totals incomplete.
+    The deadline is cooperative: it cannot interrupt a blocked filesystem call.
     """
     files = size = entries = 0
-    complete = True
+    reason: IncompleteReason | None = None
+    deadline = time.monotonic() + DATA_WALK_SECONDS
+
+    def volume(cause: IncompleteReason | None) -> DataVolume:
+        return DataVolume(
+            files=files,
+            bytes=size,
+            complete=cause is None,
+            entry_cap=cap,
+            incomplete_reason=cause,
+        )
+
+    try:
+        device = root.stat().st_dev
+    except OSError:
+        return volume("unreadable")
     pending = [str(root)]
     while pending:
+        if time.monotonic() >= deadline:
+            return volume("time_budget")
         try:
             with os.scandir(pending.pop()) as listing:
                 for entry in listing:
+                    if entries >= cap:
+                        return volume("entry_cap")
+                    if time.monotonic() >= deadline:
+                        return volume("time_budget")
                     entries += 1
-                    if entries > cap:
-                        return DataVolume(files=files, bytes=size, complete=False, entry_cap=cap)
-                    if entry.is_dir(follow_symlinks=False):
-                        pending.append(entry.path)
-                    elif entry.is_file(follow_symlinks=False):
-                        size += entry.stat(follow_symlinks=False).st_size
-                        files += 1
+                    try:
+                        info = entry.stat(follow_symlinks=False)
+                        if info.st_dev != device:
+                            reason = reason or "other_device"
+                            continue
+                        if entry.is_dir(follow_symlinks=False):
+                            pending.append(entry.path)
+                        elif entry.is_file(follow_symlinks=False):
+                            size += info.st_size
+                            files += 1
+                    except OSError:
+                        # A vanished entry must not hide its readable siblings.
+                        reason = reason or "unreadable"
         except OSError:
-            complete = False
-    return DataVolume(files=files, bytes=size, complete=complete, entry_cap=cap)
+            reason = reason or "unreadable"
+    return volume(reason)
 
 
 def _metric(spec: dict[str, JsonValue]) -> MetricView:
@@ -369,7 +404,8 @@ class TaskSummaries:
                 entry.failure = SummaryFailure(stage=failure.stage, message=failure.message)
         except Exception as error:
             entry.failure = SummaryFailure(
-                stage="console", message=f"{type(error).__name__}: {error}"
+                stage="console",
+                message=summary_error_message(error),
             )
         with self._lock:
             self._entries[key] = entry

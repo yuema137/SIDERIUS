@@ -58,8 +58,13 @@ references below. A described task is not authorization for unbounded API/GPU wo
 4. Prepare the experiment separately: model routing, workflow, data exposure,
    iterations, budgets and output workspace. Recommend the
    [Luna test profile](../../../configs/llm/README.md) for an initial process check,
-   while honoring an explicitly chosen model. Keep keys external. Save a launch
-   script and settings in the project; do not reimplement framework training.
+   while honoring an explicitly chosen model. Keep keys external. For v1.1.0 the
+   recommended route is a saved workflow declaration, `workflow.py` in the external
+   project, prepared with `.venv/bin/python -m tools.candidate_prepare --reusable-request PATH`
+   and launched with `.venv/bin/python -m tools.candidate_operations submit --store-config FILE --request FILE`
+   (see [Reusable candidates and native training](#reusable-candidates-and-native-training)).
+   A saved `run_chain.sh` launch script and its settings remain supported for
+   companion and paper tasks. Either way, do not reimplement framework training.
 5. Run the applicable [offline checks and command preview](../../getting-started/first-run.md)
    in the selected environment, resolve actual failures, and give the user the
    saved task/experiment paths, important effective settings, exact command and
@@ -183,7 +188,7 @@ for execution. Preparation and launch are those of any saved source above.
   read it from the task package, never guess. Direction comes from the task's
   metric, never from the declaration. A mismatch refuses at worker admission,
   not at editor Review.
-- If the user edits the loop in the Workflow Editor, re-read `workflow.py`
+- If the user edits the loop in the console's Workflow tab, re-read `workflow.py`
   before changing it; the editor rewrites the file in canonical form.
 - Stop (run-wide, terminal) and Pause (this segment) take effect at the next
   completed-iteration boundary; an acknowledgement is not the outcome. From
@@ -194,6 +199,98 @@ for execution. Preparation and launch are those of any saved source above.
   stopped, timed-out or condition-completed loops cannot be resumed.
 - Report per-iteration results as recorded; do not combine or rank iterations
   on the user's behalf unless asked.
+- `on_met="request_input"` ("Pause and ask me") is valid on `MetricThresholdStop`,
+  `NoImprovementStop` and `JudgeStop`; the default `"stop"` completes the loop.
+  At a completed-iteration boundary a met `stop` condition wins over a met
+  `request_input` one. `MetricThresholdStop` pauses once, when the incumbent first
+  reaches the threshold. For a `JudgeStop` with `request_input`, a judge "stop"
+  verdict means "ask the operator"; the judge prompt is unchanged. Tell the user
+  that the run is paused, not finished, and that the loop continues only after
+  an explicit Resume.
+- Resume a paused loop with advice (`--advice-file` is optional; without it the
+  Resume carries no advice). Run the review-and-save step from the selected
+  checkout, with the same operation store config used to launch:
+
+  ```bash
+  .venv/bin/python -m tools.candidate_operations write-loop-resume \
+    --store-config /absolute/path/operation-store.json \
+    --operation-id <paused-operation-uuid> \
+    --output /absolute/path/loop-resume.json \
+    --advice-file /absolute/path/advice.txt
+  ```
+
+  The advice file is UTF-8 text, 1 to 4000 characters after trimming
+  surrounding whitespace, with no control or format characters (CRLF is read as
+  LF; a lone CR is refused). An invalid file exits 2 with `invalid_input_or_record`
+  and nothing is written. The command reviews the paused segment and creates
+  `--output` once; an existing file is refused with `output_exists` and left
+  unchanged, so a retry after a lost response reuses the same request ID. It does
+  not launch. Launch is then the ordinary
+  `.venv/bin/python -m tools.candidate_operations submit --store-config ... --request /absolute/path/loop-resume.json`,
+  which needs the same authorization and provider credentials as Launch.
+  Authored loops are controlled by these CLI and Python routes, not by
+  `review-resume`, which serves captured native chains only.
+
+## Literature reviews aggregated by an LLM judge
+
+Use this route only when the user wants several external literature reviews
+combined into one proposal input by an LLM judge. Its execution profile is
+`native-literature-judged/v1`. Follow the
+[judge strategies contract](../../../src/workflows/judge_strategies/judge-strategies-contract.md)
+for the strategy semantics and the
+[declaration contract](../../../src/workflows/definition/definition-contract.md#adaptor-declarations-inert)
+for the adaptor declaration (`siderius.adaptors/v1`, one `literature.output` input
+port with a declared `max_items`, one combine strategy and one select strategy).
+The admitted LLM combine kinds are `debate-judge/v1` (`DebateJudgeStrategy`;
+`judge_output` `rank` or `synthesize`, `synthesize_count` required only for
+`synthesize`), `rubric-rank/v1` (`RubricRankStrategy`; the rubric must come from
+the task composition's `rubrics:`) and `judge-merge/v1` (`JudgeMergeStrategy`).
+Declare `synthesize` with `synthesize_count: 1` when the proposer should receive one
+merged review.
+
+- Judge routes are operator configuration: `WorkflowLLMConfig.judge` in the LLM
+  config, with the route slot the strategy declares (`aggregate` or `debate`). The
+  route needs an explicit provider and model and a bounded output budget. Declare
+  `judge.max_judge_calls`; launch refuses a run whose static call bound exceeds it,
+  and refuses this profile when it is absent. Do not declare a route or cap the
+  user has not chosen; the bound is `rounds × (N + critic) + 1` for `debate-judge/v1`, where `rounds` is the API field for debate rounds, not loop iterations
+  ([judge strategies contract](../../../src/workflows/judge_strategies/judge-strategies-contract.md)).
+- Network: remote paper roots, or enabled dynamic search, need an explicit
+  `network=true` on the review request. Provider calls remain subject to the
+  sandbox network policy. Do not enable network access on the user's behalf.
+- The only worked example in the repository is
+  `tests/unit/tools/candidate_worker/test_literature_judged.py`. Copy its shape,
+  not a scientific choice from it.
+
+## v1.1.0 limit: loops and literature-judged reviews do not combine
+
+An authored loop is admitted only with `native-interpretation-candidate/v1`
+(`admit_loop` in `src/tools/candidate_worker/loop_models.py`). The
+literature-judged profile cannot carry a loop, so one declaration cannot have both.
+Do not add a loop to a literature-judged declaration, and do not invent a combined
+profile. The v1.1.0 workaround is two steps, and the operator must approve each
+paid run:
+
+1. Run A: the literature-judged workflow, with its judge synthesizing the key
+   findings into one merged review (`synthesize_count: 1`).
+2. Run B: the authored loop. Give run A's merged findings to the proposer as
+   human advice, using one of these two routes:
+   - Declared advice: set `preparation_options.proposal_advice` in run B's
+     `workflow.py` to the findings text. It is the proposal capability's advice
+     (`human_advice` of `interpretation-to-proposal`) and is applied on every
+     iteration. The field is `str | None` (`CandidatePreparationOptions`,
+     `src/workflows/definition/models.py`) with no declared length bound, so keep
+     the text to the findings the user chose and do not paste raw run output.
+   - Resume advice: at a pause, pass the text with `--advice-file`. It is 1 to
+     4000 characters after trimming (`MAX_OPERATOR_ADVICE_CHARS`), is appended after
+     the declared advice, and applies only to the resumed segment.
+
+Do not set `expert_context` for this workaround. For
+`native-interpretation-candidate/v1` it is framework-managed, and reusable
+preparation sets it to `None` (`src/tools/candidate_prepare/reusable_interpretation.py`).
+
+A combined profile is deferred to v1.2. Tell the user this limit when they ask for
+both in one run.
 
 ## Captured native iterative chains
 
