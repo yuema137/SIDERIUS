@@ -76,6 +76,17 @@ not evidence that the model or batch should shrink. Unattributed bytes do not
 establish clean visibility. Sampling immediately before phase admission is the
 only freshness guarantee; there is no additional staleness guard.
 
+`admission.AdmissionExecutionConditions` owns the recorded
+`effective_execution_conditions` shape, distinct from the launch declaration in
+`process_visibility.py`. Its `refusal_enforcement` is `all_phase_modes` for
+isolated headroom checks and `phase_policy` for the delegated ordinary route;
+the latter is constructed through the record model before serialization.
+`stops_phase` validates supplied conditions and reads typed fields. Invalid
+conditions raise `ValidationError` rather than selecting enforcement from raw
+keys. Absent conditions preserve ordinary enforcement; an
+`environment_headroom_unproven` reason always stops without needing conditions.
+The launch declaration and GPU protection mechanism identity remain unchanged.
+
 ## Scope and historical compatibility
 
 This changes omitted configuration on larger devices and explicit ceilings
