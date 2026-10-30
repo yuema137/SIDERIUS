@@ -5,7 +5,7 @@ import hashlib
 import json
 import os
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
@@ -279,3 +279,17 @@ def require_available(root: Path, releasable: Callable[[UUID], bool]) -> None:
             raise OperationFailure("integrity", "unrecognized operation directory") from error
         if str(operation_id) != name or not releasable(operation_id):
             raise OperationFailure("busy", "store has an active or unresolved operation")
+    with directory(root) as descriptor, suppress(FileNotFoundError):
+        os.unlink("active.json", dir_fd=descriptor)
+
+
+def release_active(config: OperationStoreConfig, operation_id: UUID) -> None:
+    """Under the store lock, discard only this operation's derived pointer."""
+    root = Path(config.state_root)
+    try:
+        active = read_model(root / "active.json", ActiveOperation, private_file=True)
+    except FileNotFoundError:
+        return
+    if active.operation_id == operation_id:
+        with directory(root) as descriptor:
+            os.unlink("active.json", dir_fd=descriptor)
