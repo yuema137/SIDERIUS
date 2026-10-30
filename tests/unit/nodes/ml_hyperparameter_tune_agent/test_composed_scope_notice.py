@@ -1,4 +1,4 @@
-"""Composed single-file attempts must not be labelled as legacy runs (#1183)."""
+"""Composed single-file notices must describe the executed file-index scope."""
 
 from dataclasses import replace
 
@@ -10,8 +10,8 @@ from tests.unit.nodes.ml_hyperparameter_tune_agent.test_c12p_b11_composed_seg_si
 )
 
 
-def test_composed_single_file_notice_does_not_claim_legacy_mode(tmp_path, capsys):
-    """Exercise the caller: mode alone used to mislabel a composed attempt."""
+def test_composed_single_file_notice_names_file_index(tmp_path, capsys):
+    """The caller must not claim task-owned scopes for a single-file attempt."""
     bindings = replace(_bindings(_composed_input(), tmp_path), trial_allowed=False)
     prepared = prepare_attempt(
         bindings,
@@ -25,7 +25,5 @@ def test_composed_single_file_notice_does_not_claim_legacy_mode(tmp_path, capsys
     assert prepared.trial_config.mode == "single_file"
     notice = capsys.readouterr().out
 
-    assert "Legacy mode" not in notice
-    assert "file_index" not in notice
-    assert "Task-owned scope" in notice
-    assert "no legacy SampleSet" in notice
+    assert "Legacy mode: file_index=0" in notice
+    assert "Task-owned scope" not in notice

@@ -43,7 +43,6 @@ from agent.skills.evaluate_vram_skill.preflight_adapter import run_production_pr
 from core.layout import checkout_root
 from core.record_role import AttemptRole, observed_attempt_role
 from core.runtime_control.admission import RESOURCE_REJECTIONS
-from core.training_seeds import TrainingSeedPlan
 from execute_tools.dataset_config import (
     ScopeViolationError,
 )
@@ -88,7 +87,7 @@ from nodes.ml_hyperparameter_tune_agent.policy import (
     resolve_measured_time_budget,
     resolve_scoring_route,
 )
-from nodes.ml_hyperparameter_tune_agent.probe_data import build_task_probe_data
+from nodes.ml_hyperparameter_tune_agent.probe_data import build_attempt_task_probe_data
 from nodes.ml_hyperparameter_tune_agent.records import (
     _build_denoised_filename,
     _build_execution_failure_record,
@@ -386,6 +385,7 @@ def run_admission_preflight(
         # is exactly what the §AB.3 transport repaired.
         task_scopes=prepared.task_scopes,
         data_dir=time_data_dir,
+        resolved_training_rows=prepared.resolved_training_rows,
     ):
         return AdmissionOutcome.next_attempt()
 
@@ -428,12 +428,11 @@ def run_admission_preflight(
     # exactly how the original defect would return, on the
     # exception paths nobody watches.
     # See docs/design/v20_priorities/pr_a_isolated_preflight_wiring.md
-    task_probe_data = build_task_probe_data(
+    task_probe_data = build_attempt_task_probe_data(
         task_composition_ref=agent_input.task_composition_ref,
         task_scopes=prepared.task_scopes,
         data_dir=time_data_dir,
-        epoch_seed=TrainingSeedPlan(trial_config.seed_context).epoch(0).subsample,
-        train_portion=trial_config.train_portion,
+        trial_config=trial_config,
         max_samples=agent_input.validation_max_train_samples,
     )
     resource_check = run_production_preflight(

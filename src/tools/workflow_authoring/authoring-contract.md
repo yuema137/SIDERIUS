@@ -11,9 +11,12 @@ named-version history only reads them.
 existing 0700 recovery directory. Source/recovery are strict descendants of the
 root. Source is current-user-owned, regular, single-link, UTF-8 and at most
 32 KiB. Ordinary permission bits (0000–0777) are preserved; special bits refuse.
-Save refuses a source without the owner-write bit as typed `read_only`
+Save refuses changed bytes for a source without the owner-write bit as typed `read_only`
 ("This file is read-only on disk: <path>") before any recovery copy, record or
 source write, so temp + rename never replaces a file its owner protected.
+Identical bytes remain a no-op even for a read-only source, after the usual base,
+task-reference publication and final bytes/mode checks; the browser reports
+"Nothing to save".
 Opening refuses with the reason and the configured path: `not_found`
 ("Workflow file not found: <path>"), `not_readable` ("Workflow file is not
 readable: <path>") and `limit` ("Workflow file is larger than the 32 KiB editor

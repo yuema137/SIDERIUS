@@ -459,8 +459,9 @@ class WorkflowAuthoring:
         proposed = parse_workflow_source(request.source)
         with self._locked():
             previous, mode = self._read_bytes()
+            unchanged = previous == payload
             # Temp + rename could replace a file its owner protected; refuse instead.
-            if not mode & stat.S_IWUSR:
+            if not unchanged and not mode & stat.S_IWUSR:
                 raise AuthoringError(
                     "read_only",
                     f"This file is read-only on disk: {self.project.source_file}",
@@ -484,7 +485,6 @@ class WorkflowAuthoring:
                     "task_reference_policy",
                     "pin removal or unbound task-reference publication is unsupported",
                 )
-            unchanged = previous == payload
             record = None if unchanged else self._next_record(previous, payload, request)
             recovery = () if unchanged else (self._recover(previous), self._recover(payload))
             self._verify_publication(current, proposed, request)

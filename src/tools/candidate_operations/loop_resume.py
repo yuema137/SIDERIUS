@@ -215,7 +215,9 @@ def successor_id(record: OperationRecord) -> UUID | None:
     return binding.operation_id
 
 
-def review_locked(config: OperationStoreConfig, operation_id: UUID) -> OperationSnapshot:
+def review_locked(
+    config: OperationStoreConfig, operation_id: UUID, *, ending: bool = False
+) -> OperationSnapshot:
     from tools.candidate_worker.loop import stop_requested
     from tools.candidate_worker.loop_evidence import require_unused_next
 
@@ -248,17 +250,22 @@ def review_locked(config: OperationStoreConfig, operation_id: UUID) -> Operation
     except (OSError, ValueError) as error:
         # Missing, unknown or unclean supervision is never resume authorization.
         raise OperationFailure("loop_resume", "paused segment lacks clean supervision") from error
-    if successor_id(record) is not None:
-        raise OperationFailure("loop_resume", "paused segment already has a successor")
+    successor = successor_id(record)
+    if successor is not None:
+        from .loop_recovery import failed_successor
+
+        if not ending or failed_successor(record) != successor:
+            raise OperationFailure("loop_resume", "paused segment already has a successor")
     loop = request.preview.document.definition.loop
     assert loop is not None
     if receipt.loop_trace.attempted_iterations >= loop.final_iteration or stop_requested(initial):
         raise OperationFailure("loop_resume", "loop is terminal")
     # Deliberately redundant with the paused readback above: defense in depth.
-    try:
-        require_unused_next(request, initial, receipt.loop_trace.attempted_iterations)
-    except ValueError as error:
-        raise OperationFailure("loop_resume", "next body slot is not unused") from error
+    if successor is None:
+        try:
+            require_unused_next(request, initial, receipt.loop_trace.attempted_iterations)
+        except ValueError as error:
+            raise OperationFailure("loop_resume", "next body slot is not unused") from error
     return snapshot
 
 
