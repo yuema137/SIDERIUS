@@ -323,6 +323,9 @@ def test_init_refuses_a_directory_owned_by_another_user(tmp_path, monkeypatch):
     with pytest.raises(WorkspaceRefused, match="owned by uid") as refusal:
         init_workspace(str(tmp_path))
     assert "chmod" not in str(refusal.value)
+    private = shlex.quote(str(tmp_path / "siderius"))
+    assert f"mkdir -m 700 {private}" in str(refusal.value)
+    assert f"then use --workspace {private}" in str(refusal.value)
     assert not (tmp_path / "siderius_workspace").exists()
 
 
@@ -651,3 +654,31 @@ def test_check_and_serve_reject_credential_file(command, tmp_path, monkeypatch, 
         )
     assert raised.value.code == 2
     assert "--credential-file is for init only" in capsys.readouterr().err
+
+
+def test_init_does_not_read_credentials_in_its_closing_check(tmp_path, monkeypatch, capsys):
+    """Init must not fall through to the normal configuration credential reader."""
+    from tools.candidate_console import config as console_config
+
+    credentials = _credential_file(tmp_path, 0o600, "unused")
+    reads = []
+
+    def record_read(path):
+        reads.append(path)
+        return {}
+
+    monkeypatch.setattr(console_config, "credential_values", record_read)
+    code, _, err = _main(
+        monkeypatch,
+        capsys,
+        "init",
+        "--workspace",
+        str(tmp_path),
+        "--credential-file",
+        str(credentials),
+    )
+    assert code == 0, err
+    assert reads == []
+    config = tmp_path / "siderius_workspace" / "settings" / "console.json"
+    assert _main(monkeypatch, capsys, "check", "--config", str(config))[0] == 0
+    assert reads == [str(credentials)]

@@ -340,3 +340,45 @@ def test_fetch_uses_the_selected_verified_bundle_task_id(bundle, workspace, tmp_
     )
     assert result.returncode == 0, result.stderr
     assert sorted(path.name for path in (root / "data").iterdir()) == ["selected"]
+
+
+@pytest.mark.parametrize("spelling", ["relative_parent", "bundle_alias", "task_alias"])
+def test_fetch_resolves_operator_package_paths(bundle, workspace, tmp_path, spelling):
+    """Operator aliases resolve before verification; listed descendants remain no-follow."""
+    root, _ = workspace
+    if spelling == "relative_parent":
+        package = f"{bundle.name}/../{bundle.name}/task"
+    elif spelling == "bundle_alias":
+        alias = tmp_path / "bundle-link"
+        alias.symlink_to(bundle, target_is_directory=True)
+        package = str(alias / "task")
+    else:
+        alias = tmp_path / "selected-package"
+        alias.symlink_to(bundle / "task", target_is_directory=True)
+        package = str(alias)
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(bundle / "fetch_data.py"),
+            "--workspace",
+            str(root),
+            "--package",
+            package,
+        ],
+        cwd=bundle.parent,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stderr
+    assert len(list((root / "data" / "quickstart").glob("*.csv"))) == 4
+
+
+def test_reader_refusal_does_not_prescribe_another_commands_flag():
+    """The shared reader's path error must not tell fetch_data to use --from-bundle."""
+    from tools.candidate_console.example_bundle import BundleRefused, read_bundle
+
+    with pytest.raises(BundleRefused) as refusal:
+        read_bundle("relative/bundle")
+    assert "--from-bundle" not in str(refusal.value)
+    assert "absolute path" in str(refusal.value)

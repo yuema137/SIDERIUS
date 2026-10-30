@@ -21,8 +21,10 @@ releases. For research runs, use the
 - A working run sandbox
   ([workspace sandbox](https://github.com/yuema137/SIDERIUS/blob/master/src/tools/workspace_sandbox/README.md)).
 - An API key for the model provider. The standard model profile uses OpenAI,
-  so runs need `OPENAI_API_KEY`. No command below reads or prints the key;
-  only a launched run receives it.
+  so runs need `OPENAI_API_KEY`. No command below prints the key.
+  `init` checks file metadata only;
+  import and `serve` read the file to validate its format. A launched run
+  receives the keys it needs.
 - The zip, `siderius-example-quickstart-<version>.zip`. Download it from the
   [SIDERIUS releases page](https://github.com/yuema137/SIDERIUS/releases) when
   the release lists it. Until then, build it from your checkout with the
@@ -77,8 +79,8 @@ version in the zip's name. That number is the package version from
    never prints its contents, and records its path as `credential_file` in the new
    `console.json`. If `console.json` already exists, `init` leaves it unchanged
    and prints the one `"credential_file": ...` line to add yourself. Now open
-   the key file in your editor and write `{"OPENAI_API_KEY": "your key"}`; a run
-   reads it only when you launch. The
+   the key file in your editor and write `{"OPENAI_API_KEY": "your key"}`.
+   The launch passes the required keys to the run. The
    [console guide](https://github.com/yuema137/SIDERIUS/blob/master/src/tools/candidate_console/README.md#set-up-and-open-the-console)
    lists the folders `init` creates, and its
    [Credentials section](https://github.com/yuema137/SIDERIUS/blob/master/src/tools/candidate_console/README.md#credentials)
@@ -108,8 +110,10 @@ version in the zip's name. That number is the package version from
    is a symlink, belongs to another user, or that your group or others can
    write to. Running it again keeps identical files and never overwrites a
    different one. If you pass `--package`, it must name the `task/` folder
-   inside an unpacked bundle with its own `SHA256SUMS`. The default task ID
-   comes from that bundle's verified `console-task.json`; `--task-id`
+   inside an unpacked bundle with its own `SHA256SUMS`. Relative paths and
+   symlinks to that folder are resolved first; symlinks inside the bundle
+   remain refused. The default task ID comes from that bundle's verified
+   `console-task.json`; `--task-id`
    overrides it.
 
 4. Import the task and its experiment setup.

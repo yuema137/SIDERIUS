@@ -173,7 +173,7 @@ def read_bundle(directory: str) -> VerifiedBundle:
     directory = directory.rstrip("/") or "/"
     if not os.path.isabs(directory) or os.path.normpath(directory) != directory:
         raise BundleRefused(
-            f"--from-bundle must be an absolute path without '..', "
+            f"bundle directory must be an absolute path without '..', "
             f"for example {os.path.abspath(directory)}"
         )
     try:
@@ -256,7 +256,7 @@ def plan_import(bundle: VerifiedBundle, config: str, task_id: str | None) -> Imp
 def copy_package(bundle: VerifiedBundle, target: ImportTarget) -> Path:
     """Write the verified ``task/`` bytes write-once below ``tasks/``; returns the manifest."""
     from .add_task import TASKS_DIRECTORY, AddTaskRefused
-    from .settings_export import _write_once
+    from .files import write_once
     from .workspace import WorkspaceRefused, ensure_owned_directory
 
     opened: dict[str, int] = {}
@@ -285,7 +285,7 @@ def copy_package(bundle: VerifiedBundle, target: ImportTarget) -> Path:
                 if path not in opened:
                     opened[path] = ensure_owned_directory(opened[parent], part, path)
                 parent = path
-            _write_once(opened[parent], PurePosixPath(name).name, payload)
+            write_once(opened[parent], PurePosixPath(name).name, payload)
     except (OSError, WorkspaceRefused) as error:
         left = f"; {target.package} was left in place" if opened else ""
         raise AddTaskRefused(f"copying the task package failed ({error}){left}") from None
