@@ -14,9 +14,9 @@
   // (loop.stop_requested/pause_requested, read from the worker's durable markers), so a
   // reload or another tab still sees it (M-1); the receipt decides what took effect.
   let request = null, last = null;
-  const counted = (loop, verb) => loop.attempted_iterations == null
+  const counted = (status, verb) => status.outcome?.completed_iterations == null
     ? `${verb}; the iteration count is unavailable.`
-    : `${verb} after ${loop.attempted_iterations} of ${loop.final_iteration} iteration${loop.final_iteration === 1 ? '' : 's'}.`;
+    : `${verb} after ${status.outcome.completed_iterations} of ${status.loop.final_iteration} completed iteration${status.loop.final_iteration === 1 ? '' : 's'}.`;
   // The receipt's verified stop reason in plain words; numbers are display-rounded and the
   // exact recorded values stay available as the state's tooltip (see render).
   const number = value => window.consoleNumbers ? window.consoleNumbers.format(value) : String(value);
@@ -130,18 +130,18 @@
       ? 'Research loop paused; the iteration count is unavailable.'
       : `Research loop paused after iteration ${loop.attempted_iterations} of ${loop.final_iteration}.`) + ' The resumed segment was interrupted without a result. End loop here to keep completed results and close the run. Resume again is unavailable.';
     if (status.native_status === 'cancelled') return 'Research loop stopped by you before it finished. Files written so far stay in the run folder; this run cannot be resumed.';
-    if (status.native_status === 'stopped') return counted(loop, 'Research loop stopped at a completed iteration boundary') + ' No partial iteration is kept as a result.';
+    if (status.native_status === 'stopped') return counted(status, 'Research loop stopped at a completed iteration boundary') + ' No partial iteration is kept as a result.';
     if (status.native_status === 'paused' && loop.input_request) {
       return inputRequest(loop) + (status.successor_operation_id ? ' A resumed segment continues this run.'
         : stopRecorded(status) ? ' Stop was requested; this run cannot continue.'
           : ` Review and resume to continue with iteration ${loop.input_request.summary.iteration + 1}.`);
     }
-    if (status.native_status === 'paused') return counted(loop, 'Research loop paused at a completed iteration boundary') + (status.successor_operation_id ? ' A resumed segment continues this run.'
+    if (status.native_status === 'paused') return counted(status, 'Research loop paused at a completed iteration boundary') + (status.successor_operation_id ? ' A resumed segment continues this run.'
       : stopRecorded(status) ? ' Stop was requested; this run cannot continue.'
         : ' No partial iteration is kept; it can be resumed from the next iteration after review.');
     if (status.native_status === 'completed' && loop.stop_reason) return `Research loop ${stopReason(loop.stop_reason, loop.final_iteration)}.`;
-    if (status.native_status === 'completed') return counted(loop, 'Research loop finished') + (stopRecorded(status) || pauseRecorded(status) ? ' The request did not take effect before the final iteration.' : '');
-    return counted(loop, `Research loop ended (${status.native_status})`);
+    if (status.native_status === 'completed') return counted(status, 'Research loop finished') + (stopRecorded(status) || pauseRecorded(status) ? ' The request did not take effect before the final iteration.' : '');
+    return counted(status, `Research loop ended (${status.native_status})`);
   }
   function render(status) {
     last = status;

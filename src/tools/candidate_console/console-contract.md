@@ -956,10 +956,15 @@ under [Authored loop Stop and state](#authored-loop-stop-and-state).
   a skipped tuner has `tuning_state="skipped"` and `result=null`. The field is
   omitted when empty, so unrouted projections keep their bytes.
 - `outcome` (only with a `result`): `graph_results.tuner_outcome(result)`, one plain
-  sentence from the tuner record's status, termination reason, completed rounds and
-  attempts. `completed_rounds == 0` always reads "No training round completed: …"
+  summary from the tuner record's status, termination reason, completed tuning rounds and
+  attempts. `completed_rounds == 0` always reads "No tuning round completed: …"
   whatever the status; the word "Completed" is used only for tuner status
-  `completed` with at least one round. `tuning_state` reports node execution only.
+  `completed` with at least one tuning round. `tuning_state` reports node execution only.
+  Normal completion has no redundant "ended by completed" suffix. Other endings
+  name the failure limit, validity gate, data scope violation or infrastructure check
+  in plain language. `admission_refusal_reason` copies only the verified output's
+  `environment_admission_refusal.reason`; when present the outcome appends
+  "Training could not start: <reason>" (safe text DOM, never HTML).
 - `GraphRunSummary` is the path-free subset of `RunView`: run name, model type,
   status, termination reason, times, completed rounds, total attempts, `metric`,
   `metric_source`, `ranking_refusal`, declared secondary metric identities, the
@@ -1951,6 +1956,30 @@ time>` (ISO and UUID on hover) and states its outcome with the shared
 `operationOutcome.sentence`. With advanced tools on, unverified records get a next
 step (`python -m tools.candidate_operations status --store-config … --operation-id …`).
 Manual UUID entry remains available.
+
+Receipt outcome evidence (`outcomes.py`, issues #1198/#1242): both `StatusView`
+and `OperationListItemView` carry the same optional `OutcomeEvidence` projection.
+`validation_passed` carries the same receipt flag to both callers, so successful
+completion headlines also agree. `failed_phases` names only graph nodes/adaptors whose state is `failed`, in verified
+order with duplicate capability labels removed. Blocked/skipped/rejected nodes are
+not failures. Loop aggregate receipts have no graph trace, so the projection resolves
+the root through `loop_root_operation` and reads iteration receipts through
+`graph_results.verified_bodies` and the worker's `verify_loop`. Missing or changed
+loop evidence refuses through the existing integrity boundary; phases are never
+guessed from a false validation flag or logs. Without recorded failed nodes the
+headline retains a generic failure. Native failure/timeout/interruption takes
+precedence over validation flags in `operationOutcome.sentence` for every caller.
+
+`OutcomeEvidence.completed_iterations` is the count of verified iteration receipts
+with status `completed`, including preceding segments, or null without a loop trace.
+The native `LoopTrace.attempted_iterations` remains unchanged: it includes a failed
+attempt. Monitor and the operation list display the completed count, never substitute
+attempts for completions, and show unavailable/bound-only wording without evidence.
+A failure in proposal on attempt 2 after one completed iteration therefore reads
+"Failed during Propose model." and "after 1 of 3 completed iterations."
+This read-only projection changes no worker records, prompt bytes or identities.
+Targeted witnesses: `test_outcomes.py`, `test_graph_results.py`,
+`tests/browser/monitor_outcomes.mjs`, `tests/browser/graph_results_monitor.mjs`.
 
 Status and logs (`app.js`): the status line is one `operationOutcome.sentence`
 (M-2; native `failed`, `timed_out` and `interrupted` read "Failed: the <run, preparation,

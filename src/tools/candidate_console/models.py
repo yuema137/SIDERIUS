@@ -374,6 +374,14 @@ class LoopResumeSelection(PreviewModel):
     )
 
 
+class OutcomeEvidence(PreviewModel):
+    """Receipt-derived facts shared by every operation headline."""
+
+    validation_passed: bool | None = None
+    failed_phases: tuple[str, ...] = ()
+    completed_iterations: int | None = Field(default=None, ge=0)
+
+
 class StatusView(PreviewModel):
     operation_id: UUID
     kind: OperationKind
@@ -389,6 +397,7 @@ class StatusView(PreviewModel):
     cancellable: bool = Field(default=False, exclude_if=lambda value: not value)
     receipt_available: bool
     native_status: str | None
+    outcome: OutcomeEvidence | None = Field(default=None, exclude_if=lambda value: value is None)
     native_id: str | None
     validation_passed: bool | None
     graph_trace: GraphTrace | None = Field(default=None, exclude_if=lambda value: value is None)
@@ -411,6 +420,7 @@ class GraphRunSummary(PreviewModel):
     model_type: str
     status: Literal["completed", "partial", "failed"]
     termination_reason: str
+    admission_refusal_reason: str | None = None
     started_at: str
     finished_at: str
     completed_rounds: int
@@ -457,6 +467,7 @@ class OperationListItemView(PreviewModel):
     admitted_at: str
     state: Literal["queued", "active", "completed", "operation_failed", "unknown"]
     native_status: str | None
+    outcome: OutcomeEvidence | None = Field(default=None, exclude_if=lambda value: value is None)
     loop: LoopStatusView | None = Field(default=None, exclude_if=lambda value: value is None)
     #: Display wording from ``seed_labels.readback_label`` (issue #983).
     seed: str

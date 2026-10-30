@@ -374,6 +374,8 @@ def test_status_projects_resume_segment_bound_and_successor(
     """Fails if a resume segment loses its root bound (hiding Stop/Pause), the
     successor link is dropped or breaks the strict status view, a segment's Resume advice
     is not shown, or an advice-free segment's status gains an ``operator_advice`` key."""
+    # This test isolates loop controls; verified outcome receipts are covered in test_outcomes.
+    monkeypatch.setattr("tools.candidate_console.service.outcome_evidence", lambda *args: None)
     operation_id = uuid4()
     monkeypatch.setattr(SERVICE + "operation_admitted", lambda config, value: True)
     monkeypatch.setattr(SERVICE + "loop_control_requests", lambda config, value: (False, False))

@@ -75,6 +75,7 @@ from .models import (
     StatusView,
     TaskChoice,
 )
+from .outcomes import outcome_evidence
 from .readiness import credential_readiness
 from .recorded_examples import read_recorded_example
 from .seed_labels import CHAIN_CONTRADICTED, readback_label
@@ -387,6 +388,7 @@ class CandidateConsole:
         )
         return StatusView(
             **snapshot.model_dump(exclude={"receipt", "receipt_digest"}),
+            outcome=outcome_evidence(self.config.operation_store, snapshot),
             seed=seed_readback(snapshot),
             native_status=receipt.status if receipt else None,
             graph_trace=receipt.graph_trace if isinstance(receipt, CandidateRunReceipt) else None,
@@ -426,6 +428,7 @@ class CandidateConsole:
                     state=snapshot.state,
                     native_status=snapshot.receipt.status if snapshot.receipt else None,
                     loop=loop,
+                    outcome=outcome_evidence(store, snapshot),
                     seed=seed_readback(snapshot),
                     reason=snapshot.reason if snapshot.state == "operation_failed" else None,
                 )

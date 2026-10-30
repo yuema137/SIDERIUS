@@ -25,23 +25,25 @@
     // Before the worker records its process identity the store reports `unknown` (L-6).
     if (value.state === 'unknown' && value.process?.reason === 'missing_identity') return `${what} is starting.`;
     if (value.state !== 'completed') return `${what}: its status cannot be determined right now.`;
+    // Typed native failures in plain words (L-2, #1145); the cause line comes from the log.
+    const noun = what.toLowerCase();
+    if (native === 'failed' && value.outcome?.failed_phases?.length) return `Failed during ${value.outcome.failed_phases.join(', ')}.`;
+    if (native === 'failed') return `Failed: the ${noun} stopped with an error before finishing.`;
+    if (native === 'timed_out') return `Failed: the ${noun} reached its time limit and was stopped.`;
+    if (native === 'interrupted') return `Failed: the ${noun} was interrupted before finishing.`;
+    const validated = value.outcome?.validation_passed ?? value.validation_passed;
     const preparation = value.kind === 'prepare' || value.kind === 'prepare_reusable';
     if (preparation && native === 'prepared') return 'Prepared and ready to launch.';
-    if (native === 'accepted' || (native === 'completed' && value.validation_passed === true)) {
+    if (native === 'accepted' || (native === 'completed' && validated === true)) {
       return `Finished: the ${what === 'Run' ? 'candidate' : what.toLowerCase()} passed validation.`;
     }
-    if (native === 'rejected' || value.validation_passed === false) {
+    if (native === 'rejected' || (native === 'completed' && validated === false)) {
       return 'Finished: validation rejected the candidate.';
     }
     if (native === 'cancelled') return 'Stopped on request before finishing; no candidate result was produced.';
     if (native === 'stopped') return 'Finished: stopped at a completed iteration boundary.';
     if (native === 'paused') return 'Paused at a completed iteration boundary.';
     if (native === 'completed') return 'Finished.';
-    // Typed native failures in plain words (L-2, #1145); the cause line comes from the log.
-    const noun = what.toLowerCase();
-    if (native === 'failed') return `Failed: the ${noun} stopped with an error before finishing.`;
-    if (native === 'timed_out') return `Failed: the ${noun} reached its time limit and was stopped.`;
-    if (native === 'interrupted') return `Failed: the ${noun} was interrupted before finishing.`;
     if (preparation) return `Preparation finished without a prepared run (${native || 'no result'}).`;
     return `Finished with status ${native || 'unknown'}.`;
   }

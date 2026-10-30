@@ -54,7 +54,7 @@ try {
     state: 'active', process: {status: 'alive', reason: 'observed'}, finishing: false, receipt_available: false, native_status: null,
     native_id: null, validation_passed: null, reason: 'fixture', ...fields});
   const terminal = (operation, nativeStatus, attempted) => status(operation, {state: 'completed', process: {status: 'exited', reason: 'observed'},
-    receipt_available: true, native_status: nativeStatus, native_id: 'fixture-run', loop: {final_iteration: 3, attempted_iterations: attempted}});
+    outcome: {failed_phases: [], completed_iterations: attempted}, receipt_available: true, native_status: nativeStatus, native_id: 'fixture-run', loop: {final_iteration: 3, attempted_iterations: attempted}});
   await page.route('**/api/**', async route => {
     const request = route.request(), url = new URL(request.url());
     assert.equal(request.headers().authorization, 'Bearer ' + metadata.token);
@@ -193,7 +193,7 @@ try {
   assert.equal(posts.length + pausePosts.length, 1, 'no further control request after reload');
 
   runningTerminal = true;
-  await state.filter({hasText: 'Research loop stopped at a completed iteration boundary after 1 of 3 iterations.'}).waitFor();
+  await state.filter({hasText: 'Research loop stopped at a completed iteration boundary after 1 of 3 completed iterations.'}).waitFor();
   assert.ok(await stop.isHidden());
   assert.equal(posts.length, 1);
 
@@ -203,7 +203,7 @@ try {
   assert.ok(await page.locator('#loop-control').isHidden(), 'a candidate without a declared loop has no loop control');
 
   await page.evaluate(id => { location.hash = 'monitor/' + id; }, finished);
-  await state.filter({hasText: 'Research loop finished after 3 of 3 iterations.'}).waitFor();
+  await state.filter({hasText: 'Research loop finished after 3 of 3 completed iterations.'}).waitFor();
   assert.ok(await stop.isHidden(), 'a finished loop has no Stop');
   assert.ok(!(await state.textContent()).includes('Stop'), 'Stop state does not leak across operations');
   assert.equal(posts.length, 1);
@@ -226,7 +226,7 @@ try {
   assert.ok(await resumeGroup.isHidden(), 'no Resume before a paused receipt');
 
   pausingTerminal = true;
-  await state.filter({hasText: 'Research loop paused at a completed iteration boundary after 1 of 3 iterations.'}).waitFor();
+  await state.filter({hasText: 'Research loop paused at a completed iteration boundary after 1 of 3 completed iterations.'}).waitFor();
   assert.ok(!(await state.textContent()).includes('ended'), 'paused is resumable, never "ended"');
   assert.ok(await pause.isHidden() && await stop.isHidden());
   await page.locator('#graph-results-observation').filter({hasText: 'Workflow training results'}).waitFor();
@@ -249,7 +249,7 @@ try {
   await stop.waitFor({state: 'visible'});
   assert.ok(await pause.isVisible(), 'a running resumed segment can be paused again');
   resumedTerminal = true;
-  await state.filter({hasText: 'Research loop finished after 3 of 3 iterations.'}).waitFor();
+  await state.filter({hasText: 'Research loop finished after 3 of 3 completed iterations.'}).waitFor();
   await page.locator('#graph-results-observation h3').filter({hasText: 'Iteration 3'}).waitFor();
   assert.equal(await page.locator('#graph-results-observation .graph-result-body').count(), 3);
   assert.ok(await stop.isHidden() && await resumeGroup.isHidden());

@@ -814,3 +814,42 @@ def test_readback_refuses_a_segment_that_continued_past_a_condition_input_reques
     )
     with pytest.raises(ValueError, match="loop continued past a condition input request"):
         verify_loop(replayed, parent, receipt)
+
+
+def test_console_outcome_reads_failed_proposal_iteration(
+    prepared, loop_tuner, native_runner, interpretation_provider, monkeypatch, tmp_path
+):
+    """#1198: real loop receipts include a failed attempt, not a second completion."""
+    from tests.unit.tools.candidate_console.test_loop_stop import _snapshot
+    from tools.candidate_console import graph_results, outcomes
+    from tools.candidate_operations import OperationStoreConfig
+    from tools.candidate_operations.models import CandidateOperation
+
+    generate = native_runner.generate
+
+    def fail_second_proposal(self, *args, **kwargs):
+        if self.context["iter"] == 2:
+            raise ValueError("synthetic proposal failure")
+        return generate(self, *args, **kwargs)
+
+    monkeypatch.setattr(native_runner, "generate", fail_second_proposal)
+    request = loop_request(prepared, final_iteration=3)
+    receipt = launch_candidate(request)
+    assert receipt.status == "failed"
+    assert receipt.loop_trace is not None and receipt.loop_trace.attempted_iterations == 2
+    operation_id = UUID(hex=receipt.run_id)
+    submission = CandidateOperation(request_id=operation_id, request=request)
+    parent = initial(request).model_copy(update={"run_id": receipt.run_id})
+    monkeypatch.setattr(outcomes, "loop_root_operation", lambda *_: submission)
+    monkeypatch.setattr(graph_results, "read_model", lambda *_args, **_kwargs: parent)
+    evidence = outcomes.outcome_evidence(
+        OperationStoreConfig(
+            state_root=str(tmp_path / "operations"),
+            preparation_roots=(str(tmp_path / "preparations"),),
+            candidate_roots=(str(tmp_path / "workspace"),),
+        ),
+        _snapshot(operation_id, receipt),
+    )
+    assert evidence is not None
+    assert evidence.completed_iterations == 1
+    assert evidence.failed_phases == ("Propose model",)

@@ -320,8 +320,11 @@ overwrites an existing `tasks/` folder.
    finished, **Workflow training results** shows the tuner report of each
    verified iteration separately; it never combines or ranks iterations.
    **Train & tune node execution** only says the node ran; **Train & tune outcome**
-   says what training achieved, for example "No training round completed: 0
-   completed rounds in 9 attempts …" when every attempt was refused or failed.
+   says what training achieved, for example "No tuning round completed: 0
+   completed tuning rounds in 9 attempts …" when every attempt was refused or failed.
+   If the environment refused training, the outcome also shows its recorded reason.
+   Failed runs name the failing phase when it was recorded. Loop progress counts
+   completed iterations; an iteration that failed during proposal does not count.
    A running authored research loop shows **Stop at next boundary**: the current
    iteration finishes, and status says stopped only once the native receipt does.
    **Pause at next boundary** works the same way; a paused loop can be reviewed and
