@@ -31,13 +31,16 @@ for offline CI. Legacy routes do not import Pydantic AI at runtime.
 
 Default routes for `openai`, `gemini`, and `deepseek` retain the existing OpenAI
 SDK Chat Completions implementation. New providers automatically select this
-backend when specified through workflow `provider` and `model_id` fields:
+backend when specified through workflow `provider` and `model_id` fields.
 
-| Provider | Default endpoint | Credential variable | Default protocol/model adapter |
-| --- | --- | --- | --- |
-| `anthropic` | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` | Anthropic Messages / `AnthropicModel` |
-| `moonshot` | `https://api.moonshot.ai/v1` | `MOONSHOT_API_KEY` | OpenAI-compatible Chat / `MoonshotAIProvider` |
-| `zai` | `https://api.z.ai/api/paas/v4` | `ZAI_API_KEY` | OpenAI-compatible Chat / `ZaiModel` |
+Credential names and model-selection requirements are owned by the
+[installation provider table](../../../docs/getting-started/installation.md#api-keys).
+
+| Provider | Default endpoint | Default protocol/model adapter |
+| --- | --- | --- |
+| `anthropic` | `https://api.anthropic.com` | Anthropic Messages / `AnthropicModel` |
+| `moonshot` | `https://api.moonshot.ai/v1` | OpenAI-compatible Chat / `MoonshotAIProvider` |
+| `zai` | `https://api.z.ai/api/paas/v4` | OpenAI-compatible Chat / `ZaiModel` |
 
 New providers require an explicit model ID. Cross-provider reflector selection
 also requires its own model ID for these providers. No model availability is
