@@ -278,7 +278,11 @@ def require_available(root: Path, releasable: Callable[[UUID], bool]) -> None:
         except ValueError as error:
             raise OperationFailure("integrity", "unrecognized operation directory") from error
         if str(operation_id) != name or not releasable(operation_id):
-            raise OperationFailure("busy", "store has an active or unresolved operation")
+            raise OperationFailure(
+                "busy",
+                "store has an active or unresolved operation",
+                blocking_operation_id=operation_id,
+            )
     with directory(root) as descriptor, suppress(FileNotFoundError):
         os.unlink("active.json", dir_fd=descriptor)
 

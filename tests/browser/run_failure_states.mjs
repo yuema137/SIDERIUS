@@ -129,6 +129,22 @@ try {
   await page.locator('#monitor-status').filter({hasText: 'Failed: the preparation stopped with an error before finishing.'}).waitFor();
   await page.locator('#monitor-cause').filter({hasText: 'TaskCompositionError: plugin file'}).waitFor();
 
+  // #1163: parent causes use a fixed status category, never the raw log exception.
+  observed[prepId] = status(prepId, 'prepare_reusable', prepDigest, {preparation_error: 'Invalid input or changed source while preparing the run. See the server log for details.'});
+  await retained('preparation');
+  await prepStatus.filter({hasText: 'Invalid input or changed source'}).waitFor();
+  await delay(500);
+  assert.doesNotMatch(await prepStatus.textContent(), /TaskCompositionError|\/task\/plugins/);
+  await shot('preparation-parent-failed');
+  await page.locator('#new-run-monitor').click();
+  await page.locator('#monitor-cause').filter({hasText: 'Invalid input or changed source'}).waitFor();
+  assert.doesNotMatch(await page.locator('#monitor-cause').textContent(), /TaskCompositionError|\/task\/plugins/);
+
+  observed[prepId] = status(prepId, 'prepare_reusable', prepDigest, {state: 'unknown', receipt_available: false, native_status: null, reason: 'native_outcome_unresolved', preparation_error: 'Preparation reported an error without a verified result. Its outcome remains unresolved; inspect the operation log.'});
+  await retained('preparation');
+  await prepStatus.filter({hasText: 'outcome remains unresolved'}).waitFor();
+  assert.equal(await page.locator('#new-run-dismiss').isHidden(), true);
+
   // Item 4: a failed launch says the run failed, with the cause; never "has finished".
   observed[runId] = status(runId, 'candidate', runDigest, {});
   await retained('candidate');

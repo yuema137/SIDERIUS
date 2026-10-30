@@ -357,11 +357,14 @@ class LogChunk(PreviewModel):
 class OperationError(PreviewModel):
     code: str
     message: str
+    blocking_operation_id: UUID | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class OperationFailure(ValueError):
-    def __init__(self, code: str, message: str):
-        self.detail = OperationError(code=code, message=message)
+    def __init__(self, code: str, message: str, *, blocking_operation_id: UUID | None = None):
+        self.detail = OperationError(
+            code=code, message=message, blocking_operation_id=blocking_operation_id
+        )
         super().__init__(message)
 
 

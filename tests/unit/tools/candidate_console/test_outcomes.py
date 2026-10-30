@@ -203,3 +203,73 @@ def test_failed_adaptor_keeps_its_capability_id(console_config):
         console_config.operation_store, _snapshot(uuid4(), aggregate)
     )
     assert observed is not None and observed.failed_phases == ("adaptor",)
+
+
+@pytest.mark.parametrize(
+    "error,expected",
+    [
+        ("ValueError: /private/key=secret", "Invalid input"),
+        ("PermissionError: /private/key=secret", "Filesystem error"),
+        ("SecretTaskName: /private/key=secret", "Preparation failed"),
+        ("preparation child exit 1; /private/key=secret", "Preparation worker failed"),
+    ],
+)
+@pytest.mark.parametrize("kind", ["prepare", "prepare_reusable"])
+def test_preparation_status_projects_fixed_cause(
+    console_config, monkeypatch, error, expected, kind
+):
+    """Status exposes a useful category without echoing receipt text or plugin class names."""
+    from tools.candidate_prepare.models import CandidatePreparationReceipt
+
+    native = CandidatePreparationReceipt(
+        preparation_id=uuid4(),
+        status="failed",
+        output_dir="/private",
+        request_path="/private/request",
+        log_path="/private/log",
+        source_observations=(),
+        error=error,
+    )
+    if kind == "prepare_reusable":
+        from tools.candidate_prepare.reusable_models import ReusablePreparationReceipt
+
+        native = ReusablePreparationReceipt(
+            preparation_id=uuid4(),
+            run_id=uuid4(),
+            envelope="/private",
+            status="failed",
+            binding_path="/private/binding",
+            binding_sha256="a" * 64,
+            error=error,
+        )
+    snapshot = _snapshot(uuid4(), receipt("failed")).model_copy(
+        update={"kind": kind, "receipt": native}
+    )
+    monkeypatch.setattr(service, "operation_admitted", lambda *a: True)
+    monkeypatch.setattr(service, "read_operation", lambda *a: snapshot)
+    monkeypatch.setattr(service, "loop_status", lambda *a, **k: None)
+    view = service.CandidateConsole(console_config).status(snapshot.operation_id)
+    assert view.preparation_error.startswith(expected)
+    assert all(
+        text not in view.model_dump_json() for text in ["/private", "secret", "SecretTaskName"]
+    )
+
+
+def test_preparation_without_receipt_explains_error_without_releasing(console_config, monkeypatch):
+    """An escaping parent admission error has no receipt but must not hide its failure."""
+    snapshot = _snapshot(uuid4(), receipt("failed")).model_copy(
+        update={
+            "kind": "prepare",
+            "receipt": None,
+            "receipt_available": False,
+            "state": "unknown",
+            "reason": "native_outcome_unresolved",
+        }
+    )
+    monkeypatch.setattr(service, "operation_admitted", lambda *a: True)
+    monkeypatch.setattr(service, "read_operation", lambda *a: snapshot)
+    monkeypatch.setattr(service, "loop_status", lambda *a, **k: None)
+    view = service.CandidateConsole(console_config).status(snapshot.operation_id)
+    assert "reported an error" in view.preparation_error
+    assert "remains unresolved" in view.preparation_error
+    assert view.state == "unknown" and not view.receipt_available

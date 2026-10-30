@@ -174,3 +174,20 @@ def test_competing_preparers_have_one_claim(selection, monkeypatch):
         results = list(pool.map(lambda _: call(), range(2)))
     assert sum(item is not None for item in results) == 1
     assert (Path(selection.output_dir) / "preparation/receipt.json").is_file()
+
+
+def test_parent_reconciliation_failure_is_logged(selection, monkeypatch, caplog):
+    """The parent previously stored its exception only in the private receipt."""
+    monkeypatch.setattr(
+        launch,
+        "supervise",
+        lambda *a: ExecutionResult(status="completed", returncode=0, elapsed_seconds=0),
+    )
+
+    def fail(*args):
+        raise ValueError("private-source-sentinel")
+
+    monkeypatch.setattr(launch, "reconcile", fail)
+    receipt = prepare_candidate(selection)
+    assert receipt.status == "failed"
+    assert "private-source-sentinel" in caplog.text
