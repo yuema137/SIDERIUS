@@ -380,7 +380,7 @@ def test_status_projects_judge_verdicts_with_rationale_only_from_their_evidence(
 @pytest.mark.parametrize(
     ("code", "message"),
     [
-        ("loop_end", "End loop: paused segment lacks clean supervision"),
+        ("loop_end", "paused segment lacks clean supervision"),
         (
             "candidate_preflight",
             "research loop feedback must connect native tuning to interpretation; "

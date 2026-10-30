@@ -133,10 +133,10 @@ def admit_loop(request: "CandidateRunRequest") -> LoopAdmissionRefusal | None:
         shape = execution_families(definition, request.preview.execution_profile)
     except ValueError:
         return LoopAdmissionRefusal("shape")
+    if shape.interpretation is None or shape.tuning is None:
+        return LoopAdmissionRefusal("shape")
     if (
-        shape.interpretation is None
-        or shape.tuning is None
-        or loop.feedback.source.node != shape.tuning
+        loop.feedback.source.node != shape.tuning
         or loop.feedback.target != shape.interpretation.interpretation
     ):
         return LoopAdmissionRefusal("feedback")

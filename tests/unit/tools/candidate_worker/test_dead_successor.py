@@ -127,7 +127,7 @@ def test_dead_successor_can_end_without_reusing_reservation(
             )
             assert not releasable(config, next_id)
             assert read_operation(config, first_id).reason == "native_terminal"
-            with pytest.raises(OperationFailure, match=r"End loop.*successor") as refused:
+            with pytest.raises(OperationFailure, match=r"successor.*End loop") as refused:
                 request_loop_stop(config, first_id)
             assert refused.value.detail.code == "loop_end"
 
@@ -137,7 +137,7 @@ def test_dead_successor_can_end_without_reusing_reservation(
     with monkeypatch.context() as patch:
         patch.setattr(process, "_stat", lambda pid: ("S", 100) if pid == sandbox.pid else stat(pid))
         assert not releasable(config, next_id)
-        with pytest.raises(OperationFailure, match=r"End loop.*successor") as refused:
+        with pytest.raises(OperationFailure, match=r"successor.*End loop") as refused:
             request_loop_stop(config, first_id)
         assert refused.value.detail.code == "loop_end"
     (identity_path.parent / "sandbox.json").unlink()

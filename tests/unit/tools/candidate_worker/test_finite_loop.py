@@ -831,6 +831,12 @@ def test_readback_refuses_a_segment_that_continued_past_a_condition_input_reques
             "review the workflow nodes and connections",
         ),
         (
+            "no_tuning",
+            "shape",
+            "research loops require a native interpretation-to-tuning iteration; "
+            "review the workflow nodes and connections",
+        ),
+        (
             "feedback",
             "feedback",
             "research loop feedback must connect native tuning to interpretation; "
@@ -865,6 +871,10 @@ def test_loop_admission_reason_survives_submission(
                     "nodes": (*definition.nodes, interpreter.model_copy(update={"id": "other"})),
                 }
             )
+        elif case == "no_tuning":
+            definition = definition.model_copy(
+                update={"nodes": tuple(n for n in definition.nodes if n.capability != "tuning")}
+            )
         else:
             definition = definition.model_copy(
                 update={
@@ -886,7 +896,7 @@ def test_loop_admission_reason_survives_submission(
     refusal = admit_loop(request)
     assert refusal is not None and refusal.reason == reason
     assert str(refusal) == message
-    if case == "feedback":
+    if case in {"feedback", "no_tuning"}:
         # Exercise typed refusal rendering independently of schema validation.
         request = loop_request(prepared)
         monkeypatch.setattr(

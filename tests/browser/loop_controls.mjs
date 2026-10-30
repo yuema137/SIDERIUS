@@ -73,7 +73,7 @@ try {
       if (url.pathname === `/api/operations/${pausing}/loop-pause`) { pausePosts.push(url.pathname); return reply({operation_id: pausing, outcome: 'requested'}); }
       if (url.pathname === `/api/operations/${ending}/loop-stop`) {
         endPosts.push(url.pathname);
-        if (endPosts.length === 1) return route.fulfill({status: 409, json: {error: {code: 'loop_end', message: 'End loop: paused segment lacks clean supervision'}}});
+        if (endPosts.length === 1) return route.fulfill({status: 409, json: {error: {code: 'loop_end', message: 'paused segment lacks clean supervision'}}});
         ended = true;
         return reply({operation_id: ending, outcome: 'requested'});
       }
@@ -335,7 +335,7 @@ try {
   assert.equal(endPosts.length, 0, 'cancelled confirmation sends no Stop');
   page.once('dialog', dialog => { void dialog.accept(); });
   await end.click();
-  await page.locator('#loop-stop-status').filter({hasText: 'End loop was not recorded: End loop: paused segment lacks clean supervision'}).waitFor();
+  await page.locator('#loop-stop-status').filter({hasText: 'End loop was not recorded: paused segment lacks clean supervision'}).waitFor();
   assert.ok(await end.isEnabled(), 'a refused End can be retried without Resume review');
   page.once('dialog', dialog => { void dialog.accept(); });
   await end.dblclick();

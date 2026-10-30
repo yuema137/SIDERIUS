@@ -1230,12 +1230,15 @@ tail. For a paused receipt it calls `review_end_locked` under the same store loc
 as Resume admission. The shared `_paused_boundary` verifies completed evidence,
 exited process, clean supervision and bound completion. End has its own eligibility:
 it does not require a recorded seed for future execution or an unused next iteration
-slot. Resume retains those requirements. End refusals use `loop_end` and
-`End loop` wording; identity failures retain their integrity codes. An existing successor is allowed only when `loop_recovery.failed_successor`
+slot. Resume retains those requirements. End refusals use `loop_end`; shared
+boundary messages contain only the reason, because the console supplies the action
+prefix. Resume retains its existing messages. Identity failures retain their integrity codes. An existing successor is allowed only when `loop_recovery.failed_successor`
 verifies that it is the selected predecessor's bound resume operation, has no
 completion or native receipt, and its wrapper and sandbox sessions have ended.
-This ending-only path permits a partial next iteration; it neither promotes that body
+This ending-only path permits a partial next iteration; it neither promotes that iteration
 to a result nor authorizes re-execution. Live, unknown or corrupt successors refuse.
+A continued predecessor directs the operator to open its successor: Stop the active
+successor or use End loop there if it is paused.
 It preserves the paused receipt and writes only the run-wide Stop marker; a stale
 Resume review cannot admit after Stop wins the lock. It reuses the store lock,
 configured-root admission, saved request/run identity checks and current process

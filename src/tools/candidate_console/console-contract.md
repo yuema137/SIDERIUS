@@ -1159,7 +1159,8 @@ paused tail that is no longer finishing. End eligibility is independent of Resum
 a verified completed pause can be ended even when the next iteration slot is occupied.
 Clean supervision, bound completion and successor-session safeguards still apply.
 A refused End renders `End loop was not recorded: <owner message>` in
-`#loop-stop-status`; it remains available for retry without Resume review.
+`#loop-stop-status`; the owner message contains only the reason, avoiding a second
+End loop prefix. It remains available for retry without Resume review.
 Typed loop admission refusals from submission display the worker owner's profile,
 iteration-shape or feedback explanation; they are never relabelled as changed inputs.
 It confirms that completed results are

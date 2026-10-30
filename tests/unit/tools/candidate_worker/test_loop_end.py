@@ -89,8 +89,13 @@ def test_stop_ends_paused_tail_without_changing_receipts(
             launch_environment=env,
         )
         process_segments()
-        with pytest.raises(OperationFailure, match="successor"):
+        with pytest.raises(OperationFailure) as refused:
             request_loop_stop(config, root_id)
+        assert refused.value.detail.code == "loop_end"
+        assert refused.value.detail.message == (
+            "this segment has a successor; open the successor to Stop it, "
+            "or use End loop there if it is paused"
+        )
         selected = next_id
 
     review = review_loop_resume(config, selected)
@@ -115,7 +120,11 @@ def test_stop_ends_paused_tail_without_changing_receipts(
     with pytest.raises(OperationFailure) as refused:
         request_loop_stop(config, selected)
     assert refused.value.detail.code == "loop_end"
-    assert refused.value.detail.message == "End loop: paused segment lacks clean supervision"
+    assert refused.value.detail.message == "paused segment lacks clean supervision"
+    with pytest.raises(OperationFailure) as resume_refusal:
+        review_loop_resume(config, selected)
+    assert resume_refusal.value.detail.code == "loop_resume"
+    assert resume_refusal.value.detail.message == "paused segment lacks clean supervision"
     supervision_path.write_bytes(supervision)
     marker = request_loop_stop(config, selected)
     assert request_loop_stop(config, selected) == marker, "Stop retries are idempotent"
