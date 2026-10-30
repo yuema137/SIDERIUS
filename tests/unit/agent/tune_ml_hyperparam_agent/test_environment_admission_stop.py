@@ -29,6 +29,8 @@ def _drive(
     tmp_path: Path, training_status: dict
 ) -> tuple[HyperparamTuningOutput, int, int, list[dict]]:
     agent_input = HyperparamTuningInput(
+        # This fixture exercises legacy single-file attempts, not trial scheduling.
+        is_trial=False,
         run_seed=TEST_RUN_SEED,
         planner_strategy="native-timing-v1",
         model_type="punet",
