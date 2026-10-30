@@ -16,7 +16,7 @@ def test_attempt_health_coverage(manifest, round_kind):
     """Missing capability rejects usable scopes; unconditional success accepts missing evidence.
 
     Both manifests must accept full and sampled evaluation scopes, including a
-    single valid row (coverage does not promise a passing dispersion verdict).
+    pair of valid rows. A single valid row cannot meet the positive dispersion floor.
     Training rows, empty/masked-only views and unsupported partition demand
     must fail closed through the same production boundary.
     """
@@ -39,16 +39,19 @@ def test_attempt_health_coverage(manifest, round_kind):
                 health_enabled=True,
             )
 
-        single_valid = scope.model_copy(update={"rows": (scope.rows[1],)})
+        two_valid = scope.model_copy(update={"rows": (scope.rows[1], scope.rows[2])})
         sampled = task.build_eval_scope(request.model_copy(update={"portion": 0.5}))
-        for covered_scope in (scope, sampled, single_valid):
+        for covered_scope in (scope, sampled, two_valid):
             for files in (None, (2,)):
                 result = validate(covered_scope, files)
                 assert result is not None and result.applicable and result.covered
 
-        for rows in ((), tuple(row for row in scope.rows if not row.valid)):
-            with pytest.raises(TaskHealthCoverageError, match="no valid predictions"):
+        for rows in ((), (scope.rows[1],), tuple(row for row in scope.rows if not row.valid)):
+            with pytest.raises(TaskHealthCoverageError, match="requires at least 2 valid rows"):
                 validate(scope.model_copy(update={"rows": rows}))
+        for selection in ({"portion": 0.08}, {"max_samples": 1}):
+            with pytest.raises(TaskHealthCoverageError, match="requires at least 2 valid rows"):
+                validate(task.build_eval_scope(request.model_copy(update=selection)))
         training = task.build_training_scope(request)
         for uncovered_scope in (
             training,

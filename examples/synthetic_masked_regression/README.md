@@ -20,8 +20,9 @@ Generated data belongs in a caller workspace and is not committed.
 
 Health checks measure variation among predictions for valid evaluation rows.
 Before each Health-enabled trial or formal attempt, the example checks that
-the selected scope contains at least one valid row and only evaluation-shard
-rows. Empty or fully masked selections are refused before execution. A scope
+the selected scope contains at least two valid rows and only evaluation-shard
+rows. Fewer than two valid predictions cannot meet the positive variation
+threshold, so those selections are refused before execution. A scope
 that passes this coverage check can still fail the prediction-variation check.
 
 The modular variant shows the same task through explicit composition:

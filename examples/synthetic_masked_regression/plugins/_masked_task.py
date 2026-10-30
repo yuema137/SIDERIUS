@@ -37,6 +37,8 @@ FEATURE_DIM = 3
 TRAIN_SHARDS = (0, 1)
 EVAL_SHARD = 2
 SCOPE_KIND = "synthetic_masked_regression_rows"
+# The declared positive dispersion floor cannot be met by one sample: std(ddof=0) = 0.
+MIN_HEALTH_VALID_ROWS = 2
 
 
 class MaskedScopeRow(BaseModel):
@@ -314,9 +316,12 @@ class SyntheticMaskedTaskDataPath:
         elif any(row.shard != self._eval_shard for row in scope.rows):
             covered = False
             reason = f"Health requires rows from evaluation shard {self._eval_shard} only"
-        elif not any(row.valid for row in scope.rows):
+        elif sum(row.valid for row in scope.rows) < MIN_HEALTH_VALID_ROWS:
             covered = False
-            reason = "evaluation scope has no valid predictions for Health dispersion"
+            reason = (
+                f"Health dispersion requires at least {MIN_HEALTH_VALID_ROWS} valid rows; "
+                "evaluation scope has insufficient valid predictions"
+            )
         else:
             covered = True
             reason = "Health reads valid predictions from the evaluation scope"
