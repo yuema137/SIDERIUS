@@ -819,9 +819,10 @@ anything else is read as dotenv
 declared names are passed to the candidate; other entries are ignored.
 
 Use only the keys required by your selected providers, plus any other explicitly
-declared runtime variables. The current credential variable names are
-`OPENAI_API_KEY`, `GEMINI_API_KEY` and `DEEPSEEK_API_KEY`. Match the names in the private file
-and `candidate_environment_names` to your reviewed profile. Do not put values in
+declared runtime variables. Find each provider's key name and model-selection
+requirements in the [provider key table](../../../docs/getting-started/installation.md#api-keys).
+Match the names in the private file and `candidate_environment_names` to your
+reviewed profile. Do not put values in
 `console.json`, commands, browser fields or version control. A placeholder is not
 a working key; presence does not prove authentication, quota or network access.
 
