@@ -26,3 +26,14 @@ The production isolated preflight is also physically qualified on an H100
 Not claimed: live LLM-agent execution or network literature retrieval by this
 example. The workflow witness uses typed deterministic substitutes; real
 training, scoring, Health, and GPU execution are covered independently.
+
+`SyntheticMaskedTaskDataPath.validate_health_coverage` proves attempt coverage
+for both manifests before composed, Health-enabled trial/formal execution.
+It accepts only scopes whose rows belong to the configured evaluation shard
+and include at least one valid row. Empty or fully masked scopes, foreign-shard
+rows, and `health_gate_files` overrides other than the singleton evaluation
+shard are uncovered demand and cause `TaskHealthCoverageError` at the attempt
+boundary. Full and sampled scopes follow the same rule; one valid row supplies
+evidence but does not imply that the dispersion check passes. The proof uses
+scope metadata; disk/supervision consistency remains a materialization check.
+Regression evidence: `tests/unit/examples/test_masked_health_coverage.py`.
