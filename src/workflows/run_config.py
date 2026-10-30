@@ -51,6 +51,7 @@ from typing import Annotated, Literal
 from pydantic import Field, TypeAdapter, ValidationError
 
 from agent.schemas.hyperparam_tuning import (
+    DEFAULT_IS_TRIAL,
     HealthGateMode,
     HyperparamTuningInput,
     ResultAuthority,
@@ -82,9 +83,8 @@ FiniteTargetScore = Annotated[float, Field(allow_inf_nan=False)]
 class WorkflowLaunchConfig:
     """Immutable launch/execution configuration for one exploration run.
 
-    Field order and defaults mirror ``run_workflow``'s original signature
-    exactly, grouped by the sink each value is forwarded to, so a reader can see
-    where every value goes.
+    Fields are grouped by their downstream sink. Run-level trial mode derives
+    from the tuner schema owner, including when constructed directly from Python.
     """
 
     source_paths: list[str] | None = None
@@ -110,7 +110,7 @@ class WorkflowLaunchConfig:
     human_advice_validate: str | None = None
     human_advice_tune: str | None = None
     human_advice_mindset: str | None = None
-    is_trial: bool = False
+    is_trial: bool = DEFAULT_IS_TRIAL
     # Lane F2 (campaign-portion authority, 2026-08-26) — TRI-STATE: a TYPED
     # value is EXPERIMENT_FIXED (merged into the plan_overrides lock by
     # `frozen_portion_overrides`, so trial planning cannot silently override

@@ -24,6 +24,7 @@ from typing import Any, Literal
 from agent.llm_settings import DEFAULT_LLM_PROVIDER, ProviderName, default_model_for_provider
 from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.hyperparam_tuning import (
+    DEFAULT_IS_TRIAL,
     HealthGateMode,
     HyperparamTuningInput,
     ResultAuthority,
@@ -82,10 +83,10 @@ def local_validated_model(
     reflect_model_id: str | None = None,
     reflect_reasoning_effort: str | None = None,
     reflect_retry_policy: RetryPolicy | None = None,
-    # --- Trial mode (optional — all defaults preserve normal single-file behavior) ---
+    # --- Run-level trial/formal mode ---
     # DS7 — trial_strategy / target_files / eval_strategy params deleted
     # alongside the dead HyperparamTuningInput fields they fed.
-    is_trial: bool = False,
+    is_trial: bool = DEFAULT_IS_TRIAL,
     trial_portion: float = 0.1,
     train_portion: float = 0.1,
     eval_portion: float = 0.1,
@@ -257,7 +258,7 @@ def local_validated_model(
         reflect() call. None means the reflector uses llm_provider.
       - reflect_model_id : optional separate model for the tuner's
         reflect() call. None means the reflector uses llm_model_id.
-      - is_trial + trial_*: trial mode configuration (caller-supplied, defaults to single-file)
+      - is_trial + trial_*: trial mode configuration (defaults to trial/formal mode)
       - trial_time_budget_minutes / formal_time_budget_minutes / data_dir :
         workflow-supplied run-level context for the tuner's per-round
         evaluate_time_skill gate (Phase I two-budget split). Each budget
