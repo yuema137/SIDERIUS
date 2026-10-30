@@ -326,7 +326,11 @@ overwrites an existing `tasks/` folder.
    iteration finishes, and status says stopped only once the native receipt does.
    **Pause at next boundary** works the same way; a paused loop can be reviewed and
    resumed, optionally with your advice, as a new segment of the same run, which
-   shows its own results.
+   shows its own results. To finish at that pause, choose **End loop here** and
+   confirm. Completed results are kept. End can still be available when Resume
+   is refused; it requires the paused worker to have finished cleanly and no
+   active or uncertain successor. If End is refused, its message explains the
+   check that failed.
    A loop ended early by a declared stop condition says why, in plain words.
    A condition set to **Pause and ask me** pauses the loop instead and reads
    "Waiting for your input", followed by what was met, for example "No improvement

@@ -208,7 +208,7 @@
         window.dispatchEvent(new CustomEvent('loop-control-changed', {detail: {operation_id: current.id}}));
       }
     } catch (error) {
-      const name = kind === 'stop' ? 'Stop' : 'Pause';
+      const name = kind === 'stop' ? (last.native_status === 'paused' ? 'End loop' : 'Stop') : 'Pause';
       if (!error.stale) state.error = `${name} was not recorded: ` + error.message + (error.status ? '' : ' The outcome is unconfirmed; retrying is safe.');
     } finally {
       state.pending = false;

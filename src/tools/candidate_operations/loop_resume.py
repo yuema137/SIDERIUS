@@ -5,6 +5,7 @@ import os
 from collections.abc import Callable, Mapping
 from contextlib import suppress
 from pathlib import Path
+from typing import Literal
 from uuid import UUID
 
 from core.control_json import encode_control
@@ -215,22 +216,17 @@ def successor_id(record: OperationRecord) -> UUID | None:
     return binding.operation_id
 
 
-def review_locked(
-    config: OperationStoreConfig, operation_id: UUID, *, ending: bool = False
-) -> OperationSnapshot:
-    from tools.candidate_worker.loop import stop_requested
-    from tools.candidate_worker.loop_evidence import require_unused_next
-
+def _paused_boundary(
+    config: OperationStoreConfig, operation_id: UUID, *, action: Literal["End loop", "resume"]
+) -> tuple[OperationRecord, CandidateRunRequest, CandidateRunReceipt, OperationSnapshot]:
+    """Shared evidence and process checks, independent of future execution."""
     from .read import bound, optional, read_operation
 
     record = load_record(config, operation_id)
-    # Issue #983 — before any native read: a segment continues the root's seed,
-    # and an S3b-era root records none (its lock does), so Review refuses it
-    # rather than offering a Resume that could adopt or re-mint a seed.
-    require_root_seed(root_record(record))
     _, request, initial = claimed_inputs(record)
     snapshot = read_operation(config, operation_id)
     receipt = snapshot.receipt
+    code = "loop_end" if action == "End loop" else "loop_resume"
     if (
         snapshot.process.status != "exited"
         or not isinstance(receipt, CandidateRunReceipt)
@@ -238,34 +234,52 @@ def review_locked(
         or receipt.loop_trace is None
         or not snapshot.receipt_digest
     ):
-        raise OperationFailure("loop_resume", "resume requires an exited, verified paused segment")
+        raise OperationFailure(code, f"{action} requires an exited, verified paused segment")
     completion = optional(operation_path(config, operation_id) / "completion.json", Completion)
     if completion is None:
-        raise OperationFailure("loop_resume", "paused operation has no bound completion")
+        raise OperationFailure(code, f"{action}: paused operation has no bound completion")
     bound(record, completion)
     if completion.outcome != "native" or completion.receipt_digest != snapshot.receipt_digest:
-        raise OperationFailure("loop_resume", "paused completion identity disagrees")
+        raise OperationFailure(code, f"{action}: paused completion identity disagrees")
     try:
         require_clean(selected_control(record))
     except (OSError, ValueError) as error:
-        # Missing, unknown or unclean supervision is never resume authorization.
-        raise OperationFailure("loop_resume", "paused segment lacks clean supervision") from error
-    successor = successor_id(record)
-    if successor is not None:
-        from .loop_recovery import failed_successor
+        raise OperationFailure(code, f"{action}: paused segment lacks clean supervision") from error
+    return record, request, initial, snapshot
 
-        if not ending or failed_successor(record) != successor:
-            raise OperationFailure("loop_resume", "paused segment already has a successor")
+
+def review_end_locked(config: OperationStoreConfig, operation_id: UUID) -> OperationSnapshot:
+    """End completed work without requiring that another iteration can execute."""
+    from .loop_recovery import failed_successor
+
+    record, _, _, snapshot = _paused_boundary(config, operation_id, action="End loop")
+    successor = successor_id(record)
+    if successor is not None and failed_successor(record) != successor:
+        raise OperationFailure(
+            "loop_end", "End loop requires a paused tail; its successor has not been verified ended"
+        )
+    return snapshot
+
+
+def review_locked(config: OperationStoreConfig, operation_id: UUID) -> OperationSnapshot:
+    from tools.candidate_worker.loop import stop_requested
+    from tools.candidate_worker.loop_evidence import require_unused_next
+
+    # Resume must never adopt or re-mint an unrecorded historical seed.
+    require_root_seed(root_record(load_record(config, operation_id)))
+    record, request, initial, snapshot = _paused_boundary(config, operation_id, action="resume")
+    receipt = snapshot.receipt
+    assert isinstance(receipt, CandidateRunReceipt) and receipt.loop_trace is not None
+    if successor_id(record) is not None:
+        raise OperationFailure("loop_resume", "paused segment already has a successor")
     loop = request.preview.document.definition.loop
     assert loop is not None
     if receipt.loop_trace.attempted_iterations >= loop.final_iteration or stop_requested(initial):
         raise OperationFailure("loop_resume", "loop is terminal")
-    # Deliberately redundant with the paused readback above: defense in depth.
-    if successor is None:
-        try:
-            require_unused_next(request, initial, receipt.loop_trace.attempted_iterations)
-        except ValueError as error:
-            raise OperationFailure("loop_resume", "next iteration slot is not unused") from error
+    try:
+        require_unused_next(request, initial, receipt.loop_trace.attempted_iterations)
+    except ValueError as error:
+        raise OperationFailure("loop_resume", "next iteration slot is not unused") from error
     return snapshot
 
 

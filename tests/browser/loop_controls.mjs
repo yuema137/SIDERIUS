@@ -72,7 +72,9 @@ try {
       assert.equal(request.postData(), '{}');
       if (url.pathname === `/api/operations/${pausing}/loop-pause`) { pausePosts.push(url.pathname); return reply({operation_id: pausing, outcome: 'requested'}); }
       if (url.pathname === `/api/operations/${ending}/loop-stop`) {
-        endPosts.push(url.pathname); ended = true;
+        endPosts.push(url.pathname);
+        if (endPosts.length === 1) return route.fulfill({status: 409, json: {error: {code: 'loop_end', message: 'End loop: paused segment lacks clean supervision'}}});
+        ended = true;
         return reply({operation_id: ending, outcome: 'requested'});
       }
       assert.equal(url.pathname, `/api/operations/${running}/loop-stop`, 'Stop is posted only for the running loop');
@@ -332,11 +334,15 @@ try {
   await end.click();
   assert.equal(endPosts.length, 0, 'cancelled confirmation sends no Stop');
   page.once('dialog', dialog => { void dialog.accept(); });
+  await end.click();
+  await page.locator('#loop-stop-status').filter({hasText: 'End loop was not recorded: End loop: paused segment lacks clean supervision'}).waitFor();
+  assert.ok(await end.isEnabled(), 'a refused End can be retried without Resume review');
+  page.once('dialog', dialog => { void dialog.accept(); });
   await end.dblclick();
   await resumeGroup.waitFor({state: 'hidden'});
   releaseEndLog(); // The stale paused poll must not settle over the new Stop.
   await state.filter({hasText: 'Ended by you at the pause after iteration 7.'}).waitFor();
-  assert.equal(endPosts.length, 1, 'confirmed double click records one Stop');
+  assert.equal(endPosts.length, 2, 'retrying End records one Stop after the refusal');
   assert.ok(await resumeGroup.isHidden(), 'ended loop offers neither Resume nor End again');
   await page.locator('#operation-observed').filter({hasText: 'Final status'}).waitFor();
   assert.equal(await page.locator('#monitor-status').textContent(), 'Ended by you at the pause after iteration 7.');
@@ -345,7 +351,7 @@ try {
   await page.locator('#access-form button').click();
   await state.filter({hasText: 'Ended by you at the pause after iteration 7.'}).waitFor();
   assert.ok(await resumeGroup.isHidden(), 'reload derives ended state from the durable Stop');
-  assert.equal(endPosts.length, 1);
+  assert.equal(endPosts.length, 2);
   assert.equal(posts.length, 1);
   assert.deepEqual(faults, []);
   console.log('PASS: Stop and Pause post once and read "requested" until the receipt; a paused loop is resumable after review, Resume posts once with the retained UUID, and the resumed segment shows Stop and its bodies; a receipt stop_reason reads in plain words, with whole-run body numbers on a resumed segment.');

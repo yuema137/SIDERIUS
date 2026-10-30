@@ -29,7 +29,7 @@ from .test_native import native_runner as native_runner
 from .test_training import training_runner as training_runner
 
 
-@pytest.mark.parametrize("pause_kind", ["operator", "condition", "resumed"])
+@pytest.mark.parametrize("pause_kind", ["operator", "condition", "resumed", "occupied_next"])
 def test_stop_ends_paused_tail_without_changing_receipts(
     prepared,
     loop_tuner,
@@ -97,7 +97,26 @@ def test_stop_ends_paused_tail_without_changing_receipts(
     assert isinstance(review.receipt, CandidateRunReceipt)
     assert review.receipt.status == "paused" and review.receipt_digest is not None
     root = Path(review.receipt.workspace) / "candidate_run"
+    if pause_kind == "occupied_next":
+        # Completed evidence stays valid even when a future slot blocks Resume.
+        (root / "iteration_002").mkdir()
+        (root / "iteration_002" / "partial.txt").write_text("unfinished")
+        with pytest.raises(OperationFailure, match="next iteration slot"):
+            review_loop_resume(config, selected)
     before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    # End uses its own refusal code and wording while supervision is uncertain.
+    supervision_path = root / (
+        f"continuations/{selected}/supervision.json"
+        if pause_kind == "resumed"
+        else "supervision.json"
+    )
+    supervision = supervision_path.read_bytes()
+    supervision_path.unlink()
+    with pytest.raises(OperationFailure) as refused:
+        request_loop_stop(config, selected)
+    assert refused.value.detail.code == "loop_end"
+    assert refused.value.detail.message == "End loop: paused segment lacks clean supervision"
+    supervision_path.write_bytes(supervision)
     marker = request_loop_stop(config, selected)
     assert request_loop_stop(config, selected) == marker, "Stop retries are idempotent"
     assert loop_control_requests(config, selected)[0]
