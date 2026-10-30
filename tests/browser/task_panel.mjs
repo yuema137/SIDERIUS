@@ -61,7 +61,7 @@ try {
   const context = await browser.newContext({viewport: {width: 1280, height: 900}});
   const page = await context.newPage(), faults = [], summaries = [];
   page.on('pageerror', error => faults.push(error.message));
-  let listMode = 'fail', observing = 1, countObserving = 1, sandbox = 'missing';
+  let listMode = 'fail', observing = 1, countObserving = 1, sandbox = 'missing', incompleteReason = null;
   await page.route('**/api/tasks**', async route => {
     const url = new URL(route.request().url());
     assert.equal(route.request().method(), 'GET', 'The Task tab never mutates');
@@ -85,7 +85,7 @@ try {
       return route.fulfill({json: view(task, 'ready', {package: {...PACKAGE, sample_counts: {state: 'counted', training: 5880, evaluation: 1469, message: null}}})});
     }
     if (observing-- > 0) return route.fulfill({json: view(task, 'observing')});
-    return route.fulfill({json: view(task, 'ready', {package: PACKAGE})});
+    return route.fulfill({json: view(task, 'ready', {package: PACKAGE, data_volume: {files: 7349, bytes: 515802467, complete: incompleteReason === null, entry_cap: 100000, incomplete_reason: incompleteReason}})});
   });
 
   // Before Connect the Task tab says what to do; Workflow is not yet gated.
@@ -153,6 +153,23 @@ try {
   await page.locator('#task-sample-counts').filter({hasText: 'Training samples'}).waitFor();
   assert.match(await text('#task-sample-counts'), /Training samples5,880.*Evaluation samples1,469/s);
   assert.ok(summaries.filter(item => item.endsWith('?count_samples=1')).length >= 2);
+
+  // Each partial-count cause must explain the actual omission, not always the entry cap.
+  for (const [reason, expected] of [
+    ['entry_cap', 'the limit of 100,000 entries was reached'],
+    ['time_budget', 'the time budget was reached'],
+    ['other_device', 'entries on another filesystem device were skipped'],
+    ['unreadable', 'some files or folders could not be read or disappeared'],
+  ]) {
+    incompleteReason = reason;
+    await page.locator('#task-refresh').click();
+    await page.locator('#task-data').filter({hasText: expected}).waitFor({timeout: 5000});
+    assert.match(await text('#task-data'), /7,349 \(at least\)/);
+    if (reason !== 'entry_cap') assert.doesNotMatch(await text('#task-data'), /100,000/);
+  }
+  incompleteReason = null;
+  await page.locator('#task-refresh').click();
+  await page.locator('#task-summary-state[data-state="ready"]').waitFor({state: 'attached'});
 
   // Light and dark, wide and narrow.
   for (const width of [1280, 900]) for (const theme of ['light', 'dark']) {

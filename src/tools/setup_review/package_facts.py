@@ -19,7 +19,6 @@ from execute_tools.task_data_path import (
     resolve_storage_read_scope,
 )
 from tools.setup_review.composition_models import (
-    FAILURE_MESSAGE_MAX_CHARS,
     DataScopeFacts,
     ModelPluginFact,
     SampleCountFacts,
@@ -27,6 +26,7 @@ from tools.setup_review.composition_models import (
     TaskPackageFacts,
     TaskSummaryRequest,
 )
+from tools.setup_review.summary_errors import summary_error_message
 
 if TYPE_CHECKING:
     from workflows.task_composition import RunTaskComposition
@@ -51,10 +51,6 @@ def _volume(impl: object, data_root: str, scope: object) -> ScopeVolume | None:
     )
 
 
-def _message(error: Exception) -> str:
-    return f"{type(error).__name__}: {error}"[:FAILURE_MESSAGE_MAX_CHARS]
-
-
 def _counts(impl: Any, data_root: str, training: object, evaluation: object) -> SampleCountFacts:
     try:
         train = impl.training_dataset(
@@ -68,7 +64,7 @@ def _counts(impl: Any, data_root: str, training: object, evaluation: object) -> 
             )
         return SampleCountFacts(state="counted", training=len(train), evaluation=len(valid))
     except Exception as error:
-        return SampleCountFacts(state="failed", message=_message(error))
+        return SampleCountFacts(state="failed", message=summary_error_message(error))
 
 
 def _scope_facts(
@@ -87,8 +83,8 @@ def _scope_facts(
         with bind_dataset_profile(composition.dataset_profile):
             training, evaluation = build_full_declared_split(composition.task_data_path)
     except Exception as error:
-        failed = DataScopeFacts(state="failed", basis=basis, message=_message(error))
-        counts = SampleCountFacts(state="failed", message=_message(error))
+        failed = DataScopeFacts(state="failed", basis=basis, message=summary_error_message(error))
+        counts = SampleCountFacts(state="failed", message=summary_error_message(error))
         return failed, counts if request.count_samples else None
     counts = (
         _counts(impl, request.data_root, training, evaluation) if request.count_samples else None
@@ -105,7 +101,9 @@ def _scope_facts(
             evaluation=_volume(impl, request.data_root, evaluation),
         ), counts
     except Exception as error:
-        return DataScopeFacts(state="failed", basis=basis, message=_message(error)), counts
+        return DataScopeFacts(
+            state="failed", basis=basis, message=summary_error_message(error)
+        ), counts
 
 
 def _implementation_sources(composition: RunTaskComposition) -> dict[str, str]:

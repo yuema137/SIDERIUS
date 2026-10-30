@@ -1718,7 +1718,8 @@ is the sole authority for loss semantics.
 ### Training batch fit before resource probing
 
 `training_batch_plan.resolve_training_batch_plan` runs once in `prepare_attempt`
-after role-specific task scope acquisition and parameter-rule enforcement, before
+after role-specific task scope acquisition, parameter-rule enforcement and the
+composed Health coverage check (`validate_attempt_health_coverage`), before
 resource probing and construction of execution/record parameters. For a composed
 training scope it calls `workload_resolvers.resolve_task_training_rows`, the
 single dataset row-count owner. `probe_data.epoch_zero_training_sampling` builds

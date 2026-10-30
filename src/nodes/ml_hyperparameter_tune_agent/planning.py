@@ -871,15 +871,6 @@ def prepare_attempt(
         task_parameters={"seg_size": declared_segmentation_size},
     )
 
-    plan, resolved_training_rows = resolve_training_batch_plan(
-        plan,
-        bindings=bindings,
-        trial_config=trial_config,
-        scopes=task_scopes,
-        resolution=resolution,
-        model_type=model_type,
-    )
-
     # 01B2 — a composed Health-enabled attempt may execute only after the
     # bound task confirms that THIS opaque evaluation scope covers its own
     # output-dependent Health demand. The helper is deliberately adjacent to
@@ -897,6 +888,19 @@ def prepare_attempt(
             else None
         ),
         health_gate_files=agent_input.health_gate_files,
+    )
+
+    # The batch fit counts training rows, which may construct the task's
+    # training dataset (eager reads for some tasks). It therefore runs only
+    # after the Health coverage refusal above, so an uncovered scope is refused
+    # before any dataset is built.
+    plan, resolved_training_rows = resolve_training_batch_plan(
+        plan,
+        bindings=bindings,
+        trial_config=trial_config,
+        scopes=task_scopes,
+        resolution=resolution,
+        model_type=model_type,
     )
 
     # Segment counts for records and reflector context. EXTRACTED (§E.2):
