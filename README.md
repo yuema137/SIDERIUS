@@ -6,7 +6,7 @@
 **Turn your dataset and research question into an iterative ML experiment.**
 Work with your coding agent to define the task and write the experiment as a
 short Python workflow file; SIDERIUS then helps propose models, implement them,
-train and evaluate them, and use the results to guide the next attempt.
+train and evaluate them, and use the results to guide the next iteration.
 
 ![Physics time-series results: SIDERIUS validation RÂ² against S4D references](docs/assets/results/physics.svg)
 
@@ -17,7 +17,7 @@ Sources: [SIDERIUS paper (arXiv:2610.14024)](https://arxiv.org/abs/2610.14024) Â
 [Comparison data and evaluation conditions](docs/assets/results/provenance.md).
 
 - **Run an experiment cycle:** go from a hypothesis to model code, measured results
-  and the next experiment, with a record of each attempt.
+  and the next experiment, with a record of each iteration.
 - **Evaluate more than a score:** declare task-specific validity checks alongside
   your metric, with controlled data access and reproducible evaluation rules.
 - **Choose how to explore:** start with a lightweight fixed workflow or let an
@@ -30,19 +30,21 @@ required model capabilities and the configurations tested so far.
 
 ## Quick start with your coding agent
 
-Before you start, you need **Python 3.12+ and uv**, your dataset location, and a
-project directory outside this checkout for your task, settings and results.
-A real run trains models and needs an **NVIDIA GPU with CUDA** on the machine
-that runs it; there is no CPU mode. A run on a machine without one stops before
-any model call and says so. Setup checks and the synthetic Quickstart checks
-run on CPU.
-Use this checkout's own `.venv/bin/python` after installation. Provider keys
-are needed for real model calls; offline setup checks need none.
-The command line and the experimental browser console read them from different places; see
-[API keys](docs/getting-started/installation.md#api-keys).
-Preparing and running a workflow uses the Linux sandbox bubblewrap; run the
-[bubblewrap check](src/tools/workspace_sandbox/README.md#check-that-bubblewrap-works)
-once on that machine.
+Before you start, you need:
+
+- **Python 3.12+ and uv.** After installation, use this checkout's own
+  `.venv/bin/python`.
+- **Your dataset location** and a **project folder outside this checkout** for
+  your task, settings and results.
+- **An NVIDIA GPU with CUDA** on the machine that runs training. There is no
+  CPU mode: a run on a machine without one stops before any model call and
+  says so. Setup checks and the synthetic Quickstart checks run on CPU.
+- **Provider API keys** for real model calls (offline setup checks need none).
+  The command line and the experimental browser console read keys from
+  different places; see [API keys](docs/getting-started/installation.md#api-keys).
+- **bubblewrap**, the Linux sandbox that preparing and running a workflow use.
+  Run the [bubblewrap check](src/tools/workspace_sandbox/README.md#check-that-bubblewrap-works)
+  once on that machine.
 
 Follow [getting started](docs/getting-started/README.md) for the ordered setup,
 where to put credentials, and the commands that prepare and run a workflow.
@@ -80,7 +82,8 @@ LLM profile, the preparation request and the result paths before preparing
 or launching anything.
 ```
 
-For orchestration, replace the execution request with:
+For orchestration, replace the words from "then write the experiment as a
+workflow declaration" through "at most three iterations." with:
 
 ```text
 Use orchestration instead of the fixed workflow. Set up the external project and
@@ -145,12 +148,12 @@ Either collaboration style can use either execution approach:
 | Execution | What happens | When to choose it |
 | --- | --- | --- |
 | **Fixed workflow: lightweight starting point** | Research capabilities run in a predefined sequence, without an extra LLM deciding each next call. | Start quickly with lower coordination overhead and a predictable research loop. |
-| **Orchestration: flexible exploration** | An LLM caller chooses and combines capabilities as evidence arrives. | Explore beyond a fixed sequence, with more setup and potentially higher LLM cost. |
+| **Orchestration: flexible exploration** | An LLM (the orchestrator) chooses which research steps to call and combines them as evidence arrives. | Explore beyond a fixed sequence, with more setup and potentially higher LLM cost. |
 
 **Workflow keeps coordination lightweight; orchestration offers more room to
 adapt the research process.** In the paper's TIDMAD comparison, fixed workflows
-had the lowest estimated LLM cost, while orchestration without Data Analysis
-produced the most valid models and the best valid score. This demonstrates its
+had the lowest estimated LLM cost, while orchestration without the Data
+Analysis step (an agent that runs analysis code on your data) produced the most valid models and the best valid score. This demonstrates its
 potential, not a guarantee that orchestration wins on every task.
 
 [![Paper Figure 3: valid and non-valid TIDMAD models versus estimated LLM cost](docs/assets/paper/figure3.svg)](docs/assets/paper/figure3.svg)
@@ -256,8 +259,9 @@ Data Analysis.
 **Figure 2. Evaluation.** The task package separates training objectives,
 validation monitoring, scientific ranking, and supporting evidence.
 Scoreability checks whether the declared metric can be computed; Health
-records applicable model/output checks and follows their configured blocking
-or observational policy. Offline behavioral review adds evidence for scientific
+records applicable model/output checks and follows their configured policy:
+**Blocking** (a failure invalidates the model) or **Recording** (the result is
+only stored). Offline behavioral review adds evidence for scientific
 acceptance without feeding its judgments back into search.
 
 These figures are exported from the [paper on arXiv](https://arxiv.org/abs/2610.14024).
@@ -281,10 +285,13 @@ uv sync --group dev --frozen
   tests/unit/examples/test_quickstart_pack.py::test_shipped_manifest_composes_with_the_declared_values -q
 ```
 
-A real run needs a task package, external data, model/provider routing, a
-workspace for results and an NVIDIA GPU with CUDA. Preview the chosen launch command before execution;
-the chain's `--dry-run` prints child commands but does not prove that a task,
-provider account or training attempt will succeed. The
+A real run needs a task package, external data, an LLM profile, a folder for
+results and an NVIDIA GPU with CUDA. Preparing a workflow
+(`python -m tools.candidate_prepare`) is offline: it captures exactly what will
+run so you can review it, but it does not prove that your provider account
+works or that training will succeed. (The older chain launcher,
+`scripts/launch/run_chain.sh`, has its own `--dry-run` preview with the same
+limit.) The
 [getting-started guide](docs/getting-started/README.md) leads to the exact setup
 and first-run references.
 
@@ -299,9 +306,11 @@ and first-run references.
 
 For example, changing the metric changes the task's scientific meaning.
 Giving the same task more search time changes the experiment. Keep both choices
-explicit so recorded results can be interpreted and compared. Use a fresh
-workspace for an intentional new identity; resuming preserves the previous
-run's recorded inputs.
+explicit so recorded results can be interpreted and compared. A workspace
+records the settings that define its results (task, data scope, Health policy
+and workflow) when it starts. To change any of them on purpose, start a fresh
+workspace; resuming an existing one keeps its recorded inputs and refuses a
+changed setting.
 
 ## Find the right part
 

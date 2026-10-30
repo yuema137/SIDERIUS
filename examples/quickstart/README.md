@@ -35,6 +35,8 @@ print(qs.materialize_run_bundle(Path.cwd(), ws))
 This writes four hash-checked CSV shards under
 `$SIDERIUS_QUICKSTART_WORKSPACE/data`, or under
 `$HOME/siderius_quickstart_workspace/data` when that variable is unset.
+Success: it prints the data folder, for example
+`{'data_dir': '/home/you/siderius_quickstart_workspace/data'}`.
 Return to the repository root before the next command:
 
 ```bash
@@ -42,6 +44,11 @@ cd ../..
 ```
 
 ## Preview a research run
+
+SIDERIUS 1.1's main route is a `workflow.py` prepared with
+`tools.candidate_prepare`; see
+[Write and run a workflow declaration](../../docs/getting-started/README.md#write-and-run-a-workflow-declaration).
+The preview below uses the older chain launcher.
 
 ```bash
 WS="${SIDERIUS_QUICKSTART_WORKSPACE:-$HOME/siderius_quickstart_workspace}"
@@ -59,6 +66,12 @@ bash scripts/launch/run_chain.sh \
     --llm_config configs/llm/openai_tiered_pro.json \
     --dry-run
 ```
+
+`--mode lilab` runs the chain as a foreground process on this machine (the
+other value, `sdsc`, submits Slurm jobs). The command matches the notebook's
+launch cell, which uses the `openai_tiered_pro.json` LLM profile; for your own
+research runs the [root README](../../README.md#choose-models-by-role)
+recommends `openai-moderate-v1.json`.
 
 The preview prints child commands. It does not execute or qualify training.
 Before removing `--dry-run`, follow the
