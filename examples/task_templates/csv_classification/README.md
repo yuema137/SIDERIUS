@@ -49,6 +49,7 @@ scored and when a result is invalid. The folder holds no data.
 
 | Path | What it is | Edit? |
 | --- | --- | --- |
+| `workflow.py` | Optional workflow for the non-console route: declares full Formal training scope and two tuning rounds. | paths and budgets |
 | `task.yaml` | The manifest: names every other file below, plus your CSV file names, label column, class labels, feature count and locked parameters. Paths are relative to this folder. | yes |
 | `declared/task_config.yaml` | The task description the agents read, and the model input and output sizes. | yes |
 | `declared/task_health.yaml` | The two Health checks, their thresholds and the number of classes. | yes |
@@ -142,9 +143,37 @@ console workspace, make the same edits (step 2), and point `workflow.py` at
 them, for example
 `ReusableTaskReferences(manifest="tasks/iris/task.yaml", data_root="data/iris")`,
 where `data_root` is the folder holding `train.csv` and `validation.csv`.
+The included `workflow.py` already declares `formal_portion=1.0` and
+`max_rounds=2`: train on the full CSV training scope in Formal mode, with an
+earlier tuning round available for Trial. Edit its task paths and time budgets
+before preparing it. The console's New setup templates declare the same portion
+and tuning-round count.
 Steps 3 and 4 (register, **Count samples**) are console-only, so on this route
 ask your coding agent to load both files through the package and report the row
 counts before you prepare a run.
+
+## Choose the training scope
+
+A Trial tuning round lets the planner explore; a Formal tuning round uses the
+configured training scope and a separate evaluation scope. With
+`force_formal_round=True` (the default), the last tuning round of **each
+iteration** is forced Formal. With `max_rounds=1` there is no Trial round;
+with `max_rounds=2` the first may be Trial and the second is Formal. Increasing
+**Final iteration** repeats the loop; it does not add tuning rounds inside it.
+
+The framework's `formal_portion=0.1` uses 10% of the training scope. For example,
+1,077 CSV training rows × 0.1 gives about 100 rows: **3 steps/epoch** with batch
+size 32 and the incomplete batch dropped. Keeping that batch adds a step.
+Formal does not mean full-data training. `formal_train_portion` can further
+reduce the rows used each epoch; `formal_eval_portion` separately controls the
+evaluation scope and defaults to 1.0.
+
+New console templates declare `formal_portion=1.0` and `max_rounds=2` so small
+user datasets are not silently reduced to 10% and Trial has an opportunity to
+run. Review portions and budgets for larger datasets. In **Train & tune →
+Training settings**, **Default** removes the template's explicit value:
+Formal portion then returns to 0.1. Trial budgets and epoch ceilings only apply
+to tuning rounds that actually run as Trial.
 
 ## What the two Health checks do
 

@@ -58,7 +58,8 @@ bash scripts/launch/run_chain.sh \
     --workspace "$WS/chain" \
     --run_name quickstart_v1 \
     --num_iterations 1 \
-    --max_rounds 1 \
+    --max_rounds 2 \
+    --formal_portion 1.0 \
     --task_composition configs/task_composition/quickstart.yaml \
     --data_dir "$WS/data" \
     --healthgate_mode blocking \
@@ -72,6 +73,12 @@ other value, `sdsc`, submits Slurm jobs). The command matches the notebook's
 launch cell, which uses the `openai_tiered_pro.json` LLM profile; for your own
 research runs the [root README](../../README.md#choose-models-by-role)
 recommends `openai-moderate-v1.json`.
+
+The command explicitly uses all 128 training rows for Formal training
+(`formal_portion=1.0`) and allows two tuning rounds: the first may be Trial;
+the last is forced Formal. `max_rounds=1` would run only Formal, regardless of
+Trial budgets. These are small-example settings; the framework Formal portion
+still defaults to 0.1. Evaluation scope is configured separately.
 
 The preview prints child commands. It does not execute or qualify training.
 Before removing `--dry-run`, follow the

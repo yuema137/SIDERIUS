@@ -744,9 +744,11 @@ def test_notebook_html_readme_and_command_stay_in_sync() -> None:
         "--healthgate_mode blocking",
         "--result_authority diagnostic",
         "--num_iterations 1",
-        "--max_rounds 1",
+        "--max_rounds 2",
+        "--formal_portion 1.0",
     ):
         assert token in readme, f"README launch command lost {token!r}"
         assert token in notebook_text, f"notebook launch cell lost {token!r}"
+        assert token in html, f"HTML launch command lost {token!r}"
     command = re.search(r"```bash\n[^`]*bash scripts/launch/run_chain\.sh[^`]+```", readme)
     assert command, "README carries no bash launch command block"

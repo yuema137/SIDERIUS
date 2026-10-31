@@ -289,3 +289,10 @@ completed, stopped or failed terminal run cannot use this paused-loop route.
 
 For the authoritative controls, see the
 [loop-control CLI contract](../../src/tools/candidate_operations/candidate-operations-contract.md#control-an-authored-loop-from-code-or-the-cli).
+
+The small training examples explicitly set `formal_portion=1.0` and
+`max_rounds=2`: use their entire training scope for Formal, with a preceding
+opportunity for Trial. The last tuning round of every iteration is forced
+Formal by default. One tuning round therefore never uses Trial; changing the
+outer iteration count does not change that. Adapt these example settings and
+budgets for your own data; the framework still defaults to 10% Formal training.

@@ -222,3 +222,13 @@ It prints the path of `siderius-example-quickstart-<version>.zip` (version from
 `pyproject.toml`, or `--version`). Two builds of the same checkout are byte for
 byte identical. The format is specified in the
 [console contract](https://github.com/yuema137/SIDERIUS/blob/master/src/tools/candidate_console/console-contract.md#example-bundles-add-task---from-bundle).
+
+## Training settings in the imported setup
+
+The Quickstart research-loop template declares two tuning rounds per iteration
+and `formal_portion=1.0`, using the full small training dataset. The first tuning
+round may be Trial; the last is forced Formal. Reducing tuning rounds to one
+leaves no Trial round. These are editable template choices. Resetting Formal
+portion to **Default** restores the framework's 0.1 (10% training scope).
+For larger tasks, review portions and budgets before Run. See
+[Trial and Formal training](../../src/tools/candidate_console/README.md#trial-and-formal-training).

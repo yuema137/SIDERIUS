@@ -894,6 +894,29 @@ review/save flow. Saving changes the source available to a subsequent New run;
 it never changes an existing captured run.
 Existing console configurations need no editor project to monitor operations.
 
+## Trial and Formal training
+
+A Trial tuning round lets the planner explore; a Formal tuning round uses the
+configured training scope and a separate evaluation scope. With
+`force_formal_round=True` (the default), the last tuning round of **each
+iteration** is forced Formal. With `max_rounds=1` there is no Trial round;
+with `max_rounds=2` the first may be Trial and the second is Formal. Increasing
+**Final iteration** repeats the loop; it does not add tuning rounds inside it.
+
+The framework's `formal_portion=0.1` uses 10% of the training scope. For example,
+1,077 CSV training rows × 0.1 gives about 100 rows: **3 steps/epoch** with batch
+size 32 and the incomplete batch dropped. Keeping that batch adds a step.
+Formal does not mean full-data training. `formal_train_portion` can further
+reduce the rows used each epoch; `formal_eval_portion` separately controls the
+evaluation scope and defaults to 1.0.
+
+New console templates declare `formal_portion=1.0` and `max_rounds=2` so small
+user datasets are not silently reduced to 10% and Trial has an opportunity to
+run. Review portions and budgets for larger datasets. In **Train & tune →
+Training settings**, **Default** removes the template's explicit value:
+Formal portion then returns to 0.1. Trial budgets and epoch ceilings only apply
+to tuning rounds that actually run as Trial.
+
 ## Edit reusable training settings
 
 Start from the [four-stage source example](../../../examples/workflow_declarations/reusable_training.py)
