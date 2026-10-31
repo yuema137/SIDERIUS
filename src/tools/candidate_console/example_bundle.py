@@ -168,20 +168,15 @@ def _read_file(root: int, name: str) -> bytes:
 def read_bundle(directory: str) -> VerifiedBundle:
     """Verify every ``SHA256SUMS`` entry and validate the two descriptors.
 
-    Trailing slashes (shell tab completion) are dropped before the path checks.
+    Resolve the operator-selected root before validating it; listed descendants
+    remain no-follow. Checksums establish integrity, not provenance.
     """
-    directory = directory.rstrip("/") or "/"
-    if not os.path.isabs(directory) or os.path.normpath(directory) != directory:
-        raise BundleRefused(
-            f"bundle directory must be an absolute path without '..', "
-            f"for example {os.path.abspath(directory)}"
-        )
     try:
-        root_path = canonical(directory)
+        root_path = canonical(str(Path(directory).resolve(strict=True)))
         root = open_directory(root_path)
-    except (OSError, OperationFailure):
+    except (OSError, RuntimeError, OperationFailure):
         raise BundleRefused(
-            f"{directory} must be an existing folder whose path has no symlinks"
+            f"bundle directory {directory!r} must resolve to an existing readable folder"
         ) from None
     try:
         expected = parse_sums(_read_file(root, SUMS))

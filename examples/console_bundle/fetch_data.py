@@ -182,6 +182,7 @@ def main(argv: list[str] | None = None) -> int:
     args = cli.parse_args(argv)
     try:
         bundle = _read_bundle(Path(args.package))
+        print(f"Using task package: {bundle.root / 'task'}", flush=True)
         task_id = args.task_id or bundle.task.task_id
         target = write_shards(Path(args.workspace), task_id, _render_verified_shards(bundle))
     except FetchRefused as error:

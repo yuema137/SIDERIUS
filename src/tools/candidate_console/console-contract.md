@@ -214,10 +214,10 @@ unpacked bundle folder and reuses every other `add-task` option except
 | `fetch_data.py`, `README.md` | data writer and human instructions |
 | `SHA256SUMS` | `<64 hex>  <path>` per line (`sha256sum -c` format), sorted by path, unique, every file except itself; paths must be relative POSIX without `.`, `..` or empty parts |
 
-**Verification** (`read_bundle`, before any write): trailing `/` characters of `DIR`
-are dropped (shell tab completion), then `DIR` must be absolute, normalized and
-canonical; `SHA256SUMS` must list `task/task.yaml`, `setup/setup.json` and
-`console-task.json`; each listed file is opened component by component with
+**Verification** (`read_bundle`, before any write): the operator-selected `DIR` is
+resolved strictly, accepting relative paths, trailing slashes, `..` and symlinked
+parents, then validated as a canonical readable directory; `SHA256SUMS` must list
+`task/task.yaml`, `setup/setup.json` and `console-task.json`; each listed file is opened component by component with
 `O_NOFOLLOW`, must be a regular file of at most 16 MiB, and its sha256 must match.
 The verified bytes are kept in memory and are the only bytes used later; files
 not listed are ignored and never copied. Errors: `<path> does not match
@@ -236,7 +236,10 @@ bundle. The operator-selected path is resolved strictly first (relative paths,
 `..` and symlink aliases are accepted); its resolved name must be `task`. There
 is no configured global root allowlist for this operator CLI. The resolved bundle
 root is the read boundary: listed descendants are still opened no-follow and
-cannot escape it. Resolution failures name `--package`; shared reader errors
+cannot escape it. SHA256SUMS establishes integrity, not provenance; only run
+bundles you trust. Before executing generator code, the CLI prints
+`Using task package: <resolved bundle>/task` and flushes stdout.
+Resolution failures name `--package`; shared reader errors
 name the bundle directory without prescribing an importing CLI flag.
 The generator (`task/plugins/_quickstart_task.py`) and data manifest
 (`task/declared/data_manifest.json`) must both be listed. Execution and manifest
