@@ -287,10 +287,17 @@ def test_every_catalog_capability_has_its_paper_label_and_theme_role():
 
     assert set(CAPABILITIES) == set(PAPER_LABELS)
     entries = presentation_entries()
-    assert {name: label for name, (label, _) in entries.items()} == PAPER_LABELS
+    from typing import get_args
+
+    from tools.candidate_worker.graph_models import GraphCapability
+
+    assert set(entries) == set(get_args(GraphCapability))
+    assert {name: entries[name][0] for name in CAPABILITIES} == PAPER_LABELS
+    assert entries["adaptor"] == ("Combine/select", "generic")
     card_css = (STATIC / "editor.css").read_text()
     theme = (STATIC / "theme.css").read_text()
-    for capability, (_, role) in entries.items():
+    for capability in CAPABILITIES:
+        _, role = entries[capability]
         assert role == capability
         assert f".circuit-card.capability-{role} {{" in card_css, role
         # One accent and one tint in each of the light and dark themes.

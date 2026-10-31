@@ -285,6 +285,8 @@ def test_status_loop_bound_from_submission_and_bodies_only_from_receipt(
     condition-completed receipt's verified stop reason is dropped or reshaped, a
     condition-paused receipt's input request is dropped, or loops without one gain an
     ``input_request`` key (their status bytes must stay unchanged)."""
+    # This test isolates loop controls; verified outcome receipts are covered in test_outcomes.
+    monkeypatch.setattr("tools.candidate_console.service.outcome_evidence", lambda *args: None)
     operation_id = uuid4()
     monkeypatch.setattr(
         "tools.candidate_console.service.operation_admitted", lambda config, value: True
@@ -347,6 +349,8 @@ def test_status_projects_judge_verdicts_with_rationale_only_from_their_evidence(
             judge_abstentions=1,
         ),
     )
+    # This test isolates loop controls; verified outcome receipts are covered in test_outcomes.
+    monkeypatch.setattr("tools.candidate_console.service.outcome_evidence", lambda *args: None)
     operation_id = uuid4()
     monkeypatch.setattr(
         "tools.candidate_console.service.operation_admitted", lambda config, value: True

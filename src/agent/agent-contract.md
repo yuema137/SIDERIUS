@@ -16,7 +16,7 @@ executes training, inference or scoring.
 
 | file | surface |
 |---|---|
-| `llm_bridge.py` | `LLMBridge` — default OpenAI-compatible transport plus optional Pydantic AI Direct API adapters. Known providers `openai` / `gemini` / `deepseek` resolve `base_url` + key env var automatically; **any OpenAI-compatible endpoint** works via explicit `base_url`/`api_key`. Also the `reflect_provider` split (route the reflector to a second provider/model) and the stub-mode bridge for $0 pseudo runs |
+| `llm_bridge.py` | `LLMBridge` — default OpenAI-compatible transport plus optional Pydantic AI Direct API adapters. Supported providers resolve `base_url` + key env var through `llm_settings.py`; the [installation table](../../docs/getting-started/installation.md#api-keys) specifies which require explicit model selection; **any OpenAI-compatible endpoint** works via explicit `base_url`/`api_key`. Also the `reflect_provider` split (route the reflector to a second provider/model) and the stub-mode bridge for $0 pseudo runs |
 | `llm_transport/` | Optional provider adapters; [transport contract](llm_transport/transport-contract.md) owns selection, protocol translation, limitations and validation |
 | `credential_environment.py` | `load_compatibility_dotenv` (python-dotenv default search, `override=False`; logs the loaded path once per process at INFO and warns when it is outside the checkout or group/other-accessible) and `warn_if_blank_credential` (warns by name for a set-but-blank key). Logs paths, modes and names only, never values |
 | `llm_settings.py` | Pure provider/model/timeout and reflector-inheritance resolution used by the bridge and offline inspection; no credentials or client construction |
@@ -47,9 +47,12 @@ explicitly when selecting a different provider.
 
 ## Inputs
 
-API keys from the environment (`OPENAI_API_KEY` / `GEMINI_API_KEY` /
-`DEEPSEEK_API_KEY` / `ANTHROPIC_API_KEY` / `MOONSHOT_API_KEY` / `ZAI_API_KEY`; `LLMBridge` calls `load_compatibility_dotenv()`, so a repo-root `.env`
-works; see [compatibility `.env` loading](../../docs/getting-started/installation.md#compatibility-env-loading)); per-stage routing from `configs/llm/*.json`
+API keys from the environment; the
+[installation provider table](../../docs/getting-started/installation.md#api-keys)
+owns credential names and default-model versus explicit-model requirements.
+`LLMBridge` calls `load_compatibility_dotenv()`, so a repo-root `.env` works
+under the [compatibility loading rules](../../docs/getting-started/installation.md#compatibility-env-loading).
+Per-stage routing comes from `configs/llm/*.json`
 (`workflows/llm_config.py` loads them); task-block YAML paths supplied by the
 caller, never discovered.
 

@@ -16,6 +16,7 @@ import core.sandbox_executor as sandbox_module
 from core.sandbox_executor import TidmadSandbox
 from execute_tools.deliverable_spec import DeliverableNaming
 from execute_tools.task_data_path import EvaluationReadRequest, TaskOutputArtifactInventory
+from nodes.ml_hyperparameter_tune_agent.contracts import AttemptIdentity
 
 execution = importlib.import_module("nodes.ml_hyperparameter_tune_agent.execution")
 
@@ -108,7 +109,9 @@ def test_tuner_finally_cleanup_preserves_other_experiments(
     # Only fields read before inference are needed: the deliberate failure
     # happens at the first skill call. The actual production finally runs.
     bindings = SimpleNamespace(
-        agent_input=SimpleNamespace(retain_model_outputs=retain),
+        agent_input=SimpleNamespace(
+            retain_model_outputs=retain, attempts_per_round=3, attempts_per_formal_round=3
+        ),
         anchor_map_data=None,
         expert_advice_str="",
         file_index=0,
@@ -140,7 +143,7 @@ def test_tuner_finally_cleanup_preserves_other_experiments(
         execution.run_inference_scoring_health(
             bindings,
             prepared,
-            SimpleNamespace(attempt_in_round=1, round_index=1),
+            AttemptIdentity(attempt_in_round=1, round_index=1, is_formal_round=False),
             SimpleNamespace(name="training"),
             train_time=0,
             training_results={},

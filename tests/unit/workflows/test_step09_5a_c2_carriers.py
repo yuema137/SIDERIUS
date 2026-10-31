@@ -97,6 +97,8 @@ class TestTheOwnershipBoundary:
 #:   the caller. ``None`` keeps review disabled unless an enabled run supplies
 #:   an explicit task-owned config; the framework ships no scientific default.
 POST_REFACTOR_DEFAULT_CHANGES: dict[str, object] = {
+    # #1240: the tuner schema owns the generic run-level trial/formal default.
+    "is_trial": True,
     "trial_portion": None,
     "train_portion": None,
     "eval_portion": None,

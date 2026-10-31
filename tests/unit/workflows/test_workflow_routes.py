@@ -442,6 +442,11 @@ def test_preview_refuses_a_routed_document_before_reading_files(tmp_path):
 
 # Pinned on base 69a9d81a before route support: (canonical source sha256, declaration digest).
 EXAMPLE_IDENTITIES = {
+    # Added with the input-gated Quickstart scenario; retain the authored loop on round-trip.
+    "research_loop_request_input.py": (
+        "47af554a45023555b5d2db9da8968b102b1b521d1f3f1a8e4e297a3e573ea22c",
+        "68eaf927a845021490000e90ec0efe6e93d27f9074456490ff24b32ee7a8adf2",
+    ),
     "managed_reusable_candidate.py": (
         "16e814a81d1a139c9fa566186d46c16b118978e1ac3fdf420a612e23be681994",
         "7586a72ae6e6c6f61c1f494ebcf80888ad9a09142cd218d752883f3f8099fab9",

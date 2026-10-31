@@ -1708,19 +1708,24 @@ class EpochCapResolution(NamedTuple):
     source: Literal["trial_max_epochs", "formal_max_epochs", "max_epochs"] | None
 
 
+# Run-level launch policy; per-round plans and historical records have their own
+# semantics and must not derive their role from this default.
+DEFAULT_IS_TRIAL: bool = True
+
+
 class HyperparamTuningInput(BaseModel):
     """
     Full specification for a tune_ml_hyperparam_agent run.
 
     Fields are grouped by concern:
       - Research:  what to explore and how hard to push
-      - Trial:     optional sparse-sampling mode for fast iteration (default = off)
+      - Trial:     trial/formal tuning mode (enabled by default)
       - Guidance:  expert advice steering the LLM planner
       - Seeding:   pre-existing records the agent should treat as prior knowledge
       - LLM:       which model drives the planning and reflection steps
       - Infra:     storage paths (managed by the communication interface in production)
 
-    When ``is_trial=False`` (the default), the agent runs in normal single-file
+    When ``is_trial=False`` explicitly, the agent runs in legacy single-file
     mode using ``file_index``. All trial fields are ignored. When ``is_trial=True``,
     the agent builds a SampleSet from the trial strategy and ignores ``file_index``.
     """
@@ -1844,9 +1849,9 @@ class HyperparamTuningInput(BaseModel):
         ),
     )
 
-    # --- Trial mode (optional — all defaults preserve normal single-file behavior) ---
+    # --- Run-level trial/formal mode ---
     is_trial: bool = Field(
-        default=False,
+        default=DEFAULT_IS_TRIAL,
         description="When True, run in trial-explore mode with sparse sampling across multiple files.",
     )
 

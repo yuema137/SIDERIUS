@@ -320,8 +320,11 @@ overwrites an existing `tasks/` folder.
    finished, **Workflow training results** shows the tuner report of each
    verified iteration separately; it never combines or ranks iterations.
    **Train & tune node execution** only says the node ran; **Train & tune outcome**
-   says what training achieved, for example "No training round completed: 0
-   completed rounds in 9 attempts …" when every attempt was refused or failed.
+   says what training achieved, for example "No tuning round completed: 0
+   completed tuning rounds in 9 attempts …" when every attempt was refused or failed.
+   If the environment refused training, the outcome also shows its recorded reason.
+   Failed runs name the failing phase when it was recorded. Loop progress counts
+   completed iterations; an iteration that failed during proposal does not count.
    A running authored research loop shows **Stop at next boundary**: the current
    iteration finishes, and status says stopped only once the native receipt does.
    **Pause at next boundary** works the same way; a paused loop can be reviewed and
@@ -827,9 +830,10 @@ anything else is read as dotenv
 declared names are passed to the candidate; other entries are ignored.
 
 Use only the keys required by your selected providers, plus any other explicitly
-declared runtime variables. The current credential variable names are
-`OPENAI_API_KEY`, `GEMINI_API_KEY` and `DEEPSEEK_API_KEY`. Match the names in the private file
-and `candidate_environment_names` to your reviewed profile. Do not put values in
+declared runtime variables. Find each provider's key name and model-selection
+requirements in the [provider key table](../../../docs/getting-started/installation.md#api-keys).
+Match the names in the private file and `candidate_environment_names` to your
+reviewed profile. Do not put values in
 `console.json`, commands, browser fields or version control. A placeholder is not
 a working key; presence does not prove authentication, quota or network access.
 

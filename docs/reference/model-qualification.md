@@ -28,10 +28,13 @@ Family names summarize prior use; use a specific model ID in your configuration.
 
 ## Provider notes
 
+The [installation provider table](../getting-started/installation.md#api-keys)
+owns key names and model-selection requirements for all providers below.
+
 <details>
 <summary>OpenAI · GPT</summary>
 
-Use `provider: openai` and `OPENAI_API_KEY`. GPT models have been used across
+Use `provider: openai`. GPT models have been used across
 workflow roles, including model design, implementation and tuning.
 
 </details>
@@ -39,7 +42,7 @@ workflow roles, including model design, implementation and tuning.
 <details>
 <summary>Google · Gemini</summary>
 
-Use `provider: gemini` and `GEMINI_API_KEY`. Gemini has been used in historical
+Use `provider: gemini`. Gemini has been used in historical
 SIDERIUS workflows.
 
 </details>
@@ -47,7 +50,7 @@ SIDERIUS workflows.
 <details>
 <summary>DeepSeek</summary>
 
-Use `provider: deepseek` and `DEEPSEEK_API_KEY`. DeepSeek has been used in
+Use `provider: deepseek`. DeepSeek has been used in
 SIDERIUS workflows, including literature-review roles.
 
 </details>
@@ -55,7 +58,7 @@ SIDERIUS workflows, including literature-review roles.
 <details>
 <summary>Anthropic · Claude Sonnet 5.5</summary>
 
-Use `provider: anthropic`, `model_id: claude-sonnet-5-5` and `ANTHROPIC_API_KEY`.
+Use `provider: anthropic` and `model_id: claude-sonnet-5-5`.
 Integration tested on 2026-10-28. Install the [additional-provider dependency](../../src/agent/llm_transport/README.md).
 
 </details>
@@ -63,7 +66,7 @@ Integration tested on 2026-10-28. Install the [additional-provider dependency](.
 <details>
 <summary>Moonshot · Kimi K3</summary>
 
-Use `provider: moonshot`, `model_id: kimi-k3` and `MOONSHOT_API_KEY`.
+Use `provider: moonshot` and `model_id: kimi-k3`.
 Integration tested on 2026-10-28 against the official international endpoint.
 One request was rate-limited and passed on retry. Install the
 [additional-provider dependency](../../src/agent/llm_transport/README.md).
@@ -73,7 +76,7 @@ One request was rate-limited and passed on retry. Install the
 <details>
 <summary>Z.AI · GLM 5.3</summary>
 
-Use `provider: zai`, `model_id: glm-5.3` and `ZAI_API_KEY`.
+Use `provider: zai` and `model_id: glm-5.3`.
 Integration tested on 2026-10-28. Install the [additional-provider dependency](../../src/agent/llm_transport/README.md).
 
 </details>

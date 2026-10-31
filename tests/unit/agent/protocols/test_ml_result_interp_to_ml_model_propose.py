@@ -242,11 +242,11 @@ class TestTimeBudgetContextFields:
     def test_defaults_when_caller_omits(self, storage, interp_output):
         """When the caller passes none of the new kwargs, ProposalInput's
         schema defaults must take effect (mirroring HyperparamTuningInput:
-        is_trial=False, trial_portion=0.1, train_portion=0.1,
+        is_trial=True, trial_portion=0.1, train_portion=0.1,
         trial_time_budget_minutes=None,
         formal_time_budget_minutes=None, data_dir=None)."""
         result = local_full_context(interp_output, storage)
-        assert result.is_trial is False
+        assert result.is_trial is True
         assert result.trial_portion == 0.1
         assert result.train_portion == 0.1
         assert not hasattr(result, "sampling_seed")  # retired (#983)
@@ -264,7 +264,7 @@ class TestTimeBudgetContextFields:
         result = local_full_context(interp_output, storage, trial_time_budget_minutes=60.0)
         assert result.trial_time_budget_minutes == 60.0
         assert result.formal_time_budget_minutes is None
-        assert result.is_trial is False
+        assert result.is_trial is True
         assert result.trial_portion == 0.1
         assert result.train_portion == 0.1
         assert result.data_dir is None
@@ -429,7 +429,7 @@ class TestLocalFullContextRecentGateExhaustionsAggregation:
         assert result.trial_time_budget_minutes == 60.0
         # Untouched kwargs keep their schema defaults
         assert result.formal_time_budget_minutes is None
-        assert result.is_trial is False
+        assert result.is_trial is True
 
 
 # ---------------------------------------------------------------------------
@@ -468,3 +468,26 @@ def test_existing_positional_expert_context_keeps_its_slot(interp_output, storag
     result = local_full_context(interp_output, storage, [], constraint_context=locked_context())
     assert result.expert_context == []
     assert result.constraint_context == locked_context()
+
+
+@pytest.mark.parametrize("explicit", [None, True, False])
+def test_omitted_proposer_mode_selects_the_tuner_default_budget(explicit, storage, interp_output):
+    """Catch the proposer silently estimating Formal while its tuner uses Trial.
+
+    The consumer's selected budget fails on the old False schema default;
+    explicit False must still select the independently configured Formal budget.
+    """
+    from agent.schemas.hyperparam_tuning import DEFAULT_IS_TRIAL
+    from nodes.ml_model_proposal_agent.ml_model_proposal_agent import (
+        _active_time_budget_minutes,
+    )
+
+    assert DEFAULT_IS_TRIAL is True
+    result = local_full_context(
+        interp_output,
+        storage,
+        is_trial=explicit,
+        trial_time_budget_minutes=7.0,
+        formal_time_budget_minutes=31.0,
+    )
+    assert _active_time_budget_minutes(result) == (31.0 if explicit is False else 7.0)

@@ -1609,6 +1609,10 @@ class HyperparamTuningAgent:
                         train_time=train_time,
                         training_results=training_results,
                     )
+                    if executed.environment_admission_refusal is not None:
+                        environment_admission_refusal = executed.environment_admission_refusal
+                        _evidence_channel_failure = environment_admission_refusal.reason
+                        break
                     if executed.scope_violation_reason is not None:
                         _scope_violation_reason = executed.scope_violation_reason
                     if executed.signal is AttemptSignal.NEXT_ATTEMPT:

@@ -99,6 +99,7 @@ def estimation_assembly_digest() -> str:
             "ml_models/plugin_loader.py",
             "ml_models/loss_plugin_loader.py",
             "nodes/ml_hyperparameter_tune_agent/execution.py",
+            "nodes/ml_hyperparameter_tune_agent/phase_admission.py",
             "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
             "nodes/ml_hyperparameter_tune_agent/runtime.py",
             "nodes/ml_hyperparameter_tune_agent/feedback.py",

@@ -59,7 +59,7 @@ try {
     }, ...(iteration === 2 ? {skipped: [{node_id: 'build1', reason: 'route_not_selected'}],
       // The node executed, but the tuner record says no round completed: the outcome row,
       // not the node state, carries that (a 0-round body must never read as succeeded).
-      outcome: 'No training round completed: 0 completed rounds in 9 attempts (tuner status partial; ended by aborted fail rounds).'} : {})}))});
+      outcome: 'No tuning round completed: 0 completed tuning rounds in 9 attempts Consecutive tuning rounds reached the failure limit. Training could not start: GPU evidence is unavailable.'} : {})}))});
     return reply({operation_id: operation, kind: 'candidate', request_digest: 'a'.repeat(64), observed_at: 'fixture', state: 'completed',
       process: {status: 'exited', reason: 'observed'}, finishing: false, receipt_available: true, native_status: 'completed',
       native_id: 'fixture-run', validation_passed: true, reason: 'native_terminal'});
@@ -81,7 +81,8 @@ try {
   assert.equal(await panel.getByText('Train & tune node execution', {exact: true}).count(), 2, 'stage uses the paper capability label and names node execution, not outcome');
   assert.equal(await panel.getByText('Train & tune state', {exact: true}).count(), 0, 'node state is not presented as the tuning outcome');
   assert.equal(await panel.getByText('Train & tune outcome', {exact: true}).count(), 1, 'only the body with a tuner outcome shows the outcome row');
-  assert.ok(await panel.getByText(/^No training round completed: 0 completed rounds in 9 attempts/).count(), 'the 0-round outcome is shown verbatim');
+  assert.ok(await panel.getByText(/^No tuning round completed: 0 completed tuning rounds in 9 attempts/).count(), 'the 0-round outcome is shown verbatim');
+  assert.ok(await panel.getByText(/Training could not start: GPU evidence is unavailable/).count());
   assert.equal(await panel.locator('.graph-result-body').count(), 2, 'per-body summaries remain separate');
   assert.equal(requests.filter(item => item.path.endsWith('/graph-results')).length, 1, 'results are read once after terminal status');
   assert.equal(await panel.locator('.graph-result-skipped').count(), 1, 'only the routed body lists skipped nodes');

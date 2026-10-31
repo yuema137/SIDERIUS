@@ -75,6 +75,8 @@ def _drive_one_attempt(tmp_path, planning_error: BaseException) -> list[dict]:
     planning stage, and the records the sandbox is asked to save.
     """
     agent_input = HyperparamTuningInput(
+        # This fixture exercises legacy single-file attempts, not trial scheduling.
+        is_trial=False,
         run_seed=TEST_RUN_SEED,
         planner_strategy="native-timing-v1",
         model_type="punet",

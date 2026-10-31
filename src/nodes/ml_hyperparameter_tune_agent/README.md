@@ -6,6 +6,12 @@ resource/time admission, and records trial/formal training, inference,
 scoring, health and provenance. It owns the reference execution loop, not
 task data, metric semantics, or model schemas.
 
+Runs use trial/formal tuning by default: Trial rounds explore configurations,
+and the final tuning round is Formal under the default schedule. In the node
+CLI, passing `--is_trial` explicitly also pins the trial sampling portions.
+Use `--no-is_trial` only for legacy single-file execution on a task with TIDMAD
+topology. See the [full guide](ml_hyperparameter_tune_agent.md) for these controls.
+
 - [Public entry and CLI](ml_hyperparameter_tune_agent.py) · [full guide](ml_hyperparameter_tune_agent.md)
   (`cli.py` is a private parser/input adapter used by that entrypoint.)
 - Input/output owners: [HyperparamTuningInput/HyperparamTuningOutput](../../agent/schemas/hyperparam_tuning.py)

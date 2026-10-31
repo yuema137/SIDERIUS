@@ -55,6 +55,7 @@ from agent.schemas.proposer_evidence import (
 )
 from agent.schemas.task_config import ForwardContract
 from agent.skills.model_io_probe_skill import ProbeConstructionError, declared_output_tensor
+from agent.skills.training_skill.estimator import SegmentationDimensionUnavailableError
 from agent.utils.architectural_pattern_tagger import ARCHITECTURAL_PATTERNS
 from agent.utils.proposer_preflight import estimate_proposal_time
 from core.capability_registry import CapabilityRegistry
@@ -295,14 +296,15 @@ def _run_preflight_check(
     ``preflight_factor`` when the estimate runs; appends a
     ``PREFLIGHT_ADVISORY`` note when the estimate exceeds the budget;
     appends a ``PREFLIGHT_SKIPPED`` note when the LLM failed to supply a
-    usable ``parameter_count_estimate``.
+    usable ``parameter_count_estimate`` or the estimator reports a typed
+    unavailable temporal dimension. Unexpected estimator errors propagate.
 
     C1 contract: the result is ADVISORY ONLY (static_uncalibrated
     provenance). Callers must not request proposal revision, inject
     rejection text into prompts, or otherwise derive blocking behavior
     from it. Returns the numeric ``factor`` for logging when the
     estimate ran, or ``None`` when it was skipped (budget disabled, or
-    params missing / non-positive).
+    params missing / non-positive, or estimate unavailable / inapplicable).
     """
     budget = _active_time_budget_minutes(inp)
     if budget is None:
@@ -318,17 +320,21 @@ def _run_preflight_check(
         return None
 
     baseline = output.baseline_config or {}
-    verdict = estimate_proposal_time(
-        model_type=output.model_name,
-        model_config=baseline.get("model_config") or {},
-        train_config=baseline.get("train_config") or {},
-        loss_config=baseline.get("loss_config") or {},
-        num_params=num_params,
-        time_budget_minutes=budget,
-        train_portion=inp.train_portion,
-        trial_portion=inp.trial_portion,
-        data_scope=inp.data_scope,
-    )
+    try:
+        verdict = estimate_proposal_time(
+            model_type=output.model_name,
+            model_config=baseline.get("model_config") or {},
+            train_config=baseline.get("train_config") or {},
+            loss_config=baseline.get("loss_config") or {},
+            num_params=num_params,
+            time_budget_minutes=budget,
+            train_portion=inp.train_portion,
+            trial_portion=inp.trial_portion,
+            data_scope=inp.data_scope,
+        )
+    except SegmentationDimensionUnavailableError as exc:
+        output.memo_consistency_notes.append(f"PREFLIGHT_SKIPPED: {type(exc).__name__}: {exc}")
+        return None
     output.preflight_estimated_minutes = verdict["estimated_minutes"]
     output.preflight_factor = verdict["factor"]
     if verdict.get("applicable") is False:

@@ -15,7 +15,7 @@ from typing import get_args
 from pydantic import TypeAdapter
 
 from agent.schemas.health_feedback import HealthFeedbackRetentionPolicy
-from agent.schemas.hyperparam_tuning import TrainingValidationPortion
+from agent.schemas.hyperparam_tuning import DEFAULT_IS_TRIAL, TrainingValidationPortion
 from agent.schemas.ordering import parse_file_order_cli
 from agent.schemas.parameter_rules import ParameterRules
 from core.retired_seed_pins import retired_pin_message
@@ -309,11 +309,11 @@ def build_parser() -> argparse.ArgumentParser:
         # read `args.is_trial or True`, so an explicit False was erased and
         # the flag could never express anything. Default stays True, so
         # omitting it behaves exactly as before; `--no-is_trial` is now the
-        # way to ask for a formal-from-the-start run.
+        # way to ask for legacy single-file execution.
         "--is_trial",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Enable trial mode (default: True). Use --no-is_trial for formal.",
+        default=DEFAULT_IS_TRIAL,
+        help="Enable trial/formal mode (default: %(default)s). Use --no-is_trial for legacy single-file mode.",
     )
     parser.add_argument(
         "--trial_strategy",

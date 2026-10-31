@@ -56,8 +56,10 @@ CONSOLE_BUNDLE_SOURCES = frozenset({"examples/console_bundle/fetch_data.py"})
 TASK_TEMPLATES_DIR = "task_templates"
 WORKFLOW_DECLARATION_SOURCES = frozenset(
     {
+        "examples/workflow_declarations/literature_debate_judged.py",
         "examples/workflow_declarations/managed_reusable_candidate.py",
         "examples/workflow_declarations/native_training.py",
+        "examples/workflow_declarations/research_loop_request_input.py",
         "examples/workflow_declarations/reusable_candidate.py",
         "examples/workflow_declarations/reusable_training.py",
     }
@@ -260,7 +262,7 @@ def test_negative_an_UNBOUND_pack_task_config_is_still_an_offender() -> None:
 
 def _is_sanctioned_plugin_source(rel_posix: str) -> bool:
     """D14 re-scope: reference plugin SOURCE lives at exactly
-    ``examples/<pack>/plugins/*.py``. The four explicit workflow declaration
+    ``examples/<pack>/plugins/*.py``. The explicitly registered workflow declaration
     examples and the example bundle's ``fetch_data.py`` are also sanctioned;
     these exact-path exceptions do not permit other Python files in those
     framework-owned namespaces. A task template's plugin source lives at
@@ -320,7 +322,7 @@ def test_python_under_examples_only_as_pack_plugin_source_d14_rescope() -> None:
 
 
 def test_negative_python_under_examples_mirror_is_detected(tmp_path: Path) -> None:
-    """Proves only plugin sources and the four declared scripts are sanctioned."""
+    """Proves only plugin sources and the registered declaration scripts are sanctioned."""
     mirror = tmp_path / "examples" / "some_pack"
     (mirror / "plugins").mkdir(parents=True)
     (mirror / "plugins" / "model.py").write_text("PLUGIN_MODEL_TYPE = 'x'\n")

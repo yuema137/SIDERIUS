@@ -84,6 +84,10 @@ def evaluate_isolated_admission(
             "The explicit GPU process-visibility declaration is invalid.", evidence
         )
     evidence["effective_execution_conditions"] = conditions.model_dump(mode="json")
+    if isinstance(snapshot, GpuAccountingSnapshot) and snapshot.query_failure is not None:
+        evidence["query_failure"] = snapshot.query_failure.value
+        refusal = environment_refusal("The device query failed; retry sampling.", evidence)
+        return refusal.model_copy(update={"detail": "sampler_error"})
     if sampling_error is not None:
         evidence["sampling_error"] = sampling_error
         return environment_refusal(

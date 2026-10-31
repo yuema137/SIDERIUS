@@ -6,7 +6,8 @@ only the pytest temporary root is normalized. The source-derived composition
 fingerprint is checked separately against the real binding and persisted lock.
 Planner assembly and verifier source digests are likewise checked against their
 current declared owners and persisted lock; frozen baseline digests stay pinned.
-Every other payload field is compared exactly. This checks input forwarding,
+The intentional #1240 run-mode default change is checked separately from the
+archived False default. Every other payload field is compared exactly. This checks input forwarding,
 not equivalence of live model outputs or scientific artifacts. Node effects use
 existing seams.
 """
@@ -218,6 +219,11 @@ def test_production_tuner_input_matches_pre_extraction_oracle(
     actual = workflow_env["tune"].return_value.run.call_args.args[0]
     payload = json.loads(json.dumps(actual.model_dump(mode="json")).replace(str(tmp_path), "<TMP>"))
     expected = json.loads((ORACLE / f"{case}.json").read_text())
+    if case in ("omitted", "empty"):
+        # #1240 deliberately replaces the historical single-file default.
+        # Keep the captured oracle intact and verify the new default in transit.
+        assert expected.pop("is_trial") is False
+        assert payload.pop("is_trial") is True
     actual_fingerprint = payload["task_composition_ref"].pop("semantic_fingerprint")
     baseline_fingerprint = expected["task_composition_ref"].pop("semantic_fingerprint")
     assert (

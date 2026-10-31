@@ -19,6 +19,7 @@ from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.generated_model_config import validate_implementation_baseline
 from agent.schemas.health_feedback import FormalValidityFeedback, TrialValidityFeedback
 from agent.schemas.hyperparam_tuning import (
+    DEFAULT_IS_TRIAL,
     ExpertAdvice,
     ExpertAdviceInput,
     GateExhaustionInfo,
@@ -961,7 +962,7 @@ class ProposalInput(BaseModel):
     # synthesizes its sample set with a hardcoded snapshot strategy, and no
     # prompt template reads them). Old serialized inputs still validate.
     is_trial: bool = Field(
-        default=False,
+        default=DEFAULT_IS_TRIAL,
         description="Whether the run uses trial (sparse) sampling. Forwarded to "
         "build_sample_set inside the proposer's evaluate_time_skill gate "
         "so it matches what the tuner will run.",
