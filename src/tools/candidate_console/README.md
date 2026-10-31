@@ -707,11 +707,12 @@ the console offers dismissal or another effect. An initial request explicitly re
 admission can be discarded and reviewed again; restored or ambiguous requests retain
 their UUID. No automatic retries or replacement IDs are created.
 
-If Prepare is blocked by another operation, the page keeps the refusal code and
-reason visible. Select the blocking operation's Monitor link to inspect it. For
-example, a `409, busy` refusal still names that operation after a status check;
-it does not claim you clicked Retry. If a worker died, new work becomes available
-only after the console confirms that its remaining processes also stopped.
+If Prepare reports another operation is blocking it, the page keeps the response
+code and reason visible. Select the blocking operation's Monitor link to inspect it.
+For example, a `409, busy` response still names that operation when a status check
+finds no preparation record. The outcome stays unconfirmed unless the server can
+verify it. If the server becomes unreachable, the page shows that new problem.
+If a worker died, new work becomes available only after the console confirms that its remaining processes also stopped.
 
 When preparation fails in its parent process, Run and Monitor show a safe cause
 category, such as invalid input or a changed source. Task authors can inspect the

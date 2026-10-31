@@ -132,6 +132,7 @@
     if (value.state === 'unknown' && !value.receipt_available) {
       return value.process?.reason === 'missing_identity' ? 'Preparing… This usually takes under a minute.' : 'Checking status…';
     }
+    if (value.state === 'operation_failed' && value.preparation_error) return `${window.operationOutcome.sentence(value)} Start over to try again.`;
     if (value.state === 'operation_failed') return value.reason === 'spawn_failed'
       ? 'Preparation did not start: the worker could not be launched. Start over to try again.'
       : 'Preparation failed before reporting a result. Its evidence is kept in Monitor; start over to try again.' + causeLine(value);
@@ -167,8 +168,8 @@
     }
   }
   function unresolvedMessage(error) {
-    if (refusal) return refusal;
     if (error.code === 'unknown_operation') {
+      if (refusal) return refusal;
       if (evidence()?.confirming) return 'This console has no record of this preparation yet. Checking once more before offering Forget…';
       return evidence()?.forgettable
         ? `This console still has no record of this preparation${retried ? ' after Retry' : ''}. Nothing is running for it here: forget it to start over.`
@@ -198,7 +199,7 @@
         problem = refused ? 'refused' : 'unresolved';
         const blocker = error.value?.error?.blocking_operation_id;
         if (error.status && error.code) {
-          refusal = `Prepare refused (${error.status}, ${error.code}): ${error.message}`;
+          refusal = `${refused ? 'Prepare refused' : 'Prepare response; outcome unconfirmed'} (${error.status}, ${error.code}): ${error.message}`;
           if (typeof blocker === 'string' && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(blocker)) {
             refusal += ` Blocking operation: ${blocker}. Open it in Monitor.`;
             $('monitor').href = '#monitor/' + blocker;

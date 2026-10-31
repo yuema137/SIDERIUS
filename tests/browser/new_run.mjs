@@ -208,8 +208,15 @@ try {
   await page.locator('#new-run-dismiss').waitFor();
   assert.match(await page.locator('#new-run-operation-status').textContent(), /409, busy.*another operation.*Blocking operation/);
   assert.doesNotMatch(await page.locator('#new-run-operation-status').textContent(), /after Retry/);
+  assert.doesNotMatch(await page.locator('#new-run-operation-status').textContent(), /Prepare refused/);
   assert.equal(await page.locator('#new-run-monitor').getAttribute('href'), '#monitor/' + blocker);
   await page.screenshot({path: join(evidence, 'prepare-busy.png'), fullPage: true});
+  // A subsequent transport failure is current evidence, not a repeated busy response.
+  await page.unroute('**/api/operations/*');
+  await page.route('**/api/operations/*', route => route.abort('failed'));
+  await page.locator('#new-run-check').click();
+  await page.locator('#new-run-operation-status').filter({hasText: 'server is unreachable'}).waitFor();
+  assert.doesNotMatch(await page.locator('#new-run-operation-status').textContent(), /409, busy/);
   // A later verified status replaces the refusal and restores this preparation's link.
   const busyIntent = await page.evaluate(() => window.reusableIntents.read('preparation').value);
   await page.unroute('**/api/operations/*');

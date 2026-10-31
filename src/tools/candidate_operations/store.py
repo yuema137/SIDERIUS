@@ -277,7 +277,9 @@ def require_available(root: Path, releasable: Callable[[UUID], bool]) -> None:
             operation_id = UUID(name)
         except ValueError as error:
             raise OperationFailure("integrity", "unrecognized operation directory") from error
-        if str(operation_id) != name or not releasable(operation_id):
+        if str(operation_id) != name:
+            raise OperationFailure("integrity", f"non-canonical operation directory: {name}")
+        if not releasable(operation_id):
             raise OperationFailure(
                 "busy",
                 "store has an active or unresolved operation",

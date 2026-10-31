@@ -48,6 +48,7 @@ from tools.candidate_prepare.reusable_models import ReusablePreparationReceipt
 from tools.candidate_worker import CandidateTokenSnapshot
 from tools.candidate_worker.loop_stop import JudgeBoundaryVerdict
 from tools.candidate_worker.models import CandidateRunReceipt
+from tools.setup_review.summary_errors import error_category
 
 from .config import host_scheduling, validate_config
 from .files import credentials
@@ -211,6 +212,12 @@ def preparation_error(snapshot: OperationSnapshot) -> str | None:
     receipt = snapshot.receipt
     if (
         snapshot.kind in {"prepare", "prepare_reusable"}
+        and snapshot.state == "operation_failed"
+        and snapshot.reason != "cancelled_while_queued"
+    ):
+        return "Preparation failed before reporting a result. See the operation log for details."
+    if (
+        snapshot.kind in {"prepare", "prepare_reusable"}
         and snapshot.state == "unknown"
         and snapshot.reason == "native_outcome_unresolved"
     ):
@@ -223,21 +230,11 @@ def preparation_error(snapshot: OperationSnapshot) -> str | None:
         return (
             "Preparation worker failed while building its inputs. See the native log for details."
         )
-    name = receipt.error.partition(":")[0]
-    if name in {
-        "OSError",
-        "FileNotFoundError",
-        "PermissionError",
-        "FileExistsError",
-        "NotADirectoryError",
-        "IsADirectoryError",
-    }:
-        return "Filesystem error while preparing the run. See the server log for details."
-    if name in {"ValueError", "TypeError", "ValidationError"}:
-        return "Invalid input or changed source while preparing the run. See the server log for details."
-    return (
-        "Preparation failed while checking or building its inputs. See the server log for details."
-    )
+    return {
+        "filesystem": "Filesystem error while preparing the run. See the server log for details.",
+        "invalid": "Invalid input or changed source while preparing the run. See the server log for details.",
+        "unexpected": "Preparation failed while checking or building its inputs. See the server log for details.",
+    }[error_category(receipt.error)]
 
 
 class CandidateConsole:

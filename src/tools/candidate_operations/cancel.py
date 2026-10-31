@@ -97,8 +97,6 @@ def refuse_inactive(snapshot: OperationSnapshot) -> None:
     """
     if snapshot.state in LIVE_STATES:
         return
-    if snapshot.reason in {"operation_process_exited", "operation_process_exiting"}:
-        raise OperationFailure("not_running", "operation process is gone; nothing to cancel")
     if snapshot.receipt_available or snapshot.state == "operation_failed":
         raise OperationFailure("terminal", "operation already finished; nothing to cancel")
     if snapshot.reason == "integrity_failure":

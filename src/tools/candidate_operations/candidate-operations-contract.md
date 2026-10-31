@@ -1424,3 +1424,9 @@ Native-chain continuations keep their existing recovery owner.
 refusal. This optional UUID names the actual scanned blocking claim, including a
 claim created before `active.json` publication; consumers need not parse exception
 text or guess from an active pointer. Other errors omit the field.
+
+A non-canonical operation directory is an `integrity` refusal whose diagnostic
+names the directory exactly as found; it does not attach a normalized UUID that
+would link to a different path. Cancel uses `terminal` for both loop and non-loop
+verified dead operations (`operation_failed`); unresolved writer sessions remain
+`not_running`. Neither case records a cancellation intent.

@@ -210,6 +210,7 @@ def test_failed_adaptor_keeps_its_capability_id(console_config):
     [
         ("ValueError: /private/key=secret", "Invalid input"),
         ("PermissionError: /private/key=secret", "Filesystem error"),
+        ("JSONDecodeError: /private/key=secret", "Invalid input"),
         ("SecretTaskName: /private/key=secret", "Preparation failed"),
         ("preparation child exit 1; /private/key=secret", "Preparation worker failed"),
     ],
@@ -273,3 +274,32 @@ def test_preparation_without_receipt_explains_error_without_releasing(console_co
     assert "reported an error" in view.preparation_error
     assert "remains unresolved" in view.preparation_error
     assert view.state == "unknown" and not view.receipt_available
+
+
+def test_predispatch_prepare_error_keeps_secret_out_of_status(console_config, monkeypatch, caplog):
+    """Real child failure before dispatch must not leave the UI to scrape its traceback."""
+    from tools.candidate_console.models import PrepareSelection
+    from tools.candidate_operations.child import execute
+    from tools.candidate_operations.store import operation_path
+
+    console = service.CandidateConsole(console_config)
+    monkeypatch.setattr("tools.candidate_operations.submit.spawn", lambda *a: None)
+    selection = PrepareSelection(operation_id=uuid4(), task_id="synthetic", run_name="predispatch")
+    console.prepare(selection)
+    sentinel = "/private/pre-dispatch-secret-sentinel"
+
+    def fail():
+        raise ValueError(sentinel)
+
+    monkeypatch.setattr("tools.candidate_operations.child.runtime_identity", fail)
+    path = operation_path(console_config.operation_store, selection.operation_id)
+    assert execute(path) == 1
+    assert sentinel in caplog.text  # private diagnostic retained
+    view = console.status(selection.operation_id)
+    assert view.state == "operation_failed" and not view.receipt_available
+    assert (
+        view.preparation_error
+        == "Preparation failed before reporting a result. See the operation log for details."
+    )
+    assert sentinel not in view.model_dump_json()
+    assert sentinel not in (path / "completion.json").read_text()

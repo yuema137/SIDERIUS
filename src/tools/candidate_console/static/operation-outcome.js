@@ -23,7 +23,7 @@
     if (value.state === 'operation_failed' && value.reason === 'operation_process_exited') return `${what} was interrupted: its worker and remaining processes stopped without reporting a result. New work can start.`;
     if (value.state === 'operation_failed') return value.reason === 'spawn_failed'
       ? `${what} did not start: the worker could not be launched.`
-      : `${what} failed before reporting a result.`;
+      : value.preparation_error || `${what} failed before reporting a result.`;
     // Before the worker records its process identity the store reports `unknown` (L-6).
     if (value.state === 'unknown' && value.process?.reason === 'missing_identity') return `${what} is starting.`;
     if (value.state !== 'completed') return `${what}: its status cannot be determined right now.`;
