@@ -55,7 +55,7 @@ def recovery_case(tmp_path, bound_spec, monkeypatch, phase, mode, isolated, faul
         measured = state.phases[phase]
         clock = Clock()
         state.allowance.clock = clock
-        state.allowance.total_seconds = 1 if fault == "deadline" else 60
+        state.allowance.total_seconds = {"deadline": 1, "backoff_deadline": 1.125}.get(fault, 60)
         # A completed training checkpoint must survive every inference refusal.
         from core.sandbox_layout import training_checkpoint_path
 
@@ -79,7 +79,10 @@ def recovery_case(tmp_path, bound_spec, monkeypatch, phase, mode, isolated, faul
             clock.value += 1
             if fault == "exception" and len(samples) == 1:
                 raise OSError("temporary proc read error")
-            if fault in {"exhaust", "persistent", "deadline", "storage"} or len(samples) == 1:
+            if (
+                fault in {"exhaust", "persistent", "deadline", "backoff_deadline", "storage"}
+                or len(samples) == 1
+            ):
                 return GpuAccountingSnapshot(
                     device=DEVICE,
                     telemetry_available=False,
@@ -171,12 +174,17 @@ def recovery_case(tmp_path, bound_spec, monkeypatch, phase, mode, isolated, faul
         identity = AttemptIdentity(
             round_index=1, attempt_in_round=1, is_formal_round=mode == "formal"
         )
+
+        def pause(seconds):
+            delays.append(seconds)
+            clock.value += seconds
+
         result, refusal = run_admitted_skill(
             bindings,
             prepared,
             identity,
             phase=phase,
-            sleep=delays.append,
+            sleep=pause,
         )
         yield SimpleNamespace(
             sandbox=sandbox,
@@ -197,7 +205,8 @@ def recovery_case(tmp_path, bound_spec, monkeypatch, phase, mode, isolated, faul
 @pytest.mark.parametrize("mode", ["trial", "formal"])
 @pytest.mark.parametrize("isolated", [False, True])
 @pytest.mark.parametrize(
-    "fault", ["recover", "exception", "exhaust", "persistent", "deadline", "storage"]
+    "fault",
+    ["recover", "exception", "exhaust", "persistent", "deadline", "backoff_deadline", "storage"],
 )
 def test_protected_recovery(recovery_case, phase, mode, isolated, fault):
     case = recovery_case
@@ -206,17 +215,32 @@ def test_protected_recovery(recovery_case, phase, mode, isolated, fault):
     launches, delays, saved = case.launches, case.delays, case.saved
     result, refusal = case.result, case.refusal
     expected = (
-        2 if fault in {"recover", "exception", "deadline"} else 1 if fault == "persistent" else 3
+        2
+        if fault in {"recover", "exception", "deadline", "backoff_deadline"}
+        else 1
+        if fault == "persistent"
+        else 3
     )
     assert len(calls) == expected
     assert {name for name, _ in calls} == {f"{phase}_skill"}
-    assert delays == ([0.25, 0.5] if expected == 3 else [0.25] if expected == 2 else [])
+    expected_delays = {
+        "recover": [0.25],
+        "exception": [0.25],
+        "exhaust": [0.25, 0.5],
+        "persistent": [],
+        "deadline": [],
+        "backoff_deadline": [0.125],
+        "storage": [0.25, 0.5],
+    }
+    assert delays == expected_delays[fault]
     assert state.phases[phase] is measured
     if phase == "inference":
         assert checkpoint.read_bytes() == b"completed training"
     assert len(launches) == (1 if fault in {"recover", "exception"} else 0)
-    assert samples == ([1] if fault == "deadline" else [60] * expected)
-    assert state.allowance.remaining == (0 if fault == "deadline" else 60 - expected)
+    assert samples == {"deadline": [1], "backoff_deadline": [1.125]}.get(fault, [60] * expected)
+    assert state.allowance.remaining == (
+        0 if fault in {"deadline", "backoff_deadline"} else 60 - expected - sum(delays)
+    )
     root = Path(sandbox.base_dir) / "gpu_execution" / "attempt"
     terminal = (
         GpuExecutionReceipt.model_validate_json((root / f"{phase}-terminal.json").read_bytes())
@@ -229,6 +253,7 @@ def test_protected_recovery(recovery_case, phase, mode, isolated, fault):
         "recover": 1,
         "exception": 1,
         "deadline": 1,
+        "backoff_deadline": 1,
         "exhaust": 3,
         "storage": 3,
     }
@@ -258,7 +283,7 @@ def _assert_terminal_result(result, refusal, saved, terminal, fault):
         assert not saved
         if fault == "storage":
             assert "synthetic terminal write failure" in result["message"]
-        elif fault == "deadline":
+        elif fault in {"deadline", "backoff_deadline"}:
             assert "allowance is exhausted" in result["message"]
         else:
             assert terminal.admission.admitted

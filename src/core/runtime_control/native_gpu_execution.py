@@ -6,6 +6,7 @@ import functools
 import os
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
 
@@ -382,3 +383,21 @@ def finalize_admission_refusal(
     if receipt.phase != phase or receipt.admission != state.current_admission:
         raise ValueError("protected admission finalization differs from the last phase receipt")
     return _publish_receipt(sandbox, result, receipt, f"{phase}-terminal.json")
+
+
+def pause_admission_retry(
+    sandbox, phase: str, seconds: float, pause: Callable[[float], None]
+) -> None:
+    """Charge protected retry waiting as preparation without renewing its deadline."""
+    state = active_attempt(sandbox)
+    if state is None:
+        pause(seconds)
+        return
+    remaining = state.allowance.remaining
+    if remaining <= 0:
+        return  # The next phase entry publishes the exhausted-allowance result.
+    state.allowance.begin(f"{phase}_admission_backoff")
+    try:
+        pause(min(seconds, remaining))
+    finally:
+        state.allowance.finish("admission backoff")

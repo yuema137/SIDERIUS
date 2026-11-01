@@ -103,8 +103,10 @@ receipts immediately. No existing receipt is overwritten.
 
 Re-entry clears only current admission/observer/startup/lifecycle/child-error state.
 It retains the attempt token, measured phase object, bound checkpoint and cumulative
-`MeasurementAllowance`. Every call charges its actual preparation duration; backoff
-between calls is outside preparation segments. Exhausted allowance refuses before
+`MeasurementAllowance`. Every call charges its actual preparation duration.
+`pause_admission_retry` charges backoff as a separate preparation segment, capped
+by the remaining allowance, so waiting cannot renew the absolute deadline.
+Exhausted allowance refuses before
 calling the executor body. Source/checkpoint/input validation runs again on every
 call, and observer creation happens only after fresh admission. Inference retry
 never re-enters training. Admission recovery never retries launched work.

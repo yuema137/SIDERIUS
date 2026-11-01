@@ -7,7 +7,10 @@ from typing import Literal
 from pydantic import TypeAdapter, ValidationError
 
 from core.runtime_control.admission import AdmissionDecision, AdmissionReason
-from core.runtime_control.native_gpu_execution import finalize_admission_refusal
+from core.runtime_control.native_gpu_execution import (
+    finalize_admission_refusal,
+    pause_admission_retry,
+)
 from nodes.ml_hyperparameter_tune_agent import runtime
 from nodes.ml_hyperparameter_tune_agent.contracts import (
     AttemptIdentity,
@@ -77,7 +80,9 @@ def run_admitted_skill(
         refusal = normalize_phase_admission_refusal(status)
         if refusal.refusal_kind == "transient_sampling" and sample_attempt + 1 < remaining:
             print(f"  Retrying {phase} admission sampling ({sample_attempt + 1}/{remaining})")
-            pause(min(0.25 * 2 ** min(sample_attempt, 2), 1.0))
+            pause_admission_retry(
+                bindings.sandbox, phase, min(0.25 * 2 ** min(sample_attempt, 2), 1.0), pause
+            )
             continue
         if refusal.refusal_kind == "transient_sampling":
             status = finalize_admission_refusal(bindings.sandbox, phase, status)
