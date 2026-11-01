@@ -150,3 +150,14 @@ text = bridge.generate_text(system_prompt="…", user_prompt="say ok")
 skills); prompt-surface pin tests under the node suites; dual-mode
 integration tests exercise the stub bridge by default; see the
 [workflow integration guide](../../tests/integration/workflows/README.md).
+
+## Structured evaluation declaration boundary
+
+Task compositions may carry an opt-in `evaluation` declaration with component
+meanings, quantitative selection and constraints, or rubric references. E1 validates
+and fingerprints this declaration; agent prompts do not consume it yet. Launch
+therefore refuses the `evaluation rendering` capability until #1293 wires the shared
+renderer. An absent declaration keeps existing prompt bytes. Rubric judgment is
+never arithmetic in MetricOrder; #1297 owns any new candidate-result projector and
+versioned judge evidence. The exact schema and future Health/source-metric binding
+are in the [evaluation contract](../execute_tools/evaluation-contract.md).

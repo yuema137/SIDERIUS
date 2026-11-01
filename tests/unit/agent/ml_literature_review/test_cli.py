@@ -511,7 +511,9 @@ def test_cold_script_transports_task_to_real_synthesis_and_storage(tmp_path, omi
             if name == "workflows.task_composition":
                 workspace = Path(sys.argv[sys.argv.index("--workspace") + 1])
                 assert os.environ["SIDERIUS_GENERATED_LIBRARY_DIR"] == str(workspace / "generated_library")
-                observed.append("composition_after_workspace")
+                # Cached helper imports do not repeat cold module initialization.
+                if name not in sys.modules:
+                    observed.append("composition_after_workspace")
             return original_import(name, *args, **kwargs)
         builtins.__import__ = observe_import
 
@@ -531,7 +533,7 @@ def test_cold_script_transports_task_to_real_synthesis_and_storage(tmp_path, omi
         sys.argv = sys.argv[1:]
         namespace = runpy.run_path(sys.argv[0], run_name="__main__")
         assert Path(namespace["__file__"]).resolve() == Path(sys.argv[0]).resolve()
-        assert observed == ["composition_after_workspace"]
+        assert observed == ["composition_after_workspace"], observed
         assert len(calls) == 1, calls
         assert calls[0][0] == "lit_review.synthesis"
         assert "Cold CLI selected synthetic task" in calls[0][1]
