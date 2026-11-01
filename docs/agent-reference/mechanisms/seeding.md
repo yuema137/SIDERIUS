@@ -148,7 +148,7 @@ without `hash()`.
 `tests/unit/execute_tools/test_trainer_seeding.py`: two in-process CPU runs
 with one `SeedContext`, started from different process RNG states, give
 identical initial weights and loss histories, and a different run seed gives
-different initial weights; a missing plan raises `MissingRunSeed` before model
+different initial weights; an explicit `None` plan raises `MissingRunSeed` before model
 construction; `main()` records generated and supplied seeds; freezing pins
 only the subsample stream; the `[seed]` line is printed before training
 starts; children get `PYTHONHASHSEED=0` unless the operator set a value.
@@ -184,8 +184,13 @@ trainer's epoch-0 subsample seed without loading torch.
 
 `train_engine_sandbox.run_experiment_streaming(..., seed_plan=...)`:
 
-1. `seed_plan=None` raises `MissingRunSeed` before the model is built. There is
-   no label- or `hash()`-based fallback.
+1. `seed_plan: TrainingSeedPlan` is a required keyword-only argument. Omitting
+   it raises Python's `TypeError` during argument binding. An untyped caller's
+   explicit `seed_plan=None` still raises `MissingRunSeed` through
+   `core.training_seeds.require_seed_plan` before the model is built. There is
+   no label- or `hash()`-based fallback. Streaming options after `seed_plan`
+   are also keyword-only; the positional prefix through `freeze_subsample`
+   is unchanged. Callers must pass the plan as `seed_plan=plan`.
 2. `seed_process(seed_plan)` runs before model construction, so weight
    initialization and dropout draw from seeded generators.
 3. Target standardization's pool uses `seed_plan.epoch(0).subsample`.
@@ -203,7 +208,9 @@ The direct legacy Python callable
 plan. Its implementation in `execute_tools.legacy_training` applies
 `seed_process` before delegating to the engine's private training body; the
 engine re-exports the public callable for existing callers.
-A missing plan raises `MissingRunSeed` before construction or checkpoint writes.
+Its `seed_plan: TrainingSeedPlan` argument is likewise required and keyword-only:
+omission raises `TypeError`, and explicit `None` raises `MissingRunSeed` before
+construction or checkpoint writes.
 The caller owns the supplied dataset and loader's sampling generators; this
 entry does not regenerate their already-materialized data or replace their RNGs.
 

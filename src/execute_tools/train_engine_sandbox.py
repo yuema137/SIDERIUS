@@ -1334,7 +1334,8 @@ def run_experiment_streaming(
     exp_id: str,
     train_portion: float | None = None,
     freeze_subsample: bool = False,
-    seed_plan: TrainingSeedPlan | None = None,
+    *,
+    seed_plan: TrainingSeedPlan,
     runtime_session: RuntimeVerificationSession | None = None,
     order_strategy: str = "shuffle",
     file_order: list[int] | None = None,
@@ -1374,9 +1375,10 @@ def run_experiment_streaming(
                            When None or 1.0, all segments in the scope are used.
         freeze_subsample:  When True, every epoch uses the epoch-0 subsample seed.
                            When False (default), each epoch draws a different subsample.
-        seed_plan:         Required ``TrainingSeedPlan``: process seeds (applied
+        seed_plan:         Required keyword-only ``TrainingSeedPlan``: process seeds (applied
                            before model construction) and the per-epoch
-                           subsample / order / shuffle seeds. ``None`` raises
+                           subsample / order / shuffle seeds. Omission raises
+                           ``TypeError``; an explicit ``None`` raises
                            ``MissingRunSeed`` (docs/agent-reference/mechanisms/seeding.md).
         runtime_session:   Optional in-subprocess runtime-verification session
                            (RT2-B, design §2.1). When provided, the epoch-0
