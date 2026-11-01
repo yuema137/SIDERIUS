@@ -7,8 +7,10 @@ Native preparation is never started here.
 
 import json
 import socket
+import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import uvicorn
 
@@ -19,7 +21,45 @@ from tools.candidate_console.app import create_app
 from tools.candidate_console.config import load_console
 
 
+def error_projections() -> None:
+    """Inject private failures only in the explicit offline error witness process."""
+    from types import SimpleNamespace
+
+    from tools.setup_review.composition_models import CompositionResult
+
+    def observe(job, task):
+        return SimpleNamespace(
+            result=CompositionResult.failed(
+                job, "composition", ValueError("private-browser-secret-sentinel")
+            )
+        )
+
+    patch("tools.candidate_console.task_summary.observe", observe).start()
+    from tests.unit.tools.candidate_console.test_editor_errors import failed_review
+    from tools.candidate_console.setups import check_setup_project
+    from tools.workflow_authoring.service import WorkflowAuthoring
+
+    original_review = WorkflowAuthoring.review
+
+    def check(project, config):
+        if project.project_id == "failed-setup":
+            raise ValueError("private-browser-secret-sentinel")
+        return check_setup_project(project, config)
+
+    def review(service, request):
+        return failed_review(
+            original_review(service, request),
+            service.project.project_root,
+            "private-browser-secret-sentinel",
+        )
+
+    patch("tools.candidate_console.setups.check_setup_project", check).start()
+    patch.object(WorkflowAuthoring, "review", review).start()
+
+
 def main() -> None:
+    if "--error-projections" in sys.argv:
+        error_projections()
     with tempfile.TemporaryDirectory(prefix="siderius-setups-browser-") as directory:
         tmp = Path(directory)
         (tmp / "base").mkdir()
