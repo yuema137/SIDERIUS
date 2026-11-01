@@ -117,6 +117,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from execute_tools.evaluation_metric import EvaluationMetric, RunMetric, ScoreabilityContract
     from execute_tools.health_checks._composition import TaskHealthBinding
     from execute_tools.task_data_path import TaskDataPath
+    from workflows.evaluation_composition import ResolvedEvaluation
 
 _MODULE_NAME_PREFIX = "siderius_task_composition_plugin_"
 """Prefix for per-plugin ``sys.modules`` names.
@@ -134,6 +135,7 @@ _MANIFEST_KEYS = frozenset(
         "task_data_path",
         "dataset_profile",
         "metric",
+        "evaluation",
         "secondary_metrics",
         "task_health",
         "interpretation_blocks",
@@ -254,6 +256,7 @@ class RunTaskComposition:
     forward_contract: ForwardContract
     semantic_fingerprint: str
     provenance: CompositionProvenance
+    evaluation: ResolvedEvaluation | None = None
     code_package: CapturedCodePackage | None = None
     deliverable_naming: Any = None
     """The run's DECLARED deliverable naming, or ``None`` for the shipped one.
@@ -2156,6 +2159,7 @@ def compute_semantic_fingerprint(
     prompt_renderer_identity: PromptRenderingIdentity | None = None,
     preflight_estimator_identity: PreflightEstimatorIdentity | None = None,
     inference_preflight: InferencePreflightPolicy | None = None,
+    evaluation_identity: dict[str, Any] | None = None,
 ) -> str:
     """sha256 over the composition's SEMANTIC content, and nothing else.
 
@@ -2300,6 +2304,8 @@ def compute_semantic_fingerprint(
         payload["observable_declarations"] = observable_declarations
     if data_analysis is not None:
         payload["data_analysis"] = data_analysis.canonical_identity()
+    if evaluation_identity is not None:
+        payload["evaluation"] = evaluation_identity
     return hashlib.sha256(_canonical(payload).encode("utf-8")).hexdigest()
 
 
@@ -2414,6 +2420,10 @@ def compose_metric_from_manifest(manifest_path: str) -> EvaluationMetric:
     """
     resolved_manifest = os.path.abspath(manifest_path)
     raw = _read_manifest(resolved_manifest)
+    if "evaluation" in raw:
+        from workflows.evaluation_composition import require_evaluation_runtime
+
+        require_evaluation_runtime(compose_run_task_bindings(manifest_path).evaluation)
     with composition_package(raw.get("code_package"), os.path.dirname(resolved_manifest)):
         metric, _declaration, _plugin = _compose_metric(
             _section(raw, "metric", resolved_manifest), os.path.dirname(resolved_manifest)
@@ -2838,6 +2848,12 @@ def _compose_resolved_task_bindings(
     judge_task, judge_paths = _compose_judge_task(raw, manifest_dir)
     source_paths.update(judge_paths)
 
+    from workflows.evaluation_composition import compose_evaluation
+
+    evaluation = compose_evaluation(
+        raw, manifest_dir, {m.spec.id: m.spec for m in (metric, *secondary_metrics)}, judge_task
+    )
+
     from workflows.data_analysis_composition import compose_workflow_data_analysis
 
     try:
@@ -2954,9 +2970,11 @@ def _compose_resolved_task_bindings(
         prompt_renderer_identity=prompt_renderer_identity,
         preflight_estimator_identity=preflight_estimator_identity,
         inference_preflight=inference_preflight,
+        evaluation_identity=evaluation.canonical_identity if evaluation is not None else None,
     )
 
     return RunTaskComposition(
+        evaluation=evaluation,
         task_data_path=impl,
         dataset_profile=profile,
         metric=metric,
@@ -2972,7 +2990,7 @@ def _compose_resolved_task_bindings(
         provenance=CompositionProvenance(
             manifest_path=resolved_manifest,
             source_paths=source_paths,
-            plugins=tuple(plugins),
+            plugins=tuple(plugins) + (evaluation.plugins if evaluation is not None else ()),
         ),
         secondary_metrics=secondary_metrics,
         deliverable_naming=deliverable_naming,
@@ -3165,7 +3183,10 @@ def bind_run_task_composition(
     from execute_tools.dataset_config import bind_dataset_profile
     from execute_tools.evaluation_metric import bind_run_metric, bind_run_secondary_metrics
     from execute_tools.task_data_path import bind_task_data_path
+    from workflows.evaluation_composition import require_evaluation_runtime
     from workflows.task_config import bind_task_config
+
+    require_evaluation_runtime(composition.evaluation)
 
     if not physical_data_root:
         raise CompositionDataRootMissing(
