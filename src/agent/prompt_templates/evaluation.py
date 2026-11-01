@@ -13,6 +13,7 @@ from execute_tools.evaluation_spec import (
     FormulaSelection,
     MetricComponent,
     RubricBalanceSelection,
+    RubricComponent,
     WeightedTerm,
 )
 from execute_tools.evaluation_validation import inspection
@@ -74,13 +75,26 @@ def render_deterministic_selection(
     return lines
 
 
+def selection_rubric_lines(
+    selection: RubricBalanceSelection, context: EvaluationPromptContext
+) -> list[str]:
+    rubric = context.rubric(selection.rubric)
+    lines = render_rubric_details(rubric)
+    already_disclosed = any(
+        isinstance(component, RubricComponent) and context.rubric(component.rubric) == rubric
+        for component in context.spec.components
+    )
+    # Equality includes resolved content, not merely a reused name/version.
+    return lines[:1] if already_disclosed else lines
+
+
 def render_selection(context: EvaluationPromptContext) -> list[str]:
     selection = context.spec.selection
     if not isinstance(selection, RubricBalanceSelection):
         return render_deterministic_selection(selection, context)
     return (
         ["- kind: rubric_balance"]
-        + ["- " + line for line in render_rubric_details(context.rubric(selection.rubric))]
+        + ["- " + line for line in selection_rubric_lines(selection, context)]
         + [
             f"- Guidance: {indent_text(selection.guidance)}",
             "- Rubric balancing applies only at admitted judged selection sites.",

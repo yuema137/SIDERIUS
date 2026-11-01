@@ -167,7 +167,7 @@ def test_rubric_balance_discloses_criteria_and_deterministic_formula(tmp_path):
     resolved = compose_evaluation({"evaluation": raw}, str(tmp_path), metrics, task)
     text = render_evaluation_spec(build_evaluation_prompt_context(resolved, primary, task))
     assert "Integer scale: [1, 5]" in text
-    assert "Criterion: supported_claims; weight 2; Use recorded evidence." in text
+    assert text.count("Criterion: supported_claims; weight 2; Use recorded evidence.") == 1
     assert "Role: qualitative evidence; not a deterministic scalar." in text
     assert "deterministic_ranking:\n  - kind: formula" in text
     assert "-1/40" in text
@@ -207,6 +207,8 @@ def test_proposer_no_longer_claims_every_component_is_the_primary_metric(tmp_pat
     with evaluation_scope(tmp_path):
         text = render_metric_context_block(evidence)
         assert "Every score in this prompt is on" not in text
+        assert "Read every comparison, ranking" not in text
+        assert "selection rule for candidate ranking" in text
         assert "[TASK EVALUATION] section in the user message" in text
         assert "threshold_for_refutation" in text
     assert render_metric_context_block(evidence) == old

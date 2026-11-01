@@ -440,7 +440,15 @@ def render_metric_context_block(evidence: ProposerInterpretationEvidence) -> str
 
     words = render_metric_direction_words(identity)
     metric_scope = f"Every score in this prompt is on the {render_metric_identity_line(identity)}."
+    ranking_scope = (
+        "- Read every comparison, ranking and state-of-the-art judgement on\n"
+        "  that direction, not on which number looks larger.\n"
+    )
     if active_evaluation_prompt_context() is not None:
+        ranking_scope = (
+            "- Use the [TASK EVALUATION] selection rule for candidate ranking.\n"
+            "- Apply the prediction metric's direction to its recorded values.\n"
+        )
         metric_scope = (
             "Recorded score fields retain their declared metric identities. "
             "The [TASK EVALUATION] section in the user message defines component "
@@ -455,8 +463,7 @@ def render_metric_context_block(evidence: ProposerInterpretationEvidence) -> str
         "\n"
         f"- Better means **{words['comparative']}**; worse means "
         f"{words['antonym']}. The task is to {words['verb']} it.\n"
-        "- Read every comparison, ranking and state-of-the-art judgement on\n"
-        "  that direction, not on which number looks larger.\n"
+        f"{ranking_scope}"
         f"- A prediction that improves on the current value must move "
         f"{words['comparative']}.\n"
         # The D2 aligning sentence (design §4.5): state what
