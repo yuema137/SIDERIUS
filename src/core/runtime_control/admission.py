@@ -411,6 +411,7 @@ def evaluate_gpu_admission(
     sampling_error: str | None = None,
     requirement_ownership: GpuRequirementOwnership | None = None,
     requirement_error: str | None = None,
+    require_evidence: bool = False,
 ) -> AdmissionDecision:
     """Decide whether to start a GPU phase, from measured occupancy.
 
@@ -424,6 +425,8 @@ def evaluate_gpu_admission(
         requirement_ownership: original ended-worker evidence and measured UUID.
             Absence never implies that a figure describes an additional worker.
         requirement_error: validation gap retained by the typed entry reader.
+        require_evidence: protected native execution requires usable evidence even
+            in trial mode; retain the actual mode in decision evidence.
         mode: `formal` demonstrates safety before proceeding; `trial`
             proceeds and records what it could not prove.
             Typed as `str` and validated **here**, so an unrecognised
@@ -456,6 +459,7 @@ def evaluate_gpu_admission(
             sampling_error=sampling_error,
             requirement_ownership=requirement_ownership,
             requirement_error=requirement_error,
+            require_evidence=require_evidence,
         )
 
     return evaluate_ordinary_gpu_admission(
@@ -468,6 +472,7 @@ def evaluate_gpu_admission(
         sampling_error=sampling_error,
         requirement_ownership=requirement_ownership,
         requirement_error=requirement_error,
+        require_evidence=require_evidence,
     )
 
 
@@ -482,6 +487,7 @@ def evaluate_ordinary_gpu_admission(
     sampling_error: str | None = None,
     requirement_ownership: GpuRequirementOwnership | None = None,
     requirement_error: str | None = None,
+    require_evidence: bool = False,
 ) -> AdmissionDecision:
     """Apply ordinary phase posture after the visibility routing decision."""
 
@@ -500,6 +506,7 @@ def evaluate_ordinary_gpu_admission(
             detail="invalid_admission_mode",
         )
 
+    evidence_required = mode == "formal" or require_evidence
     if isinstance(snapshot, GpuAccountingSnapshot) and snapshot.query_failure is not None:
         sampling_error = f"nvidia-smi query failed: {snapshot.query_failure.value}"
     if sampling_error is not None:
@@ -508,7 +515,7 @@ def evaluate_ordinary_gpu_admission(
         # OPEN exactly when it is supposed to protect, which is the
         # fail-open posture this commit exists to remove.
         failed = {"mode": mode, "sampling_error": sampling_error}
-        if mode == "formal":
+        if evidence_required:
             return _refuse(
                 "measurement_unavailable",
                 f"device occupancy could not be sampled ({sampling_error}), so no "
@@ -552,7 +559,7 @@ def evaluate_ordinary_gpu_admission(
 
     # --- telemetry ---------------------------------------------------
     if not telemetry or total_mib is None or used_mib is None or other_mib is None:
-        if mode == "formal":
+        if evidence_required:
             return _refuse(
                 "measurement_unavailable",
                 "device occupancy could not be measured, so safety has not been "
@@ -637,7 +644,7 @@ def evaluate_ordinary_gpu_admission(
         # is telling us a reader cannot either.
         authoritative_requirement = float(requirement_mib)
     if authoritative_requirement is None:
-        if mode == "formal":
+        if evidence_required:
             return _refuse(
                 "policy_unavailable",
                 "device occupancy was measured, but no applicable measured GPU "
@@ -668,7 +675,7 @@ def evaluate_ordinary_gpu_admission(
         ownership_issue = ownership_issue or requirement_ownership.applicability_refusal(snapshot)
     if ownership_issue is not None:
         evidence["requirement_error"] = ownership_issue
-        if mode == "formal":
+        if evidence_required:
             return _refuse(
                 "policy_unavailable", ownership_issue, source="unavailable", evidence=evidence
             )

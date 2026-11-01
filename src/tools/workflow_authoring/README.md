@@ -48,8 +48,10 @@ whether referenced manifests, data or plugins exist.
    adding nodes. Click **Save** to validate the graph; a save row opens (with
    Settings › Show advanced tools it also shows the exact generated Python diff).
    After inspector edits, press **Save** (then **Cancel**) first to update
-   the Python panel before typing source changes. Inspector changes can rewrite formatting and
-   comments; the diff shows that rewrite. The **Research loop** section of Selection adds or
+   the Python panel before typing source changes. Inspector changes preserve
+   values you did not edit, including their Python spelling. Adding or removing
+   items can change surrounding formatting; review the diff. The **Research loop**
+   section of Selection adds or
    removes the research loop, its iteration limit and stop conditions; a loop your
    coding agent wrote in `workflow.py` appears there, and the diff shows the
    resulting Python.
@@ -81,8 +83,9 @@ To only look at the file as a canvas of nodes and their ports, complete steps
 
 Caveats:
 
-- The editor is read-write. **Save** rewrites `workflow.py` from the editor's
-  canonical form, which can change formatting and comments. Before you save, keep
+- The editor is read-write. **Save** applies your reviewed changes to `workflow.py`.
+  Untouched values retain their exact spelling, including `2.0`, numeric notation
+  and string escapes. Before you save, keep
   a copy or commit the file to version control. Version history keeps recovery
   copies of the previous and proposed bytes, but `workflow.py` stays authoritative,
   so these copies are not a substitute for version control.

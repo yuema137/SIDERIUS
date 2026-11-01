@@ -324,7 +324,7 @@
     const id = project, sha = base.sha256, key = bindingKey(); inspecting = key;
     const live = () => project === id && base?.sha256 === sha && bindingKey() === key;
     try {
-      const value = await api(`${encodeURIComponent(id)}/draft`, {expected_sha256: sha, draft: {base_document: clone(graph), bindings: clone(bindings)}});
+      const value = await api(`${encodeURIComponent(id)}/draft`, {expected_sha256: sha, source: anchor.source, draft: {base_document: clone(graph), bindings: clone(bindings)}});
       if (!live()) return;
       inspection = {key, status: value.inspection.status, diagnostics: value.inspection.diagnostics,
         problems: value.inspection.problems || value.inspection.diagnostics.map(message => ({code: value.inspection.status, message}))};

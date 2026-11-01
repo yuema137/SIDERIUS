@@ -115,3 +115,20 @@ was executed for a documentation change.
 [Metric extension](../../guides/bring-your-own-metric.md),
 [composition](composition.md), [plugins](plugins.md), and
 [objectives and metrics](../../concepts/objectives-and-metrics.md).
+
+## Opt-in structured evaluation declaration
+
+The optional task `evaluation` spec can name primary/secondary metrics as components
+with scientific meaning, units and descriptive ranges. References always use the
+post-transform `MetricResult.scalar` units. `evaluation.selection` is separate from
+the training loss in top-level `objective`. A secondary becomes required evidence
+only if a formula term or constraint references it; listing a component alone keeps
+it observational. Runtime promotion is deferred to #1294/#1295, currently protected
+by launch capability refusals.
+
+Weighted_sum will emit a new higher-is-better selection scalar, never relabel the
+source metric. Health keeps original source metric values, never utility. Existing
+primary-unit thresholds must be explicitly rebound or refused when formula selection
+lands. Rubrics remain outside MetricOrder. See the
+[evaluation contract](../../../src/execute_tools/evaluation-contract.md) for the
+schema, launch gates, identity and mandatory downstream binding rules.
