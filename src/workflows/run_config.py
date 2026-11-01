@@ -202,7 +202,7 @@ class WorkflowLaunchConfig:
                 "Fraction of the declared training scope used in Formal mode when "
                 "formal_training_scope_source is operator (the default). 0.1 means 10%, "
                 "not full-data training; 1.0 selects the whole training scope. For 1,077 "
-                "CSV training rows, 0.1 selects about 100 rows: about 3 full batches per "
+                "CSV training rows, 0.1 selects about 108 rows: about 3 full batches per "
                 "epoch at batch size 32 (a retained partial batch adds a step). "
                 "formal_train_portion further limits each epoch; formal_eval_portion "
                 "separately controls evaluation. Templates explicitly choose 1.0; "

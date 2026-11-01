@@ -74,11 +74,7 @@ launch cell, which uses the `openai_tiered_pro.json` LLM profile; for your own
 research runs the [root README](../../README.md#choose-models-by-role)
 recommends `openai-moderate-v1.json`.
 
-The command explicitly uses all 128 training rows for Formal training
-(`formal_portion=1.0`) and allows two tuning rounds: the first may be Trial;
-the last is forced Formal. `max_rounds=1` would run only Formal, regardless of
-Trial budgets. These are small-example settings; the framework Formal portion
-still defaults to 0.1. Evaluation scope is configured separately.
+These small-task settings use `formal_portion=1.0` and `max_rounds=2`; see [Trial and Formal training](../../src/tools/candidate_console/README.md#trial-and-formal-training) for scope, round limits and framework defaults.
 
 The preview prints child commands. It does not execute or qualify training.
 Before removing `--dry-run`, follow the

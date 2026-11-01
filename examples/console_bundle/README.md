@@ -225,10 +225,4 @@ byte identical. The format is specified in the
 
 ## Training settings in the imported setup
 
-The Quickstart research-loop template declares two tuning rounds per iteration
-and `formal_portion=1.0`, using the full small training dataset. The first tuning
-round may be Trial; the last is forced Formal. Reducing tuning rounds to one
-leaves no Trial round. These are editable template choices. Resetting Formal
-portion to **Default** restores the framework's 0.1 (10% training scope).
-For larger tasks, review portions and budgets before Run. See
-[Trial and Formal training](../../src/tools/candidate_console/README.md#trial-and-formal-training).
+These small-task settings use `formal_portion=1.0` and `max_rounds=2`; see [Trial and Formal training](../../src/tools/candidate_console/README.md#trial-and-formal-training) for scope, round limits and framework defaults.

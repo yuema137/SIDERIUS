@@ -904,7 +904,7 @@ with `max_rounds=2` the first may be Trial and the second is Formal. Increasing
 **Final iteration** repeats the loop; it does not add tuning rounds inside it.
 
 The framework's `formal_portion=0.1` uses 10% of the training scope. For example,
-1,077 CSV training rows × 0.1 gives about 100 rows: **3 steps/epoch** with batch
+1,077 CSV training rows × 0.1 gives about 108 rows: **3 steps/epoch** with batch
 size 32 and the incomplete batch dropped. Keeping that batch adds a step.
 Formal does not mean full-data training. `formal_train_portion` can further
 reduce the rows used each epoch; `formal_eval_portion` separately controls the

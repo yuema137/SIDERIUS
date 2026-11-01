@@ -2248,7 +2248,7 @@ Formal training uses `formal_portion=0.1` and `formal_train_portion=1.0` by
 native default when `formal_training_scope_source="operator"`. These are
 training fractions, not mode labels or evaluation fractions. Evaluation uses
 `formal_eval_portion=1.0` by default. A CSV scope of 1,077 rows at portion .1
-has about 100 rows and 3 complete batches of size 32; retaining the partial
+has about 108 rows and 3 complete batches of size 32; retaining the partial
 batch adds a step. Actual step count also depends on per-epoch fraction,
 ceilings and batching policy. `formal_training_scope_source="agent"` instead
 uses validated planner training portions; evaluation remains operator-owned.
