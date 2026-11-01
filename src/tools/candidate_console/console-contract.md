@@ -438,7 +438,9 @@ panel edit after review discards the review. `operation-outcome.js` renders
 `reason="cancelled_while_queued"` as "cancelled before start" (not a failure;
 `OperationListItemView.reason` carries the reason for `operation_failed` rows
 only). The native-chain card states native chains are serial-only. Under the ledger, `parallel.budget` is refused
-`parallel_budget`; without a configured ledger a `parallel` launch without its
+`parallel_budget`. The shared budget's `max_queued_operations` bounds waiting
+children; admission returns `host_queue_full` before claim/spawn when full
+(default zero disables waiting). See the operations queue contract. Without a configured ledger a `parallel` launch without its
 own budget is refused `parallel_budget_required`. A loop resume inherits its
 root's `resources` and `parallel`. Every refusal reaches the browser as the
 operation owner's typed code. Status: `StatusView.state` and the list state

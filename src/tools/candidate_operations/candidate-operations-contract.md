@@ -423,12 +423,21 @@ to the slot UUID (for a GPU unit) and continues as a placed operation
 (`sandbox.json`, release). Submissions also promote: admission promotes the
 swept ledger before planning the new unit.
 
-Waiting cost (known limit). Each waiting child is a full operation child that
-has already imported the operation stack: about 0.56 GiB resident while idle
-(review measurement, 2026-10-28). That memory is not counted in any reservation,
-and the queue has no length cap, so many queued submissions can exhaust host
-memory before any of them runs. Tracked in #1073 (lazy imports in the waiting
-child and/or a queue cap).
+Waiting cost and bound. Native-chain hardware review imports its environment
+inspection only when `review()` runs; importing the operation child/queue does
+not import PyTorch. Waiters still have Python, schema and control-stack overhead,
+which is not included in placed reservations. Operators must leave memory headroom.
+`HostBudget.max_queued_operations` is a strict nonnegative integer, default zero
+(no waiting). Set it explicitly in the shared budget file to permit a bounded
+number of waiting children. After sweep and FIFO promotion, admission refuses a
+new queued decision with `host_queue_full` when the remaining queue is at the
+limit, before claim or spawn. Immediately placeable operations remain accepted.
+The check and insertion share the ledger lock across stores. Cancelled/dead
+waiters free space through the existing queue/liveness owners. This bounds
+waiting entries, not running reservations or in-process worker ready queues.
+Nonzero limits participate in the budget digest; zero is omitted to retain
+existing zero-wait budget bytes. Changing a limit with live entries requires
+draining the ledger first (`budget_mismatch`).
 
 Snapshot. While `queued.json` exists without `placement.json` and the child is
 alive, `read_operation` reports `state="queued"`, `reason="host_queued"`;

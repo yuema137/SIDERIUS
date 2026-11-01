@@ -157,6 +157,8 @@ def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -
                 "not_prepared": "preparation has no verified candidate to review",
                 "host_ledger_missing": "host resources and parallel nodes need a host ledger "
                 "in the console configuration; review without them",
+                "host_queue_full": "host waiting queue is full or disabled; retry when "
+                "capacity is available",
                 "resources_required": "this console shares a host ledger: declare the run's "
                 "host resources, then review again",
             }.get(error.detail.code, "native operation could not be verified")

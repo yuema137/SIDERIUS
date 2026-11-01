@@ -804,8 +804,10 @@ Then, on **Run**, open **Host resources and parallel nodes** before you review:
 3. Click **Review prepared run**. The review lists what you entered; changing it
    afterwards asks you to review again.
 
-When the host is busy, the run shows **queued** and starts by itself when earlier
-runs finish. Stopping a queued run removes it before it starts ("Cancelled before
+To allow waiting runs, set `max_queued_operations` in the shared host budget
+file to a positive limit. When the host is busy and the queue has room, the run
+shows **queued** and starts by itself when earlier runs finish. Otherwise the
+submission is refused with `host_queue_full`; retry when capacity is available. Stopping a queued run removes it before it starts ("Cancelled before
 start"). Native chains always run one step at a time, outside the ledger.
 
 For example, if your saved `llm.json` uses OpenAI routes, set
