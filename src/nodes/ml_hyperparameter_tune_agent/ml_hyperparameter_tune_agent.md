@@ -1812,6 +1812,30 @@ both probe routes' sampling against the request observed by the row-count owner.
 
 ## The reflector is told what RESOLVED, not what was proposed (Lane D / F15)
 
+### Console action boundary
+
+`plan_logging.py::render_effective_plan` owns the console presentation of the
+effective request and retained proposal. `planning.py::prepare_attempt` calls it
+after `ResolutionTracker.finish_with_model` projects the persisted `TrialConfig`.
+It consumes the same `execution_provenance` returned on `PreparedAttempt`, prints
+each final event's proposed/effective values and existing authority description,
+and labels hypothesis and reasoning as authored proposal text. With disagreements,
+that proposal is explicitly superseded; without disagreements, it remains a
+proposal rather than an observed result. The renderer neither mutates plans nor
+recomputes policy. The existing policy receipt supplies the selected inheritance
+strategy and named winning trial; the action block supplies final differences,
+including changes after inheritance. Both describe preparation, not completed
+training. Persisted hypothesis fields and reflector prompt bytes are unchanged.
+
+Regression coverage: `tests/unit/nodes/ml_hyperparameter_tune_agent/test_plan_logging.py`
+drives real preparation for `full_clone` and operator overrides, compares displayed
+values with the effective training request, and covers unchanged proposals.
+The rendering assembly identity changes when `planning.py` changes because it is
+part of that identity's source closure; this console change does not bypass that
+binding or rewrite archived evidence.
+
+### Reflection provenance
+
 `plan.hypothesis` is free prose the planner authors **before** the framework
 resolves the plan. Seven steps then overrule parts of it — operator
 `plan_overrides`, the mode-override chain, the task-declared objective,
