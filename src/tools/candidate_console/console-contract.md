@@ -1683,9 +1683,9 @@ stay local in the loop draft state (`loopDrafts`, separate from training drafts)
 and block Review and circuit edits exactly as an invalid limit does. Cross-field
 rules (one per kind, `completed_bodies < final_iteration`) are the declaration's:
 a refused loop review reads "Review refused the research loop: …" with the
-diagnostic `field_path`. Loop edits preserve bytes only for an already-canonical
-source; Review re-renders the whole declaration, so hand-formatted or commented
-sources are rewritten (visible in the diff). The panel
+diagnostic `field_path`. Loop edits patch exact source values; untouched literals
+retain their original bytes, including in hand-formatted sources (see the authoring
+contract). The panel
 does not draw a back-edge or annotate cards, and it shares the source-dirty,
 conflict and saving fences of the unified draft. Capture review (`ReusableCaptureReview.loop`)
 reports the executed request's authored loop, refusing a request loop that differs
@@ -2486,7 +2486,7 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   no module is left, and Review/Save refuse (`draft_incomplete`) until no problem
   remains, so the saved file is never invalid. A deletion nobody reads, with no other
   edits, is a targeted byte-preserving removal; otherwise the combined document is
-  rendered canonically. Deleting every module shows the §7.2 empty state.
+  patched while preserving untouched literals. Deleting every module shows the §7.2 empty state.
 - Disabled Save shows `#editor-save-reason` inline ("Fix N problems to save",
   "Checking…", "Saving…"); disabled Next: Run shows `#workflow-next-reason` ("Save a
   version to run" or "Not set up for runs").
