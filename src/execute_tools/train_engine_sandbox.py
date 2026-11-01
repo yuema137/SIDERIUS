@@ -49,6 +49,7 @@ from execute_tools.dataset_config import (
     tidmad_topology,
 )
 from execute_tools.learning_rate_schedule import build_epoch_lr_controller
+from execute_tools.legacy_training import run_experiment as run_experiment
 from execute_tools.model_input_dtype import (
     TRAINING_SITE_DTYPE,
     apply_contract_cardinality,
@@ -1117,36 +1118,6 @@ def refuse_zero_optimizer_steps(
         "training scope smaller than one batch trains nothing. Refusing "
         "rather than reporting an untrained model as a completed round — "
         "raise the scope or train_portion, or lower batch_size."
-    )
-
-
-def run_experiment(
-    model_cfg: object,
-    train_cfg: TrainConfig,
-    loss_cfg: LossConfig,
-    data_loader: DataLoader,
-    sandbox_dirs: dict[str, str],
-    exp_id: str,
-    model_io: ModelIOContract | None = None,
-    expected_custom_loss_snapshot: CapabilityContractSnapshot | None = None,
-    *,
-    seed_plan: TrainingSeedPlan | None = None,
-) -> dict[str, Any]:
-    """Train with a caller-owned loader and a required run-derived seed plan.
-
-    Seed process RNGs before model construction. The caller owns data selection
-    and loader generators; only the trainer CLI may generate a missing run seed.
-    """
-    seed_process(require_seed_plan(seed_plan))
-    return _run_experiment(
-        model_cfg,
-        train_cfg,
-        loss_cfg,
-        data_loader,
-        sandbox_dirs,
-        exp_id,
-        model_io,
-        expected_custom_loss_snapshot,
     )
 
 

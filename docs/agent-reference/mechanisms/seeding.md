@@ -200,7 +200,9 @@ trainer's epoch-0 subsample seed without loading torch.
 
 The direct legacy Python callable
 `train_engine_sandbox.run_experiment(..., seed_plan=...)` requires the same
-plan and applies `seed_process` before delegating to its private training body.
+plan. Its implementation in `execute_tools.legacy_training` applies
+`seed_process` before delegating to the engine's private training body; the
+engine re-exports the public callable for existing callers.
 A missing plan raises `MissingRunSeed` before construction or checkpoint writes.
 The caller owns the supplied dataset and loader's sampling generators; this
 entry does not regenerate their already-materialized data or replace their RNGs.

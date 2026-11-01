@@ -67,7 +67,8 @@ records (`metric_result` / `metric_refusal`), typed training results.
 - Scientific metric implementations and their frozen definitions belong to the
   task package. Generic execution does not select a scientific formula.
 - **Seeded training**: `train_engine_sandbox.run_experiment_streaming`
-  and the legacy Python callable `run_experiment` require a `TrainingSeedPlan`
+  and the legacy Python callable `run_experiment` (implemented in
+  `legacy_training.py`, re-exported by the engine) require a `TrainingSeedPlan`
   (`None` raises `MissingRunSeed`) and seed the process RNGs before model
   construction (`process_seeding.seed_process`). The streaming path gives every
   `DataLoader` an explicit generator and

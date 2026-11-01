@@ -157,6 +157,7 @@ _run(Path(sys.argv[1]), 42)
         result = subprocess.run(
             [sys.executable, "-c", script, str(tmp_path)],
             env={**os.environ, "PYTHONHASHSEED": hash_seed, "CUDA_VISIBLE_DEVICES": ""},
+            cwd=Path(__file__).resolve().parents[3],
             check=True,
             capture_output=True,
             text=True,
