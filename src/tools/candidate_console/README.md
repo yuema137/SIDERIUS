@@ -708,14 +708,14 @@ If a step does not succeed, the line under the Run steps says so in plain words,
 example "The preparation failed. The cause and its log are named below; start over to
 try again." or "The run failed. The cause is shown below; open it in Monitor for the
 full log." A time limit, an interruption, a stop on request and a worker that never
-started each get their own sentence. Below it, the step's status line names the cause:
-the last error line of the log, such as "Cause (from the log): TaskCompositionError:
-plugin file … does not exist". A failed preparation also names its log file,
-`inputs/preparation/worker.log` in the run's folder; Monitor shows the same log under
-**Activity and logs** with log source **Native**. Fix the cause, then select **Start
-over** and prepare again. A paused research loop is not reported as finished either:
-the line says whether it is waiting for your input or was paused by you, and to open
-it in Monitor to resume.
+started each get their own sentence. Below it, the step's status line shows a safe
+preparation error category or, for other failures, the last error line from the log.
+Monitor provides the full logs under **Activity and logs**. Preparation workers write
+`inputs/preparation/worker.log` in the run's folder (log source **Native**); errors
+in the process that starts or checks preparation go to the operation log (log source
+**Operation**). Fix the cause, then select **Start over** and prepare again.
+A paused research loop says whether it is waiting for your input or was paused by
+you, and directs you to Monitor to resume.
 
 The browser retains preparation and candidate intents separately before sending
 either effect. Storage failure prevents dispatch. After a lost response or reload,
@@ -724,6 +724,18 @@ blocks new effects; changing or saving source never removes it. Wait until the p
 the console offers dismissal or another effect. An initial request explicitly refused before
 admission can be discarded and reviewed again; restored or ambiguous requests retain
 their UUID. No automatic retries or replacement IDs are created.
+
+If Prepare reports another operation is blocking it, the page keeps the response
+code and reason visible. Select the blocking operation's Monitor link to inspect it.
+For example, a `409, busy` response still names that operation when a status check
+finds no preparation record. The outcome stays unconfirmed unless the server can
+verify it. If the server becomes unreachable, the page shows that new problem.
+If a worker died, new work becomes available only after the console confirms that its remaining processes also stopped.
+
+When preparation fails in its parent process, Run and Monitor show a safe cause
+category, such as invalid input or a changed source. Task authors can inspect the
+full traceback in the server log (the operation log for a detached preparation).
+Fix the cause, then select **Start over** and prepare again.
 
 While the server is live, an admitted preparation can be recovered even if its
 original source or credential file disappears. Restart still validates configured

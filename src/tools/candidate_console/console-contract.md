@@ -2038,7 +2038,9 @@ Status and logs (`app.js`): the status line is one `operationOutcome.sentence`
 native chain, …> …" in plain words for every kind, including a preparation (#1145),
 native `cancelled` (Stop run, #1027) reads "Stopped on request before finishing; no
 candidate result was produced.", and a store `unknown` state whose process reason is
-`missing_identity` reads "… is starting."). For a failed operation `#monitor-cause` shows "Cause (from the
+`missing_identity` reads "… is starting."). A preparation with `preparation_error`
+shows that fixed category as its cause; see [preparation diagnostics](#preparation-refusal-and-parent-failure-diagnostics).
+Otherwise, for a failed operation `#monitor-cause` shows "Cause (from the
 log): <last exception line>" (`operationOutcome.cause`, the last line shaped like
 `Name(Error|Exception|Failure|Refusal): …`; a line over 300 characters is cut at the
 last space before character 300, trailing punctuation dropped, and ends with "…", never
@@ -3095,3 +3097,48 @@ requests `?refresh=1` and is disabled while observing. `GET /api/tasks` items ca
 so existing check/editor job digests and observations are byte-identical. The
 transport refuses a passed result whose `package`/`sample_counts` presence does not
 match the request.
+
+### Preparation refusal and parent failure diagnostics
+
+Run retains the last typed Prepare response for the exact in-page intent across
+`unknown_operation` polling. It renders HTTP status, fixed server code/message,
+and, when supplied, the UUID `error.blocking_operation_id` as a Monitor link.
+The UUID comes from the admission owner's blocking claim, never from exception
+text or the derived active pointer. This does not certify non-admission: the
+existing two-read absence and explicit dismissal rules still govern Forget.
+Only an initial response with `admission_not_attempted` is labeled `Prepare refused`;
+other typed errors say the outcome is unconfirmed. A retained response overrides
+only `unknown_operation` polls; transport and other check errors show their current
+message, including unreachable-server guidance.
+The phrase `after Retry` is used only after an explicit Retry dispatch in this
+page. Refusal and retry evidence are page-local, cleared on intent change; a
+reload resumes observation without inventing a remembered refusal or retry.
+
+`StatusView.preparation_error` is omitted except for a verified failed preparation
+receipt with an error, a preparation in `operation_failed` (except deliberate
+`cancelled_while_queued`), or a preparation with `unknown/native_outcome_unresolved`
+completion. The latter reports an error without a verified result and explicitly
+keeps the outcome unresolved; it does not enable Start over or release admission.
+`service.preparation_error` uses `tools.setup_review.summary_errors.error_category`
+for legacy receipt diagnostics and renders fixed filesystem,
+invalid-input/changed-source, child-worker, or generic preparation messages.
+Child-worker failures direct the author to the native log; parent failures direct
+them to the server/operation log.
+Neither exception text nor task-defined exception class names reach that field.
+Run and Monitor cause summaries prefer this field over log extraction, including
+an outstanding asynchronous log read. Raw logs remain explicit diagnostic evidence
+for task authors. Parent catches log full tracebacks through server logging;
+operation children inherit the private operation log. Receipts and their identities
+are unchanged.
+
+Non-loop candidate/preparation interruptions use `operation_process_exited` and
+`operation_process_exiting` from the operation owner. The shared outcome renderer
+explains stopped processes versus unresolved writers; only verified termination
+allows new work. Native-chain continuation recovery is unchanged.
+
+Pre-dispatch preparation failures have no receipt but still carry a fixed
+`preparation_error`. Run and Monitor use that field instead of automatically
+extracting a cause from the private operation traceback. Explicit log access
+remains available to task authors. The shared category owner classifies live
+exceptions by hierarchy and legacy text by recognized built-in/standard class
+identities (including `JSONDecodeError`); unknown custom names remain generic.

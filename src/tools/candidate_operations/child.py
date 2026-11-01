@@ -1,5 +1,6 @@
 """One operation process: publish identity, invoke native owner, record references."""
 
+import logging
 import os
 import sys
 from collections.abc import Callable
@@ -111,6 +112,8 @@ def execute(path: Path) -> int:
             reason="native_terminal",
         )
     except (Exception, KeyboardInterrupt):
+        if record.submission.kind in {"prepare", "prepare_reusable"}:
+            logging.getLogger(__name__).exception("Preparation operation failed")
         # Do not serialize exception messages: arbitrary plugins can include credentials.
         completion = Completion(
             operation_id=record.submission.request_id,
