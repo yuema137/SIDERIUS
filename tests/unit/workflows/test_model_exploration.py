@@ -1245,28 +1245,60 @@ class TestRunWorkflowMultiIteration:
         iter1_inp = workflow_env["interp"].return_value.run.call_args_list[0][0][0]
         assert iter1_inp.model_knowledge_cache == {}
 
-    def test_stops_on_target_score(self, workflow_env):
+    @pytest.mark.parametrize(
+        ("valid_score", "restored_score", "expected_iterations"),
+        [(None, None, 3), (1.5, None, 3), (2.0, None, 1), (2.5, None, 1), (None, 2.5, 0)],
+    )
+    def test_stops_only_on_valid_target_score(
+        self, workflow_env, capsys, valid_score, restored_score, expected_iterations
+    ):
+        """Raw formal above target cannot stop; valid/restored incumbents can."""
         names = iter(["model_a", "model_b", "model_c"])
         workflow_env["propose"].return_value.run.side_effect = lambda inp: _make_proposal_output(
             next(names)
         )
-        workflow_env["tune"].return_value.run.side_effect = lambda inp: _make_tune_output(
-            model_type=inp.model_type, score=2.5
-        )
 
+        def tune(inp):
+            output = _make_tune_output(model_type=inp.model_type, score=3.0)
+            output.best_valid_formal_denoising_score = valid_score
+            return output
+
+        workflow_env["tune"].return_value.run.side_effect = tune
         results = run_workflow(
             launch=WorkflowLaunchConfig(
                 data_dir=workflow_env["data_dir"],
                 model_types=["punet"],
                 source_run_name="v1",
-                max_iterations=5,
+                max_iterations=3,
                 target_score=2.0,
             ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
+            restored_state=RestoredState(chain_best_valid_formal_score=restored_score),
         )
-        # Should stop after first iteration since score 2.5 >= 2.0
-        assert len(results) == 1
+        assert len(results) == expected_iterations
+        console = capsys.readouterr().out
+        reason = "iterations_exhausted" if expected_iterations == 3 else "target_reached"
+        assert f"Stop reason: {reason}" in console
+        if expected_iterations == 0:
+            workflow_env["tune"].return_value.run.assert_not_called()
+            workflow_env["propose"].return_value.run.assert_not_called()
+            assert not (Path(workflow_env["workspace"]) / "test_run" / "iteration_001").exists()
+        raw = 3.0 if expected_iterations else None
+        assert f"Best formal (unfiltered, this execution): {raw}" in console
+        summary = json.loads(
+            (Path(workflow_env["workspace"]) / "test_run" / "workflow_test_run.json").read_text()
+        )
+        assert summary["best_score_overall"] == raw
+        assert summary["termination_reason"] == reason
+        assert summary["status"] == "completed"
+        assert summary["best_valid_formal_score"] == (restored_score or valid_score)
+        for row in summary["iterations"]:
+            assert row["best_score"] == 3.0
+            assert row["best_score_basis"] == "health_unfiltered_trial_and_formal"
+        if expected_iterations:
+            assert "best trial/formal score (Health-unfiltered)=3.0" in console
+        assert summary["best_score_overall_basis"] == "unfiltered_formal_current_execution"
 
     def test_trial_only_iter_does_not_poison_formal_anchor(self, workflow_env):
         """Regression: ``best_score_overall`` (= next iter's
