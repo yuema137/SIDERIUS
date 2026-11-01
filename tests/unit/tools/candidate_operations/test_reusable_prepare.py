@@ -237,3 +237,26 @@ def test_missing_top_after_exit_is_unknown_and_blocks_admission(intent, monkeypa
     )
     with pytest.raises(OperationFailure, match="unresolved"):
         submit_operation(config, next_request, launch_environment={})
+
+
+@pytest.mark.parametrize("error_type", [OSError, ValueError])
+def test_preflight_refusal_explains_checks_without_echoing_inputs(intent, monkeypatch, error_type):
+    """#1244: preflight failure must give useful checks without claiming inputs changed."""
+    from unittest.mock import Mock
+
+    config, submission, _ = intent
+    monkeypatch.setattr(
+        "tools.candidate_operations.submit.preflight_reusable_candidate",
+        Mock(side_effect=error_type("secret-sentinel")),
+    )
+    spawn = Mock()
+    monkeypatch.setattr("tools.candidate_operations.submit.spawn", spawn)
+    with pytest.raises(OperationFailure) as refused:
+        submit_operation(config, submission, launch_environment={})
+    assert refused.value.detail.code == "reusable_preflight"
+    assert refused.value.detail.message == (
+        "reusable preparation preflight failed; check the task manifest, data root, "
+        "LLM configuration and selected paths, then review again"
+    )
+    spawn.assert_not_called()
+    assert not (Path(config.state_root) / "operations" / str(submission.request_id)).exists()

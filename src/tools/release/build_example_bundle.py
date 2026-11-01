@@ -11,7 +11,9 @@ second hand-maintained copy.
   ``../../examples/quickstart/`` reference rewritten package-relative; any other
   ``..`` or absolute reference is refused.
 - ``task/declared/``, ``task/plugins/``: the non-Markdown files of
-  ``examples/quickstart/declared`` and ``examples/quickstart/plugins``.
+  ``examples/quickstart/declared`` and ``examples/quickstart/plugins``; only
+  .py/.json/.yaml are supported. Other assets, symlinks and subfolders are
+  refused; Markdown and __pycache__ directories are excluded.
 - ``setup/setup.json``, ``fetch_data.py``, ``README.md``: ``examples/console_bundle/``.
 - ``console-task.json``: :data:`TASK_ID`, :data:`TASK_LABEL` and
   ``add_task.STARTER_VALUES``.
@@ -77,7 +79,7 @@ def _rewrite(value: Any, location: str) -> Any:
         return [_rewrite(item, f"{location}[{index}]") for index, item in enumerate(value)]
     if isinstance(value, str):
         if value.startswith(PACK_PREFIX):
-            return value[len(PACK_PREFIX) :]
+            value = value[len(PACK_PREFIX) :]
         if value.startswith("/") or ".." in Path(value).parts:
             raise BundleBuildError(f"{location} = {value!r} is not inside examples/quickstart")
     return value
@@ -108,8 +110,17 @@ def bundle_files() -> dict[str, bytes]:
     files = {f"{TASK}/task.yaml": task_manifest()}
     for folder in PACKAGE_FOLDERS:
         for path in sorted((PACK / folder).iterdir()):
-            if path.is_file() and not path.is_symlink() and path.suffix in PACKAGE_SUFFIXES:
-                files[f"{TASK}/{folder}/{path.name}"] = path.read_bytes()
+            if path.is_symlink():
+                raise BundleBuildError(f"{path} is a symlink; package files must be regular")
+            if path.name == "__pycache__" and path.is_dir():
+                continue
+            if not path.is_file():
+                raise BundleBuildError(f"{path} is not a regular package file")
+            if path.suffix.lower() == ".md":
+                continue
+            if path.suffix not in PACKAGE_SUFFIXES:
+                raise BundleBuildError(f"{path} has an unsupported package file type")
+            files[f"{TASK}/{folder}/{path.name}"] = path.read_bytes()
     setup = (SOURCES / SETUP).read_bytes()
     BundleSetup.model_validate_json(setup)  # never ship a descriptor import would refuse
     files[SETUP] = setup

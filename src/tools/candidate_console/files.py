@@ -41,6 +41,22 @@ def write_all(descriptor: int, payload: bytes) -> None:
         view = view[os.write(descriptor, view) :]
 
 
+def write_once(directory: int, name: str, payload: bytes) -> None:
+    """Create a private file once under a trusted directory descriptor.
+
+    ``name`` is a caller-validated single filename; existing entries are refused.
+    """
+    descriptor = os.open(
+        name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory
+    )
+    try:
+        os.fchmod(descriptor, 0o600)
+        write_all(descriptor, payload)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def _file_bytes(value: str, *, owner_only: bool) -> bytes:
     path = canonical(value)
     directory = open_directory(path.parent)

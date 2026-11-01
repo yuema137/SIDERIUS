@@ -379,3 +379,34 @@ def test_status_projects_judge_verdicts_with_rationale_only_from_their_evidence(
             "confidence": "medium",
         },
     ]
+
+
+@pytest.mark.parametrize(
+    ("code", "message"),
+    [
+        ("loop_end", "paused segment lacks clean supervision"),
+        (
+            "candidate_preflight",
+            "research loop feedback must connect native tuning to interpretation; "
+            "review the workflow connections",
+        ),
+        (
+            "reusable_preflight",
+            "reusable preparation preflight failed; check the task manifest, data root, "
+            "LLM configuration and selected paths, then review again",
+        ),
+        (
+            "native_chain_admission",
+            "native chain admission failed; check the capture, launch settings, "
+            "input paths and required environment bindings, then review again",
+        ),
+    ],
+)
+def test_http_preserves_safe_admission_and_end_refusals(console_config, monkeypatch, code, message):
+    """The global HTTP projection must preserve the safe owner's actionable refusal."""
+    # Route-local Stop handling falls through to the same global OperationFailure
+    # handler used by submission; unrelated integrity errors stay sanitized above.
+    _stop_calls(monkeypatch, OperationFailure(code, message))
+    response = client(console_config).post(f"/api/operations/{uuid4()}/loop-stop", json={})
+    assert response.status_code == 409
+    assert response.json()["error"] == {"code": code, "message": message}
