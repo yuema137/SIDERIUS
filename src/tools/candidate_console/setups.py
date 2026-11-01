@@ -443,7 +443,7 @@ def _slug(label: str) -> str:
 
 def _materialize(workspace: Path, label: str, registry: SetupRegistry, source: bytes) -> str:
     """Create ``projects/<id>/`` (0700), its recovery folder (0700) and the source (0600)."""
-    from .settings_export import _write_once
+    from .files import write_once
     from .workspace import WorkspaceRefused, ensure_owned_directory
 
     taken = {setup.project.project_id for setup in registry.setups()}
@@ -478,7 +478,7 @@ def _materialize(workspace: Path, label: str, registry: SetupRegistry, source: b
             try:
                 os.fchmod(target, 0o700)
                 os.close(ensure_owned_directory(target, RECOVERY_NAME, created + RECOVERY_NAME))
-                _write_once(target, SOURCE_NAME, source)
+                write_once(target, SOURCE_NAME, source)
             finally:
                 os.close(target)
         except (OSError, WorkspaceRefused):

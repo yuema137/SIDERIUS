@@ -8,12 +8,14 @@ from tools.candidate_operations.host_ledger import HostScheduling, ledger_direct
 from tools.candidate_operations.models import OperationFailure
 
 from .config_errors import MissingConfigFile
-from .files import canonical, config_bytes, credential_values, token
+from .files import canonical, config_bytes, credential_values, require_owner_only_file, token
 from .models import ConsoleConfig
 from .settings_models import ResolvedConsole
 
 
-def validate_config(config: ConsoleConfig, *, workspace: Path | None = None) -> ConsoleConfig:
+def validate_config(
+    config: ConsoleConfig, *, workspace: Path | None = None, credential_metadata_only: bool = False
+) -> ConsoleConfig:
     """Validate inert facts; ``workspace`` adds its settings and library to protected paths."""
     from tools.candidate_prepare.admission import validate_read_only_exclusion
 
@@ -94,7 +96,10 @@ def validate_config(config: ConsoleConfig, *, workspace: Path | None = None) -> 
     token(config.auth_token_file)
     if config.credential_file is not None:
         # Validate private file facts and JSON/dotenv shape, without selecting/printing values.
-        credential_values(config.credential_file)
+        if credential_metadata_only:
+            require_owner_only_file(config.credential_file)
+        else:
+            credential_values(config.credential_file)
     return config
 
 
@@ -120,20 +125,28 @@ def load_config(path: str) -> ConsoleConfig:
     return validate_config(ConsoleConfig.model_validate_json(config_bytes(path)))
 
 
-def load_console(path: str) -> ResolvedConsole:
-    """Resolve omitted layout locations, then apply the unchanged ``validate_config``."""
+def load_console(path: str, *, credential_metadata_only: bool = False) -> ResolvedConsole:
+    """Resolve and validate; init checks credential metadata without reading values."""
     from .workspace import resolve_console
 
     resolved = resolve_console(config_bytes(path))
     context = replace(resolved.settings, console_path=canonical(path))
-    return validate_resolved(ResolvedConsole(resolved.config, context))
+    return validate_resolved(
+        ResolvedConsole(resolved.config, context), credential_metadata_only=credential_metadata_only
+    )
 
 
-def validate_resolved(resolved: ResolvedConsole) -> ResolvedConsole:
+def validate_resolved(
+    resolved: ResolvedConsole, *, credential_metadata_only: bool = False
+) -> ResolvedConsole:
     """``validate_config`` with workspace protection, then settings certification."""
     from .settings_file import validate_settings
 
-    config = validate_config(resolved.config, workspace=resolved.settings.workspace_root)
+    config = validate_config(
+        resolved.config,
+        workspace=resolved.settings.workspace_root,
+        credential_metadata_only=credential_metadata_only,
+    )
     resolved = ResolvedConsole(config, resolved.settings)
     validate_settings(resolved)
     return resolved

@@ -337,10 +337,15 @@ def test_negative_python_under_examples_mirror_is_detected(tmp_path: Path) -> No
     (template / "plugins").mkdir(parents=True)
     (template / "plugins" / "_task.py").write_text("pass\n")
     (template / "helper.py").write_text("pass\n")
+    bundle = tmp_path / "examples" / CONSOLE_BUNDLE_DIR
+    bundle.mkdir()
+    (bundle / "fetch_data.py").write_text("pass\n")
+    (bundle / "unexpected.py").write_text("pass\n")
     found = _python_files_under(tmp_path / "examples")
     rels = [p.relative_to(tmp_path).as_posix() for p in found]
     offenders = [r for r in rels if not _is_sanctioned_plugin_source(r)]
     assert offenders == [
+        "examples/console_bundle/unexpected.py",
         "examples/some_pack/loader.py",
         "examples/task_templates/some_template/helper.py",
         "examples/workflow_declarations/plugins/intrusion.py",

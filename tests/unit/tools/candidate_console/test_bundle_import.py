@@ -271,11 +271,10 @@ def test_fetch_verifies_the_bundle_before_executing_task_code(bundle, workspace,
 
 def test_read_bundle_accepts_the_trailing_slash_tab_completion_adds(bundle):
     """Defect: ``--from-bundle DIR/`` (as tab completion types it) is refused."""
-    from tools.candidate_console.example_bundle import BundleRefused, read_bundle
+    from tools.candidate_console.example_bundle import read_bundle
 
     assert read_bundle(f"{bundle}/").root == bundle
-    with pytest.raises(BundleRefused, match=re.escape("without '..'")):
-        read_bundle(f"{bundle}/../{bundle.name}/")
+    assert read_bundle(f"{bundle}/../{bundle.name}/").root == bundle
 
 
 @pytest.mark.parametrize("module", ["tools", "argparse"])
@@ -340,3 +339,95 @@ def test_fetch_uses_the_selected_verified_bundle_task_id(bundle, workspace, tmp_
     )
     assert result.returncode == 0, result.stderr
     assert sorted(path.name for path in (root / "data").iterdir()) == ["selected"]
+
+
+@pytest.mark.parametrize("spelling", ["relative_parent", "bundle_alias", "task_alias"])
+def test_fetch_resolves_operator_package_paths(bundle, workspace, tmp_path, spelling):
+    """Operator aliases resolve before verification; listed descendants remain no-follow."""
+    root, _ = workspace
+    if spelling == "relative_parent":
+        package = f"{bundle.name}/../{bundle.name}/task"
+    elif spelling == "bundle_alias":
+        alias = tmp_path / "bundle-link"
+        alias.symlink_to(bundle, target_is_directory=True)
+        package = str(alias / "task")
+    else:
+        alias = tmp_path / "selected-package"
+        alias.symlink_to(bundle / "task", target_is_directory=True)
+        package = str(alias)
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(bundle / "fetch_data.py"),
+            "--workspace",
+            str(root),
+            "--package",
+            package,
+        ],
+        cwd=bundle.parent,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith(f"Using task package: {bundle / 'task'}\n")
+    assert len(list((root / "data" / "quickstart").glob("*.csv"))) == 4
+
+
+def test_reader_refusal_does_not_prescribe_another_commands_flag(tmp_path):
+    """The shared reader's path error must not tell fetch_data to use --from-bundle."""
+    from tools.candidate_console.example_bundle import BundleRefused, read_bundle
+
+    with pytest.raises(BundleRefused) as refusal:
+        read_bundle(str(tmp_path / "missing"))
+    assert "--from-bundle" not in str(refusal.value)
+    assert "must resolve to an existing readable folder" in str(refusal.value)
+
+
+@pytest.mark.parametrize("relative", [False, True])
+def test_import_resolves_symlinked_download_parent(
+    bundle, workspace, tmp_path, monkeypatch, capsys, relative
+):
+    """Fetch and import must agree when downloads sit below a symlinked home."""
+    root, config = workspace
+    assert _fetch(bundle, root).returncode == 0
+    alias = tmp_path / "downloads-alias"
+    alias.symlink_to(bundle.parent, target_is_directory=True)
+    monkeypatch.chdir(tmp_path)
+    selected = Path(alias.name if relative else alias) / bundle.name
+    code, _, err = _import(monkeypatch, capsys, config, selected)
+    assert code == 0, err
+    assert (root / "tasks" / "quickstart" / "task.yaml").is_file()
+
+
+def test_import_still_refuses_symlinked_bundle_descendants(
+    bundle, workspace, tmp_path, monkeypatch, capsys
+):
+    """Resolving the selected root must not permit checksum-listed files to escape it."""
+    root, config = workspace
+    manifest = bundle / "task" / "task.yaml"
+    outside = tmp_path / "manifest.yaml"
+    manifest.rename(outside)
+    manifest.symlink_to(outside)
+    code, _, err = _import(monkeypatch, capsys, config, bundle)
+    assert code == 2
+    assert "symlink" in err
+    assert not (root / "tasks" / "quickstart").exists()
+
+
+def test_fetch_announces_resolved_package_before_generator_execution(bundle, workspace):
+    """The selected path must be visible before trusted task code starts executing."""
+    from tools.candidate_console.example_bundle import format_sums, parse_sums
+
+    generator = bundle / "task" / "plugins" / "_quickstart_task.py"
+    generator.write_text(generator.read_text() + '\nprint("generator executing", flush=True)\n')
+    sums = bundle / "SHA256SUMS"
+    sums.write_bytes(
+        format_sums({name: (bundle / name).read_bytes() for name in parse_sums(sums.read_bytes())})
+    )
+    result = _fetch(bundle, workspace[0])
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines()[:2] == [
+        f"Using task package: {bundle / 'task'}",
+        "generator executing",
+    ]
