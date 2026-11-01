@@ -68,11 +68,13 @@ def _reject_host_paths(value: JsonValue) -> None:
             raise ValueError(
                 "evaluation fingerprint contributor must not contain absolute host paths"
             )
-    elif isinstance(value, dict):
+        return
+    if isinstance(value, dict):
         for key, item in value.items():
             _reject_host_paths(key)
             _reject_host_paths(item)
-    elif isinstance(value, list):
+        return
+    if isinstance(value, list):
         for item in value:
             _reject_host_paths(item)
 
@@ -123,6 +125,22 @@ def _identity(
     return {"declaration": declaration, "component_kinds": kinds, "components": contributions}
 
 
+def _required_capabilities(
+    spec: EvaluationSpec,
+    registry: Mapping[str, ComponentKindRegistration],
+) -> frozenset[str]:
+    capabilities = {"evaluation rendering"}
+    for component in spec.components:
+        capabilities.update(registry[component.kind].required_capabilities)
+    if formula_terms(spec):
+        capabilities.add("formula aggregation")
+    if spec.constraints:
+        capabilities.add("feasibility constraints")
+    if isinstance(spec.selection, RubricBalanceSelection):
+        capabilities.add("rubric balancing")
+    return frozenset(capabilities)
+
+
 def compose_evaluation(
     raw: dict[str, Any],
     manifest_dir: str,
@@ -161,15 +179,7 @@ def compose_evaluation(
         if any(not isinstance(value, ResolvedComponent) for value in resolved.values()):
             raise ValueError("component loader must return a validated ResolvedComponent")
         validate_references(spec, registry, resolved)
-        capabilities = {"evaluation rendering"}
-        for component in spec.components:
-            capabilities.update(registry[component.kind].required_capabilities)
-        if formula_terms(spec):
-            capabilities.add("formula aggregation")
-        if spec.constraints:
-            capabilities.add("feasibility constraints")
-        if isinstance(spec.selection, RubricBalanceSelection):
-            capabilities.add("rubric balancing")
+        capabilities = _required_capabilities(spec, registry)
         identity = _identity(spec, registry, resolved, kinds, ctx)
         return ResolvedEvaluation(
             spec,
