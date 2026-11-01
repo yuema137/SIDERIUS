@@ -120,3 +120,52 @@ def test_recursive_changes_keep_sibling_literals_and_exact_source_edit_semantics
     payload["training_settings"]["launch"]["trial_time_budget_minutes"] = 2
     changed = type(document).model_validate_json(json.dumps(payload))
     assert '"trial_time_budget_minutes": 2,' in update_workflow_source(source, changed)
+
+
+@pytest.mark.parametrize("kind", ["document", "draft"])
+def test_browser_overflow_is_restored_before_document_admission(kind):
+    """Removing transport recovery rejects a valid authored iteration budget as null."""
+    source = EXAMPLE.with_name("research_loop_request_input.py").read_text()
+    source = source.replace("final_iteration=3,", "final_iteration=" + "1" + "0" * 310 + ",")
+    document = browser_document(source)
+    assert document["definition"]["loop"]["final_iteration"] is None
+    proposal = {"kind": kind, "source": source}
+    if kind == "document":
+        proposal["document"] = document
+    else:
+        proposal["draft"] = {"base_document": document, "bindings": []}
+    request = ReviewRequest.model_validate_json(
+        json.dumps({"expected_sha256": "0" * 64, "proposal": proposal})
+    )
+    admitted = request.proposal
+    if admitted.kind == "draft":
+        restored = admitted.draft.base_document
+    else:
+        assert admitted.kind == "document"
+        restored = admitted.document
+    assert restored == parse_workflow_source(source)
+
+
+def test_source_less_document_review_preserves_browser_rounded_literals(tmp_path):
+    """Legacy proposals need disk-source comparison; no transport anchor is supplied."""
+    source = literal_source()
+    editor = editor_for(tmp_path, source)
+    base = editor.read()
+    document = browser_document(source)
+    document["definition"]["task"]["manifest"] = "changed.yaml"
+    request = ReviewRequest.model_validate_json(
+        json.dumps(
+            {
+                "expected_sha256": base.sha256,
+                "proposal": {"kind": "document", "document": document},
+            }
+        )
+    )
+    review = editor.review(request)
+    assert review.source == source.replace('"task.yaml"', "'changed.yaml'")
+    editor.save(
+        SaveRequest(
+            source=review.source, proposal_sha256=review.sha256, expected_sha256=base.sha256
+        )
+    )
+    assert editor.project.source_file.read_bytes() == review.source.encode()

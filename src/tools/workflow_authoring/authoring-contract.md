@@ -605,6 +605,13 @@ changed/new values still pass through the native JSON model validator. Exact
 Python source is required to distinguish a deliberate null from overflow or to
 edit a numeric type/precision that JavaScript cannot represent.
 
+The admission regression uses an authored `final_iteration` beyond binary64 range:
+its browser projection is null, which cannot enter the native loop model unless
+recovery runs first. A separate source-less `DocumentProposal` regression checks
+disk-source numeric comparison during Review and Save; such callers cannot use
+pre-admission recovery without an anchor. Both paths share `source_updates._equal`
+as the numeric comparison authority.
+
 Already-canonical sources remain canonical after patching. The updater first
 retains source values, then uses the existing canonical renderer, preserving
 canonical loop add/remove byte parity and the renderer's validation diagnostics.
