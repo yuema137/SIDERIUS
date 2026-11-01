@@ -127,19 +127,32 @@ def setup_project(workspace: Path, setup_id: str) -> Project:
     )
 
 
+_REGISTRY_ERRORS = (
+    f"settings/{SETUPS_FILE} must be a private regular file (mode 600)",
+    f"settings/{SETUPS_FILE} is not valid {SETUPS_SCHEMA} JSON",
+)
+
+
+def _registry_problem(error: SettingsInvalid) -> str:
+    """Only exact framework-owned messages retain their corrective guidance."""
+    generic = console_error_message(error)
+    for safe in _REGISTRY_ERRORS:
+        if error.args == (safe,):
+            return safe
+    return generic.rstrip(".")
+
+
 def _read(path: Path) -> tuple[tuple[SetupEntry, ...], str | None]:
     try:
         payload = private_bytes(str(path))
     except FileNotFoundError:
         return (), None
     except (OSError, OperationFailure) as error:
-        raise SettingsInvalid(
-            f"settings/{SETUPS_FILE} must be a private regular file (mode 600)"
-        ) from error
+        raise SettingsInvalid(_REGISTRY_ERRORS[0]) from error
     try:
         document = SetupsFile.model_validate_json(payload)
     except ValidationError:
-        raise SettingsInvalid(f"settings/{SETUPS_FILE} is not valid {SETUPS_SCHEMA} JSON") from None
+        raise SettingsInvalid(_REGISTRY_ERRORS[1]) from None
     return document.setups, hashlib.sha256(payload).hexdigest()
 
 
@@ -240,7 +253,7 @@ class SetupStore:
         try:
             _, digest = _read(registry_path(workspace))
         except SettingsInvalid as error:
-            digest, problem = "unreadable", console_error_message(error)
+            digest, problem = "unreadable", _registry_problem(error)
         else:
             problem = None
         if digest != self._sha256:

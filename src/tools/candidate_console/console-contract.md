@@ -3177,3 +3177,32 @@ Browser evidence: `tests/browser/console_error_projection.mjs` injects a synthet
 private cause in the real HTTP fixture (`setups_fixture --error-projections`) and
 checks Task and setup-dialog text, response bodies and server logging. The ordinary
 Task and experiment-setup witnesses continue to cover the surrounding navigation.
+
+
+Editor `/review` and `AuthoringError.proposal` responses apply `safe_review` at the
+console adapter. It copies `task_reference_update.observation` and
+`current_observation`, logs each native failure privately, and replaces only the
+failure's `message` and `exception_type` with fixed summary text and the shared
+category identifier. Native authoring objects and diagnostic artifacts remain
+unchanged. Ordinary reviews and successful observations retain their existing
+representation. Both observations are sanitized before the browser's JSON details
+renderer receives them; client-side hiding is not the protection boundary.
+
+Registry stale errors retain exactly the two `_REGISTRY_ERRORS` literals owned by
+`setups._read`: private-file mode guidance and invalid-registry-schema guidance.
+`_registry_problem` compares the complete exception args tuple to these constants,
+returns the constant on a match, and otherwise uses fixed generic category text.
+It never trusts arbitrary SettingsInvalid text. Raw causes remain in logging;
+joined stale messages do not contain `. ;`/`.;` punctuation.
+
+The AST guard additionally checks format calls/percent formatting, exception args,
+and chained `x.result.failure.message` access, and counts duplicate statement
+occurrences (multiple raw expressions in one statement count once). Named safe
+projection calls are boundaries for the syntactic scan. Explicit reviewed baseline
+entries retain fixed guidance and typed legacy carriers for #1328. Alias, dynamic
+attribute, whole-model serialization, safe-owner shadowing and JavaScript gaps are
+listed in #1339; behavioral HTTP/browser sentinel tests cover the editor model
+projection independently of this syntactic guard. The editor browser witness
+renders real sanitized HTTP observations through the production JSON details
+component, using synthetic visibility gates only; it does not qualify saving or
+scientific compatibility.

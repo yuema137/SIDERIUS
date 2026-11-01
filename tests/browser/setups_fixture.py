@@ -35,10 +35,26 @@ def error_projections() -> None:
         )
 
     patch("tools.candidate_console.task_summary.observe", observe).start()
-    patch(
-        "tools.candidate_console.setups.check_setup_project",
-        side_effect=ValueError("private-browser-secret-sentinel"),
-    ).start()
+    from tests.unit.tools.candidate_console.test_editor_errors import failed_review
+    from tools.candidate_console.setups import check_setup_project
+    from tools.workflow_authoring.service import WorkflowAuthoring
+
+    original_review = WorkflowAuthoring.review
+
+    def check(project, config):
+        if project.project_id == "failed-setup":
+            raise ValueError("private-browser-secret-sentinel")
+        return check_setup_project(project, config)
+
+    def review(service, request):
+        return failed_review(
+            original_review(service, request),
+            service.project.project_root,
+            "private-browser-secret-sentinel",
+        )
+
+    patch("tools.candidate_console.setups.check_setup_project", check).start()
+    patch.object(WorkflowAuthoring, "review", review).start()
 
 
 def main() -> None:

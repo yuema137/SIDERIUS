@@ -304,7 +304,27 @@ def test_setup_failure_keeps_cause_only_in_server_log(workspace, monkeypatch, ca
     assert response.status_code == 409
     assert secret not in response.text
     assert "Invalid value" in response.text
+    assert ".;" not in response.text
     assert secret in caplog.text
     if surface == "validation":
         assert "projects/my-setup/ was left in place" in response.text
         assert (workspace / "projects/my-setup").is_dir()
+
+
+@pytest.mark.parametrize("problem", ["permissions", "json"])
+def test_registry_refusal_preserves_fixed_recovery_guidance(workspace, problem):
+    """The stale-registry response must keep fixed mode/schema guidance, without '.;'."""
+    api = _client(_load(workspace))
+    assert _create(api).status_code == 201
+    path = _registry(workspace)
+    if problem == "permissions":
+        path.chmod(0o644)
+        expected = "settings/experiment_setups.json must be a private regular file (mode 600)"
+    else:
+        path.write_text("not JSON private-raw-registry-sentinel")
+        expected = "settings/experiment_setups.json is not valid siderius.console-experiment-setups/v1 JSON"
+    response = _create(api, label="Second")
+    assert response.status_code == 409
+    assert expected in response.json()["error"]["message"]
+    assert ".;" not in response.text
+    assert "private-raw-registry-sentinel" not in response.text

@@ -602,7 +602,8 @@ coding agent, then press **Refresh**.
    If the panel says the package **could not be read**, it names the stage and the
    error category. Ask the task author to inspect the console server log for the
    underlying cause, fix the package, and press **Refresh**. Raw exception text
-   stays out of the panel because it can contain private paths or credentials. If it says
+   stays out of the panel because it can contain private paths or credentials. The same
+   protection applies to task-check details in Workflow reviews. If it says
    the summary is **not available** (for example, the sandbox or the data folder is
    missing), follow the hint shown and press **Refresh**.
 4. Open **Workflow**. Until a task is selected, Workflow and Run are greyed out

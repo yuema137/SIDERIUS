@@ -20,20 +20,44 @@ def _logging(node: ast.AST) -> bool:
     )
 
 
-def _raw_expression(node: ast.AST, caught: set[str]) -> bool:
-    """Recognize direct exception conversions and message carriers."""
+def _mentions_exception(node: ast.AST, caught: set[str]) -> bool:
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-        return node.func.id in {"str", "repr"} and any(
-            isinstance(arg, ast.Name) and arg.id in caught for arg in node.args
+        if node.func.id in {"console_error_message", "summary_error_message", "error_category"}:
+            return False
+    if isinstance(node, ast.Name):
+        return node.id in caught
+    return any(_mentions_exception(child, caught) for child in ast.iter_child_nodes(node))
+
+
+def _message_attribute(node: ast.AST, caught: set[str]) -> bool:
+    if not isinstance(node, ast.Attribute):
+        return False
+    if node.attr == "args":
+        return _mentions_exception(node.value, caught)
+    if node.attr != "message":
+        return False
+    return _mentions_exception(node.value, caught | {"failure"}) or any(
+        isinstance(item, ast.Attribute) and item.attr == "failure" for item in ast.walk(node.value)
+    )
+
+
+def _raw_expression(node: ast.AST, caught: set[str]) -> bool:
+    """Recognize direct formatting, exception args and nested failure messages."""
+    if isinstance(node, ast.Call):
+        name = node.func.id if isinstance(node.func, ast.Name) else None
+        method = node.func.attr if isinstance(node.func, ast.Attribute) else None
+        return (name in {"str", "repr", "format"} or method == "format") and any(
+            _mentions_exception(arg, caught)
+            for arg in (*node.args, *(kw.value for kw in node.keywords))
         )
     if isinstance(node, ast.FormattedValue):
-        return isinstance(node.value, ast.Name) and node.value.id in caught
-    if isinstance(node, ast.Attribute) and node.attr == "message":
-        return isinstance(node.value, ast.Name) and node.value.id in caught | {"failure"}
-    return False
+        return _mentions_exception(node.value, caught)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mod):
+        return _mentions_exception(node.right, caught)
+    return _message_attribute(node, caught)
 
 
-def _forwarding(tree: ast.AST) -> set[str]:
+def _forwarding(tree: ast.AST) -> list[str]:
     """Find direct conversions/interpolations and serialized message forwarding.
 
     This is a review tripwire, not whole-program taint analysis. Exact legacy
@@ -44,7 +68,7 @@ def _forwarding(tree: ast.AST) -> set[str]:
         node.name for node in ast.walk(tree) if isinstance(node, ast.ExceptHandler) and node.name
     }
     parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
-    findings = set()
+    findings: dict[ast.AST, str] = {}
     for node in ast.walk(tree):
         if not _raw_expression(node, caught):
             continue
@@ -55,8 +79,8 @@ def _forwarding(tree: ast.AST) -> set[str]:
             statement = node
             while not isinstance(statement, ast.stmt) and statement in parents:
                 statement = parents[statement]
-            findings.add(ast.unparse(statement))
-    return findings
+            findings[statement] = ast.unparse(statement)
+    return sorted(findings.values())
 
 
 def test_console_exception_forwarding_has_no_unreviewed_surfaces():
@@ -73,7 +97,23 @@ def test_console_exception_forwarding_has_no_unreviewed_surfaces():
     )
 
 
-@pytest.mark.parametrize("expression", ["str(cause)", "repr(cause)", "f'{cause}'", "cause.message"])
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "str(cause)",
+        "repr(cause)",
+        "format(cause)",
+        "f'{cause}'",
+        "f'{cause!r}'",
+        "'{}'.format(cause)",
+        "'{err}'.format(err=cause)",
+        "'%s' % cause",
+        "'%s' % (cause,)",
+        "cause.message",
+        "cause.args",
+        "str(cause.args[0])",
+    ],
+)
 def test_guard_detects_exception_forwarding(expression):
     """The guard must catch arbitrary exception variable names and all direct spellings."""
     tree = ast.parse(
@@ -85,3 +125,17 @@ def test_guard_detects_exception_forwarding(expression):
 def test_guard_detects_serialized_failure_and_allows_logging():
     assert _forwarding(ast.parse("return View(message=failure.message)"))
     assert not _forwarding(ast.parse("logger.error('cause: %s', failure.message)"))
+
+
+@pytest.mark.parametrize("expression", ["x.failure.message", "x.result.failure.message"])
+def test_guard_detects_chained_messages(expression):
+    assert _forwarding(ast.parse(f"return View(message={expression})"))
+
+
+def test_guard_counts_duplicate_statements_once_per_occurrence():
+    tree = ast.parse(
+        "try:\n    work()\nexcept Exception as cause:\n    view(str(cause))\n    view(str(cause))"
+    )
+    assert _forwarding(tree) == ["view(str(cause))", "view(str(cause))"]
+    # Multiple raw subexpressions in one statement must not inflate its count.
+    assert len(_forwarding(ast.parse("return str(x.failure.message)"))) == 1

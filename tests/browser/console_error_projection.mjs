@@ -51,7 +51,38 @@ try {
   assert.ok(diagnostics.includes(secret), 'Server retains the private cause');
   assert.deepEqual(faults, []);
   await page.screenshot({path: join(evidence, 'setup-safe-error.png'), fullPage: true});
-  console.log('PASS: Task/setup HTTP and browser projections exclude private causes; server logs retain them');
+  // A real editor review carries native target/current failure observations.
+  await page.locator('#setup-new-label').fill('Editor setup');
+  await page.locator('#setup-new-create').click();
+  await page.locator('#setup-new-dialog').waitFor({state: 'hidden'});
+  const headers = {Authorization: 'Bearer ' + metadata.token, Origin: metadata.origin};
+  const opened = await page.request.get(metadata.origin + '/api/editor/editor-setup', {headers});
+  const current = await opened.json();
+  const checked = await page.request.post(metadata.origin + '/api/editor/editor-setup/review', {
+    headers, data: {expected_sha256: current.sha256, proposal: {kind: 'source', source: current.source}}
+  });
+  assert.equal(checked.status(), 200);
+  assert.ok(!(await checked.text()).includes(secret));
+  const review = (await checked.json()).task_reference_update;
+  assert.match(review.observation.result.failure.message, /Invalid value/);
+  assert.match(review.current_observation.result.failure.message, /Unexpected error/);
+  // Exercise the production JSON details renderer with the safe HTTP observations.
+  // Only its visibility gates are synthetic; this does not assert save admission.
+  await page.evaluate(review => {
+    const parent = document.createElement('div'); parent.id = 'error-witness-review';
+    document.body.append(parent);
+    review.save_supported = true;
+    review.current_observation.result.candidate_check = {};
+    window.editorTaskControls.renderReview(parent, {review, connected: true, saving: false}, {});
+  }, review);
+  await page.locator('#error-witness-review summary').filter({hasText: 'Task declaration details'}).click();
+  const details = await page.locator('#error-witness-review pre').textContent();
+  assert.ok(!details.includes(secret));
+  assert.match(details, /Invalid value/); assert.match(details, /Unexpected error/);
+  assert.ok(diagnostics.includes(secret));
+  assert.deepEqual(faults, []);
+  await page.screenshot({path: join(evidence, 'editor-safe-observations.png'), fullPage: true});
+  console.log('PASS: Task/setup/editor HTTP and browser projections exclude private causes; server logs retain them');
 } finally {
   if (browser) await browser.close();
   lines.close();
