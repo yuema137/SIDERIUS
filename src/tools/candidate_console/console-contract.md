@@ -214,10 +214,10 @@ unpacked bundle folder and reuses every other `add-task` option except
 | `fetch_data.py`, `README.md` | data writer and human instructions |
 | `SHA256SUMS` | `<64 hex>  <path>` per line (`sha256sum -c` format), sorted by path, unique, every file except itself; paths must be relative POSIX without `.`, `..` or empty parts |
 
-**Verification** (`read_bundle`, before any write): trailing `/` characters of `DIR`
-are dropped (shell tab completion), then `DIR` must be absolute, normalized and
-canonical; `SHA256SUMS` must list `task/task.yaml`, `setup/setup.json` and
-`console-task.json`; each listed file is opened component by component with
+**Verification** (`read_bundle`, before any write): the operator-selected `DIR` is
+resolved strictly, accepting relative paths, trailing slashes, `..` and symlinked
+parents, then validated as a canonical readable directory; `SHA256SUMS` must list
+`task/task.yaml`, `setup/setup.json` and `console-task.json`; each listed file is opened component by component with
 `O_NOFOLLOW`, must be a regular file of at most 16 MiB, and its sha256 must match.
 The verified bytes are kept in memory and are the only bytes used later; files
 not listed are ignored and never copied. Errors: `<path> does not match
@@ -232,7 +232,16 @@ This does not authenticate the running script itself; run `sha256sum -c
 SHA256SUMS` independently before execution.
 `render_shards` calls `read_bundle` on the selected package's parent before
 executing task code. `--package` must name the `task/` folder in an unpacked
-bundle. The generator (`task/plugins/_quickstart_task.py`) and data manifest
+bundle. The operator-selected path is resolved strictly first (relative paths,
+`..` and symlink aliases are accepted); its resolved name must be `task`. There
+is no configured global root allowlist for this operator CLI. The resolved bundle
+root is the read boundary: listed descendants are still opened no-follow and
+cannot escape it. SHA256SUMS establishes integrity, not provenance; only run
+bundles you trust. Before executing generator code, the CLI prints
+`Using task package: <resolved bundle>/task` and flushes stdout.
+Resolution failures name `--package`; shared reader errors
+name the bundle directory without prescribing an importing CLI flag.
+The generator (`task/plugins/_quickstart_task.py`) and data manifest
 (`task/declared/data_manifest.json`) must both be listed. Execution and manifest
 parsing use the verified in-memory bytes, without reopening these files.
 The CLI verifies once and uses the validated `BundleTask.task_id` from that
@@ -241,6 +250,11 @@ Verification failures exit 2 with `fetch_data refused: ...` before task code
 executes or workspace data is written. Generated shard hashes are then checked
 against the verified data manifest before the existing write-once data writer
 runs. No task content, shard hashes or composition fingerprints change.
+
+**Write owner**: `files.write_once(directory, name, payload)` creates a
+caller-validated single filename with `O_EXCL | O_NOFOLLOW`, forces mode 0600,
+writes all bytes and fsyncs. Bundle copy, data generation, setup creation and
+settings export use this shared helper; existing entries are never replaced.
 
 **Pre-copy checks** (`plan_import`): console.json validates and resolves, has
 `workspace_root`, and `experiment_setups.browser_creatable` is true (else
@@ -283,10 +297,12 @@ created: <message>. Create one in the Workflow tab instead.`
 [--version V]`, version default `pyproject.toml`): `task/task.yaml` is
 `configs/task_composition/quickstart.yaml` loaded with `yaml.safe_load`, every
 string starting `../../examples/quickstart/` made package-relative and any other
-absolute or `..` string refused, dumped with `sort_keys=False` under a generated
-header; `task/declared` and `task/plugins` are the `.py`/`.json`/`.yaml` files of
+absolute or `..` string refused (including after prefix removal), dumped with
+`sort_keys=False` under a generated header; `task/declared` and `task/plugins` are the `.py`/`.json`/`.yaml` files of
 `examples/quickstart/{declared,plugins}` (READMEs excluded: their links are
-checkout-relative); `setup/setup.json`, `fetch_data.py`, `README.md` come from
+checkout-relative). Unsupported extensions, symlinks, special files and nested
+folders are refused rather than omitted; `__pycache__` directories are ignored.
+`setup/setup.json`, `fetch_data.py`, `README.md` come from
 `examples/console_bundle/`; `console-task.json` from `TASK_ID`, `TASK_LABEL` and
 `STARTER_VALUES`. Zip entries are sorted, `ZIP_STORED`, mtime 1980-01-01 00:00:00,
 Unix mode 0644; an existing output file is refused. Tests:
@@ -489,12 +505,20 @@ absent, selecting that library profile as `llm_profile`, and `settings/console.j
 write-once only when absent: `workspace_root`, `port` (default 8740, `--port`),
 `browser_origin`, `tasks: []`, `global_settings: {"browser_writable": true}`,
 `experiment_setups: {"browser_creatable": true}` (see "Experiment setups").
+Init parent ownership and group-write refusals share `_require_private_parent`: both
+name a private `mkdir -m 700 .../siderius` recovery where the caller can write,
+then the matching `--workspace` path. Foreign ownership never suggests chmod.
+
 **`--credential-file PATH`** (init only; `check`/`serve` reject it) is checked
 before anything is created by `files.require_owner_only_file`: `files.canonical`
 path, no-follow parent walk, `stat(follow_symlinks=False)` requiring a regular file
 with `st_uid == os.getuid()` and mode exactly 0600. The file is never opened, so no
 value is read or printed; a failed predicate exits 2 with one fixed message and
-creates nothing. A new `console.json` gets the top-level `credential_file: PATH`.
+creates nothing. The CLI closing validation passes `credential_metadata_only=True`
+through `_load`, `load_console`, `validate_resolved` and `validate_config`, so it
+also uses `require_owner_only_file` without reading credentials. Other callers
+keep format validation by default. A new `console.json` gets the top-level
+`credential_file: PATH`.
 An existing `console.json` is never rewritten: when its `credential_file` differs
 from `PATH` (or is absent), `init` still creates the missing folders and the
 per-task output roots below, then raises `workspace.CredentialFileNotAdded`

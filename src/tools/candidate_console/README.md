@@ -42,6 +42,19 @@ file against the bundle's `SHA256SUMS`, copies the package to
 creates the setup `quickstart-research-loop` from a workflow template. It never
 overwrites an existing `tasks/` folder.
 
+Run `fetch_data.py` before `add-task`: import finishes with `check`, which needs
+`data/quickstart/` to exist. If you imported first and only that check failed,
+write the data, then run:
+
+```bash
+.venv/bin/python -m tools.candidate_console check \
+  --config /absolute/project/siderius_workspace/settings/console.json
+```
+
+Do not import the same task again. If you choose `--task-id NAME` when importing,
+pass the same `--task-id NAME` to `fetch_data.py` so it writes `data/NAME/`.
+A successful data command ends with `Data ready in .../data/NAME`.
+
 ## Set up and open the console
 
 1. Create the console workspace inside a directory you own, for example your
@@ -91,8 +104,9 @@ overwrites an existing `tasks/` folder.
 
    `init` refuses the file unless it is a regular file you own with mode `600`,
    and never prints its contents. It writes the path into a new
-   `console.json`; the closing check then reads the file only to confirm it is
-   JSON or dotenv text, so an empty file passes and you can add the key later.
+   `console.json`; its closing check also checks metadata only, so you can add
+   the key later. Explicit `check` and `serve` commands read the file to validate
+   its JSON or dotenv format without printing values.
    If `console.json` already exists, `init` does not change it: it creates any
    missing folders, prints the exact `"credential_file": ...` line to add or
    substitute and the `check` command to run next, and exits with status 2.
