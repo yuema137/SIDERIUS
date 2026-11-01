@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 import random
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Literal
+from typing import Annotated, Any, ClassVar, Literal, NoReturn
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from torch.utils.data import Dataset
 
 from execute_tools.task_data_path import (
+    EpochSamplingParams,
     EvaluationReadRequest,
     HealthCoverageRequest,
     HealthCoverageResult,
@@ -39,6 +41,27 @@ class _EvaluationScope(BaseModel):
         if self.partitions != sorted({partition for _, partition, _ in self.rows}):
             raise ValueError("fixture partitions must exactly describe the evaluation rows")
         return self
+
+
+class _TrainingScope(BaseModel):
+    """Only training identities may supply the planning row count."""
+
+    kind: Literal["tuner_rows"]
+    leg: Literal["train"]
+    rows: list[tuple[Literal["train"], Partition, RowIndex]]
+
+
+class _PlanningDataset(Dataset[NoReturn]):
+    """Expose cardinality without enabling actual training on symbolic rows."""
+
+    def __init__(self, rows: int) -> None:
+        self.rows = rows
+
+    def __len__(self) -> int:
+        return self.rows
+
+    def __getitem__(self, index: int) -> NoReturn:
+        raise AssertionError("pseudo tuner fixture must not read training samples")
 
 
 class TunerComposedTask:
@@ -121,8 +144,14 @@ class TunerComposedTask:
             raise ValueError("foreign tuner scope")
         return decoded
 
-    def training_dataset(self, scope: object, params: Any) -> Any:
-        raise AssertionError("pseudo tuner fixture must not materialize training data")
+    def training_dataset(self, scope: object, params: EpochSamplingParams) -> Dataset[NoReturn]:
+        """Count scoped rows after epoch subsampling and the validation ceiling."""
+        rows = len(_TrainingScope.model_validate(scope).rows)
+        if rows and params.train_portion is not None:
+            rows = max(1, int(rows * params.train_portion))
+        if params.max_samples is not None:
+            rows = min(rows, params.max_samples)
+        return _PlanningDataset(rows)
 
     def validation_dataset(self, scope: object, params: Any) -> Any:
         raise AssertionError("pseudo tuner fixture must not materialize evaluation data")
