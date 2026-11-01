@@ -1442,8 +1442,11 @@ native writer lease it verifies the immutable predecessor/successor binding, rej
 a partial next slot, and reconstructs ChainState through the same native completed
 history fold before dispatching N+1. Captured inputs and original external identities
 must still match; changing workflow source or configuration requires a new run.
-Historical paused receipts can coexist with later bodies only through the exact
-verified successor binding. There is no general partial-record acceptance switch.
+A paused receipt verifies its completed iterations independently of whether the next
+iteration slot is unused. Unbound files in that next slot are never accepted as results:
+Resume review and dispatch refuse them, while End can close the verified pause.
+Historical resumed work still requires the exact verified successor binding. There is
+no general partial-record acceptance switch.
 
 Resume does not recover failed, stopped, interrupted, timed-out or uncertain runs.
 It does not change the declared loop limit or scientific history policy. The existing
@@ -1996,3 +1999,12 @@ Tests: `tests/unit/tools/candidate_worker/test_parallel_dispatch.py` (serial
 golden in any completion order, slot never exceeded, drain + forged receipt,
 SIGTERM kills real unit groups), `test_parallel_lock.py`,
 `tests/unit/agent/test_token_unit.py`.
+
+
+### Loop admission refusal owner
+
+`loop_models.admit_loop` returns `None` or a `LoopAdmissionRefusal` with
+reason `profile`, `shape` or `feedback`. Messages are fixed, path-free text;
+`require_loop` raises that refusal for existing effect and evidence boundaries.
+Operations must render this typed reason instead of inferring a policy from the
+request after catching an arbitrary `ValueError`.

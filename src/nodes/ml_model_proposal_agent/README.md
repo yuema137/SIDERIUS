@@ -19,6 +19,10 @@ The runtime preflight is advisory. If a draft omits a temporal segment size
 needed by the estimate, the node records why it skipped the estimate and returns
 the proposal. Runtime decisions use measured evidence after implementation.
 Invalid estimator inputs and unexpected errors still surface.
+If a draft explicitly sets the segment size to zero or a negative number,
+schema validation refuses it before estimation. The pipeline sends that error
+back to the proposing stage for correction; legacy mode returns the validation
+error without an inner retry.
 
 In a workflow's LLM JSON file, `propose.comparison`, `propose.reasoning` and
 `propose.proposing` select the model for each pipeline stage. Each selection

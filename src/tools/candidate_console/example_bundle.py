@@ -168,20 +168,15 @@ def _read_file(root: int, name: str) -> bytes:
 def read_bundle(directory: str) -> VerifiedBundle:
     """Verify every ``SHA256SUMS`` entry and validate the two descriptors.
 
-    Trailing slashes (shell tab completion) are dropped before the path checks.
+    Resolve the operator-selected root before validating it; listed descendants
+    remain no-follow. Checksums establish integrity, not provenance.
     """
-    directory = directory.rstrip("/") or "/"
-    if not os.path.isabs(directory) or os.path.normpath(directory) != directory:
-        raise BundleRefused(
-            f"--from-bundle must be an absolute path without '..', "
-            f"for example {os.path.abspath(directory)}"
-        )
     try:
-        root_path = canonical(directory)
+        root_path = canonical(str(Path(directory).resolve(strict=True)))
         root = open_directory(root_path)
-    except (OSError, OperationFailure):
+    except (OSError, RuntimeError, OperationFailure):
         raise BundleRefused(
-            f"{directory} must be an existing folder whose path has no symlinks"
+            f"bundle directory {directory!r} must resolve to an existing readable folder"
         ) from None
     try:
         expected = parse_sums(_read_file(root, SUMS))
@@ -256,7 +251,7 @@ def plan_import(bundle: VerifiedBundle, config: str, task_id: str | None) -> Imp
 def copy_package(bundle: VerifiedBundle, target: ImportTarget) -> Path:
     """Write the verified ``task/`` bytes write-once below ``tasks/``; returns the manifest."""
     from .add_task import TASKS_DIRECTORY, AddTaskRefused
-    from .settings_export import _write_once
+    from .files import write_once
     from .workspace import WorkspaceRefused, ensure_owned_directory
 
     opened: dict[str, int] = {}
@@ -285,7 +280,7 @@ def copy_package(bundle: VerifiedBundle, target: ImportTarget) -> Path:
                 if path not in opened:
                     opened[path] = ensure_owned_directory(opened[parent], part, path)
                 parent = path
-            _write_once(opened[parent], PurePosixPath(name).name, payload)
+            write_once(opened[parent], PurePosixPath(name).name, payload)
     except (OSError, WorkspaceRefused) as error:
         left = f"; {target.package} was left in place" if opened else ""
         raise AddTaskRefused(f"copying the task package failed ({error}){left}") from None

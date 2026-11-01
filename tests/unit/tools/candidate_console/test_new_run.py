@@ -395,3 +395,29 @@ def test_review_refuses_single_file_mode_for_a_task_without_tidmad_topology(tmp_
     # A TIDMAD-topology profile keeps its single-file path: is_trial false stays admitted.
     tidmad = _tidmad_topology_manifest(tmp_path)
     check_trainable_launch(_training_document(is_trial=False), task_manifest=tidmad)
+
+
+def test_busy_response_names_blocking_operation(fresh, monkeypatch):
+    """The blocking claim's UUID survives HTTP sanitization without raw exception text."""
+    from uuid import uuid4
+
+    from tests.unit.tools.candidate_console.test_http import client
+
+    adapter, selection, _ = fresh
+    review = adapter.review("fresh", selection)
+    blocker = uuid4()
+
+    def fail(*args, **kwargs):
+        raise OperationFailure("busy", "/private/secret", blocking_operation_id=blocker)
+
+    monkeypatch.setattr("tools.candidate_console.service.submit_operation", fail)
+    response = client(adapter.console.config).post(
+        "/api/editor/fresh/reusable-preparations/prepare",
+        json=intent(review).model_dump(mode="json"),
+    )
+    assert response.status_code == 409
+    assert response.json()["error"] == {
+        "code": "busy",
+        "message": "another operation is active or unresolved",
+        "blocking_operation_id": str(blocker),
+    }

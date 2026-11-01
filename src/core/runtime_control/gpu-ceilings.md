@@ -120,7 +120,12 @@ refusal under all enforcement modes while identifying retryable sampling.
 phase owner consumes it using the bounded existing attempt allowance and short
 backoff documented in the tuner contract. Missing executable/UUID/telemetry and
 invalid visibility are not transient query failures. `process_visibility.py`
-is unchanged. Protected native execution recovery remains issue #1280.
+is unchanged. Exceptions reported through `sampling_error` receive the same
+validated isolated refusal detail as typed query failures. Protected native
+execution sets the internal `require_evidence=True` evaluator argument, disabling
+trial evidence-gap permission while retaining the recorded mode, and uses the same
+tuner recovery owner. See [protected lifecycle](native-gpu-execution.md#failure-and-persistence)
+for sampling/terminal receipts and retained preparation allowance.
 
 Focused evidence: `test_gpu_accounting.py` exercises timeout and nonzero exit in
 both query stages, ordinary/isolated admission, baseline transport and persistent

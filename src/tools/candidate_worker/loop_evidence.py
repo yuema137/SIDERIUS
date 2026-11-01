@@ -113,9 +113,9 @@ def verified_loop(
 ) -> VerifiedLoop:
     """``verify_loop`` plus the re-derived input anchor a continuation resumes from."""
     from .loop import pause_requested, stop_requested
-    from .loop_models import admit_loop
+    from .loop_models import require_loop
 
-    admit_loop(request)
+    require_loop(request)
     loop = request.preview.document.definition.loop
     assert loop is not None
     if (
@@ -148,7 +148,13 @@ def verified_loop(
     # A segment may pause only after dispatching its own body, never at its resume point.
     resumed_at, checkpoints = verify_segment(initial, receipt)
     successor = has_successor(initial, receipt)
-    if trace.attempted_iterations < loop.final_iteration and not successor:
+    # A paused receipt proves completed work, not eligibility to dispatch again.
+    # Resume admission and resume_history separately require an unused next slot.
+    if (
+        receipt.status != "paused"
+        and trace.attempted_iterations < loop.final_iteration
+        and not successor
+    ):
         require_unused_next(request, initial, trace.attempted_iterations)
     from .loop_resume import segment_advice
 

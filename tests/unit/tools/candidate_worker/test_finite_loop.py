@@ -609,7 +609,7 @@ def test_loop_on_unsupported_profile_is_refused_before_record_and_dispatch(
     # Exception payloads may include secrets or arbitrarily long raw input. Neither
     # the profile-specific refusal nor the generic I/O refusal may forward them.
     for error_type, message in (
-        (ValueError, "research loops require the native-interpretation-candidate profile"),
+        (ValueError, "candidate inputs or routes changed; review again"),
         (OSError, "candidate inputs or routes changed; review again"),
     ):
         with monkeypatch.context() as patch:
@@ -814,6 +814,108 @@ def test_readback_refuses_a_segment_that_continued_past_a_condition_input_reques
     )
     with pytest.raises(ValueError, match="loop continued past a condition input request"):
         verify_loop(replayed, parent, receipt)
+
+
+@pytest.mark.parametrize(
+    ("case", "reason", "message"),
+    [
+        (
+            "profile",
+            "profile",
+            "research loops require the native-interpretation-candidate profile",
+        ),
+        (
+            "extra_node",
+            "shape",
+            "research loops require a native interpretation-to-tuning iteration; "
+            "review the workflow nodes and connections",
+        ),
+        (
+            "no_tuning",
+            "shape",
+            "research loops require a native interpretation-to-tuning iteration; "
+            "review the workflow nodes and connections",
+        ),
+        (
+            "feedback",
+            "feedback",
+            "research loop feedback must connect native tuning to interpretation; "
+            "review the workflow connections",
+        ),
+    ],
+)
+def test_loop_admission_reason_survives_submission(
+    prepared, tmp_path, monkeypatch, case, reason, message
+):
+    """#1244: structural refusals must not be misreported as changed input files."""
+    from unittest.mock import Mock
+    from uuid import uuid4
+
+    from tools.candidate_operations import (
+        CandidateOperation,
+        OperationStoreConfig,
+        submit_operation,
+    )
+    from tools.candidate_operations.models import OperationFailure
+    from tools.candidate_worker.loop_models import admit_loop
+
+    request = loop_request(prepared)
+    definition = request.preview.document.definition
+    if case == "profile":
+        preview = request.preview.model_copy(update={"execution_profile": None})
+    else:
+        if case == "extra_node":
+            interpreter = next(node for node in definition.nodes if node.id == "interpret")
+            definition = definition.model_copy(
+                update={
+                    "nodes": (*definition.nodes, interpreter.model_copy(update={"id": "other"})),
+                }
+            )
+        elif case == "no_tuning":
+            definition = definition.model_copy(
+                update={"nodes": tuple(n for n in definition.nodes if n.capability != "tuning")}
+            )
+        else:
+            definition = definition.model_copy(
+                update={
+                    "loop": definition.loop.model_copy(
+                        update={
+                            "feedback": definition.loop.feedback.model_copy(
+                                update={"target": "other"}
+                            ),
+                        }
+                    )
+                }
+            )
+        preview = request.preview.model_copy(
+            update={
+                "document": request.preview.document.model_copy(update={"definition": definition}),
+            }
+        )
+    request = request.model_copy(update={"preview": preview})
+    refusal = admit_loop(request)
+    assert refusal is not None and refusal.reason == reason
+    assert str(refusal) == message
+    if case in {"feedback", "no_tuning"}:
+        # Exercise typed refusal rendering independently of schema validation.
+        request = loop_request(prepared)
+        monkeypatch.setattr(
+            "tools.candidate_operations.submit.fresh_preview", Mock(side_effect=refusal)
+        )
+    config = OperationStoreConfig(
+        state_root=str(tmp_path / "state"),
+        preparation_roots=(str(tmp_path),),
+        candidate_roots=(str(tmp_path),),
+    )
+    spawn = Mock()
+    monkeypatch.setattr("tools.candidate_operations.submit.spawn", spawn)
+    submission = CandidateOperation(request_id=uuid4(), request=request)
+    with pytest.raises(OperationFailure) as error:
+        submit_operation(config, submission, launch_environment={})
+    assert error.value.detail.code == "candidate_preflight"
+    assert error.value.detail.message == message
+    assert not (Path(config.state_root) / "operations" / str(submission.request_id)).exists()
+    spawn.assert_not_called()
 
 
 def test_console_outcome_reads_failed_proposal_iteration(

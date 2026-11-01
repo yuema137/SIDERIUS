@@ -383,6 +383,7 @@ class OutcomeEvidence(PreviewModel):
 
 
 class StatusView(PreviewModel):
+    preparation_error: str | None = Field(default=None, exclude_if=lambda value: value is None)
     operation_id: UUID
     kind: OperationKind
     request_digest: str

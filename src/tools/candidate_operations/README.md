@@ -103,7 +103,7 @@ When `state` is `completed`, `receipt.status` says what the native step reported
 | `prepared` | Preparation captured the inputs; nothing ran |
 | `accepted` / `rejected` | Candidate validation passed / failed; no training implied |
 | `completed` | Train & tune returned; read scores and Health before trusting results |
-| `paused` / `stopped` | A research loop paused (resumable) or stopped (final) |
+| `paused` / `stopped` | A research loop paused (review before resuming) or stopped (final) |
 | `cancelled` | Stopped at once by `cancel` |
 | `failed` / `timed_out` / `interrupted` | The native step did not finish; read the native log |
 
@@ -428,6 +428,12 @@ browser console offers the same actions in Monitor.
    was recorded; check `status` until the run reports `paused`, `stopped` or
    `completed`. If the request arrives during the last iteration, that iteration
    finishes and the run reports `completed`.
+
+   To end a loop that is already paused, use `stop-loop` with its paused operation
+   UUID. Completed results are kept, and the loop cannot resume afterward. This
+   can succeed even when Resume is unavailable, such as when unfinished files
+   occupy the next iteration's folder. The worker must have finished cleanly;
+   an active or uncertain successor still prevents End.
 
 2. To resume a paused loop, review it and save the resume request once:
 
