@@ -101,6 +101,10 @@ class TrainingBudgetExecution:
         for phase, unit, count in workloads:
             if phase == "validation" and validation_rows is None:
                 continue
+            existing = session.observation.components.get(phase)
+            if phase == "training" and existing is not None and existing.actual_seconds is not None:
+                # The planned optimizer boundary already reconciled this scope.
+                continue
             session.record_executed_workload(
                 ResolvedPhaseWorkload(
                     phase=phase,
@@ -233,10 +237,10 @@ def complete_training_workload(
         if budget_execution is not None and completed_epochs < epoch_limit
         else "requested_horizon"
     )
-    # Planned completion was already published before final validation. Keep
-    # that boundary's duration and do not finalize its verifier a second time.
+    # A planned-boundary actual is authoritative even without eligible completion.
+    # Keep its duration and do not finalize its verifier a second time.
     training = session.observation.components["training"]
-    if training.completion is None:
+    if training.actual_seconds is None:
         session.complete_phase_workload(
             "training",
             actual_seconds=training_seconds,

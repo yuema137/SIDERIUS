@@ -347,7 +347,10 @@ reconciled counts. The training component completes at the final planned optimiz
 boundary, before required validation starts. `complete_planned_optimizer_work`
 reconciles adaptive training counts and delegates evidence to the session owner;
 it does not complete validation. Validation rejection or failure retains that
-training actual. Earlier epochs keep future training predicted; cooperative stops
+training actual. Whole-epoch finalization skips training reconciliation and actual
+publication once that actual is recorded, including when verification did not
+permit completion. This preserves calibration provenance and the optimizer
+boundary duration without promoting unverified work to completion. Earlier epochs keep future training predicted; cooperative stops
 are reconciled after the last successful whole epoch. Candidate success still
 requires successful validation. Inference completion follows full deliverable consumption. Completed actuals,
 including setup, are charged once without the safety multiplier; estimates for

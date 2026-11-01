@@ -76,7 +76,9 @@ long that same work would take. The default `completed-workload-v1` policy check
 its actual elapsed time against the budget. Remaining work still needs the
 existing conservative checks. Once the last planned optimizer step finishes,
 validation admission uses the measured training cost. A candidate still needs
-successful validation; inference must finish writing every prediction before it
+successful validation. Later finalization preserves the training duration recorded
+before validation, even when its timing evidence cannot qualify for completion;
+inference must finish writing every prediction before it
 can pass.
 
 This does not make a few fast batches a reliable speed estimate. Their timing
