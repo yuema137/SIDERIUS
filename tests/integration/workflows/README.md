@@ -18,3 +18,13 @@ offline witness:
 
 Owner: `src/workflows/` and launch adapters. See the
 [integration map](../README.md).
+
+To check vocabulary growth and promotion across iterations with supplied results:
+
+```bash
+.venv/bin/python -m pytest tests/integration/workflows/test_vocab_accumulation.py -q
+```
+
+The tests supply observed prediction references and explicitly bind a dataset
+profile where prompt rendering needs it. See the
+[vocabulary fixture contract](vocabulary-fixture-contract.md).
