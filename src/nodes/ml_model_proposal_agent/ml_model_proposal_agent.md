@@ -485,3 +485,13 @@ separator, colons and Unicode control characters are refused through the existin
 retry feedback. Names are never sanitized. The workflow independently repeats
 this check before name-derived attempt renaming and tuning directory creation,
 including operator-supplied fixed plans; archival decoding remains permissive.
+
+
+## Structured evaluation prompt context
+
+Legacy and pipeline messages, including corrections/retries, receive the shared user-message block. Comparison and causal metric context refer to that block; prediction direction/refutation rules still apply to their named metric.
+
+The run-scoped composition supplies this context through the shared append path.
+Absence adds no bytes and never enters the new boundary under historical profiles.
+The [evaluation contract](../../execute_tools/evaluation-contract.md#evaluation-prompt-rendering)
+owns formatting, profile admission and runtime capability distinctions.

@@ -330,3 +330,13 @@ permissive. Component validation does not promise universal OS filename
 portability, safe generated Python syntax or confinement against existing symlinks.
 
 Independent output symbols are bound from actual outputs, never forced to the synthetic input extent. Shared symbols and fixed dimensions remain mandatory. See [probe ownership](../../agent/skills/model_io_probe_skill.md) for validation and synthetic-target refusal semantics.
+
+
+## Structured evaluation prompt context
+
+Model and custom-loss reasoning, code generation and repair receive the shared block. Evaluation preference does not change the declared training objective or grant measurement capability.
+
+The run-scoped composition supplies this context through the shared append path.
+Absence adds no bytes and never enters the new boundary under historical profiles.
+The [evaluation contract](../../execute_tools/evaluation-contract.md#evaluation-prompt-rendering)
+owns formatting, profile admission and runtime capability distinctions.

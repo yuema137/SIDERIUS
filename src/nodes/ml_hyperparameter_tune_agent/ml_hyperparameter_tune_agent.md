@@ -2240,3 +2240,13 @@ disabling does not weaken enforcement or synthesize replacement context.
 See the [disclosure contract](../../../docs/agent-reference/mechanisms/constraint-disclosure.md)
 for call coverage, planner/reflector timing snapshots, resume identity and
 experiment-owned historical rendering requirements.
+
+
+## Structured evaluation prompt context
+
+Planner and reflector receive the shared block through their existing constraint append calls. deterministic_ranking is visible when declared; this renderer does not implement formula or rubric execution.
+
+The run-scoped composition supplies this context through the shared append path.
+Absence adds no bytes and never enters the new boundary under historical profiles.
+The [evaluation contract](../../execute_tools/evaluation-contract.md#evaluation-prompt-rendering)
+owns formatting, profile admission and runtime capability distinctions.

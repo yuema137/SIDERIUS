@@ -34,7 +34,7 @@ There is **no `version` field**. (Recorded as a known gap — see
 | `metric` | ✅ | the primary metric: declaration + implementation | **run refused** |
 | `task_config` | ✅ | `task_description` + `forward_contract` | **run refused** |
 | `task_health` | ✅ *(as a statement)* | the health family, or an explicit `none: true` | **run refused** — see below |
-| `evaluation` | — | structured candidate selection, constraints and component meanings; composition/inspection only until runtime capabilities land | no evaluation identity key or added prompt bytes |
+| `evaluation` | — | structured candidate selection, constraints and component meanings; shared agent rendering; advanced execution remains capability-gated | no evaluation identity key or added prompt bytes |
 | `secondary_metrics` | — | a list of observational metrics | the run has none: no record keys, no rendered bytes |
 | `proposal_blocks` | — | task science for the proposer's prompts | the proposer gets **no** task science |
 | `implementor_blocks` | — | task science for the implementor's prompts | the implementor renders nothing |
@@ -994,9 +994,9 @@ setup failures retain their separate typed transport.
 ## Structured evaluation declarations (composition and inspection)
 
 The optional `evaluation` section declares candidate selection separately from
-training `objective`. It currently composes and validates, but launch refuses until
-its required runtime capabilities land; even `selection: {kind: primary}` requires
-`evaluation rendering`. An absent section adds no semantic payload key or prompt
+training `objective`. It composes, validates and renders for agents. Primary-only metric selection can
+launch; formula aggregation, feasibility, measurement and rubric runtime capabilities
+remain independently guarded. An absent section adds no semantic payload key or prompt
 bytes. Full fingerprints can still change with the release's estimation assembly.
 
 ```yaml

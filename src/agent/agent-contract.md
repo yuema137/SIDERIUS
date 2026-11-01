@@ -154,10 +154,11 @@ integration tests exercise the stub bridge by default; see the
 ## Structured evaluation declaration boundary
 
 Task compositions may carry an opt-in `evaluation` declaration with component
-meanings, quantitative selection and constraints, or rubric references. E1 validates
-and fingerprints this declaration; agent prompts do not consume it yet. Launch
-therefore refuses the `evaluation rendering` capability until #1293 wires the shared
-renderer. An absent declaration keeps existing prompt bytes. Rubric judgment is
+meanings, quantitative selection and constraints, or rubric references. Composition validates and fingerprints the declaration. The shared constraint
+append path renders it through `evaluation.spec` using a scoped, copyable context.
+The absent-spec gate is outside the boundary, preserving historical profile
+admission and message bytes. Primary-only metric evaluation can launch; other
+evaluation capabilities retain their own guards. Rubric judgment is
 never arithmetic in MetricOrder; #1297 owns any new candidate-result projector and
 versioned judge evidence. The exact schema and future Health/source-metric binding
 are in the [evaluation contract](../execute_tools/evaluation-contract.md).

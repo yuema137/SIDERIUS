@@ -809,3 +809,13 @@ performs no persistence and does not run optional analysis. False cold-start inp
 raises `ValueError`. The implementation lives in private `cold_start.py`; consumers
 use the public package export. `ResultInterpretationAgent.run` retains its live
 name guard and optional analysis-brief stage around this shared builder.
+
+
+## Structured evaluation prompt context
+
+Per-model, synthesis, dedup and analysis-brief messages receive the shared block. The active-evaluation display noun is recorded score; serialized denoising_score fields and historical evidence remain unchanged.
+
+The run-scoped composition supplies this context through the shared append path.
+Absence adds no bytes and never enters the new boundary under historical profiles.
+The [evaluation contract](../../execute_tools/evaluation-contract.md#evaluation-prompt-rendering)
+owns formatting, profile admission and runtime capability distinctions.

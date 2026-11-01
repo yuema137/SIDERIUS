@@ -113,7 +113,6 @@ def test_composes_but_launch_names_every_missing_capability(task, tmp_path):
             pytest.fail("unimplemented evaluation launched")
     for name in (
         "composition succeeded",
-        "evaluation rendering",
         "formula aggregation",
         "feasibility constraints",
     ):
@@ -292,7 +291,9 @@ def test_scoring_child_cannot_bypass_launch_capability_guard(task):
     from workflows.task_composition import compose_metric_from_manifest
 
     compose(task, declaration(task))
-    with pytest.raises(TaskCompositionError, match="evaluation rendering"):
+    assert compose_metric_from_manifest(str(task / "composition.yaml")).spec.id
+    compose(task, formula(declaration(task)))
+    with pytest.raises(TaskCompositionError, match="formula aggregation"):
         compose_metric_from_manifest(str(task / "composition.yaml"))
 
 
@@ -418,3 +419,18 @@ def test_plugin_programming_error_is_not_reclassified_as_configuration(task):
     (task / "kind.py").write_text(source)
     with pytest.raises(RuntimeError, match="broken plugin implementation"):
         compose(task, spec)
+
+
+def test_primary_evaluation_binds_prompt_context_and_refuses_lost_binding(task, tmp_path):
+    from agent.evaluation_context import bind_evaluation_prompt_context
+    from agent.prompt_templates.constraints import append_constraint_disclosure
+    from workflows.task_composition import CompositionNotBoundError, verify_composition_is_bound
+
+    composed = compose(task, declaration(task))
+    with bind_run_task_composition(composed, physical_data_root=str(tmp_path)):
+        verify_composition_is_bound(composed)
+        assert "Coverage of the evaluation bands." in append_constraint_disclosure("prompt", None)
+        with bind_evaluation_prompt_context(None, composed.metric.spec, None):
+            with pytest.raises(CompositionNotBoundError, match="evaluation"):
+                verify_composition_is_bound(composed)
+    assert "[TASK EVALUATION]" not in append_constraint_disclosure("prompt", None)
