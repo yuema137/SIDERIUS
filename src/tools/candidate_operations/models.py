@@ -240,6 +240,7 @@ class ProcessIdentity(PreviewModel):
     boot_id: str
     pid: int = Field(gt=0)
     start_ticks: int = Field(ge=0)
+    pid_namespace_inode: int | None = Field(default=None, gt=0)
 
 
 class ProcessObservation(PreviewModel):

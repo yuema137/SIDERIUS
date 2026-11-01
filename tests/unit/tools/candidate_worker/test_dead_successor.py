@@ -80,6 +80,7 @@ def test_dead_successor_can_end_without_reusing_reservation(
                 operation_id=next_id,
                 request_digest=record.request_digest,
                 boot_id="fixture-boot",
+                pid_namespace_inode=Path("/proc/self/ns/pid").stat().st_ino,
                 pid=fake_pid,
                 start_ticks=100,
             ),
@@ -117,6 +118,20 @@ def test_dead_successor_can_end_without_reusing_reservation(
     assert predecessor.reason == "loop_successor_failed"
     assert predecessor.successor_operation_id == next_id
     assert predecessor.receipt_digest == review.receipt_digest
+
+    # Another namespace (or a legacy marker) cannot authorize admission or End.
+    for namespace in (None, Path("/proc/self/ns/pid").stat().st_ino + 1):
+        publish(
+            identity_path,
+            identity.model_copy(update={"pid_namespace_inode": namespace}),
+            replace=True,
+        )
+        assert read_operation(config, next_id).state == "unknown"
+        assert not releasable(config, next_id)
+        with pytest.raises(OperationFailure) as refused:
+            request_loop_stop(config, first_id)
+        assert refused.value.detail.code == "loop_end"
+    publish(identity_path, identity, replace=True)
 
     # A surviving or unobservable session prevents release and End, even with a dead leader.
     for members in (1, None):

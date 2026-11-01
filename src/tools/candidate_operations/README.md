@@ -120,6 +120,15 @@ To stop a running candidate, see
 [Stop a running candidate now](#stop-a-running-candidate-now). Captured native
 continuation is limited to the explicit route below.
 
+Keep status readers and the console in the same container/PID namespace that
+launched the operation. Containers can give the same process different PID
+numbers, so a reader in another namespace cannot safely decide that it ended.
+That uncertainty blocks release of its slot and End of an abandoned loop.
+Older records without namespace information remain readable but cannot prove
+process exit on the same boot. Preserve them; see the
+[observation boundaries](candidate-operations-contract.md#host-reservation-ledger)
+for the compatibility rule.
+
 Use `--kind operation` for wrapper output. Logs and full native receipts are
 trusted local data and may contain sensitive task or plugin output. Byte cursors
 advance using `next_offset`; chunks can split UTF-8 characters. An offset beyond
