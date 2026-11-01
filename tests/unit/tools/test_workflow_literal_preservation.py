@@ -1,7 +1,7 @@
 """Issue 961: unrelated browser edits must not rewrite Professional source values."""
 
 import json
-import subprocess
+import math
 from pathlib import Path
 
 import pytest
@@ -35,20 +35,19 @@ def literal_source() -> str:
     )
 
 
+def _browser_number(value: str) -> int | float | None:
+    number = float(value)
+    if not math.isfinite(number):
+        return None
+    return int(number) if number.is_integer() else number
+
+
 def browser_document(source: str) -> dict:
-    """Use actual JS serialization, including binary64 integer rounding."""
+    """Model Number losses; the browser witness exercises real JS serialization."""
     return json.loads(
-        subprocess.run(
-            [
-                "node",
-                "-e",
-                "let s='';process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>process.stdout.write(JSON.stringify(JSON.parse(s))))",
-            ],
-            input=parse_workflow_source(source).model_dump_json(),
-            text=True,
-            capture_output=True,
-            check=True,
-        ).stdout
+        parse_workflow_source(source).model_dump_json(),
+        parse_int=_browser_number,
+        parse_float=_browser_number,
     )
 
 
