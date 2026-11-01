@@ -346,3 +346,19 @@ credential checks use the same provider metadata and argument projections.
 These checks report required credential names, never values, and cannot prove
 provider/model availability. New provider support does not add task defaults,
 change prompts, or modify deterministic training and evaluation.
+
+## Evaluation declaration admission
+
+The task composer delegates optional `evaluation` resolution to
+`evaluation_composition.compose_evaluation`. It carries validated declarations and
+canonical identity without executing them. `bind_run_task_composition` refuses
+unimplemented evaluation capabilities before activating run bindings; standalone
+scoring-child metric composition applies the same guard. Inspection remains
+available through `RunTaskComposition.evaluation.inspect()`. Existing composition
+fingerprint locks own evaluation-only resume refusal. See the
+[evaluation contract](../execute_tools/evaluation-contract.md) for schemas, defaults,
+registry and the explicit source-metric Health / effective-scalar selection boundary.
+
+`task_composition_identity.validate_composed_source_identity` owns the existing
+composed-task artifact-naming and registration-captured source identity checks.
+The composer delegates these prerequisites without changing their refusal behavior.

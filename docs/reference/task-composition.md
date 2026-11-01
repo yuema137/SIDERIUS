@@ -34,6 +34,7 @@ There is **no `version` field**. (Recorded as a known gap — see
 | `metric` | ✅ | the primary metric: declaration + implementation | **run refused** |
 | `task_config` | ✅ | `task_description` + `forward_contract` | **run refused** |
 | `task_health` | ✅ *(as a statement)* | the health family, or an explicit `none: true` | **run refused** — see below |
+| `evaluation` | — | structured candidate selection, constraints and component meanings; composition/inspection only until runtime capabilities land | no evaluation identity key or added prompt bytes |
 | `secondary_metrics` | — | a list of observational metrics | the run has none: no record keys, no rendered bytes |
 | `proposal_blocks` | — | task science for the proposer's prompts | the proposer gets **no** task science |
 | `implementor_blocks` | — | task science for the implementor's prompts | the implementor renders nothing |
@@ -989,3 +990,50 @@ probe child, including implementor forward-only checks and generated validator
 tests. The input cap is not an activation-memory guarantee. Child failure or
 resource exhaustion rejects the candidate rather than granting a pass; task
 setup failures retain their separate typed transport.
+
+## Structured evaluation declarations (composition and inspection)
+
+The optional `evaluation` section declares candidate selection separately from
+training `objective`. It currently composes and validates, but launch refuses until
+its required runtime capabilities land; even `selection: {kind: primary}` requires
+`evaluation rendering`. An absent section adds no semantic payload key or prompt
+bytes. Full fingerprints can still change with the release's estimation assembly.
+
+```yaml
+evaluation:
+  components:
+    - kind: metric
+      id: accuracy
+      metric: accuracy             # already declared primary or secondary id
+      meaning: Fraction of correct predictions on the evaluation split.
+      units: fraction
+      range: {lower: 0.0, upper: 1.0}  # descriptive only
+  selection:
+    kind: formula
+    formula:
+      family: weighted_sum
+      params:
+        terms:
+          - component: accuracy
+            weight: 1.0
+            lower: 0.0
+            upper: 1.0
+            out_of_range: refuse  # required; alternatively clip
+  constraints:
+    - {component: accuracy, op: '>=', threshold: 0.95}
+```
+
+Metric references use post-transform scalar units and inherit direction from
+MetricSpec. Weighted_sum declares its normalization on each term and emits
+higher-is-better utility. Constraints use raw component values. Rubric components
+and `selection: {kind: rubric_balance, rubric: {id, version}, guidance: ...,
+deterministic_ranking: {kind: primary}}` resolve task-declared rubrics; their actual
+SHA is pinned even when the authored reference omits it. No rubric enters arithmetic.
+
+`compose_run_task_bindings(path).evaluation.inspect()` returns composition warnings,
+term marginal utility rates and required runtime capabilities without executing a
+candidate. Custom `component_kinds` load a file-backed registration through the
+existing symbol loader. Measurement schemas are deferred to their runtime owner;
+`kind: measurement` is not a builtin yet. Exact models, defaults, registry interfaces,
+identity and downstream Health/threshold boundaries are owned by the
+[evaluation contract](../../src/execute_tools/evaluation-contract.md).
