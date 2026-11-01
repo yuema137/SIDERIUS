@@ -31,6 +31,7 @@ from agent.skills.evaluate_time_skill.wrapper import _aggregate_inference_file_t
 from agent.skills.evaluate_vram_skill.evidence import preflight_memory_fields
 from core.checkpoint_selection import CheckpointSelection
 from core.durable_io import publish_json_atomically
+from core.record_encoding import encoded_record, model_record_value
 from core.record_role import AttemptRole
 from core.run_invariants import (
     RunInvariants,
@@ -48,7 +49,6 @@ from execute_tools.evaluation_metric import (
     NotScoreableError,
 )
 from execute_tools.health_checks.candidate_eligibility import formal_validity_of
-from execute_tools.scoring_utils import coerce_nonfinite_to_none
 from execute_tools.trained_model_artifact import (
     TrainedModelEmissionContext,
     TrainingArtifactCandidate,
@@ -1080,15 +1080,14 @@ def _resume_progress(
 def publish_run_output(output_path: str, agent_output: HyperparamTuningOutput) -> None:
     """Persist ``run_output`` through the storage owner.
 
-    Coerce float('-inf') no-signal sentinels (and NaN) to JSON null at the
-    storage boundary: ``model_dump_json`` would otherwise emit non-standard
-    ``-Infinity`` tokens that break the dashboard's ``JSON.parse``.
+    Preserve non-finite evidence through the shared versioned strict JSON
+    owner. Typed float paths distinguish it from missing values and strings.
     S2 / U5: serialise-first + atomic replace. ``run_output`` is the artifact
     the iteration manifest hashes, so a crash mid-write must leave either the
     previous file or the complete new one, never a truncated one that the next
     iteration's replay check then reports as a tamper.
     """
-    safe_output = coerce_nonfinite_to_none(agent_output.model_dump())
+    safe_output = encoded_record(model_record_value(agent_output))
     publish_json_atomically(output_path, safe_output, indent=4)
 
 

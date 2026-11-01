@@ -21,6 +21,7 @@ from agent.schemas.model_probe import ModelProbeContext
 from agent.schemas.proposal import InheritedComponent
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from core.generated_seed_scan import GeneratedSeedCall
+from core.record_encoding import RecordModel
 from core.training_seeds import SeedContext
 
 
@@ -150,7 +151,7 @@ class ValidatorInput(BaseModel):
     )
 
 
-class ValidatorOutput(BaseModel):
+class ValidatorOutput(RecordModel):
     """
     Output of ml_code_validator_agent.
 

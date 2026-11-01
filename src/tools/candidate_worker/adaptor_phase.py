@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from core.canonical_json import canonical_json_bytes
+from core.canonical_json import canonical_json_bytes, replay_json_bytes
 from core.durable_io import publish_bytes_write_once
 from workflows.adaptors import (
     AdaptorInputRef,
@@ -41,6 +41,7 @@ from workflows.definition.fanout import ProposalFamilies, execution_families
 from workflows.definition.llm_strategies import LLM_STRATEGY_TYPES
 
 from . import readiness
+from .adaptor_replay import replay_record
 from .graph_evidence import read_graph_control, record_digest
 from .graph_models import GraphNodeEvidence, GraphReason, GraphState, GraphTrace
 from .layout import adaptor_dir, adaptor_output_path, adaptor_record_path
@@ -342,13 +343,17 @@ def verify_adaptors(
         entry = entries[adaptor.id]
         if entry.record_path is None:
             continue
+        stored_bytes = read_graph_control(Path(entry.record_path))
+        stored_record = AdaptorRecord.model_validate_json(stored_bytes)
+        version = stored_record.encoding_version
         outcome, record = decide(adaptor, entries, iteration=iteration, skips=skips, judge=judge)
+        record = replay_record(record, outcome, adaptor, version)
         if isinstance(adaptor.combine, LLM_STRATEGY_TYPES) and record.strategy_evidence is None:
             from .adaptor_llm import judge_evidence_dir
 
             if judge_evidence_dir(workspace, adaptor.id, iteration).exists():
                 raise ValueError(f"adaptor {adaptor.id} has judge evidence its record never ran")
-        if read_graph_control(Path(entry.record_path)) != canonical_json_bytes(record):
+        if stored_bytes != replay_json_bytes(record, version=version):
             raise ValueError(f"adaptor {adaptor.id} record does not match its recomputation")
         if (entry.state, entry.reason) != graph_closure(outcome):
             raise ValueError(f"adaptor {adaptor.id} terminal state does not match its record")
@@ -360,7 +365,7 @@ def verify_adaptors(
                 workspace, adaptor.id, PORT, output.index, iteration=iteration
             )
             emitted.add(path.name)
-            if read_graph_control(path) != canonical_json_bytes(output.value):
+            if read_graph_control(path) != replay_json_bytes(output.value, version=version):
                 raise ValueError(f"adaptor {adaptor.id} output does not match its recomputation")
         published = {
             path.name

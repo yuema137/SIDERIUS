@@ -50,6 +50,7 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.training_diagnosis import TrainingDiagnosis
 from core.checkpoint_selection import SelectedCheckpoint
 from core.planner_strategy_identity import PlannerStrategyIdentity
+from core.record_encoding import RecordModel
 from core.record_role import AttemptRole, RecordRoleError, is_formal_role
 from core.retired_seed_pins import RetiredSeedPins, split_retired_seed_pins
 
@@ -414,7 +415,7 @@ class ExperimentMemory(BaseModel):
     )
 
 
-class ExperimentRecord(BaseModel):
+class ExperimentRecord(RecordModel):
     record_type: Literal["experiment", "attempt_failure"] = "experiment"
     exp_id: str
     status: Literal[
@@ -3653,7 +3654,7 @@ class PhysicalRejection(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class HyperparamTuningOutput(BaseModel):
+class HyperparamTuningOutput(RecordModel):
     """
     Full report produced by a completed tune_ml_hyperparam_agent run.
 

@@ -12,9 +12,10 @@ all three names, so every existing import path keeps working.
 
 import json
 import os
-from typing import Any, cast
+from typing import Any
 
 from core.durable_io import publish_json_atomically
+from core.record_encoding import decode_record, encoded_record
 from core.record_log import (
     RecordHistoryUnreadable,
     append_record,
@@ -23,7 +24,6 @@ from core.record_log import (
     read_record_log,
     record_log_path,
 )
-from execute_tools.scoring_utils import coerce_nonfinite_to_none
 
 
 def _ensure_dir(path: str) -> None:
@@ -94,16 +94,7 @@ class LocalRecorder(BaseRecorder):
     def save_record(self, record: dict[str, Any]):
         exp_id = record["exp_id"]
 
-        # Coerce float('-inf') no-signal sentinels to JSON null so the on-disk
-        # record stays browser-safe (RFC-8259 doesn't allow Infinity / -Infinity).
-        #
-        # The cast discharges what the coercion's runtime contract guarantees
-        # but its unannotated signature cannot say: a dict INPUT yields a dict
-        # of the same shape (the helper recurses structure-preservingly and
-        # only rewrites non-finite floats to None). pyright otherwise infers
-        # the full recursive union and refuses `append_record(dict[str, Any])`
-        # — found by CI's pyright, the one check this host cannot run.
-        safe_record = cast("dict[str, Any]", coerce_nonfinite_to_none(record))
+        safe_record = encoded_record(record)
 
         # every detail json should stay in the run_name folder
         detail_path = os.path.join(self.record_dir, f"{exp_id}.json")
@@ -119,7 +110,7 @@ class LocalRecorder(BaseRecorder):
         if os.path.exists(self.record_log) and not self._summary_matches(projection):
             # The view is torn, missing or stale; the log is the truth.
             self._publish_summary(projection)
-        return projection
+        return [decode_record(record) for record in projection]
 
     # -- internals -----------------------------------------------------------
 

@@ -104,12 +104,16 @@ this is a contract, not an accident:
 
 ### The storage image
 
-Every record is written through `coerce_nonfinite_to_none`
-(`execute_tools/scoring_utils.py`, applied in
-`core/sandbox_executor.py::LocalRecorder.save_record`), which replaces every
-non-finite float with JSON `null` — RFC-8259 has no `NaN` or `Infinity` token.
-So the on-disk image of a diverged epoch is a `None` **element**, and the
-objective series are typed `list[float | None]` to accept it.
+New records use `core.record_encoding` through
+`core.recorders.LocalRecorder.save_record`. The versioned strict JSON format
+preserves non-finite floats as typed string paths; `get_summary` restores
+their values. See the [encoding contract](../../../src/core/core-contract.md#versioned-non-finite-record-json-issue-1111)
+for the single format authority.
+
+Legacy writers replaced non-finite floats with JSON `null`. Archived objective
+series can therefore contain a `None` **element**, and remain typed
+`list[float | None]` to read those records. Missing historical values are not
+guessed back into a particular non-finite float.
 
 Two consequences worth stating plainly:
 
@@ -157,7 +161,7 @@ otherwise `decreasing` or `increasing`. There is no hidden smoothing.
 |---|---|
 | trainer emits an undeclared key | rejected at the tuner boundary |
 | expected validation, missing R3 | `error_training` |
-| non-finite value in R2 or R3 | `state: invalid`; raw values preserved on the record (as `null` once persisted — see "The storage image"), the record itself still admitted |
+| non-finite value in R2 or R3 | `state: invalid`; raw values preserved on the record (typed non-finite values in new records; legacy `null` remains readable — see "The storage image"), the record itself still admitted |
 | custom or `sum`-reduced objective | `comparability: not_established`, with a reason |
 
 ## Source map

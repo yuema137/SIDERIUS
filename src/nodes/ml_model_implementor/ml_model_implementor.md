@@ -330,3 +330,12 @@ permissive. Component validation does not promise universal OS filename
 portability, safe generated Python syntax or confinement against existing symlinks.
 
 Independent output symbols are bound from actual outputs, never forced to the synthetic input extent. Shared symbols and fixed dimensions remain mandatory. See [probe ownership](../../agent/skills/model_io_probe_skill.md) for validation and synthetic-target refusal semantics.
+
+### Native output record encoding
+
+The native output writer delegates to `core.record_encoding` for versioned
+strict JSON, preserving typed non-finite floats. Load with the output schema's
+`model_validate_json`; legacy unversioned records remain supported. The
+[core contract](../../core/core-contract.md#versioned-non-finite-record-json-issue-1111)
+owns metadata, legacy projection and digest impact. Legacy records may contain null where a float was non-finite. New native output
+and `LocalRecorder` writes preserve that float through the versioned encoding.

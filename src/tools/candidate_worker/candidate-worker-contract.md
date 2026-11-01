@@ -335,25 +335,26 @@ non-finite numbers at their owners (`NumericRange`, `ParameterRule`), so no such
 value reaches transport.
 Ingress may write such a value as a string (for example `"-inf"`).
 
-Every other candidate-worker JSON write declares its artifact class through
-`record_json.artifact_json` (issue #1046), and the class picks one existing
-owner; there is no third encoding:
+Candidate-worker record writes use `record_json.artifact_json(kind="record")`,
+which delegates to the versioned strict encoding in
+[`core/record_encoding.py`](../../core/record_encoding.py). The
+[core contract](../../core/core-contract.md#versioned-non-finite-record-json-issue-1111)
+owns metadata, typed float paths, legacy decoding and identity effects.
+Unknown artifact classes raise `ValueError`.
 
-- `record`: files that people and the dashboard read, namely captured node
-  records such as `run_output_<run_name>.json` and the request/receipt control
-  documents. These use the storage owner
-  `execute_tools.scoring_utils.coerce_nonfinite_to_none`: strict JSON, with
-  inf/NaN written as `null`, exactly as the native tuner writes `run_output`.
-- `internal`: documents a later worker phase rereads and compares, namely node
-  inputs, the proposal seed, fan-out payloads and the graph tuning input. These
-  use the unit-transport JSON-constant encoding
-  (`unit_transport.constants_json`), so an inf/NaN value survives the reread.
+`kind="internal"` names documents a later phase rereads: `request.json`, node
+inputs, proposal seed, fan-out payloads and graph tuning input. These retain
+`unit_transport.constants_json`. Control receipts use the same versioned record owner, with the existing
+bounded control encoder enforcing its byte limit. Whether a value may be non-finite remains with its
+schema; encoding does not grant admission to invalid inputs.
 
-`capture_record` compares an existing native record with the returned output
-after projecting the output through the same storage owner. A `-inf` no-signal
-sentinel or a NaN therefore no longer reads as "native record disagrees", and
-the in-memory output, with `-inf` intact, is what the worker passes on.
-Whether a value may be nonfinite stays with its owner (issue #1012).
+`capture_record` preserves native bytes, comparing new records through the
+shared lossless encoding (NaN-safe, with infinity sign preserved). Legacy
+unversioned records are compared with their old null projection; the in-memory
+output remains intact. New native records are decoded by their owning output
+schema. Adaptor readback dispatches on the recorded `encoding_version`, absent
+only for legacy records, and recomputes both record and emitted-output bytes
+under that version. No historical receipt or artifact is rewritten.
 
 Passed validation returns typed in-memory outputs to training. Missing model
 or loss sources refuse before construction/staging. The shared construction

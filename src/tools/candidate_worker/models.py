@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import Field, field_validator, model_validator
 
 from core.generated_artifact_name import validate_generated_artifact_name
+from core.record_encoding import RecordModel
 from core.seeding import RunSeed, RunSeedBinding, SeedCoordinates, SeedSource
 from tools.setup_review.route_models import LLMRoute
 from tools.workflow_preview.models import FileObservation, PreviewModel, WorkflowPreviewRequest
@@ -80,8 +81,11 @@ class TrainingOutputEvidence(PreviewModel):
     output_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
-class CandidateRunReceipt(PreviewModel):
+class CandidateRunReceipt(RecordModel):
     """Execution index; native records remain the authority for node data."""
+
+    # Reuse the preview boundary policy while adding the persisted-record reader.
+    model_config = PreviewModel.model_config
 
     run_id: str
     run_name: str

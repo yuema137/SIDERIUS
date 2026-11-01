@@ -145,3 +145,14 @@ tuner_input = local_validated_model(validation_output, ...)  # the ONLY mapping 
 `tests/unit/agent/` per-node schema suites and
 `tests/unit/agent/protocols/`; golden record baselines under the tuner's
 test goldens pin persisted shapes.
+
+## Persisted output encoding
+
+Native output schemas derive from `core.record_encoding.RecordModel` (literature
+through `ExternalAgentOutput`). Its validation entry points decode versioned
+non-finite record metadata before running native validators; field declarations,
+JSON schema and in-memory dumps are unchanged. `ExperimentRecord` uses the same
+reader. The [core contract](../../core/core-contract.md#versioned-non-finite-record-json-issue-1111)
+owns the encoding and legacy behavior. Do not reimplement null/string conversion
+in a node or protocol. The census walks all reachable output field annotations,
+including `Any` containers and required float leaves.

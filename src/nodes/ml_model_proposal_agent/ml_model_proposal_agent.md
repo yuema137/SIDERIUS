@@ -476,3 +476,12 @@ separator, colons and Unicode control characters are refused through the existin
 retry feedback. Names are never sanitized. The workflow independently repeats
 this check before name-derived attempt renaming and tuning directory creation,
 including operator-supplied fixed plans; archival decoding remains permissive.
+
+### Native output record encoding
+
+The native output writer delegates to `core.record_encoding` for versioned
+strict JSON, preserving typed non-finite floats. Load with the output schema's
+`model_validate_json`; legacy unversioned records remain supported. The
+[core contract](../../core/core-contract.md#versioned-non-finite-record-json-issue-1111)
+owns metadata, legacy projection and digest impact. Legacy records may contain null where a float was non-finite. New native output
+and `LocalRecorder` writes preserve that float through the versioned encoding.
