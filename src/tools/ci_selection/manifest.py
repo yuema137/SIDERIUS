@@ -59,6 +59,7 @@ FULL_SUITE_TRIGGERS: tuple[str, ...] = (
     # owner misses cross-area identity tests. Include assets and nested packs.
     "examples/",
     "configs/task_composition/",
+    "tests/fixtures/step10_p1/",
     "src/tools/ci_selection/",
     "tests/unit/tools/ci_selection/",
     "tests/conftest.py",

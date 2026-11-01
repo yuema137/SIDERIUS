@@ -92,6 +92,13 @@ def test_moved_asset_and_rename_retain_their_consumers():
         "examples/quickstart/plugins/_quickstart_task.py",
         "configs/task_composition/synthetic_masked_regression.yaml",
         "configs/task_composition/quickstart.yaml",
+        "tests/fixtures/step10_p1/fourth_task/plugins/band_coverage_metric.py",
+        "tests/fixtures/step10_p1/fourth_task/composition.yaml",
+        "tests/fixtures/step10_p1/fourth_task/declared/task_health.yaml",
+        "tests/fixtures/step10_p1/davis/composition.yaml",
+        "tests/fixtures/step10_p1/davis/task_config.yaml",
+        "tests/fixtures/step10_p1/pets/composition.yaml",
+        "tests/fixtures/step10_p1/tidmad/composition.yaml",
     ],
 )
 def test_composition_inputs_include_cross_area_identity_consumers(changed: str) -> None:
@@ -110,6 +117,9 @@ def test_composition_inputs_include_cross_area_identity_consumers(changed: str) 
     expanded = resolve_selection(REPO_ROOT, [changed, "README.md"])
     assert expanded.full_suite, expanded.reason
     assert "tests/unit/workflows/test_local_code_composition.py" in expanded.files
+    assert "tests/unit/workflows/test_step10_p1_c4_extension_proof.py" in expanded.files
+    assert "tests/unit/workflows/test_arxiv_255_impl_content_fingerprint.py" in expanded.files
+    assert "tests/unit/workflows/test_step12_pr12e_c4_registration_identity.py" in expanded.files
 
 
 class TestTheModelIsFailClosed:
