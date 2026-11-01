@@ -39,6 +39,7 @@ from tools.workflow_preview.models import PreviewModel
 from workflows.definition import ReusableTaskReferences, TaskBinding
 
 from .config_errors import MissingConfigFile
+from .error_messages import console_error_message
 from .files import open_directory, private_bytes
 from .models import ConsoleConfig, TaskChoice
 from .settings_file import SettingsInvalid
@@ -220,7 +221,7 @@ class SetupStore:
                 raise SetupRefused(
                     409,
                     "invalid_setup",
-                    f"the setup folder failed validation ({error}); {created} was left in place",
+                    f"the setup folder failed validation ({console_error_message(error)}); {created} was left in place",
                 ) from None
             entry = SetupEntry(
                 setup_id=setup_id,
@@ -239,7 +240,7 @@ class SetupStore:
         try:
             _, digest = _read(registry_path(workspace))
         except SettingsInvalid as error:
-            digest, problem = "unreadable", str(error)
+            digest, problem = "unreadable", console_error_message(error)
         else:
             problem = None
         if digest != self._sha256:

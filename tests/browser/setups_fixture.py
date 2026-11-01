@@ -7,8 +7,10 @@ Native preparation is never started here.
 
 import json
 import socket
+import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import uvicorn
 
@@ -19,7 +21,29 @@ from tools.candidate_console.app import create_app
 from tools.candidate_console.config import load_console
 
 
+def error_projections() -> None:
+    """Inject private failures only in the explicit offline error witness process."""
+    from types import SimpleNamespace
+
+    from tools.setup_review.composition_models import CompositionResult
+
+    def observe(job, task):
+        return SimpleNamespace(
+            result=CompositionResult.failed(
+                job, "composition", ValueError("private-browser-secret-sentinel")
+            )
+        )
+
+    patch("tools.candidate_console.task_summary.observe", observe).start()
+    patch(
+        "tools.candidate_console.setups.check_setup_project",
+        side_effect=ValueError("private-browser-secret-sentinel"),
+    ).start()
+
+
 def main() -> None:
+    if "--error-projections" in sys.argv:
+        error_projections()
     with tempfile.TemporaryDirectory(prefix="siderius-setups-browser-") as directory:
         tmp = Path(directory)
         (tmp / "base").mkdir()

@@ -1,0 +1,63 @@
+{
+  "followup": "https://github.com/Galileo-Sandbox/SIDERIUS/issues/1328",
+  "scope": "Existing typed framework guidance and remaining settings/import/authoring carriers. Exact expressions only; Task/GPU/setup leaks have no exception.",
+  "expressions": {
+    "reusable_candidate.py": [
+      "raise OperationFailure('judge_route', str(error)) from error"
+    ],
+    "add_task.py": [
+      "print(f\"Creating the task's folders stopped: {error}.\", file=sys.stderr)",
+      "print(f'The task was added, but its first experiment setup was not created: {error.message}. Create one in the Workflow tab instead.', file=sys.stderr)",
+      "print(f'add-task refused: {error}.', file=sys.stderr)",
+      "print(f'add-task refused: {error}.{left}', file=sys.stderr)",
+      "raise AddTaskRefused(str(error)) from None"
+    ],
+    "settings_file.py": [
+      "raise SettingsInvalid(str(error)) from None"
+    ],
+    "settings_export.py": [
+      "raise ExportRefused(422, 'invalid_advice', str(error)) from None",
+      "raise ExportRefused(422, 'invalid_profile', f\"the task's LLM profile is not usable with --llm_config: {error}\") from None"
+    ],
+    "setup_routes.py": [
+      "content: dict[str, object] = {'error': {'code': error.code, 'message': error.message}}"
+    ],
+    "settings_library.py": [
+      "raise LibraryRefused(422, 'invalid_file', f'Not an LLM profile: {error}') from None",
+      "raise LibraryRefused(422, 'invalid_file', str(error)) from None"
+    ],
+    "editor.py": [
+      "return JSONResponse(status_code=409, content={'error': {'code': error.code, 'message': str(error)}, 'current': error.current.model_dump(mode='json') if error.current else None, 'proposal': error.proposal.model_dump(mode='json') if error.proposal else None})"
+    ],
+    "config.py": [
+      "raise ValueError(f'configured host ledger is unusable: {error}') from error"
+    ],
+    "example_bundle.py": [
+      "raise AddTaskRefused(f'copying the task package failed ({error}){left}') from None"
+    ],
+    "reusable_preparation.py": [
+      "raise OperationFailure('launch_policy', str(error)) from error"
+    ],
+    "package_mounts.py": [
+      "return str(error)"
+    ],
+    "__main__.py": [
+      "print(f'Console configuration is incomplete: {error}.', file=sys.stderr)",
+      "print(f'Console settings are invalid: {error}.', file=sys.stderr)",
+      "print(f'Workspace init refused: {error}. Nothing was deleted.', file=sys.stderr)",
+      "print(f'Workspace init stopped: console settings are invalid: {error}. Nothing was deleted.', file=sys.stderr)",
+      "print(f'Workspace init stopped: console.json is incomplete: {error}. Nothing was deleted.', file=sys.stderr)"
+    ],
+    "settings_routes.py": [
+      "return JSONResponse(status_code=error.status, content={'error': {'code': error.code, 'message': error.message}})"
+    ],
+    "settings_service.py": [
+      "raise SettingsRefusal(422, 'settings_invalid', str(error)) from None",
+      "raise SettingsRefusal(error.status, error.code, error.message) from None",
+      "return (None, digest, f'settings/global_settings.json: {error}. Fix or restore the file and Reload, or choose values here and Save to replace it.')"
+    ],
+    "template_routes.py": [
+      "raise AuthoringError('unsupported', str(error), current) from error"
+    ]
+  }
+}
