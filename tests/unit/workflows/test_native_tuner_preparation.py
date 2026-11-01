@@ -4,8 +4,8 @@ Full payload equality catches dropped/swapped forwarding that schema validation
 cannot detect. Expectations were captured from run_workflow before extraction;
 only the pytest temporary root is normalized. The source-derived composition
 fingerprint is checked separately against the real binding and persisted lock.
-Planner content/assembly and verifier source digests are likewise checked against their
-current declared owners and persisted lock; frozen baseline digests stay pinned.
+Planner content is pinned to reviewed bytes; planner assembly and verifier source
+digests are checked against their declared owners and persisted lock. Frozen baseline digests stay pinned.
 The intentional #1240 run-mode default change is checked separately from the
 archived False default. Every other payload field is compared exactly. This checks input forwarding,
 not equivalence of live model outputs or scientific artifacts. Node effects use
@@ -242,12 +242,12 @@ def test_production_tuner_input_matches_pre_extraction_oracle(
     current_planner = planner_strategy.resolve_planner_strategy("native-timing-v1")
     assert actual_planner_assembly == current_planner.identity.assembly_sha256
     assert actual.expected_planner_strategy == current_planner.identity
-    # #1111 deliberately decodes persisted history before prompt rendering.
-    # Preserve the archived oracle; verify the forwarded new content identity.
+    # The content hash changed because #1111 decodes persisted history before
+    # rendering. Preserve the archived oracle and pin the reviewed new bytes.
     baseline_content = expected["expected_planner_strategy"].pop("content_sha256")
     assert baseline_content == "73b7df9cad19e398695f057ef322e3ad01d07e1d3e0a6c0f85e918d06594c562"
     assert payload["expected_planner_strategy"].pop("content_sha256") == (
-        current_planner.identity.content_sha256
+        "3925330560b77fab1623f0bbdde89bc02fbf2c60c6eb287307d2ba2983c7831d"
     )
     # Issue #983 — the workflow generates a run seed per run (a seed-owned
     # path); the oracle predates it. Keep its bytes and check the forwarded
