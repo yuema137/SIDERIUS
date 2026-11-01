@@ -145,3 +145,16 @@ tuner_input = local_validated_model(validation_output, ...)  # the ONLY mapping 
 `tests/unit/agent/` per-node schema suites and
 `tests/unit/agent/protocols/`; golden record baselines under the tuner's
 test goldens pin persisted shapes.
+
+## Inactive loss rule targets
+
+Loss rules require active targets, not conditional locks. `ParameterRules`
+refuses an inactive target when its own rules fix `loss_config.loss_type`
+(`exact` or singleton `allowed`); `validate_parameter_rule_ownership` checks
+combined task/workflow declarations. The shared resolver checks again after
+exact locks select the effective type, including mutated rule dictionaries.
+Strict plan resolution uses the `LossConfig` default if the type is omitted;
+proposal resolution with `defer_missing_non_exact=True` defers an unknown type.
+All rule kinds are refused on inactive targets, including exact null/false.
+The error identifies the path and type. `LossConfig.inactive_parameter_values`
+is the sole activity authority. Normal configs still normalize as before.

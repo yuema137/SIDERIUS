@@ -161,3 +161,12 @@ SIDERIUS_PLUGIN_DIRS=/path/to/my_plugin_dir <entrypoint …>
 `tests/unit/ml_models/` — loader contract refusals, registry shadowing,
 output-type vocabulary, loss compatibility; baseline-config pins live with the
 comparison-campaign tests.
+
+## Loss parameter activity
+
+`LossConfig.inactive_parameter_values(loss_type)` owns the fields nullified
+by each loss route. `enforce_parameter_consistency` applies those values for
+ordinary configs; parameter-rule validation uses the same owner to refuse
+constraints on inactive targets. Focal routes nullify `beta`; `smooth_l1`
+nullifies `alpha`/`gamma` and disables `use_class_weights`; `ce` and `custom`
+nullify `alpha`/`gamma`/`beta`. Custom hyperparameters remain plugin-owned.

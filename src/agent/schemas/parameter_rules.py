@@ -233,6 +233,38 @@ def validate_model_parameter_rules(
     )
 
 
+def _validate_active_loss_rule_targets(
+    rule_sets: Iterable[ParameterRules], *, loss_type: Any = None
+) -> None:
+    """Reject constraints on inactive fields, even exact null/false declarations.
+
+    A fixed rule takes precedence over the authored type. Without one, callers
+    supply the effective type (or defer by leaving it unknown).
+    """
+    from ml_models.models_format_sandbox import LossConfig
+
+    declarations = tuple(rule_sets)
+    for rules in declarations:
+        rule = rules.rules.get("loss_config.loss_type")
+        if rule is not None:
+            if rule.kind == "exact":
+                loss_type = rule.exact
+                break
+            if rule.allowed is not None and len(rule.allowed) == 1:
+                loss_type = rule.allowed[0]
+    if not isinstance(loss_type, str):
+        return
+    inactive = LossConfig.inactive_parameter_values(loss_type)
+    for rules in declarations:
+        for path in rules.rules:
+            if path.startswith("loss_config.") and path.split(".", 1)[1] in inactive:
+                raise ParameterRuleError(
+                    f"parameter rule for {path!r} targets an inactive field for "
+                    f"loss_type={loss_type!r}; LossConfig nullifies this field. "
+                    "Remove the rule or select a loss type that consumes the field."
+                )
+
+
 def _validate_parameter_path(path: str, rules: Iterable[ParameterRule]) -> None:
     """Validate declaration syntax and fixed-contract target membership and type."""
     parts = path.split(".")
@@ -415,6 +447,7 @@ class ParameterRules(BaseModel):
     def validate_paths(self) -> ParameterRules:
         for path, rule in self.rules.items():
             _validate_parameter_path(path, (rule,))
+        _validate_active_loss_rule_targets((self,))
         return self
 
 
@@ -571,6 +604,13 @@ def resolve_parameter_rule_document(
             rule = rules.rules.get(path)
             if rule is not None:
                 _validate_value(path, value, rule, owner)
+    from ml_models.models_format_sandbox import LossConfig
+
+    loss_config = resolved.get("loss_config")
+    loss_type = loss_config.get("loss_type") if isinstance(loss_config, Mapping) else None
+    if loss_type is None and not defer_missing_non_exact:
+        loss_type = LossConfig.model_fields["loss_type"].default
+    _validate_active_loss_rule_targets((rules for _, rules in declarations), loss_type=loss_type)
     return resolved
 
 
@@ -581,6 +621,9 @@ def validate_parameter_rule_ownership(
     workflow_rules: ParameterRules | None,
 ) -> None:
     """Keep task-owned objectives from competing with loss parameter rules."""
+    _validate_active_loss_rule_targets(
+        rules for rules in (task_rules, workflow_rules) if rules is not None
+    )
     if not objective_declared:
         return
     if any(

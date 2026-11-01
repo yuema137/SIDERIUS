@@ -539,7 +539,16 @@ Notes:
   remains supported. Loss rule targets are checked the same way against the
   fields of the execution `LossConfig`; a misspelled field such as
   `loss_config.gammmma` is refused instead of being dropped when the loss is
-  built. Custom-loss plugin hyperparameters are not transported through
+  built. A loss rule must also target a field active for the effective
+  `loss_type`. For example, `loss_config.beta: {exact: 2}` is refused for
+  `focal`, whose `LossConfig` nullifies `beta`. This applies to every rule
+  kind, including exact null/false. A declaration with an exact or singleton
+  allowed loss type is checked immediately; combined task/workflow rules are
+  checked by the ownership gate. Otherwise resolution checks the type after
+  exact locks, using the `LossConfig` default when a plan omits it. A proposal
+  with no selected type defers this check until the tuner resolves the plan.
+  Remove an inactive rule or select a loss that consumes its target.
+  Custom-loss plugin hyperparameters are not transported through
   `loss_config` (the plugin executes its `PLUGIN_LOSS_CONFIG_CLASS`
   defaults), so a rule naming one, such as `loss_config.snr_threshold`, is
   refused. `model_config` targets are checked against the configuration
