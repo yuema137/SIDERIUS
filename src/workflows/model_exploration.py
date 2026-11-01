@@ -217,7 +217,7 @@ from workflows.task_settings import (
 from workflows.task_settings import (
     resolve_analysis_binding as _resolve_analysis_binding,
 )
-from workflows.termination import infrastructure_abort_reason
+from workflows.termination import infrastructure_abort_reason, target_reached, workflow_stop_reason
 from workflows.training_startup import prepare_training_run, workflow_lock_identity
 from workflows.training_startup import (
     resolve_tuner_health_config_source as resolve_tuner_health_config_source,
@@ -2137,10 +2137,9 @@ def run_workflow(
     # Step 10 P2a C1 — run-scoped so the Q-10-2 unrankable notice is printed
     # once for the whole run rather than once per iteration.
     _metric_identity_notice = _OncePerRunNotice()
-    # `_iter_order` is bound per iteration by the fold below; predeclared so
-    # the early-stop check reads a defined name even if an iteration exits
-    # before reaching the fold.
-    _iter_order: MetricOrder | None = None
+    # Seed reconciliation supplies direction for the restored-incumbent check;
+    # completed iterations refresh it through the existing history fold.
+    _iter_order = MetricOrder(seed_metric_spec) if seed_metric_spec is not None else None
 
     # Chain mode runs each iter as its own subprocess with max_iterations=1 and
     # an externally-supplied start_iteration. The loop variable becomes the
@@ -2149,6 +2148,9 @@ def run_workflow(
     # in nodes.result_interpretation_agent stamps on every row. Without this
     # offset, every chain iter would log iteration=1 (V8 Domain 3 bug).
     for iteration in range(launch.start_iteration, launch.start_iteration + launch.max_iterations):
+        # Check restored evidence before creating an iteration or invoking nodes.
+        if target_reached(state.chain_formal_incumbent_reference, launch.target_score, _iter_order):
+            break
         iter_dir = os.path.join(bindings.run_dir, f"iteration_{iteration:03d}")
         os.makedirs(iter_dir, exist_ok=True)
 
@@ -2936,7 +2938,7 @@ def run_workflow(
 
         print(
             f"\n  [{iteration}] Complete: {proposal.model_name} "
-            f"best_score={tune_output.best_denoising_score}"
+            f"best trial/formal score (Health-unfiltered)={tune_output.best_denoising_score}"
         )
 
         # Fix 4 — parent-process memory probe at iteration exit. Fires
@@ -2975,22 +2977,13 @@ def run_workflow(
             iter_idx=iteration, phase="post_gc", workspace=bindings.workspace, scope="workflow"
         )
 
-        # Use the Health-valid chain incumbent, including restored evidence.
-        # MetricOrder owns direction; without a reconciled order, do not stop.
-        if (
-            launch.target_score is not None
-            and state.chain_formal_incumbent_reference is not None
-            and _iter_order is not None
-            and _iter_order.is_at_least(state.chain_formal_incumbent_reference, launch.target_score)
-        ):
-            print(
-                f"\n  Target score {launch.target_score} reached "
-                f"(Health-valid formal best={state.chain_formal_incumbent_reference}). "
-                "Stopping early."
-            )
-            break
-
     # --- Final summary ---
+    stop_reason = workflow_stop_reason(
+        state.iteration_results,
+        state.chain_formal_incumbent_reference,
+        launch.target_score,
+        _iter_order,
+    )
     finished_at = time.strftime("%Y-%m-%d %H:%M:%S")
     print(f"\n{'=' * 60}")
     aborted = infrastructure_abort_reason(state.iteration_results) is not None
@@ -2999,8 +2992,13 @@ def run_workflow(
     print(f"  Finished    : {finished_at}")
     print(f"  Iterations  : {len(state.iteration_results)}/{launch.max_iterations}")
     print(f"  Best formal (unfiltered, this execution): {state.best_score_overall}")
+    print(f"  Best formal (Health-valid, chain): {state.chain_formal_incumbent_reference}")
+    print(f"  Stop reason: {stop_reason}")
     for i, result in enumerate(state.iteration_results, 1):
-        print(f"    Iteration {i}: {result.model_type} score={result.best_denoising_score}")
+        print(
+            f"    Iteration {i}: {result.model_type} "
+            f"best trial/formal score (Health-unfiltered)={result.best_denoising_score}"
+        )
     print(f"{'=' * 60}\n")
 
     _save_workflow_summary(
@@ -3010,6 +3008,8 @@ def run_workflow(
         finished_at,
         state.iteration_results,
         state.best_score_overall,
+        state.chain_formal_incumbent_reference,
+        stop_reason,
     )
 
     return state.iteration_results
@@ -3022,13 +3022,19 @@ def _save_workflow_summary(
     finished_at: str,
     iteration_results: list[HyperparamTuningOutput],
     best_score_overall: float | None,
+    best_valid_formal_score: float | None,
+    stop_reason: str,
 ):
     """Save a JSON summary of the full workflow run."""
     aborted = infrastructure_abort_reason(iteration_results) is not None
     summary = {
         "workflow": "model_exploration",
         "run_name": run_name,
-        "status": "completed" if iteration_results and not aborted else "failed",
+        "status": "completed"
+        if (iteration_results or stop_reason == "target_reached") and not aborted
+        else "failed",
+        "termination_reason": stop_reason,
+        "best_valid_formal_score": best_valid_formal_score,
         "started_at": started_at,
         "finished_at": finished_at,
         "total_iterations": len(iteration_results),
@@ -3038,14 +3044,13 @@ def _save_workflow_summary(
             {
                 "model_type": r.model_type,
                 "best_score": r.best_denoising_score,
+                "best_score_basis": "health_unfiltered_trial_and_formal",
                 "completed_rounds": r.completed_rounds,
                 "status": r.status,
             }
             for r in iteration_results
         ],
     }
-    if aborted:
-        summary["termination_reason"] = "infrastructure_abort"
     path = os.path.join(workspace, f"workflow_{run_name}.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=4)

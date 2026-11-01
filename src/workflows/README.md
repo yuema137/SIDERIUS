@@ -24,8 +24,11 @@ rules remain with the mechanism references it links.
 
 ## Stop at a target score
 
-The in-process workflow accepts `--target_score`. It stops after an iteration
-when a formal result that passes Health validity meets the target, using the
-metric's declared direction. A high score from an invalid result cannot stop
-the run. The final “Best formal (unfiltered, this execution)” line includes
-invalid results and is only a progress report.
+The in-process workflow accepts `--target_score`. Before each iteration it checks
+whether the best formal result that passes Health validity meets the target,
+using the metric's declared direction. If a resumed run already meets the target,
+it skips new iterations. Startup validation still runs.
+
+The final summary reports the valid score and why the run stopped. The separate
+“Best formal (unfiltered, this execution)” line and trial/formal iteration scores
+include invalid results and are only progress reports.

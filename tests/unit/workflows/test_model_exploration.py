@@ -1247,7 +1247,7 @@ class TestRunWorkflowMultiIteration:
 
     @pytest.mark.parametrize(
         ("valid_score", "restored_score", "expected_iterations"),
-        [(None, None, 3), (1.5, None, 3), (2.0, None, 1), (2.5, None, 1), (None, 2.5, 1)],
+        [(None, None, 3), (1.5, None, 3), (2.0, None, 1), (2.5, None, 1), (None, 2.5, 0)],
     )
     def test_stops_only_on_valid_target_score(
         self, workflow_env, capsys, valid_score, restored_score, expected_iterations
@@ -1278,12 +1278,26 @@ class TestRunWorkflowMultiIteration:
         )
         assert len(results) == expected_iterations
         console = capsys.readouterr().out
-        assert ("Stopping early." in console) == (expected_iterations == 1)
-        assert "Best formal (unfiltered, this execution): 3.0" in console
+        reason = "iterations_exhausted" if expected_iterations == 3 else "target_reached"
+        assert f"Stop reason: {reason}" in console
+        if expected_iterations == 0:
+            workflow_env["tune"].return_value.run.assert_not_called()
+            workflow_env["propose"].return_value.run.assert_not_called()
+            assert not (Path(workflow_env["workspace"]) / "test_run" / "iteration_001").exists()
+        raw = 3.0 if expected_iterations else None
+        assert f"Best formal (unfiltered, this execution): {raw}" in console
         summary = json.loads(
             (Path(workflow_env["workspace"]) / "test_run" / "workflow_test_run.json").read_text()
         )
-        assert summary["best_score_overall"] == 3.0
+        assert summary["best_score_overall"] == raw
+        assert summary["termination_reason"] == reason
+        assert summary["status"] == "completed"
+        assert summary["best_valid_formal_score"] == (restored_score or valid_score)
+        for row in summary["iterations"]:
+            assert row["best_score"] == 3.0
+            assert row["best_score_basis"] == "health_unfiltered_trial_and_formal"
+        if expected_iterations:
+            assert "best trial/formal score (Health-unfiltered)=3.0" in console
         assert summary["best_score_overall_basis"] == "unfiltered_formal_current_execution"
 
     def test_trial_only_iter_does_not_poison_formal_anchor(self, workflow_env):
