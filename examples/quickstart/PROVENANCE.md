@@ -126,9 +126,19 @@ stale:
 
   The §8 composition cell, by contrast, IS pure recomputation and has been
   re-derived from the committed pack (`60fde910197c…`, fingerprint
-  `1330d3991a98c48b…`). A reader comparing §8 against §10 will therefore
+  `f6ffd579815e0a14…`). A reader comparing §8 against §10 will therefore
   see them disagree; the disagreement is real, explained here, and the
   §8 values are the ones that describe the pack you have.
 
 `quickstart.html` is a generated static rendering of the same notebook,
 labelled as such, and section-heading-synced by test.
+
+## Sampling seed contract (#1169)
+
+The task plugin now refuses absent scope/epoch seeds when sampling, using
+`core.seeding.MissingRunSeed`. Explicitly seeded selections and generated
+shard bytes are unchanged. The plugin content hash and composition semantic
+fingerprint change; the pure §8 composition output is refreshed. Historical
+launch receipts in §10 and above remain evidence of their original revision.
+Resume with an old plugin identity fails closed; use a new workspace or the
+original source revision for those receipts. No new live witness is claimed.
