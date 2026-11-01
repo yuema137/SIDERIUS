@@ -215,6 +215,12 @@ def _review_native_chain_operation(
     return admission
 
 
+NATIVE_CHAIN_ADMISSION_REFUSAL = (
+    "native chain admission failed; check the capture, launch settings, "
+    "input paths and required environment bindings, then review again"
+)
+
+
 def review_native_chain_operation(
     config: OperationStoreConfig,
     submission: NativeChainOperation,
@@ -227,9 +233,7 @@ def review_native_chain_operation(
             config, submission, launch_environment=launch_environment
         )
     except (OSError, ValueError, subprocess.SubprocessError) as error:
-        raise OperationFailure(
-            "native_chain_admission", "native chain capture or launch binding refused"
-        ) from error
+        raise OperationFailure("native_chain_admission", NATIVE_CHAIN_ADMISSION_REFUSAL) from error
 
 
 def _fence(record: OperationRecord) -> None:

@@ -22,7 +22,7 @@ from pydantic import Field
 
 from tools.workflow_preview.models import PreviewModel
 
-from .files import config_bytes, open_directory, write_all
+from .files import config_bytes, open_directory, write_once
 from .settings_models import Id
 
 if TYPE_CHECKING:
@@ -82,18 +82,6 @@ def inline_advice(document: object) -> bytes | None:
     except AdviceArtifactError as error:
         raise ExportRefused(422, "invalid_advice", str(error)) from None
     return payload
-
-
-def _write_once(directory: int, name: str, payload: bytes) -> None:
-    descriptor = os.open(
-        name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory
-    )
-    try:
-        os.fchmod(descriptor, 0o600)
-        write_all(descriptor, payload)
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
 
 
 def _free_name(exports: int, name: str) -> str:
@@ -178,7 +166,7 @@ def export(setups: SetupRegistry, workspace: Path, request: ExportRequest) -> Ex
         try:
             os.fchmod(target, 0o700)
             for name, payload in files.items():
-                _write_once(target, name, payload)
+                write_once(target, name, payload)
         finally:
             os.close(target)
     finally:

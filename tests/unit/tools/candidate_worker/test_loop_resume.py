@@ -207,9 +207,9 @@ def test_completed_pause_resumes_actual_body_in_new_process(
         )
         with pytest.raises(OperationFailure, match="exited"):
             review_loop_resume(config, first_id)
-    # A partial next slot already invalidates the paused readback, before admission.
+    # A partial next slot blocks Resume, while the completed pause remains readable.
     (root / "iteration_002").mkdir()
-    with pytest.raises(OperationFailure, match="verified paused"):
+    with pytest.raises(OperationFailure, match="next iteration slot"):
         review_loop_resume(config, first_id)
     (root / "iteration_002").rmdir()
     stop = {"run_id": first.receipt.run_id, "declaration_digest": first.receipt.declaration_digest}

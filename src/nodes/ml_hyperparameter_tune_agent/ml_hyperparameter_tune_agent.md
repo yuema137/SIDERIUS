@@ -691,6 +691,11 @@ missing telemetry. Missing executables, missing GPU rows and malformed telemetry
 remain persistent evidence gaps. Isolated admission retains unconditional
 phase refusal during retries, including `observe_only`. Invalid visibility
 still wins over a transient query failure.
+Protected native execution uses this same owner and classification. Its transient
+refusals persist separate sampling receipts; this owner finalizes the last receipt
+on exhaustion. A persistence failure returns infrastructure failure without further
+retry. Measured phase identity, checkpoint and remaining preparation allowance survive
+re-entry; see [protected execution](../../core/runtime_control/native-gpu-execution.md).
 Inference retries do not repeat successful training. Exhaustion or a persistent
 environment refusal emits one final refusal record and returns the decision in
 `TrainingOutcome.environment_admission_refusal` or

@@ -42,6 +42,19 @@ file against the bundle's `SHA256SUMS`, copies the package to
 creates the setup `quickstart-research-loop` from a workflow template. It never
 overwrites an existing `tasks/` folder.
 
+Run `fetch_data.py` before `add-task`: import finishes with `check`, which needs
+`data/quickstart/` to exist. If you imported first and only that check failed,
+write the data, then run:
+
+```bash
+.venv/bin/python -m tools.candidate_console check \
+  --config /absolute/project/siderius_workspace/settings/console.json
+```
+
+Do not import the same task again. If you choose `--task-id NAME` when importing,
+pass the same `--task-id NAME` to `fetch_data.py` so it writes `data/NAME/`.
+A successful data command ends with `Data ready in .../data/NAME`.
+
 ## Set up and open the console
 
 1. Create the console workspace inside a directory you own, for example your
@@ -91,8 +104,9 @@ overwrites an existing `tasks/` folder.
 
    `init` refuses the file unless it is a regular file you own with mode `600`,
    and never prints its contents. It writes the path into a new
-   `console.json`; the closing check then reads the file only to confirm it is
-   JSON or dotenv text, so an empty file passes and you can add the key later.
+   `console.json`; its closing check also checks metadata only, so you can add
+   the key later. Explicit `check` and `serve` commands read the file to validate
+   its JSON or dotenv format without printing values.
    If `console.json` already exists, `init` does not change it: it creates any
    missing folders, prints the exact `"credential_file": ...` line to add or
    substitute and the `check` command to run next, and exits with status 2.
@@ -329,7 +343,11 @@ overwrites an existing `tasks/` folder.
    iteration finishes, and status says stopped only once the native receipt does.
    **Pause at next boundary** works the same way; a paused loop can be reviewed and
    resumed, optionally with your advice, as a new segment of the same run, which
-   shows its own results.
+   shows its own results. To finish at that pause, choose **End loop here** and
+   confirm. Completed results are kept. End can still be available when Resume
+   is refused; it requires the paused worker to have finished cleanly and no
+   active or uncertain successor. If End is refused, its message explains the
+   check that failed.
    A loop ended early by a declared stop condition says why, in plain words.
    A condition set to **Pause and ask me** pauses the loop instead and reads
    "Waiting for your input", followed by what was met, for example "No improvement
@@ -690,14 +708,14 @@ If a step does not succeed, the line under the Run steps says so in plain words,
 example "The preparation failed. The cause and its log are named below; start over to
 try again." or "The run failed. The cause is shown below; open it in Monitor for the
 full log." A time limit, an interruption, a stop on request and a worker that never
-started each get their own sentence. Below it, the step's status line names the cause:
-the last error line of the log, such as "Cause (from the log): TaskCompositionError:
-plugin file … does not exist". A failed preparation also names its log file,
-`inputs/preparation/worker.log` in the run's folder; Monitor shows the same log under
-**Activity and logs** with log source **Native**. Fix the cause, then select **Start
-over** and prepare again. A paused research loop is not reported as finished either:
-the line says whether it is waiting for your input or was paused by you, and to open
-it in Monitor to resume.
+started each get their own sentence. Below it, the step's status line shows a safe
+preparation error category or, for other failures, the last error line from the log.
+Monitor provides the full logs under **Activity and logs**. Preparation workers write
+`inputs/preparation/worker.log` in the run's folder (log source **Native**); errors
+in the process that starts or checks preparation go to the operation log (log source
+**Operation**). Fix the cause, then select **Start over** and prepare again.
+A paused research loop says whether it is waiting for your input or was paused by
+you, and directs you to Monitor to resume.
 
 The browser retains preparation and candidate intents separately before sending
 either effect. Storage failure prevents dispatch. After a lost response or reload,
@@ -706,6 +724,18 @@ blocks new effects; changing or saving source never removes it. Wait until the p
 the console offers dismissal or another effect. An initial request explicitly refused before
 admission can be discarded and reviewed again; restored or ambiguous requests retain
 their UUID. No automatic retries or replacement IDs are created.
+
+If Prepare reports another operation is blocking it, the page keeps the response
+code and reason visible. Select the blocking operation's Monitor link to inspect it.
+For example, a `409, busy` response still names that operation when a status check
+finds no preparation record. The outcome stays unconfirmed unless the server can
+verify it. If the server becomes unreachable, the page shows that new problem.
+If a worker died, new work becomes available only after the console confirms that its remaining processes also stopped.
+
+When preparation fails in its parent process, Run and Monitor show a safe cause
+category, such as invalid input or a changed source. Task authors can inspect the
+full traceback in the server log (the operation log for a detached preparation).
+Fix the cause, then select **Start over** and prepare again.
 
 While the server is live, an admitted preparation can be recovered even if its
 original source or credential file disappears. Restart still validates configured
