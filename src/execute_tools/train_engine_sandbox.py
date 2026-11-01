@@ -49,6 +49,7 @@ from execute_tools.dataset_config import (
     tidmad_topology,
 )
 from execute_tools.learning_rate_schedule import build_epoch_lr_controller
+from execute_tools.legacy_training import run_experiment as run_experiment
 from execute_tools.model_input_dtype import (
     TRAINING_SITE_DTYPE,
     apply_contract_cardinality,
@@ -1120,7 +1121,7 @@ def refuse_zero_optimizer_steps(
     )
 
 
-def run_experiment(
+def _run_experiment(
     model_cfg,
     train_cfg: TrainConfig,
     loss_cfg: LossConfig,
@@ -2481,7 +2482,10 @@ def main():
             generator=torch_generator(seed_plan.epoch(0).shuffle),
             worker_init_fn=dataloader_worker_init,
         )
-        results = run_experiment(
+        # Already seeded before dataset construction: do not rewind the NumPy
+        # stream after the dataset's offset draw. Direct Python calls use the
+        # seeded public run_experiment entry instead.
+        results = _run_experiment(
             model_cfg,
             train_cfg,
             loss_cfg,

@@ -198,8 +198,25 @@ trainer's epoch-0 subsample seed without loading torch.
 5. The R3 validation pass keeps its `fork_rng` isolation, so it consumes no
    training RNG state.
 
+The direct legacy Python callable
+`train_engine_sandbox.run_experiment(..., seed_plan=...)` requires the same
+plan. Its implementation in `execute_tools.legacy_training` applies
+`seed_process` before delegating to the engine's private training body; the
+engine re-exports the public callable for existing callers.
+A missing plan raises `MissingRunSeed` before construction or checkpoint writes.
+The caller owns the supplied dataset and loader's sampling generators; this
+entry does not regenerate their already-materialized data or replace their RNGs.
+
 The legacy single-file branch of `main()` calls `seed_process` before building
-its dataset and gives its loader the epoch-0 shuffle generator.
+its dataset and gives its loader the epoch-0 shuffle generator. It then calls
+the same private training body without reseeding: the dataset's NumPy offset
+draw must remain ahead of any NumPy draws in a model constructor. The CLI's
+existing RNG sequence and the streaming path are unchanged.
+
+These guarantees cover process-global constructor/forward RNGs, not random
+state created while importing plugins before seeding. Plugin import lifecycle
+policy is tracked in issue #1306; independent unseeded generators and plugins
+that reseed themselves are also outside this guarantee.
 
 ### Trainer CLI entry boundary
 
