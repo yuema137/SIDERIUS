@@ -21,3 +21,14 @@ The caller chooses settings and order; individual nodes own their reasoning.
 The [workflows and task composition contract](workflow-contract.md) records interfaces,
 inputs, outputs, state changes, refusal behavior and related tests. Cross-package
 rules remain with the mechanism references it links.
+
+## Stop at a target score
+
+The in-process workflow accepts `--target_score`. Before each iteration it checks
+whether the best formal result that passes Health validity meets the target,
+using the metric's declared direction. If a resumed run already meets the target,
+it skips new iterations. Startup validation still runs.
+
+The final summary reports the valid score and why the run stopped. The separate
+“Best formal (unfiltered, this execution)” line and trial/formal iteration scores
+include invalid results and are only progress reports.

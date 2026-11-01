@@ -7,14 +7,17 @@ from execute_tools.task_registration_scope import run_registration_scope
 from nodes.ml_hyperparameter_tune_agent.health_coverage import validate_attempt_health_coverage
 from workflows.task_composition import compose_run_task_bindings
 
+from .test_modular_masked_regression import isolated_task_registrations
 from .test_synthetic_masked_regression_pack import MANIFEST, PACK
 
 
 @pytest.mark.parametrize("manifest", [MANIFEST, PACK / "modular/composition.yaml"])
 @pytest.mark.parametrize("round_kind", ["trial", "formal"])
-def test_attempt_health_coverage(manifest, round_kind):
+def test_attempt_health_coverage(manifest, round_kind, isolated_task_registrations):
     """Missing capability rejects usable scopes; unconditional success accepts missing evidence.
 
+    The existing variant-isolation fixture keeps inherited plain registrations
+    from poisoning modular composition, then restores both registry maps.
     Both manifests must accept full and sampled evaluation scopes, including a
     pair of valid rows. A single valid row cannot meet the positive dispersion floor.
     Training rows, empty/masked-only views and unsupported partition demand

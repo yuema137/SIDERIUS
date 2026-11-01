@@ -95,6 +95,10 @@ prompts.
   initialization and dropout inside a model or plugin `__init__`/`forward`
   draw from seeded process generators. A model must not reseed them
   ([seeding mechanism](../../docs/agent-reference/mechanisms/seeding.md)).
+  This guarantee covers process-global RNG draws during construction/forward,
+  not random values created while importing a plugin, independent unseeded
+  generators, or plugin reseeding. Plugin imports can precede trainer seeding;
+  their lifecycle policy is tracked separately in issue #1306.
 
 ## Extension points
 
@@ -161,3 +165,13 @@ SIDERIUS_PLUGIN_DIRS=/path/to/my_plugin_dir <entrypoint …>
 `tests/unit/ml_models/` — loader contract refusals, registry shadowing,
 output-type vocabulary, loss compatibility; baseline-config pins live with the
 comparison-campaign tests.
+
+## Loss parameter activity
+
+`LossConfig.inactive_parameter_values(loss_type)` owns the fields nullified
+by each loss route. `enforce_parameter_consistency` applies those values for
+ordinary configs; parameter-rule validation uses the same owner to refuse
+dead rules when declarations fix an incompatible loss type; otherwise rules
+are conditional and inactive attempts carry receipts. Focal routes nullify `beta`; `smooth_l1`
+nullifies `alpha`/`gamma` and disables `use_class_weights`; `ce` and `custom`
+nullify `alpha`/`gamma`/`beta`. Custom hyperparameters remain plugin-owned.

@@ -165,6 +165,17 @@ def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -
             # Typed absence after a successful store read; the only code that may
             # justify forgetting a retained intent. Plain 404 ``not_found`` never does.
             return error_response(404, "unknown_operation", error.detail.message)
+        if error.detail.blocking_operation_id is not None:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": {
+                        "code": error.detail.code,
+                        "message": message,
+                        "blocking_operation_id": str(error.detail.blocking_operation_id),
+                    }
+                },
+            )
         response = error_response(409, error.detail.code, message)
         if isinstance(error, ReusableAdmissionNotAttempted):
             return JSONResponse(

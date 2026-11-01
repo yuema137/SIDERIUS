@@ -67,10 +67,15 @@ records (`metric_result` / `metric_refusal`), typed training results.
 - Scientific metric implementations and their frozen definitions belong to the
   task package. Generic execution does not select a scientific formula.
 - **Seeded training**: `train_engine_sandbox.run_experiment_streaming`
-  requires a `TrainingSeedPlan` (`None` raises `MissingRunSeed`), seeds the
-  process RNGs before model construction (`process_seeding.seed_process`) and
-  gives every `DataLoader` an explicit generator and `worker_init_fn`. The
-  trainer CLI is a run-seed entry boundary (`--seed_context_json`, otherwise
+  and the legacy Python callable `run_experiment` (implemented in
+  `legacy_training.py`, re-exported by the engine) require a `TrainingSeedPlan`
+  (`None` raises `MissingRunSeed`) and seed the process RNGs before model
+  construction (`process_seeding.seed_process`). The streaming path gives every
+  `DataLoader` an explicit generator and
+  `worker_init_fn`. Direct legacy callers own their supplied loader and its
+  sampling generators. The already-seeded legacy CLI calls the private shared
+  training body without reseeding after dataset construction, preserving its
+  RNG sequence. The trainer CLI is a run-seed entry boundary (`--seed_context_json`, otherwise
   generated). See the [seeding mechanism](../../docs/agent-reference/mechanisms/seeding.md#trainer-seeding).
 
 ## Non-owned semantics

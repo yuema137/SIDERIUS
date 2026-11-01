@@ -7,6 +7,7 @@ task code never runs in the console process. The console adds its own
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
@@ -36,6 +37,8 @@ from workflows.definition import TaskBinding
 from workflows.llm_config import parse_llm_config_bytes
 
 from .models import TaskChoice
+
+logger = logging.getLogger(__name__)
 
 DATA_WALK_ENTRY_CAP = 100_000
 DATA_WALK_SECONDS = 5.0
@@ -393,6 +396,13 @@ class TaskSummaries:
             entry.volume = walk_data_root(Path(task.data_root), self._cap)
             observed = self._observer(job, task)
             failure = observed.result.failure
+            if failure is not None:
+                logger.error(
+                    "Task summary %s failure (%s): %s",
+                    failure.stage,
+                    failure.exception_type,
+                    failure.message,
+                )
             if failure is None:
                 entry.state, entry.package = "ready", project_package(task, observed)
             elif failure.stage == "sandbox" and failure.exception_type == "SandboxUnavailable":
@@ -401,8 +411,11 @@ class TaskSummaries:
                     reason="sandbox_missing", hint=_HINTS["sandbox_missing"]
                 )
             else:
-                entry.failure = SummaryFailure(stage=failure.stage, message=failure.message)
+                entry.failure = SummaryFailure(
+                    stage=failure.stage, message=summary_error_message(failure.exception_type)
+                )
         except Exception as error:
+            logger.exception("Task summary observation failed")
             entry.failure = SummaryFailure(
                 stage="console",
                 message=summary_error_message(error),
