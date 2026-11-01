@@ -74,8 +74,10 @@ the changed observation/decision source identity before reuse.
 A task that has finished its selected work does not need a prediction of how
 long that same work would take. The default `completed-workload-v1` policy checks
 its actual elapsed time against the budget. Remaining work still needs the
-existing conservative checks. A completed training stage includes its required
-validation; inference must finish writing every prediction before it can pass.
+existing conservative checks. Once the last planned optimizer step finishes,
+validation admission uses the measured training cost. A candidate still needs
+successful validation; inference must finish writing every prediction before it
+can pass.
 
 This does not make a few fast batches a reliable speed estimate. Their timing
 record remains unsuitable for future calibration. Partial work cannot claim

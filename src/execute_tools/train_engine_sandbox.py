@@ -91,6 +91,7 @@ from execute_tools.trained_model_artifact import (
 from execute_tools.training_batches import completed_epoch_loss
 from execute_tools.training_budget_execution import (
     TrainingAllocationRejected,
+    complete_planned_optimizer_work,
     complete_training_workload,
     enforce_training_allocation,
     return_on_allocation_rejection,
@@ -1966,6 +1967,20 @@ def run_experiment_streaming(
         if learning_rates is not None and epoch_rates is not None:
             learning_rates.append(epoch_rates)
         print(f"Epoch {ep} | Avg Loss: {avg_loss:.6f}")
+
+        if completing_workload:
+            assert runtime_session is not None and t_train_start is not None
+            complete_planned_optimizer_work(
+                runtime_session,
+                verifier=verifier,
+                optimizer_steps=completed_optimizer_steps,
+                completed_epochs=ep + 1,
+                training_seconds=max(
+                    time.perf_counter() - t_train_start - validation_seconds_total, 1e-9
+                ),
+                epoch0_dataset_seconds=epoch0_dataset_seconds,
+            )
+            verifier = None
 
         # Step 07a — R3 for THIS completed epoch (one observation per R2
         # entry, so the two curves always agree in length). Sequencing call
