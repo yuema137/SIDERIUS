@@ -1160,7 +1160,15 @@ paused receipt and durable Stop marker; the native status remains `paused`. Resu
 request uses the same reviewed Resume below; it sends no advice. Without a successor it offers **Review
 resume** (one GET on click, never polled), then **Resume loop**, disabled unless
 credentials are ready. **End loop here** is offered beside these actions on a
-paused tail that is no longer finishing. It confirms that completed results are
+paused tail that is no longer finishing. End eligibility is independent of Resume:
+a verified completed pause can be ended even when the next iteration slot is occupied.
+Clean supervision, bound completion and successor-session safeguards still apply.
+A refused End renders `End loop was not recorded: <owner message>` in
+`#loop-stop-status`; the owner message contains only the reason, avoiding a second
+End loop prefix. It remains available for retry without Resume review.
+Typed loop admission refusals from submission display the worker owner's profile,
+iteration-shape or feedback explanation; they are never relabelled as changed inputs.
+It confirms that completed results are
 kept and the run cannot resume, then posts `{}` to the existing `loop-stop` route.
 Pending Stop and Resume requests disable competing actions. Success triggers a
 fresh Monitor read, including its status sentence and observation label; a
