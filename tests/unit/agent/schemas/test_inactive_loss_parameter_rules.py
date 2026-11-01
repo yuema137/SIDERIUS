@@ -1,4 +1,4 @@
-"""Issue #1039: a rule must constrain a field the selected loss consumes."""
+"""Issue #1039: conditional loss rules must disclose inactivity and refuse fixed dead rules."""
 
 from pathlib import Path
 
@@ -34,12 +34,18 @@ from workflows.task_composition import TaskCompositionError, compose_run_task_bi
     ],
 )
 @pytest.mark.parametrize("owner", ["task_rules", "workflow_rules"])
-def test_inactive_exact_locks_are_refused(loss_type: str, field: str, value, owner: str):
-    """Previously every lock passed, even though LossConfig erased its target."""
+def test_inactive_exact_locks_are_disclosed(loss_type: str, field: str, value, owner: str, capsys):
+    """Dynamic loss choice remains valid, with typed receipts and visible disclosure."""
     rules = ParameterRules.model_validate({f"loss_config.{field}": {"exact": value}})
     plan = ExperimentPlan(loss_config={"loss_type": loss_type})
-    with pytest.raises(ParameterRuleError, match=rf"loss_config\.{field}.*inactive.*{loss_type}"):
-        apply_parameter_rules(plan, **{owner: rules})
+    effective = apply_parameter_rules(plan, **{owner: rules})
+    assert effective.loss_cfg == plan.loss_cfg
+    (receipt,) = effective.inactive_parameter_rules
+    assert receipt.path == f"loss_config.{field}"
+    assert receipt.loss_type == loss_type
+    assert receipt.owner == owner.removesuffix("_rules")
+    assert receipt.rule.exact == value
+    assert "inactive for this attempt" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
@@ -48,10 +54,14 @@ def test_inactive_exact_locks_are_refused(loss_type: str, field: str, value, own
 def test_non_exact_rules_cannot_validate_an_ignored_authored_value(rule: dict):
     """Non-exact rules also used to accept values subsequently erased by the loss."""
     rules = ParameterRules.model_validate({"loss_config.beta": rule})
-    with pytest.raises(ParameterRuleError, match="inactive"):
-        apply_parameter_rules(
-            ExperimentPlan(loss_config={"loss_type": "focal", "beta": 2}), workflow_rules=rules
-        )
+    effective = apply_parameter_rules(
+        ExperimentPlan(loss_config={"loss_type": "focal"}), workflow_rules=rules
+    )
+    assert (
+        effective.inactive_parameter_rules[0].rule.model_dump(mode="json", exclude_none=True)
+        == rule
+    )
+    assert "beta" not in effective.loss_cfg
 
 
 def test_effective_type_and_default_control_activity():
@@ -62,8 +72,8 @@ def test_effective_type_and_default_control_activity():
     effective = apply_parameter_rules(plan, task_rules=beta, workflow_rules=smooth)
     assert LossConfig.model_validate(effective.loss_cfg).beta == 2
     assert plan.loss_cfg == {"loss_type": "focal"}
-    with pytest.raises(ParameterRuleError, match=r"inactive.*focal"):
-        apply_parameter_rules(ExperimentPlan(loss_config={}), workflow_rules=beta)
+    default = apply_parameter_rules(ExperimentPlan(loss_config={}), workflow_rules=beta)
+    assert default.inactive_parameter_rules[0].loss_type == "focal"
     # A baseline with no selected loss may defer until the tuner chooses it.
     assert resolve_parameter_rule_document(
         {"loss_config": {}}, workflow_rules=beta, defer_missing_non_exact=True
@@ -115,3 +125,31 @@ def test_resolver_rechecks_mutated_rules_and_effective_type():
                 workflow_rules=rules,
                 defer_missing_non_exact=defer,
             )
+
+
+def test_receipts_reset_when_next_attempt_activates_field():
+    """Re-resolution must not carry stale inactivity into another loss route."""
+    rules = ParameterRules.model_validate({"loss_config.beta": {"exact": 2}})
+    inactive = apply_parameter_rules(
+        ExperimentPlan(loss_config={"loss_type": "focal"}), workflow_rules=rules
+    )
+    inactive.loss_cfg = {"loss_type": "smooth_l1"}
+    active = apply_parameter_rules(inactive, workflow_rules=rules)
+    assert active.loss_cfg["beta"] == 2
+    assert not active.inactive_parameter_rules
+    assert "inactive_parameter_rules" not in active.model_dump()
+
+
+def test_proposal_guidance_explains_conditional_loss_rules():
+    """A proposal must not infer that a beta rule forces smooth_l1 loss."""
+    from nodes.ml_model_proposal_agent.parameter_rules import render_proposal_parameter_rules
+
+    rules = ParameterRules.model_validate({"loss_config.beta": {"exact": 2}})
+    text = render_proposal_parameter_rules(None, rules)
+    assert "they do not restrict your loss choice" in text
+    assert (
+        "inactive"
+        not in render_proposal_parameter_rules(
+            None, ParameterRules.model_validate({"train_config.epochs": {"exact": 2}})
+        ).lower()
+    )

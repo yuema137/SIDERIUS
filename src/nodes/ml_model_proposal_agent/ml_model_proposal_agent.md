@@ -476,3 +476,13 @@ separator, colons and Unicode control characters are refused through the existin
 retry feedback. Names are never sanitized. The workflow independently repeats
 this check before name-derived attempt renaming and tuning directory creation,
 including operator-supplied fixed plans; archival decoding remains permissive.
+
+
+### Conditional loss parameter rules
+
+Rule guidance states conditional loss-field applicability when loss rules are
+present; train/model-only and empty-rule prompts keep their prior bytes.
+`resolve_proposal_baseline_config` uses shared resolution: dead rules under a
+rule-fixed loss type fail, while planner-selected inactive fields are skipped
+with log disclosure. Unknown proposal types defer activity. The tuner recomputes
+and persists typed attempt receipts; proposal metadata is not receipt authority.

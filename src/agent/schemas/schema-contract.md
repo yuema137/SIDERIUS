@@ -146,15 +146,23 @@ tuner_input = local_validated_model(validation_output, ...)  # the ONLY mapping 
 `tests/unit/agent/protocols/`; golden record baselines under the tuner's
 test goldens pin persisted shapes.
 
-## Inactive loss rule targets
+## Conditional loss rules and attempt receipts
 
-Loss rules require active targets, not conditional locks. `ParameterRules`
-refuses an inactive target when its own rules fix `loss_config.loss_type`
-(`exact` or singleton `allowed`); `validate_parameter_rule_ownership` checks
-combined task/workflow declarations. The shared resolver checks again after
-exact locks select the effective type, including mutated rule dictionaries.
-Strict plan resolution uses the `LossConfig` default if the type is omitted;
-proposal resolution with `defer_missing_non_exact=True` defers an unknown type.
-All rule kinds are refused on inactive targets, including exact null/false.
-The error identifies the path and type. `LossConfig.inactive_parameter_values`
-is the sole activity authority. Normal configs still normalize as before.
+`LossConfig.inactive_parameter_values` owns activity. A rule constrains its
+field only when active; it never implicitly restricts planner loss choice.
+`ParameterRules` and the combined ownership gate refuse dead rules when exact
+or singleton-allowed declarations fix an incompatible type. The shared
+resolver repeats this check, then skips inactive field constraints for a
+planner-selected type and logs the decision. Missing inactive values need not
+exist and inactive predicates are not called. Active rules retain ordinary
+exact/conflict/value enforcement.
+
+`InactiveParameterRule` contains `path`, `owner` (task/workflow), `loss_type`,
+`rule` (typed `ParameterRule`) and `reason="inactive_for_selected_loss"`.
+`apply_parameter_rules` recomputes `ExperimentPlan.inactive_parameter_rules`
+every call; the tuner transports it to the identically typed
+`ExperimentRecord.inactive_parameter_rules` at the common emission boundary.
+Both fields default to empty and are excluded from dumps when empty, preserving
+legacy no-receipt record shapes. Planner history retains the record field even
+when condensed. Unknown proposal types defer activity; omitted strict-plan types
+use the LossConfig default. Ordinary LossConfig normalization is unchanged.

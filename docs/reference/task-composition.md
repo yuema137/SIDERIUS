@@ -539,15 +539,21 @@ Notes:
   remains supported. Loss rule targets are checked the same way against the
   fields of the execution `LossConfig`; a misspelled field such as
   `loss_config.gammmma` is refused instead of being dropped when the loss is
-  built. A loss rule must also target a field active for the effective
-  `loss_type`. For example, `loss_config.beta: {exact: 2}` is refused for
-  `focal`, whose `LossConfig` nullifies `beta`. This applies to every rule
-  kind, including exact null/false. A declaration with an exact or singleton
-  allowed loss type is checked immediately; combined task/workflow rules are
-  checked by the ownership gate. Otherwise resolution checks the type after
-  exact locks, using the `LossConfig` default when a plan omits it. A proposal
-  with no selected type defers this check until the tuner resolves the plan.
-  Remove an inactive rule or select a loss that consumes its target.
+  built. Loss-field rules constrain values only while their fields are active;
+  they do not constrain the planner's choice of `loss_type`. If rules fix the
+  type (`exact` or singleton `allowed`) to a route that nullifies a constrained
+  field, declaration/combined ownership validation refuses that **dead rule**.
+  Otherwise a planner-selected inactive field is accepted: its rule is neither
+  applied nor evaluated, even when its value is omitted. For example, a beta
+  lock is inactive for focal loss but applies to a later smooth_l1 attempt.
+  The shared resolver logs each inactive rule; effective plans and persisted
+  `ExperimentRecord.inactive_parameter_rules` carry typed receipts with path,
+  owner, selected loss type, rule and `inactive_for_selected_loss` reason.
+  Planner history preserves these receipts in both full and condensed records.
+  All rule kinds follow this policy, including exact null/false. A strict plan
+  with no type uses the `LossConfig` default; a proposal with no type defers
+  activity until a type is selected. Receipts are recomputed on resolution,
+  never inherited as authority from planner-supplied metadata.
   Custom-loss plugin hyperparameters are not transported through
   `loss_config` (the plugin executes its `PLUGIN_LOSS_CONFIG_CLASS`
   defaults), so a rule naming one, such as `loss_config.snr_threshold`, is

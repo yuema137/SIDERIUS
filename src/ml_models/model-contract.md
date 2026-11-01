@@ -167,6 +167,7 @@ comparison-campaign tests.
 `LossConfig.inactive_parameter_values(loss_type)` owns the fields nullified
 by each loss route. `enforce_parameter_consistency` applies those values for
 ordinary configs; parameter-rule validation uses the same owner to refuse
-constraints on inactive targets. Focal routes nullify `beta`; `smooth_l1`
+dead rules when declarations fix an incompatible loss type; otherwise rules
+are conditional and inactive attempts carry receipts. Focal routes nullify `beta`; `smooth_l1`
 nullifies `alpha`/`gamma` and disables `use_class_weights`; `ce` and `custom`
 nullify `alpha`/`gamma`/`beta`. Custom hyperparameters remain plugin-owned.
