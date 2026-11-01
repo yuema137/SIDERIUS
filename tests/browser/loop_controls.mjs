@@ -4,7 +4,7 @@ import {spawn} from 'node:child_process';
 import {createRequire} from 'node:module';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 import {tmpdir} from 'node:os';
 import {showAllConsoleSections} from './console_view_flags.mjs';
 
@@ -12,7 +12,6 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[name], `Set ${name}`);
 const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.workflow_editor_server'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
 let errors = ''; server.stderr.on('data', chunk => {errors += chunk;});
-const lines = createInterface({input: server.stdout});
 const running = '33333333-3333-4333-8333-333333333333';
 const fixed = '44444444-4444-4444-8444-444444444444';
 const finished = '55555555-5555-4555-8555-555555555555';
@@ -28,17 +27,7 @@ const pausedStopped = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const ending = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 let browser;
 try {
-  const metadata = await new Promise((accept, reject) => {
-    const timer = setTimeout(() => reject(new Error(`Server startup timeout: ${errors}`)), 15000);
-    lines.on('line', line => {
-      try {
-        const value = JSON.parse(line);
-        if (!value.origin || !value.token) return;
-        clearTimeout(timer); lines.close(); accept(value);
-      } catch { /* Native plugin registration may write one informational line first. */ }
-    });
-    server.once('exit', code => {clearTimeout(timer); reject(new Error(`Server ${code}: ${errors}`));});
-  });
+  const metadata = await waitForMetadata(server, {timeoutMs: 15000});
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
   showAllConsoleSections(browser);
@@ -357,5 +346,5 @@ try {
   console.log('PASS: Stop and Pause post once and read "requested" until the receipt; a paused loop is resumable after review, Resume posts once with the retained UUID, and the resumed segment shows Stop and its bodies; a receipt stop_reason reads in plain words, with whole-run body numbers on a resumed segment.');
 } finally {
   if (browser) await browser.close();
-  server.kill('SIGTERM'); lines.close();
+  server.kill('SIGTERM');
 }

@@ -12,6 +12,7 @@ from pathlib import Path
 
 import uvicorn
 
+from tests.browser.fixture_metadata import emit_metadata
 from tests.unit.tools.candidate_console.conftest import console_config
 from tests.unit.tools.candidate_console.test_settings_page import workspace
 from tests.unit.tools.candidate_prepare.conftest import selection
@@ -38,15 +39,12 @@ def main() -> None:
         path.write_text(json.dumps(document))
         resolved = load_console(str(path))
         config = resolved.config
-        print(
-            json.dumps(
-                {
-                    "origin": config.browser_origin,
-                    "token": Path(config.auth_token_file).read_text(),
-                    "workspace": str(root),
-                }
-            ),
-            flush=True,
+        emit_metadata(
+            {
+                "origin": config.browser_origin,
+                "token": Path(config.auth_token_file).read_text(),
+                "workspace": str(root),
+            }
         )
         uvicorn.run(
             create_app(config, resolved.settings),

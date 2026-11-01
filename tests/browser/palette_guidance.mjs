@@ -11,14 +11,13 @@ import {readFile} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const key of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[key], `Set ${key}`);
 const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.node_palette_fixture'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
 let errors = '', browser;
 server.stderr.on('data', chunk => { errors += chunk; });
-const lines = createInterface({input: server.stdout});
 const waitUntil = async (predicate, what = 'Browser condition') => {
   const deadline = Date.now() + 20000;
   while (!(await predicate())) { if (Date.now() > deadline) throw new Error(`${what} timed out`); await new Promise(resolve => setTimeout(resolve, 50)); }
@@ -36,11 +35,7 @@ const contrastOf = locator => locator.evaluate(element => {
   return (Math.max(a, b) + .05) / (Math.min(a, b) + .05);
 });
 try {
-  const metadata = await new Promise((accept, reject) => {
-    const timer = setTimeout(() => reject(new Error(`Fixture startup timeout: ${errors}`)), 30000);
-    lines.once('line', line => { clearTimeout(timer); accept(JSON.parse(line)); });
-    server.once('exit', code => { clearTimeout(timer); reject(new Error(`Fixture exited ${code}: ${errors}`)); });
-  });
+  const metadata = await waitForMetadata(server, {timeoutMs: 30000});
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
   const page = await browser.newPage({viewport: {width: 1440, height: 1100}}), faults = [], posts = [];
