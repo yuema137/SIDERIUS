@@ -24,8 +24,8 @@ from workflows.definition.draft import inspect_draft
 from workflows.definition.source import (
     WorkflowSourceError,
     parse_workflow_source,
-    render_workflow_source,
 )
+from workflows.definition.source_updates import update_workflow_source
 
 from .loop import loop_template, with_loop
 from .models import (
@@ -315,7 +315,9 @@ class WorkflowAuthoring:
                 raise AuthoringError(
                     "draft_" + inspection.status, "\n".join(inspection.diagnostics)
                 )
-            proposal = DocumentProposal(kind="document", document=inspection.document)
+            proposal = DocumentProposal(
+                kind="document", document=inspection.document, source=proposal.source
+            )
         task_review = None
         node_edit = None
         if isinstance(proposal, TaskReferenceUpdateProposal):
@@ -340,9 +342,11 @@ class WorkflowAuthoring:
                 )
             except ValueError as error:
                 raise AuthoringError("task_reference_policy", str(error)) from error
-            source = render_workflow_source(updated)
+            source = update_workflow_source(base.source, updated)
         elif isinstance(proposal, LoopProposal):
-            source = render_workflow_source(with_loop(proposal.source, proposal.loop))
+            source = update_workflow_source(
+                proposal.source, with_loop(proposal.source, proposal.loop)
+            )
         elif isinstance(proposal, (AddNodeProposal, NodeDraftsProposal, RemoveNodeProposal)):
             self._base(current_payload, request.expected_sha256)
             try:
@@ -357,7 +361,11 @@ class WorkflowAuthoring:
                 raise AuthoringError(error.code, str(error)) from error
         else:
             source = (
-                render_workflow_source(proposal.document)
+                update_workflow_source(
+                    proposal.source if proposal.source is not None else base.source,
+                    proposal.document,
+                    browser_numbers=True,
+                )
                 if isinstance(proposal, DocumentProposal)
                 else proposal.source
             )
