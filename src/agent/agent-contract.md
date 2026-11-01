@@ -150,3 +150,13 @@ text = bridge.generate_text(system_prompt="…", user_prompt="say ok")
 skills); prompt-surface pin tests under the node suites; dual-mode
 integration tests exercise the stub bridge by default; see the
 [workflow integration guide](../../tests/integration/workflows/README.md).
+
+## Persisted prompt history decoding
+
+Planner memory and reflector actual-results dictionaries are decoded through
+`core.record_encoding.decode_record` at the prompt entry point, including
+external raw-summary callers. Storage metadata is never prompt evidence.
+Finite/null prompt bytes remain unchanged. Non-finite values retain the
+existing numeric prompt-text rendering after decoding; historical null
+records remain null. The detailed serialization/paper-impact owner is
+[core record contract](../core/core-contract.md#raw-consumer-boundary-and-prompt-rendering).

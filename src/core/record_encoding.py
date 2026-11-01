@@ -73,6 +73,8 @@ def encoded_record(value: dict[str, Any], *, always: bool = True) -> dict[str, A
 
 def decode_record(value: Any) -> Any:
     """Decode versioned records without mutating input; leave legacy data alone."""
+    if isinstance(value, list):
+        return [decode_record(item) for item in value]
     if not isinstance(value, dict) or METADATA not in value:
         return value
     metadata = EncodingMetadata.model_validate(value[METADATA])

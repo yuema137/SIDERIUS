@@ -34,6 +34,7 @@ import sys
 from collections.abc import Iterable, Sequence
 from typing import Any
 
+from core.record_encoding import decode_record
 from execute_tools.evaluation_metric import (
     METRIC_IDENTITY_UNAVAILABLE,
     MetricIdentityConflictError,
@@ -57,7 +58,8 @@ def partition_by_metric_identity(
     """
     rankable: list[dict[str, Any]] = []
     unranked: list[dict[str, Any]] = []
-    for record in records:
+    for raw_record in records:
+        record = decode_record(raw_record)
         (rankable if metric_identity_from_record(record) is not None else unranked).append(record)
     return rankable, unranked
 

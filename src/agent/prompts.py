@@ -28,6 +28,7 @@ from agent.prompt_templates.tuner.rendering import (
 from agent.prompt_templates.tuner.runtime_evidence import render_training_epoch_evidence
 from agent.prompt_templates.tuner.timing_context import render_timing_context
 from agent.schemas.planner_timing import PlannerTimingContext
+from core.record_encoding import decode_record
 
 # Step 07 PR 07b (P2) — collapse advice about a health check the run does not
 # actually run would tell the planner to look for a signal it can never
@@ -968,6 +969,9 @@ def get_planner_user_prompt(
             means "no prior data" — typically round 1 before any pre-flight
             has run. See §10.3 / §10.11.
     """
+    # History may arrive from an external raw summary reader. Decode before
+    # either JSON rendering or typed diagnosis; storage tags are never prompt data.
+    memory_history = decode_record(memory_history)
     windowed = _truncate_memory_history(memory_history) if memory_history else []
     history_context = (
         json.dumps(windowed, indent=2) if windowed else "No previous experiments recorded."
@@ -1375,6 +1379,8 @@ def get_reflector_user_prompt(
   ⚠ If training_psd_segments << baseline_psd_segments, poor scores may be from
      insufficient data, NOT bad hyperparameters. Recommend increasing trial_portion.
 """
+
+    actual_results = decode_record(actual_results)
 
     return f"""
 ### Experiment Outcome for {exp_id}:

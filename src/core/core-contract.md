@@ -248,3 +248,34 @@ Template text and output field schemas are unchanged, but a non-finite value
 previously erased to null can now affect downstream prompt data. Experiment-owned
 qualified-assembly lists need separate qualification before adopting the new
 revision; retain the experiment dependency pin to reproduce historical behavior.
+
+### Raw consumer boundary and prompt rendering
+
+`decode_record` also accepts a summary list and decodes each record before
+returning it. Dashboard local-data access, exploration summary/native-output
+routes, persisted metric ranking, funnel assembly and workflow validation
+delegate to this owner. Raw log bootstrap/summary equality and native capture
+intentionally retain storage bytes for durability or comparison; these are not
+scientific consumer APIs. Typed native readers use `RecordModel` validation.
+
+Planner `get_planner_user_prompt` decodes incoming memory before truncation,
+JSON history rendering and training-dynamics rendering. Reflector
+`get_reflector_user_prompt` decodes the actual-results record before rendering.
+This also covers external callers passing raw persisted dictionaries. No
+storage metadata or quoted numeric sentinel is model-facing. The existing
+JSON-in-prose renderer represents decoded non-finite floats as unquoted
+`Infinity`, `-Infinity` and `NaN`; it is prompt text, not a persisted strict
+JSON document. Actual string values remain strings. Finite/null histories
+retain field order and identical rendered bytes. For newly persisted
+non-finite histories, the planner now sees the original numeric evidence where
+historical null-projected records render `null`; old archives still render
+their historical null. Typed interpreter/proposer/literature/implementor
+consumers receive decoded values before their existing projections and numeric
+formatters, never storage tags. No prompt template is changed.
+
+The encoding version is a dispatch label, not authentication. Replay still
+requires the recorded digest anchors and recomputed artifact bytes. Removing a
+version does not authorize arbitrary replacement values under an unchanged
+trusted digest; if both anchors and artifacts are attacker-controlled, this
+format alone supplies no authenticity. Additional consumed-input identity and
+downgrade/path-check hardening is tracked in #1326.
