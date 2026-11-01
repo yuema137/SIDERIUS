@@ -630,6 +630,16 @@ Selection is conservative:
   readers, plus any test with a literal contract-file edge;
 - Python changes select direct tests, tests of explicit transitive callers,
   declared dynamic readers and the changed area's owning suite;
+- every path under `examples/` or `configs/task_composition/` triggers the full
+  unit suite, including Markdown, declared assets, nested task templates and
+  console bundles. Composition follows manifest references and fingerprints
+  package directories; the selector's Python import graph and literal test
+  references cannot prove all consumers of those inputs. All current task-plugin
+  files referenced by these manifests reside under `examples/` and are covered
+  by that trigger. New plugin locations outside these roots require an explicit
+  dependency audit and selection coverage before narrowing is safe. This trades
+  selection speed for complete composition/identity coverage without a test-name
+  allowlist. The trigger takes precedence over document and area ownership;
 - shared hubs, CI/selector infrastructure, dependencies, missing/deleted paths,
   unmapped importable files, inventory/parse errors and malformed transport run
   the full suite with a reason;
