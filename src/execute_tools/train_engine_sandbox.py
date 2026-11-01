@@ -1121,6 +1121,36 @@ def refuse_zero_optimizer_steps(
 
 
 def run_experiment(
+    model_cfg: object,
+    train_cfg: TrainConfig,
+    loss_cfg: LossConfig,
+    data_loader: DataLoader,
+    sandbox_dirs: dict[str, str],
+    exp_id: str,
+    model_io: ModelIOContract | None = None,
+    expected_custom_loss_snapshot: CapabilityContractSnapshot | None = None,
+    *,
+    seed_plan: TrainingSeedPlan | None = None,
+) -> dict[str, Any]:
+    """Train with a caller-owned loader and a required run-derived seed plan.
+
+    Seed process RNGs before model construction. The caller owns data selection
+    and loader generators; only the trainer CLI may generate a missing run seed.
+    """
+    seed_process(require_seed_plan(seed_plan))
+    return _run_experiment(
+        model_cfg,
+        train_cfg,
+        loss_cfg,
+        data_loader,
+        sandbox_dirs,
+        exp_id,
+        model_io,
+        expected_custom_loss_snapshot,
+    )
+
+
+def _run_experiment(
     model_cfg,
     train_cfg: TrainConfig,
     loss_cfg: LossConfig,
@@ -2481,7 +2511,10 @@ def main():
             generator=torch_generator(seed_plan.epoch(0).shuffle),
             worker_init_fn=dataloader_worker_init,
         )
-        results = run_experiment(
+        # Already seeded before dataset construction: do not rewind the NumPy
+        # stream after the dataset's offset draw. Direct Python calls use the
+        # seeded public run_experiment entry instead.
+        results = _run_experiment(
             model_cfg,
             train_cfg,
             loss_cfg,

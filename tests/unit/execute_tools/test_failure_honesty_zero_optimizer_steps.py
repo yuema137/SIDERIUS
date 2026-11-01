@@ -166,6 +166,7 @@ class TestEpochEngineRefuses:
                 loader,
                 _sandbox_dirs(tmp_path),
                 "zero_step_witness",
+                seed_plan=TrainingSeedPlan(SeedContext(run_seed=42)),
             )
 
     def test_no_checkpoint_and_no_success_sentinel_are_written(self, tmp_path):
@@ -184,6 +185,7 @@ class TestEpochEngineRefuses:
                 DataLoader(_Pairs(6), batch_size=8, drop_last=True),
                 dirs,
                 "zero_step_witness",
+                seed_plan=TrainingSeedPlan(SeedContext(run_seed=42)),
             )
         assert os.listdir(dirs["models"]) == [], (
             "an untrained model was checkpointed for a round that ran no optimizer step"
@@ -199,6 +201,7 @@ class TestEpochEngineRefuses:
             DataLoader(_Pairs(6), batch_size=6, drop_last=True),
             dirs,
             "one_batch",
+            seed_plan=TrainingSeedPlan(SeedContext(run_seed=42)),
         )
         assert not np.isnan(out["final_loss"])
         assert "_OK_one_batch" in os.listdir(dirs["models"])

@@ -95,6 +95,10 @@ prompts.
   initialization and dropout inside a model or plugin `__init__`/`forward`
   draw from seeded process generators. A model must not reseed them
   ([seeding mechanism](../../docs/agent-reference/mechanisms/seeding.md)).
+  This guarantee covers process-global RNG draws during construction/forward,
+  not random values created while importing a plugin, independent unseeded
+  generators, or plugin reseeding. Plugin imports can precede trainer seeding;
+  their lifecycle policy is tracked separately in issue #1306.
 
 ## Extension points
 

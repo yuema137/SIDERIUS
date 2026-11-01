@@ -537,6 +537,7 @@ class TestLegacySingleFile:
                 loader,
                 _sandbox(tmp_path, "legacy"),
                 "legacy",
+                seed_plan=TrainingSeedPlan(SeedContext(run_seed=42)),
             )
         assert list(summary.keys()) == [*LEGACY_TRAINING_RESULT_KEYS, "training_history"]
         h = TrainingHistory.model_validate(summary["training_history"])
