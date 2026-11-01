@@ -112,3 +112,45 @@ def test_bundle_task_is_self_contained_and_composes_like_the_checkout_quickstart
     with run_registration_scope():
         bundled = compose_run_task_bindings(str(manifest))
     assert bundled.task_data_path_id == "quickstart_tabular"
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        "../outside.json",
+        "/outside.json",
+        PACK_PREFIX + "../outside.json",
+        PACK_PREFIX + "/outside.json",
+    ],
+)
+def test_manifest_rewrite_refuses_escaping_references(reference):
+    """Nested references must stay package-relative even after stripping the prefix."""
+    from tools.release.build_example_bundle import BundleBuildError, _rewrite
+
+    with pytest.raises(BundleBuildError, match=r"manifest\.items\[0\]"):
+        _rewrite({"items": [reference]}, "manifest")
+
+
+@pytest.mark.parametrize("kind", ["unsupported", "symlink", "directory", "fifo"])
+def test_builder_refuses_package_entries_it_cannot_ship(tmp_path, monkeypatch, kind):
+    """An unshippable asset must fail the build instead of disappearing from the zip."""
+    import os
+
+    from tools.release import build_example_bundle as builder
+
+    pack = tmp_path / "pack"
+    for folder in builder.PACKAGE_FOLDERS:
+        (pack / folder).mkdir(parents=True)
+    asset = pack / "declared" / "asset.bin"
+    if kind == "symlink":
+        asset.symlink_to(builder.SHIPPED_MANIFEST)
+    elif kind == "directory":
+        asset.mkdir()
+    elif kind == "fifo":
+        os.mkfifo(asset)
+    else:
+        asset.write_bytes(b"required asset")
+    monkeypatch.setattr(builder, "PACK", pack)
+    with pytest.raises(builder.BundleBuildError, match=r"asset\.bin"):
+        builder.build(tmp_path, "invalid")
+    assert not (tmp_path / "siderius-example-quickstart-invalid.zip").exists()

@@ -12,7 +12,7 @@ from workflows.task_composition import RunTaskComposition
 from .budget import WorkerBudget
 from .graph_evidence import read_graph_control
 from .layout import candidate_control_dir
-from .loop_models import LoopContinuation, LoopPause, LoopStop, LoopTrace, admit_loop
+from .loop_models import LoopContinuation, LoopPause, LoopStop, LoopTrace, require_loop
 from .loop_stop import (
     BodyScore,
     JudgeBoundaryVerdict,
@@ -73,7 +73,7 @@ def execute_loop(
     from .graph_evidence import verify_graph_trace
     from .loop_evidence import advance_body, initial_history
 
-    admit_loop(request)
+    require_loop(request)
     loop = request.preview.document.definition.loop
     assert loop is not None
     if loop.stop_conditions:

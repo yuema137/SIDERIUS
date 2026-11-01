@@ -290,7 +290,7 @@ def test_admission_forwards_full_native_routes(chain, monkeypatch, route_name):
         require_credentials(actual_routes, names, env)
 
     monkeypatch.setattr("tools.candidate_operations.native_chain.require_credentials", check)
-    with pytest.raises(ValueError, match="binding refused"):
+    with pytest.raises(ValueError, match="native chain admission failed; check"):
         review_native_chain_operation(record.config, submission, launch_environment={})
     assert observed == [routes]
 
@@ -612,3 +612,30 @@ def test_lock_seed_the_reviewed_declaration_does_not_explain_is_not_shown(chain)
     observed = read_operation(record.config, record.submission.request_id).native_chain
     assert observed.run_seed is None and observed.run_seed_source is None
     assert observed.run_seed_anomaly == "lock_contradicts_declaration"
+
+
+@pytest.mark.parametrize("error_type", [OSError, ValueError])
+def test_admission_refusal_explains_checks_without_echoing_inputs(chain, monkeypatch, error_type):
+    """#1244: failed native admission names actionable checks without exposing payloads."""
+    from unittest.mock import Mock
+
+    from tools.candidate_operations.models import OperationFailure
+
+    record, _ = chain
+    config = record.config.model_copy(update={"state_root": record.config.state_root + "-new"})
+    submission = record.submission.model_copy(update={"request_id": uuid4()})
+    monkeypatch.setattr(
+        "tools.candidate_operations.submit.review_native_chain_operation",
+        Mock(side_effect=error_type("secret-sentinel")),
+    )
+    spawn = Mock()
+    monkeypatch.setattr("tools.candidate_operations.submit.spawn", spawn)
+    with pytest.raises(OperationFailure) as refused:
+        submit_operation(config, submission, launch_environment={})
+    assert refused.value.detail.code == "native_chain_admission"
+    assert refused.value.detail.message == (
+        "native chain admission failed; check the capture, launch settings, "
+        "input paths and required environment bindings, then review again"
+    )
+    spawn.assert_not_called()
+    assert not (Path(config.state_root) / "operations" / str(submission.request_id)).exists()

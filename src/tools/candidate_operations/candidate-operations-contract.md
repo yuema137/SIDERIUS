@@ -106,12 +106,24 @@ when inputs change or credentials disappear. Store lock/directories may already
 exist on refusal; no new operation record, worker or native workspace is claimed.
 The existing environment filter remains the forwarding authority.
 
-Fresh-preview refusals retain code `candidate_preflight`. For a `ValueError` on
-an authored loop whose execution profile is not `native-interpretation-candidate/v1`,
-the message is `research loops require the native-interpretation-candidate profile`.
-This fixed message is selected from validated request fields, never exception text
-or raw input. `OSError` and other `ValueError` refusals retain
-`candidate inputs or routes changed; review again`.
+Fresh-preview refusals retain code `candidate_preflight`. The worker's
+`admit_loop` returns `LoopAdmissionRefusal | None`; `require_loop` raises a
+returned refusal at preflight, execution and evidence boundaries. Submission renders
+only that typed exception's safe fixed message, without rechecking the profile:
+- `profile`: research loops require the native-interpretation-candidate profile.
+- `shape`: research loops require a native interpretation-to-tuning iteration;
+  review the workflow nodes and connections.
+- `feedback`: research loop feedback must connect native tuning to interpretation;
+  review the workflow connections.
+
+Other `OSError` and `ValueError` refusals retain
+`candidate inputs or routes changed; review again`; arbitrary exception text is
+never forwarded. Reusable preparation preflight failures use `reusable_preflight`
+and direct the operator to check the task manifest, data root, LLM configuration and
+selected paths before reviewing again. Native-chain admission failures use
+`native_chain_admission` and direct the operator to check the capture, launch
+settings, input paths and required environment bindings. These generic boundaries
+do not claim a particular input changed or expose raw exception payloads.
 
 ## Run seed (issue #983)
 
@@ -1214,13 +1226,19 @@ changes after review refuse the new operation rather than changing its meaning.
 
 `request_loop_stop(config, operation_id)` is an operation-bound graceful request
 for the candidate worker's declared finite loop, including an exited, verified paused
-tail. For a paused receipt it calls `review_locked(..., ending=True)` under the
-same store lock as Resume admission: clean supervision and bound completion are
-required. An existing successor is allowed only when `loop_recovery.failed_successor`
+tail. For a paused receipt it calls `review_end_locked` under the same store lock
+as Resume admission. The shared `_paused_boundary` verifies completed evidence,
+exited process, clean supervision and bound completion. End has its own eligibility:
+it does not require a recorded seed for future execution or an unused next iteration
+slot. Resume retains those requirements. End refusals use `loop_end`; shared
+boundary messages contain only the reason, because the console supplies the action
+prefix. Resume retains its existing messages. Identity failures retain their integrity codes. An existing successor is allowed only when `loop_recovery.failed_successor`
 verifies that it is the selected predecessor's bound resume operation, has no
 completion or native receipt, and its wrapper and sandbox sessions have ended.
-This ending-only path permits a partial next body; it neither promotes that body
+This ending-only path permits a partial next iteration; it neither promotes that iteration
 to a result nor authorizes re-execution. Live, unknown or corrupt successors refuse.
+A continued predecessor directs the operator to open its successor: Stop the active
+successor or use End loop there if it is paused.
 It preserves the paused receipt and writes only the run-wide Stop marker; a stale
 Resume review cannot admit after Stop wins the lock. It reuses the store lock,
 configured-root admission, saved request/run identity checks and current process
@@ -1247,7 +1265,7 @@ that receipt, the wrapper is observably exited, and recorded native supervision
 proves clean process-group shutdown. Missing/unknown lifecycle evidence, a reached
 finite limit, a met stop condition (a `completed` receipt with `loop_trace.stop_reason`),
 a root Stop or an existing successor refuses with `loop_resume`. A
-partial next body already invalidates the paused readback, so the review finds no
+partial next iteration already invalidates the paused readback, so the review finds no
 verified paused segment. The review constructs no process and reads no credentials.
 
 Submit `CandidateLoopResumeOperation(request_id=..., request=CandidateLoopResumeRequest(
