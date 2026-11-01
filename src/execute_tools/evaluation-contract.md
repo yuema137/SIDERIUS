@@ -71,7 +71,7 @@ Selection variants:
   mandatory and cannot recursively be rubric_balance. Rubric selection is only
   used by admitted judged paths once #1297 lands, not by every selection site.
 
-Weighted-sum arithmetic contract for #1294: normalize each term to
+Weighted-sum arithmetic contract: normalize each term to
 `q=(value-lower)/(upper-lower)` using its explicit range policy. Convert q to
 utility using the source metric direction through MetricOrder; lower-preferring
 components contribute `1-q`. The aggregate is `sum(weight*utility)/sum(weight)`.
@@ -90,7 +90,7 @@ produce inspection warnings. Descriptive component ranges do not impose feasibil
 No equality, implicit tolerance or inferred scientific threshold is supported.
 
 Only a secondary referenced by a formula term or constraint becomes REQUIRED
-quantitative evidence in #1294/#1295. Merely listing it as a component leaves it
+quantitative evidence for formula execution (constraint execution remains #1295). Merely listing it as a component leaves it
 observational. Missing or nonfinite required evidence must fail closed; unrelated
 secondary errors retain their observational behavior. Health, feasibility and
 preference remain separate authorities; Trial Health exemptions do not grant
@@ -148,7 +148,7 @@ Never suppress assembly changes or rewrite archived evidence to claim parity.
 
 ## Downstream handoff
 
-#1294 emits a NEW effective selection MetricSpec whose id derives from canonical
+Formula execution emits a NEW effective selection MetricSpec whose id derives from canonical
 evaluation identity, with higher-is-better utility for weighted_sum. Ranking binds
 to that scalar. **Health explicitly keeps reading original source metric values,
 never utility**, including a named raw component where a check supports one.
@@ -175,3 +175,85 @@ inspection, plugin identity/isolation/relocation, defaulted schema extension and
 rubric digest resolution. Full affected package suites and the separately recorded
 baseline comparison establish integration evidence; declarations alone do not
 establish runtime evaluation support.
+
+## Deterministic selection runtime
+
+`workflows/evaluation_selection.py` derives the effective `MetricSpec` without
+replacing `RunTaskComposition.metric`, which remains the executable source metric.
+`selection_metric_spec` exposes the ranking declaration. The optional typed
+`SelectionBinding` is projected through `TaskCompositionRef`; it carries source
+and effective specs, evaluation SHA and ordered required component identities.
+`evaluation.inspect()` reports `effective_metric_id`, direction and utility units
+for formula selection. The id is `evaluation.weighted_sum.v1.<evaluation SHA>`;
+aggregation is `evaluation.weighted_sum/v1`, direction is `higher`, and no source
+transform is applied twice. Primary selection retains the original spec.
+
+`evaluation_aggregation.py` is the sole arithmetic owner. The native task-owned
+scoring child calls it after source primary and declared secondary evaluation.
+Finite decimal input representations are converted to exact rational values for
+normalization, directional utility and weighted summation; final persisted numbers
+are floats. Bounds and weights come from terms, never observed candidate values.
+`MetricOrder.normalized_utility` owns source-direction interpretation. A missing,
+refused, errored, nonfinite or out-of-range required component produces the existing
+`NotScoreableResult` path; no available-term renormalization or zero substitution.
+The source primary must also succeed, including when it is not a formula term.
+Unreferenced secondaries remain observational.
+
+`EvaluationInputsScoreability` accepts evaluated component evidence. Its generic
+file-only `check` refuses because file presence cannot establish quantitative
+acceptance. The aggregate owner supplies its evidence verdict after the source
+metric contracts and range checks. Persisted inspection uses the existing inert
+scoreability reconstruction; it does not execute external task code.
+
+The child writes `evaluation_result: EvaluationEvidence` beside `metric_result`.
+This contains the evaluation SHA, effective metric id, source `MetricResult`,
+ordered `ComponentEvaluation` entries (identity, raw, normalized, utility, authored
+weight/bounds/range policy, weighted contribution and clipping flag), aggregate,
+and typed failures. Successful `metric_result.scalar` and `denoising_score` are the
+aggregate. Effective `file_vector` and `per_sample` are absent/null: a scalar
+combination does not imply a per-file decomposition. The source vector remains in
+`evaluation_result.source_metric_result.per_sample`.
+
+The parent validates the child identity, required component roster and scalar
+agreement before adopting results. Structured refusal evidence survives child exit
+1 into `error_scoring` / `failure_type=not_scoreable` and `metric_refusal`.
+Scope and package-integrity exceptions retain their existing terminal handling.
+The record field is omitted when evaluation is absent. Historical records are not
+recomputed. Existing composition locks and metric reconciliation reject changed
+formula identities and mixed source/effective ranking histories.
+
+Health receives the original source scalar and vector through
+`evaluation_child.source_health_inputs`; `round_health` independently checks the
+selection scalar's validity. Formula utility never replaces a task Health input.
+Existing Health validity filtering still precedes MetricOrder ranking. Effective
+identity travels through tuner best tracks, chain history, resume, interpretation,
+proposal evidence, adaptors, reports and dashboard ranking. Source per-file values
+must not be labelled as utility evidence.
+
+### Admission and threshold units
+
+`workflows/evaluation_admission.py` owns formula admission. Only native TASK_OWNED
+scoring-child execution is supported. ANCHOR_NORMALIZED and
+CandidateEvaluationExecutor combinations refuse; their child handoffs are #1336.
+Referenced custom quantitative kinds without runtime values refuse by component
+name and kind (#1338). Constraints and rubric capabilities remain independently
+gated; enabling formula aggregation does not enable them or evaluation rendering.
+
+Under formula selection, existing primary-unit thresholds refuse. Use the generated
+effective metric id for loop `metric_threshold`, route `MetricAtLeast`, and
+`threshold/v1` metric adaptors. The exploration CLI requires
+`--target_score_metric <effective id>` alongside `--target_score`. All declared
+branches are checked before dispatch. `component:<id>` raw targets explicitly
+refuse until #1337. A target value of .8 means .8 utility, not source-metric units.
+
+Active tuner score-unit settings require `score_units_metric` (CLI
+`--score_units_metric`) equal to the generated effective id. This acknowledges
+units for enabled skip/bypass margins and a numerical degeneration penalty.
+Disabled formal gates need no unit declaration; dimensionless fractions keep their
+meaning. No-evaluation and primary-selection launches retain existing behavior.
+
+Validation owners: `tests/unit/execute_tools/test_evaluation_aggregation.py`,
+`tests/unit/workflows/test_evaluation_admission.py`, the existing metric/Health
+structural guards and the complete affected package suites. Paper qualification
+must report semantic-payload parity separately from release-wide assembly identity
+changes; schema/source edits can move identities even with identical prompt bytes.

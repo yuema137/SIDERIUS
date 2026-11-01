@@ -96,6 +96,8 @@ class WorkflowLaunchConfig:
     max_rounds: int = 10
     max_proposal_attempts: int = 3
     target_score: FiniteTargetScore | None = None
+    target_score_metric: str | None = None
+    score_units_metric: str | None = None
     file_index: int = 6
     healthgate_mode: HealthGateMode | None = None
     result_authority: ResultAuthority | None = None
@@ -385,6 +387,7 @@ def _launch_owners() -> dict[str, _LaunchOwner]:
         "ResearchPolicy.minimum_boldness",
         ResearchPolicy.model_fields["minimum_boldness"].rebuild_annotation(),
     )
+    owners["target_score_metric"] = _owner("WorkflowLaunchConfig.target_score_metric", str | None)
     owners["target_score"] = _owner("WorkflowLaunchConfig.target_score", FiniteTargetScore | None)
     return owners
 

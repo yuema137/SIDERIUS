@@ -2240,3 +2240,14 @@ disabling does not weaken enforcement or synthesize replacement context.
 See the [disclosure contract](../../../docs/agent-reference/mechanisms/constraint-disclosure.md)
 for call coverage, planner/reflector timing snapshots, resume identity and
 experiment-owned historical rendering requirements.
+
+## Effective evaluation selection
+
+The executable `run_metric` remains the source metric. The composition's
+`SelectionBinding` supplies the effective spec for `run_order`, planner/reflector
+metric labels and final output stamps. `scoring_transport.py` validates child
+results and builds Health invocation context; `round_health.py` projects source
+values before Health evaluation. Formula records retain typed `evaluation_result`
+evidence and have no fabricated effective per-file vector. See the
+[evaluation runtime contract](../../execute_tools/evaluation-contract.md#deterministic-selection-runtime)
+for supported routes, required evidence, refusal records and `score_units_metric`.

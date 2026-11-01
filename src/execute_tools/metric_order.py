@@ -47,6 +47,7 @@ Steps 09/10/M2 migrate them. Deliberately NOT imported by the scoring path:
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
+from fractions import Fraction
 from typing import TypeVar
 
 from execute_tools.evaluation_metric import MetricDeclaration, MetricDirection
@@ -182,6 +183,15 @@ class MetricOrder:
         the bypass banner's counterpart to :attr:`comparison_symbol`.
         """
         return ">=" if self._higher else "<="
+
+    @staticmethod
+    def utility_direction() -> MetricDirection:
+        """The declared preference of a normalized utility output."""
+        return _HIGHER
+
+    def normalized_utility(self, value: Fraction) -> Fraction:
+        """Orient a normalized [0, 1] value toward greater utility."""
+        return value if self._higher else 1 - value
 
     # -- extremes -----------------------------------------------------------
 

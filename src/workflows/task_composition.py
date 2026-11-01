@@ -256,6 +256,20 @@ class RunTaskComposition:
     forward_contract: ForwardContract
     semantic_fingerprint: str
     provenance: CompositionProvenance
+
+    @property
+    def selection_binding(self):
+        from workflows.evaluation_selection import selection_binding
+
+        return selection_binding(self)
+
+    @property
+    def selection_metric_spec(self):
+        """Effective ranking declaration; the source metric remains executable."""
+        from workflows.evaluation_selection import effective_metric_spec
+
+        return effective_metric_spec(self.metric.spec, self.evaluation)
+
     evaluation: ResolvedEvaluation | None = None
     code_package: CapturedCodePackage | None = None
     deliverable_naming: Any = None
@@ -1920,6 +1934,7 @@ def build_task_composition_ref(task_composition: Any) -> TaskCompositionRef | No
 
     objective = getattr(task_composition, "objective", None)
     return TaskCompositionRef(
+        selection_binding=getattr(task_composition, "selection_binding", None),
         model_probe_context=model_probe_context_for(task_composition),
         semantic_fingerprint=task_composition.semantic_fingerprint,
         task_data_path_id=type(task_composition.task_data_path).task_data_path_id,
@@ -3152,6 +3167,9 @@ def bind_run_task_composition(
     from workflows.task_config import bind_task_config
 
     require_evaluation_runtime(composition.evaluation)
+    from workflows.evaluation_admission import require_formula_route
+
+    require_formula_route(composition)
 
     if not physical_data_root:
         raise CompositionDataRootMissing(

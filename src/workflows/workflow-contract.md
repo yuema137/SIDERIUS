@@ -362,3 +362,14 @@ registry and the explicit source-metric Health / effective-scalar selection boun
 `task_composition_identity.validate_composed_source_identity` owns the existing
 composed-task artifact-naming and registration-captured source identity checks.
 The composer delegates these prerequisites without changing their refusal behavior.
+
+## Effective metric binding
+
+Formula selection binds ranking consumers to `RunTaskComposition.selection_metric_spec`,
+projected through the selection owner and existing tuner/interpretation protocols.
+The source implementation remains `composition.metric`. Evaluation launch admission
+checks threshold units before effects; the exploration CLI pairs `--target_score`
+with `--target_score_metric`. The shared tuner launch surface transports
+`--score_units_metric` without adding an argument when the shell launcher omits it.
+See the [runtime contract](../execute_tools/evaluation-contract.md#deterministic-selection-runtime)
+for the single authority on formula semantics and unsupported combinations.

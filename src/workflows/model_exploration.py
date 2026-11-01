@@ -75,6 +75,7 @@ import psutil as _psutil
 import yaml
 
 from core.generated_artifact_name import validate_generated_artifact_name
+from workflows.evaluation_selection import selection_metric
 from workflows.proposal_pipeline import get_reasoning_pipeline as _get_reasoning_pipeline
 
 if TYPE_CHECKING:
@@ -744,7 +745,9 @@ def _build_lit_review_input(
 
 def _declared_metric_spec(composition: RunTaskComposition | None) -> MetricSpec | None:
     """Project a declared composition identity without deriving a metric or direction."""
-    return composition.metric.spec if composition is not None else None
+    return (
+        selection_metric(composition, composition.metric.spec) if composition is not None else None
+    )
 
 
 class _OncePerRunNotice:
@@ -1677,6 +1680,9 @@ def run_workflow(
     # doing it. An un-composed run is a no-op here.
     verify_composition_is_bound(task_composition)
 
+    from workflows.evaluation_admission import admit_evaluation_settings
+
+    admit_evaluation_settings(task_composition, launch)
     from execute_tools.evaluation_execution import candidate_evaluation_executor
     from execute_tools.model_output_retention import require_local_output_inventory
 
@@ -2912,7 +2918,7 @@ def run_workflow(
             required_gate_ids=_run_required_gate_ids,
             run_metric_spec=run_metric_spec,
             bound_metric_spec=(
-                bindings.task_composition.metric.spec
+                selection_metric(bindings.task_composition, bindings.task_composition.metric.spec)
                 if bindings.task_composition is not None
                 else None
             ),
@@ -3116,6 +3122,9 @@ def main():
         help="Max propose→implement→validate retries per iteration (default: 3).",
     )
     parser.add_argument(
+        "--target_score_metric", help="Explicit effective metric id for --target_score."
+    )
+    parser.add_argument(
         "--target_score",
         type=float,
         default=None,
@@ -3242,6 +3251,7 @@ def main():
                 max_rounds=args.max_rounds,
                 max_proposal_attempts=args.max_proposal_attempts,
                 target_score=args.target_score,
+                target_score_metric=args.target_score_metric,
                 file_index=args.file_index,
                 human_advice_interpret=args.advice_interpret,
                 human_advice_analysis=args.advice_analysis,

@@ -114,7 +114,6 @@ def test_composes_but_launch_names_every_missing_capability(task, tmp_path):
     for name in (
         "composition succeeded",
         "evaluation rendering",
-        "formula aggregation",
         "feasibility constraints",
     ):
         assert name in str(error.value)

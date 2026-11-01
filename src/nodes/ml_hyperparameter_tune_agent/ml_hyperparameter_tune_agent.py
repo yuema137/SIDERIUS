@@ -755,6 +755,9 @@ class HyperparamTuningAgent:
         """
         # --- Validate input ---
         agent_input = HyperparamTuningInput.model_validate(agent_input)
+        from workflows.evaluation_admission import admit_evaluation_settings
+
+        admit_evaluation_settings(agent_input.task_composition_ref, agent_input)
         if agent_input.storage.local is not None:
             validate_generated_artifact_name(
                 agent_input.storage.local.run_name, field="storage.local.run_name"
@@ -902,7 +905,10 @@ class HyperparamTuningAgent:
         # interpreted. There is deliberately no second direction field: the
         # same-loss `final_loss` rank stays lower-is-better by definition of a
         # loss and never consults it.
-        run_order = MetricOrder(run_metric.spec)
+        from workflows.evaluation_selection import selection_metric
+
+        run_selection_spec = selection_metric(agent_input.task_composition_ref, run_metric.spec)
+        run_order = MetricOrder(run_selection_spec)
 
         # --- DataScope + HealthGate startup validation (DS5) ---
         # Dataset-resolved checks (schema validators cover only internal
@@ -1414,6 +1420,7 @@ class HyperparamTuningAgent:
             run_deliverable_spec=run_deliverable_spec,
             run_deliverable_naming=run_deliverable_naming,
             run_metric=run_metric,
+            selection_binding=agent_input.task_composition_ref.selection_binding if agent_input.task_composition_ref else None,
             run_secondary_metrics=run_secondary_metrics,
             run_order=run_order,
             run_scientific_gate_ids=_resolve_run_gate_ids(agent_input),
@@ -1655,7 +1662,7 @@ class HyperparamTuningAgent:
                         prepared=prepared,
                         reflect_results=reflect_results,
                         reflection_context=reflection_context,
-                        metric_spec=run_metric.spec,
+                        metric_spec=run_selection_spec,
                         training_diagnosis=training_diagnosis,
                         task_render=run_task_render,
                     )

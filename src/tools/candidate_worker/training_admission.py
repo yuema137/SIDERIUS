@@ -188,6 +188,9 @@ def admit_training(
         ).model_dump_json()
     )
     launch = settings.launch
+    from workflows.evaluation_admission import admit_evaluation_settings
+
+    admit_evaluation_settings(composition, launch)
     validate_formal_launch(
         healthgate_mode=launch.healthgate_mode,
         result_authority=launch.result_authority,

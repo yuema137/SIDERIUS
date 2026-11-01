@@ -200,3 +200,10 @@ start.
 ## Related
 
 - [Operating a run](../../guides/operating-a-run.md) · [Composition](composition.md) · [Plugins](plugins.md)
+
+Formula evaluation records additionally retain typed `evaluation_result` evidence.
+The effective ranking MetricSpec derives its id from canonical evaluation identity;
+source metric values remain separately identified in that evidence. Existing
+composition locks and metric reconciliation govern resume: do not retroactively
+aggregate primary-only records or re-label historical scores. See the
+[evaluation contract](../../../src/execute_tools/evaluation-contract.md#deterministic-selection-runtime).

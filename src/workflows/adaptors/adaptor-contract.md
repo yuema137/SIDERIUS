@@ -195,3 +195,10 @@ direction iff metric, rankable-field guard, record literal digest.
 - `too_many_items` (split never truncates) is a graph reason since B6-4: the
   adaptor closes `failed/too_many_items` with its record.
 - Open semantics to confirm: `field-rank` over exactly one value.
+
+For formula evaluation, the bound metric supplied to metric ranking is the
+composition's effective selection spec. Threshold declarations must name that id
+at launch; they cannot compare primary-unit thresholds with utility or infer a raw
+component target. The [evaluation contract](../../execute_tools/evaluation-contract.md#deterministic-selection-runtime)
+owns admission and the generated identity. Existing Health eligibility and
+MetricOrder ordering remain unchanged.

@@ -102,6 +102,7 @@ INACTIVE_LAUNCH_FIELDS = frozenset(
         "enable_chain_incumbent_formal_gates",
         # #1012: consumed only by the chain-incumbent gates, inactive above.
         "skip_formal_min_delta",
+        "score_units_metric",
         "bypass_formal_time_budget_min_delta",
         "exploration_mode",
         "human_advice_analysis",
@@ -126,6 +127,7 @@ INACTIVE_LAUNCH_FIELDS = frozenset(
         "source_run_name",
         "start_iteration",
         "target_score",
+        "target_score_metric",
         "training_budget_reserve_fraction",
         "validation_fixed_candidate_plan",
     }

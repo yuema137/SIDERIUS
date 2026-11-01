@@ -488,3 +488,13 @@ keeps the actual instance edges; prepared review lists independent instances
 executed serially. Direct version-1 native requests remain supported. Both routes
 use the same native executor and independent operation/HTTP observation; neither
 aggregates, ranks or promises distinct scientific proposals.
+
+### Formula evaluation thresholds
+
+On the exploration Python CLI, formula selection requires
+`--target_score_metric <generated effective metric id>` when `--target_score` is
+set. Shared tuner/chain launch controls use `--score_units_metric <effective id>`
+to explicitly bind active skip/bypass margins or a numerical degeneration penalty.
+These flags do not change absent-evaluation defaults. The
+[evaluation runtime contract](../../src/execute_tools/evaluation-contract.md#deterministic-selection-runtime)
+owns supported routes, id inspection and raw-target refusal.

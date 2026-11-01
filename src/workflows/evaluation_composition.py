@@ -55,7 +55,10 @@ class ResolvedEvaluation:
         ).hexdigest()
 
     def inspect(self) -> dict[str, Any]:
+        from workflows.evaluation_selection import selection_inspection
+
         return {
+            **selection_inspection(self),
             **inspection(self.spec, self.components),
             "required_capabilities": sorted(self.required_capabilities),
             "identity": self.sha256,
@@ -196,6 +199,9 @@ def compose_evaluation(
 def require_evaluation_runtime(evaluation: ResolvedEvaluation | None) -> None:
     if evaluation is None:
         return
+    from workflows.evaluation_admission import require_component_runtime
+
+    require_component_runtime(evaluation)
     missing = sorted(
         name
         for name in evaluation.required_capabilities

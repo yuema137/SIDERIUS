@@ -626,3 +626,13 @@ declaration identity. Settings participate in external-binding identity and cann
 be changed by a task-reference-only update. See the
 [preparation contract](../../tools/candidate_prepare/candidate-prepare-contract.md#reusable-native-literature-candidate)
 for the exact controls, child-composition trust boundary and resource restrictions.
+
+### Formula threshold admission
+
+When evaluation selection is a formula, `metric_threshold`, `MetricAtLeast` and
+metric `threshold/v1` declarations name the generated effective metric id.
+Worker admission checks every declaration before dispatch, including unvisited
+branches. A source metric id is not an implicit unit conversion; raw component
+targets are unsupported. See the
+[evaluation contract](../../execute_tools/evaluation-contract.md#deterministic-selection-runtime)
+for the owning rule and effective id inspection.
