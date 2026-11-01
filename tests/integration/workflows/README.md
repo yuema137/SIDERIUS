@@ -16,5 +16,9 @@ offline witness:
   tests/integration/workflows/test_vram_awareness.py -q
 ```
 
+It checks that the next proposal receives the recorded memory estimate in GiB,
+the rejection details, and the hardware context. See the
+[VRAM feedback fixture contract](vram-feedback-fixture-contract.md).
+
 Owner: `src/workflows/` and launch adapters. See the
 [integration map](../README.md).
