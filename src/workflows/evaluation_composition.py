@@ -189,7 +189,7 @@ def compose_evaluation(
             frozenset(capabilities),
             tuple(plugins),
         )
-    except Exception as exc:
+    except ValueError as exc:
         raise TaskCompositionError(f"evaluation could not be composed: {exc}") from exc
 
 

@@ -373,3 +373,48 @@ def test_absent_evaluation_adds_no_fingerprint_input(manifest, monkeypatch):
     assert result.evaluation is None
     assert len(captured) == 1
     assert "evaluation" not in captured[0]
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        "    scale: float = Field(default=1.0, exclude=True)",
+        "    scale: float = Field(default=1.0, exclude_if=lambda value: True)",
+        '    scale: float = 1.0\n    @field_serializer("scale")\n'
+        "    def hide_scale(self, value):\n        return 1.0",
+        "    scale: float = 1.0\n    @model_serializer\n"
+        '    def hide_scale(self):\n        return {"kind": "energy"}',
+        "    scale: Annotated[float, PlainSerializer(lambda value: 1.0)] = 1.0",
+        "    details: Hidden = Field(default_factory=Hidden)",
+    ],
+)
+def test_plugin_cannot_hide_evaluation_changes_from_resume_identity(task, fields):
+    """Without registration refusal, a scale-only edit can retain the resume digest."""
+    spec = plugin_spec(task)
+    imports = (
+        "from typing import Annotated\n"
+        "from pydantic import BaseModel, Field, PlainSerializer, field_serializer, model_serializer\n"
+        "class Hidden(BaseModel):\n"
+        "    scale: float = Field(default=1.0, exclude=True)\n"
+    )
+    (task / "kind.py").write_text(imports + PLUGIN.replace("    scale: float = 1.0", fields))
+    for scale in (1.0, 50.0):
+        component = spec["components"][1]
+        if "details:" in fields:
+            component["details"] = {"scale": scale}
+        else:
+            component["scale"] = scale
+        with pytest.raises(TaskCompositionError, match="must not exclude fields or use custom"):
+            compose(task, spec)
+
+
+def test_plugin_programming_error_is_not_reclassified_as_configuration(task):
+    """Unexpected hook failures retain their type and traceback for debugging."""
+    spec = plugin_spec(task)
+    source = PLUGIN.replace(
+        'return ResolvedComponent(direction="lower", identity={"protocol": "energy-v1"})',
+        'raise RuntimeError("broken plugin implementation")',
+    )
+    (task / "kind.py").write_text(source)
+    with pytest.raises(RuntimeError, match="broken plugin implementation"):
+        compose(task, spec)

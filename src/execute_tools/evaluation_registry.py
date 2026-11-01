@@ -80,6 +80,30 @@ def component_adapter(registry: Mapping[str, ComponentKindRegistration]) -> Type
     return TypeAdapter(Annotated[union, Field(discriminator="kind")])
 
 
+def _validate_identity_serialization(schema: type[ComponentSpec]) -> None:
+    """Reject schema hooks that can hide validated values from the resume identity.
+
+    Inspect the compiled schema so nested models, Annotated serializers and
+    serializer decorators follow the same rule, including recursive definitions.
+    """
+    pending: list[Any] = [schema.__pydantic_core_schema__]
+    while pending:
+        node = pending.pop()
+        if isinstance(node, dict):
+            if (
+                "serialization" in node
+                or node.get("serialization_exclude")
+                or node.get("serialization_exclude_if") is not None
+            ):
+                raise ValueError(
+                    "component kind schemas must not exclude fields or use custom serializers; "
+                    "all validated values must participate in evaluation identity"
+                )
+            pending.extend(node.values())
+        elif isinstance(node, (list, tuple)):
+            pending.extend(node)
+
+
 def validate_registration(name: str, value: object) -> ComponentKindRegistration:
     if not isinstance(value, ComponentKindRegistration):
         raise ValueError(f"component kind {name!r} must export ComponentKindRegistration")
@@ -91,6 +115,7 @@ def validate_registration(name: str, value: object) -> ComponentKindRegistration
         for key, expected in (("extra", "forbid"), ("frozen", True), ("strict", True))
     ):
         raise ValueError(f"component kind {name!r} schema must be extra=forbid, frozen and strict")
+    _validate_identity_serialization(value.schema)
     discriminator = value.schema.model_fields["kind"].annotation
     if value.kind != name or get_args(discriminator) != (name,):
         raise ValueError(f"component kind {name!r} disagrees with registration/schema kind")

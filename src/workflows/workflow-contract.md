@@ -358,3 +358,7 @@ available through `RunTaskComposition.evaluation.inspect()`. Existing compositio
 fingerprint locks own evaluation-only resume refusal. See the
 [evaluation contract](../execute_tools/evaluation-contract.md) for schemas, defaults,
 registry and the explicit source-metric Health / effective-scalar selection boundary.
+
+`task_composition_identity.validate_composed_source_identity` owns the existing
+composed-task artifact-naming and registration-captured source identity checks.
+The composer delegates these prerequisites without changing their refusal behavior.

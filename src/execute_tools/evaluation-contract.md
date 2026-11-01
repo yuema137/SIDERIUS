@@ -102,6 +102,11 @@ A file exports one `ComponentKindRegistration` with kind, version, schema, load,
 fingerprint, render, value_kind (`quantitative` or `rubric`), and
 required_capabilities (default empty frozenset). Schema extends `ComponentSpec`,
 uses one matching `Literal` kind and must remain extra=forbid, frozen and strict.
+Plugin schemas must not exclude fields or define custom serializers, including
+in nested models or Annotated types: these could hide validated values from the
+resume identity. Registration inspects the compiled Pydantic schema and refuses
+these declarations. Expected validation/loading ValueErrors become
+TaskCompositionError; unexpected hook programming errors propagate unchanged.
 Each composition starts with a fresh builtin registry; builtin override refuses.
 There is no mutable shared registration state or rollback procedure.
 

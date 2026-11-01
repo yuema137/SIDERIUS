@@ -284,7 +284,9 @@ file loading and name lookup provide it; selection precedence is unchanged.
 export (`file`, `symbol`). The existing `_load_symbol` content/package identity
 rules apply; `module:` is refused for this v1 extension. Each composition builds a
 fresh registry and validates schema variant, loader, fingerprint contributor, renderer
-hook and runtime capability requirements. Contributor output cannot contain absolute
+hook and runtime capability requirements. Plugin schemas cannot exclude fields or
+use custom serializers, including nested types, because every validated field must
+remain visible to the resume identity. Contributor output cannot contain absolute
 host paths. Builtins currently comprise metric and rubric; measurements land through
 this extension in #1296. No global registry or runtime execution is introduced.
 See the [evaluation contract](../../../src/execute_tools/evaluation-contract.md).
