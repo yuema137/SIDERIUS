@@ -1420,7 +1420,9 @@ class HyperparamTuningAgent:
             run_deliverable_spec=run_deliverable_spec,
             run_deliverable_naming=run_deliverable_naming,
             run_metric=run_metric,
-            selection_binding=agent_input.task_composition_ref.selection_binding if agent_input.task_composition_ref else None,
+            selection_binding=agent_input.task_composition_ref.selection_binding
+            if agent_input.task_composition_ref
+            else None,
             run_secondary_metrics=run_secondary_metrics,
             run_order=run_order,
             run_scientific_gate_ids=_resolve_run_gate_ids(agent_input),

@@ -77,6 +77,16 @@ class SelectionBinding(BaseModel):
     components: dict[str, dict[str, JsonValue]]
 
 
+def _validate_refusal_evidence(
+    evidence: EvaluationEvidence,
+    refusal: NotScoreableResult | None,
+) -> None:
+    if refusal is None or refusal.metric_id != evidence.effective_metric_id:
+        raise ValueError("Evaluation refusal must carry the same effective metric identity")
+    if tuple(refusal.verdict.failures) != evidence.failures or evidence.aggregate is not None:
+        raise ValueError("Evaluation refusal disagrees with component failures")
+
+
 def validate_record_evaluation(
     evidence: EvaluationEvidence | None,
     metric: MetricResult | None,
@@ -86,10 +96,7 @@ def validate_record_evaluation(
     if evidence is None:
         return
     if evidence.failures:
-        if refusal is None or refusal.metric_id != evidence.effective_metric_id:
-            raise ValueError("Evaluation refusal must carry the same effective metric identity")
-        if tuple(refusal.verdict.failures) != evidence.failures or evidence.aggregate is not None:
-            raise ValueError("Evaluation refusal disagrees with component failures")
+        _validate_refusal_evidence(evidence, refusal)
         return
     if metric is None or evidence.aggregate is None or evidence.source_metric_result is None:
         raise ValueError("Successful evaluation requires effective and source metric evidence")

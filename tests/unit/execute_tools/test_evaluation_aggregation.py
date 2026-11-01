@@ -247,11 +247,20 @@ def test_record_readback_rejects_a_tampered_aggregate():
     from agent.schemas.hyperparam_tuning import ExperimentRecord
 
     spec, evaluation = composed()
-    outcome, evidence = aggregate_evaluation(evaluation, spec, result("accuracy", "higher", .8), [result("error", "lower", 2.)])
-    payload = {"exp_id": "a", "status": "success", "model_type": "synthetic", "timestamp": "2026-11-01",
-               "params": {}, "denoising_score": .8, "metric_result": outcome.model_dump(mode="json"),
-               "evaluation_result": evidence.model_dump(mode="json")}
+    outcome, evidence = aggregate_evaluation(
+        evaluation, spec, result("accuracy", "higher", 0.8), [result("error", "lower", 2.0)]
+    )
+    payload = {
+        "exp_id": "a",
+        "status": "success",
+        "model_type": "synthetic",
+        "timestamp": "2026-11-01",
+        "params": {},
+        "denoising_score": 0.8,
+        "metric_result": outcome.model_dump(mode="json"),
+        "evaluation_result": evidence.model_dump(mode="json"),
+    }
     ExperimentRecord.model_validate(payload)
-    payload["evaluation_result"]["aggregate"] = .9
+    payload["evaluation_result"]["aggregate"] = 0.9
     with pytest.raises(ValueError, match="Evaluation evidence disagrees"):
         ExperimentRecord.model_validate(payload)

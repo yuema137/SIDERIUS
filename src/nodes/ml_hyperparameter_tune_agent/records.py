@@ -1394,7 +1394,8 @@ def finalize_run_output(
             # than passed as an instance because this dict is written with
             # `json.dump(..., default=str)`, which would stringify the model.
             "metric_spec": selection_metric(
-                bindings, bindings.run_metric.spec,
+                bindings,
+                bindings.run_metric.spec,
             ).model_dump(),
             # Step 10 / P2b — the same rule, for the same reason: which
             # secondaries this run DECLARED is a launch fact and does not stop

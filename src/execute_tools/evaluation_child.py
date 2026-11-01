@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from execute_tools.evaluation_aggregation import aggregate_evaluation
 from execute_tools.evaluation_metric import MetricResult, NotScoreableError, NotScoreableResult
-from execute_tools.evaluation_results import EvaluationEvidence
+from execute_tools.evaluation_results import EvaluationEvidence, SelectionBinding
 from execute_tools.evaluation_validation import formula_terms
 from workflows.evaluation_selection import SelectionCarrier, bound_selection
 
@@ -62,6 +62,11 @@ def validate_child_evaluation(
         raise ValueError("Scoring child effective metric identity mismatch")
     if metric.scalar != evidence.aggregate or results.get("denoising_score") != evidence.aggregate:
         raise ValueError("Scoring child effective scalar disagrees with component evidence")
+    _validate_source_components(evidence, binding)
+    return evidence
+
+
+def _validate_source_components(evidence: EvaluationEvidence, binding: SelectionBinding) -> None:
     source = evidence.source_metric_result
     if (
         source is None
@@ -75,7 +80,6 @@ def validate_child_evaluation(
     for item in evidence.components:
         if item.identity != binding.components[item.component_id]:
             raise ValueError("Scoring child component identity mismatch")
-    return evidence
 
 
 def evaluation_record_fields(results: dict[str, Any]) -> dict[str, Any]:

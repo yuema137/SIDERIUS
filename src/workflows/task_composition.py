@@ -114,7 +114,13 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from agent.schemas.task_config import ForwardContract
     from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
     from execute_tools.dataset_config import DatasetProfile
-    from execute_tools.evaluation_metric import EvaluationMetric, RunMetric, ScoreabilityContract
+    from execute_tools.evaluation_metric import (
+        EvaluationMetric,
+        MetricSpec,
+        RunMetric,
+        ScoreabilityContract,
+    )
+    from execute_tools.evaluation_results import SelectionBinding
     from execute_tools.health_checks._composition import TaskHealthBinding
     from execute_tools.task_data_path import TaskDataPath
     from workflows.evaluation_composition import ResolvedEvaluation
@@ -258,13 +264,13 @@ class RunTaskComposition:
     provenance: CompositionProvenance
 
     @property
-    def selection_binding(self):
+    def selection_binding(self) -> SelectionBinding | None:
         from workflows.evaluation_selection import selection_binding
 
         return selection_binding(self)
 
     @property
-    def selection_metric_spec(self):
+    def selection_metric_spec(self) -> MetricSpec:
         """Effective ranking declaration; the source metric remains executable."""
         from workflows.evaluation_selection import effective_metric_spec
 

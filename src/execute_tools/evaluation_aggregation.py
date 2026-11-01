@@ -71,6 +71,28 @@ def _term_evidence(
     ), contribution
 
 
+def _source_evidence(
+    source_spec: MetricSpec,
+    primary: MetricResult | NotScoreableResult,
+) -> tuple[MetricResult | None, list[ScoreabilityFailure]]:
+    failures: list[ScoreabilityFailure] = []
+    source = primary if isinstance(primary, MetricResult) else None
+    if source is None or source.scalar is None or not math.isfinite(source.scalar):
+        failures.append(
+            ScoreabilityFailure(
+                requirement="source_primary", detail="Source primary is not scoreable or finite."
+            )
+        )
+        source = None
+    elif source.metric_id != source_spec.id or source.direction != source_spec.direction:
+        failures.append(
+            ScoreabilityFailure(
+                requirement="source_primary", detail="Source primary identity mismatch."
+            )
+        )
+    return source, failures
+
+
 def aggregate_evaluation(
     evaluation: ResolvedEvaluation,
     source_spec: MetricSpec,
@@ -81,20 +103,7 @@ def aggregate_evaluation(
     effective = effective_metric_spec(source_spec, evaluation)
     contract = effective.scoreability
     assert isinstance(contract, EvaluationInputsScoreability)
-    failures: list[ScoreabilityFailure] = []
-    source = primary if isinstance(primary, MetricResult) else None
-    if source is None or source.scalar is None or not math.isfinite(source.scalar):
-        failures.append(
-            ScoreabilityFailure(
-                requirement="source_primary", detail="Source primary is not scoreable or finite."
-            )
-        )
-    elif source.metric_id != source_spec.id or source.direction != source_spec.direction:
-        failures.append(
-            ScoreabilityFailure(
-                requirement="source_primary", detail="Source primary identity mismatch."
-            )
-        )
+    source, failures = _source_evidence(source_spec, primary)
     results = {r.metric_id: r for r in secondaries}
     if source is not None:
         results[source.metric_id] = source
@@ -119,9 +128,7 @@ def aggregate_evaluation(
     record = EvaluationEvidence(
         evaluation_sha256=evaluation.sha256,
         effective_metric_id=effective.id,
-        source_metric_result=source
-        if source and source.scalar is not None and math.isfinite(source.scalar)
-        else None,
+        source_metric_result=source,
         components=tuple(evidence),
         aggregate=scalar,
         failures=tuple(failures),

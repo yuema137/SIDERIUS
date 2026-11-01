@@ -61,3 +61,25 @@ def test_anchor_route_is_named_and_absent_evaluation_is_unchanged():
 def test_raw_component_target_is_explicitly_unsupported():
     with pytest.raises(ValueError, match="raw component targets are not supported"):
         require_effective_target("component:quality", "effective", "metric_threshold")
+
+
+def test_external_executor_refuses_before_dispatch(monkeypatch):
+    monkeypatch.setattr(
+        "execute_tools.evaluation_execution.candidate_evaluation_executor", lambda: object()
+    )
+    with pytest.raises(ValueError, match="CandidateEvaluationExecutor"):
+        admit_evaluation_settings(carrier(), SimpleNamespace())
+    admit_evaluation_settings(None, SimpleNamespace())
+
+
+@pytest.mark.parametrize("kind", ["metric_threshold", "metric_at_least", "threshold/v1"])
+def test_nested_authored_threshold_requires_effective_identity(kind):
+    """Even a threshold in an unvisited branch must refuse before execution."""
+    from workflows.evaluation_admission import admit_formula_definition
+
+    threshold = {"kind": kind, "basis": "metric", "metric_id": "source"}
+    definition = SimpleNamespace(model_dump=lambda **_: {"branches": [{"stop": threshold}]})
+    with pytest.raises(ValueError, match="effective metric"):
+        admit_formula_definition(carrier(), definition)
+    threshold["metric_id"] = "effective"
+    admit_formula_definition(carrier(), definition)
