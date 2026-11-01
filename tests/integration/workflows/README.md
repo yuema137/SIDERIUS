@@ -18,3 +18,13 @@ offline witness:
 
 Owner: `src/workflows/` and launch adapters. See the
 [integration map](../README.md).
+
+The tuner scope tests use symbolic rows so planning can count training samples
+without loading data or running a model:
+
+```bash
+.venv/bin/python -m pytest tests/integration/workflows/test_data_scope_tuner_pseudo.py -q
+```
+
+See the [symbolic fixture contract](../../fixtures/tuner-composed-task-contract.md)
+for sampling rules and the boundaries that prevent execution.
