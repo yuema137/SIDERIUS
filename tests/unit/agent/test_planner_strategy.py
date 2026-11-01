@@ -198,11 +198,13 @@ def test_conditional_provider_system_text_reaches_final_request(monkeypatch):
 # the bound parallel unit (agent.token_unit). Serial rows are byte-identical, but
 # the bridge source is part of the planner assembly, so workspace resume across
 # this change is refused (previous assembly 7bc6513b...).
+# Deliberately moved by #1111: prompt entry points decode persisted history.
+# Finite text is unchanged; non-finite evidence no longer leaks storage strings.
 NATIVE_PLANNER_IDENTITY_PIN = {
     "name": "native-timing-v1",
     "version": "1",
-    "content_sha256": "73b7df9cad19e398695f057ef322e3ad01d07e1d3e0a6c0f85e918d06594c562",
-    "assembly_sha256": "535247aae36ff96838bf652f16e4e422c12013acb7fec365b0db3d2c3eb75d55",
+    "content_sha256": "3925330560b77fab1623f0bbdde89bc02fbf2c60c6eb287307d2ba2983c7831d",
+    "assembly_sha256": "5366121171d2c1157ae3698da284ca39bfbb06566bd2646b56b2e170d837292b",
 }
 
 
