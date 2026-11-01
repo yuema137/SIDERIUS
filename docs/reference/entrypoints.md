@@ -338,7 +338,8 @@ loudly by name when the file is missing.
 
 The workflow itself, runnable directly. Accepts `--task_composition`,
 `--run_name`, `--max_iterations` (default `1`), `--max_rounds` (default `10`),
-`--max_proposal_attempts` (default `3`), `--target_score`, LLM routing flags and
+`--max_proposal_attempts` (default `3`), `--target_score` (stop when the Health-valid
+formal chain incumbent meets the target in the metric direction), LLM routing flags and
 advice flags.
 It has no `--run_seed`: `run_workflow` adopts the workspace lock's `run_seed`
 or generates and locks a new one.

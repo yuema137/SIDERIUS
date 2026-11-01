@@ -76,6 +76,26 @@ invariants lock and effective health config (written via `core` /
   workspace (`plugins/{run_name}/` and its generated-library paths); the
   workflow does not make the checkout a hidden task workspace.
 
+## Target-score stopping and progress summaries
+
+`--target_score` compares `ChainState.chain_formal_incumbent_reference` with
+`MetricOrder.is_at_least` after a completed iteration. The incumbent is the
+Health-valid formal value advanced by `research_history.advance_completed_history`
+from `best_valid_formal_denoising_score`, including restored valid evidence.
+No incumbent or no reconciled metric order means no target stop. Minimizing
+metrics meet the target with `<=`; maximizing metrics use `>=`.
+
+`best_score_overall` remains unfiltered formal progress for this execution only,
+never restored decision state. The console labels it explicitly; workflow JSON
+preserves that key and adds `best_score_overall_basis` with value
+`unfiltered_formal_current_execution`. Report/dashboard consumers do not read
+this field. Resume reconstructs the valid incumbent from committed tuner
+records; workflow JSON is not its decision-state source.
+
+Changing the workflow source changes `estimation_assembly_digest` and derived
+composition identity even for launches without a target. Historical estimator
+profiles require qualification for the selected framework source.
+
 ## Candidate request enrichment
 
 `candidate_requests.enrich_implementation_request` and

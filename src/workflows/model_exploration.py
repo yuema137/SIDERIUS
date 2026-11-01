@@ -16,7 +16,7 @@ Iterative model exploration loop:
 
 Stop conditions (whichever comes first):
   - max_iterations reached (successful iterations = validated + tuned)
-  - target_score achieved (best_denoising_score >= target)
+  - target_score achieved (Health-valid formal incumbent meets target)
 
 Single-pass mode is max_iterations=1 (the default).
 
@@ -1586,7 +1586,7 @@ def run_workflow(
         max_iterations: Number of successful iterations (validated + tuned).
         max_rounds: Tuning budget per iteration.
         max_proposal_attempts: Max propose→implement→validate retries per iteration.
-        target_score: Optional early stop — halt if best score >= target.
+        target_score: Optional early stop — halt if the Health-valid formal incumbent meets target.
         file_index: Training/validation file index (ignored when is_trial=True).
         llm_config: Per-node LLM configuration. If None, use the complete
             default workflow profile. See WorkflowLLMConfig.default for details.
@@ -2975,21 +2975,18 @@ def run_workflow(
             iter_idx=iteration, phase="post_gc", workspace=bindings.workspace, scope="workflow"
         )
 
-        # Step 10 P2a C1 — "reached the target" means AT LEAST AS GOOD AS the
-        # target on the metric's own axis, which under a minimised metric is
-        # `<=`. `_iter_order` is this iteration's reconciled order; when it is
-        # None nothing was ranked, `best_score_overall` was never advanced, and
-        # the guard below short-circuits on it — an unranked run never stops
-        # early on an assumed direction.
+        # Use the Health-valid chain incumbent, including restored evidence.
+        # MetricOrder owns direction; without a reconciled order, do not stop.
         if (
             launch.target_score is not None
-            and state.best_score_overall is not None
+            and state.chain_formal_incumbent_reference is not None
             and _iter_order is not None
-            and _iter_order.is_at_least(state.best_score_overall, launch.target_score)
+            and _iter_order.is_at_least(state.chain_formal_incumbent_reference, launch.target_score)
         ):
             print(
                 f"\n  Target score {launch.target_score} reached "
-                f"(best={state.best_score_overall}). Stopping early."
+                f"(Health-valid formal best={state.chain_formal_incumbent_reference}). "
+                "Stopping early."
             )
             break
 
@@ -3001,7 +2998,7 @@ def run_workflow(
     print(f"  Started     : {started_at}")
     print(f"  Finished    : {finished_at}")
     print(f"  Iterations  : {len(state.iteration_results)}/{launch.max_iterations}")
-    print(f"  Best overall: {state.best_score_overall}")
+    print(f"  Best formal (unfiltered, this execution): {state.best_score_overall}")
     for i, result in enumerate(state.iteration_results, 1):
         print(f"    Iteration {i}: {result.model_type} score={result.best_denoising_score}")
     print(f"{'=' * 60}\n")
@@ -3036,6 +3033,7 @@ def _save_workflow_summary(
         "finished_at": finished_at,
         "total_iterations": len(iteration_results),
         "best_score_overall": best_score_overall,
+        "best_score_overall_basis": "unfiltered_formal_current_execution",
         "iterations": [
             {
                 "model_type": r.model_type,
@@ -3119,7 +3117,7 @@ def main():
         "--target_score",
         type=float,
         default=None,
-        help="Optional early stop: halt if best score >= target.",
+        help="Optional early stop: Health-valid formal incumbent meets target in metric direction.",
     )
     parser.add_argument(
         "--file_index",
