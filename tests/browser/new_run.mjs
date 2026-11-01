@@ -196,6 +196,43 @@ try {
   await page.unroute('**/reusable-preparations/prepare');
   await page.locator('#new-run-review').click();
   await page.locator('#new-run-status').filter({hasText: 'Inputs checked'}).waitFor();
+  // #1215: a busy refusal survives typed absence polls and names the blocking claim.
+  const blocker = '12151215-1215-4215-8215-121512151215';
+  await page.route('**/reusable-preparations/prepare', route => route.fulfill({status: 409, json: {error: {code: 'busy', message: 'another operation is active or unresolved', blocking_operation_id: blocker}}}));
+  await page.route('**/api/operations/*', route => route.fulfill({status: 404, json: {error: {code: 'unknown_operation', message: 'absent'}}}));
+  await page.locator('#new-run-prepare').click();
+  await page.locator('#new-run-operation-status').filter({hasText: '409, busy'}).waitFor();
+  await page.locator('#new-run-check').click();
+  await delay(5500);
+  await page.locator('#new-run-check').click();
+  await page.locator('#new-run-dismiss').waitFor();
+  assert.match(await page.locator('#new-run-operation-status').textContent(), /409, busy.*another operation.*Blocking operation/);
+  assert.doesNotMatch(await page.locator('#new-run-operation-status').textContent(), /after Retry/);
+  assert.doesNotMatch(await page.locator('#new-run-operation-status').textContent(), /Prepare refused/);
+  assert.equal(await page.locator('#new-run-monitor').getAttribute('href'), '#monitor/' + blocker);
+  await page.screenshot({path: join(evidence, 'prepare-busy.png'), fullPage: true});
+  // A subsequent transport failure is current evidence, not a repeated busy response.
+  await page.unroute('**/api/operations/*');
+  await page.route('**/api/operations/*', route => route.abort('failed'));
+  await page.locator('#new-run-check').click();
+  await page.locator('#new-run-operation-status').filter({hasText: 'server is unreachable'}).waitFor();
+  assert.doesNotMatch(await page.locator('#new-run-operation-status').textContent(), /409, busy/);
+  // A later verified status replaces the refusal and restores this preparation's link.
+  const busyIntent = await page.evaluate(() => window.reusableIntents.read('preparation').value);
+  await page.unroute('**/api/operations/*');
+  await page.route('**/api/operations/*', route => route.fulfill({json: {
+    operation_id: busyIntent.payload.selection.preparation_operation_id, kind: 'prepare_reusable',
+    request_digest: busyIntent.payload.expectation.request_digest, state: 'operation_failed',
+    process: {status: 'exited'}, reason: 'spawn_failed', receipt_available: false
+  }}));
+  await page.locator('#new-run-check').click();
+  await page.locator('#new-run-operation-status').filter({hasText: 'could not be launched'}).waitFor();
+  assert.equal(await page.locator('#new-run-monitor').getAttribute('href'), '#monitor/' + busyIntent.payload.selection.preparation_operation_id);
+  await page.locator('#new-run-dismiss').click();
+  await page.unroute('**/reusable-preparations/prepare');
+  await page.unroute('**/api/operations/*');
+  await page.locator('#new-run-review').click();
+  await page.locator('#new-run-status').filter({hasText: 'Inputs checked'}).waitFor();
   // Storage failure cannot send preparation, and does not affect the candidate key.
   await page.evaluate(() => {window.originalSetItem = Storage.prototype.setItem; Storage.prototype.setItem = function(key, value) {if (key.startsWith('siderius.reusable-preparation.v2/')) throw Error('fixture storage failure'); return window.originalSetItem.call(this, key, value);};});
   const before = requests.length; await page.locator('#new-run-prepare').click();

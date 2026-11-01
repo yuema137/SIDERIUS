@@ -214,10 +214,10 @@ unpacked bundle folder and reuses every other `add-task` option except
 | `fetch_data.py`, `README.md` | data writer and human instructions |
 | `SHA256SUMS` | `<64 hex>  <path>` per line (`sha256sum -c` format), sorted by path, unique, every file except itself; paths must be relative POSIX without `.`, `..` or empty parts |
 
-**Verification** (`read_bundle`, before any write): trailing `/` characters of `DIR`
-are dropped (shell tab completion), then `DIR` must be absolute, normalized and
-canonical; `SHA256SUMS` must list `task/task.yaml`, `setup/setup.json` and
-`console-task.json`; each listed file is opened component by component with
+**Verification** (`read_bundle`, before any write): the operator-selected `DIR` is
+resolved strictly, accepting relative paths, trailing slashes, `..` and symlinked
+parents, then validated as a canonical readable directory; `SHA256SUMS` must list
+`task/task.yaml`, `setup/setup.json` and `console-task.json`; each listed file is opened component by component with
 `O_NOFOLLOW`, must be a regular file of at most 16 MiB, and its sha256 must match.
 The verified bytes are kept in memory and are the only bytes used later; files
 not listed are ignored and never copied. Errors: `<path> does not match
@@ -232,7 +232,16 @@ This does not authenticate the running script itself; run `sha256sum -c
 SHA256SUMS` independently before execution.
 `render_shards` calls `read_bundle` on the selected package's parent before
 executing task code. `--package` must name the `task/` folder in an unpacked
-bundle. The generator (`task/plugins/_quickstart_task.py`) and data manifest
+bundle. The operator-selected path is resolved strictly first (relative paths,
+`..` and symlink aliases are accepted); its resolved name must be `task`. There
+is no configured global root allowlist for this operator CLI. The resolved bundle
+root is the read boundary: listed descendants are still opened no-follow and
+cannot escape it. SHA256SUMS establishes integrity, not provenance; only run
+bundles you trust. Before executing generator code, the CLI prints
+`Using task package: <resolved bundle>/task` and flushes stdout.
+Resolution failures name `--package`; shared reader errors
+name the bundle directory without prescribing an importing CLI flag.
+The generator (`task/plugins/_quickstart_task.py`) and data manifest
 (`task/declared/data_manifest.json`) must both be listed. Execution and manifest
 parsing use the verified in-memory bytes, without reopening these files.
 The CLI verifies once and uses the validated `BundleTask.task_id` from that
@@ -241,6 +250,11 @@ Verification failures exit 2 with `fetch_data refused: ...` before task code
 executes or workspace data is written. Generated shard hashes are then checked
 against the verified data manifest before the existing write-once data writer
 runs. No task content, shard hashes or composition fingerprints change.
+
+**Write owner**: `files.write_once(directory, name, payload)` creates a
+caller-validated single filename with `O_EXCL | O_NOFOLLOW`, forces mode 0600,
+writes all bytes and fsyncs. Bundle copy, data generation, setup creation and
+settings export use this shared helper; existing entries are never replaced.
 
 **Pre-copy checks** (`plan_import`): console.json validates and resolves, has
 `workspace_root`, and `experiment_setups.browser_creatable` is true (else
@@ -283,10 +297,12 @@ created: <message>. Create one in the Workflow tab instead.`
 [--version V]`, version default `pyproject.toml`): `task/task.yaml` is
 `configs/task_composition/quickstart.yaml` loaded with `yaml.safe_load`, every
 string starting `../../examples/quickstart/` made package-relative and any other
-absolute or `..` string refused, dumped with `sort_keys=False` under a generated
-header; `task/declared` and `task/plugins` are the `.py`/`.json`/`.yaml` files of
+absolute or `..` string refused (including after prefix removal), dumped with
+`sort_keys=False` under a generated header; `task/declared` and `task/plugins` are the `.py`/`.json`/`.yaml` files of
 `examples/quickstart/{declared,plugins}` (READMEs excluded: their links are
-checkout-relative); `setup/setup.json`, `fetch_data.py`, `README.md` come from
+checkout-relative). Unsupported extensions, symlinks, special files and nested
+folders are refused rather than omitted; `__pycache__` directories are ignored.
+`setup/setup.json`, `fetch_data.py`, `README.md` come from
 `examples/console_bundle/`; `console-task.json` from `TASK_ID`, `TASK_LABEL` and
 `STARTER_VALUES`. Zip entries are sorted, `ZIP_STORED`, mtime 1980-01-01 00:00:00,
 Unix mode 0644; an existing output file is refused. Tests:
@@ -489,12 +505,20 @@ absent, selecting that library profile as `llm_profile`, and `settings/console.j
 write-once only when absent: `workspace_root`, `port` (default 8740, `--port`),
 `browser_origin`, `tasks: []`, `global_settings: {"browser_writable": true}`,
 `experiment_setups: {"browser_creatable": true}` (see "Experiment setups").
+Init parent ownership and group-write refusals share `_require_private_parent`: both
+name a private `mkdir -m 700 .../siderius` recovery where the caller can write,
+then the matching `--workspace` path. Foreign ownership never suggests chmod.
+
 **`--credential-file PATH`** (init only; `check`/`serve` reject it) is checked
 before anything is created by `files.require_owner_only_file`: `files.canonical`
 path, no-follow parent walk, `stat(follow_symlinks=False)` requiring a regular file
 with `st_uid == os.getuid()` and mode exactly 0600. The file is never opened, so no
 value is read or printed; a failed predicate exits 2 with one fixed message and
-creates nothing. A new `console.json` gets the top-level `credential_file: PATH`.
+creates nothing. The CLI closing validation passes `credential_metadata_only=True`
+through `_load`, `load_console`, `validate_resolved` and `validate_config`, so it
+also uses `require_owner_only_file` without reading credentials. Other callers
+keep format validation by default. A new `console.json` gets the top-level
+`credential_file: PATH`.
 An existing `console.json` is never rewritten: when its `credential_file` differs
 from `PATH` (or is absent), `init` still creates the missing folders and the
 per-task output roots below, then raises `workspace.CredentialFileNotAdded`
@@ -1160,7 +1184,15 @@ paused receipt and durable Stop marker; the native status remains `paused`. Resu
 request uses the same reviewed Resume below; it sends no advice. Without a successor it offers **Review
 resume** (one GET on click, never polled), then **Resume loop**, disabled unless
 credentials are ready. **End loop here** is offered beside these actions on a
-paused tail that is no longer finishing. It confirms that completed results are
+paused tail that is no longer finishing. End eligibility is independent of Resume:
+a verified completed pause can be ended even when the next iteration slot is occupied.
+Clean supervision, bound completion and successor-session safeguards still apply.
+A refused End renders `End loop was not recorded: <owner message>` in
+`#loop-stop-status`; the owner message contains only the reason, avoiding a second
+End loop prefix. It remains available for retry without Resume review.
+Typed loop admission refusals from submission display the worker owner's profile,
+iteration-shape or feedback explanation; they are never relabelled as changed inputs.
+It confirms that completed results are
 kept and the run cannot resume, then posts `{}` to the existing `loop-stop` route.
 Pending Stop and Resume requests disable competing actions. Success triggers a
 fresh Monitor read, including its status sentence and observation label; a
@@ -1651,9 +1683,9 @@ stay local in the loop draft state (`loopDrafts`, separate from training drafts)
 and block Review and circuit edits exactly as an invalid limit does. Cross-field
 rules (one per kind, `completed_bodies < final_iteration`) are the declaration's:
 a refused loop review reads "Review refused the research loop: …" with the
-diagnostic `field_path`. Loop edits preserve bytes only for an already-canonical
-source; Review re-renders the whole declaration, so hand-formatted or commented
-sources are rewritten (visible in the diff). The panel
+diagnostic `field_path`. Loop edits patch exact source values; untouched literals
+retain their original bytes, including in hand-formatted sources (see the authoring
+contract). The panel
 does not draw a back-edge or annotate cards, and it shares the source-dirty,
 conflict and saving fences of the unified draft. Capture review (`ReusableCaptureReview.loop`)
 reports the executed request's authored loop, refusing a request loop that differs
@@ -2006,7 +2038,9 @@ Status and logs (`app.js`): the status line is one `operationOutcome.sentence`
 native chain, …> …" in plain words for every kind, including a preparation (#1145),
 native `cancelled` (Stop run, #1027) reads "Stopped on request before finishing; no
 candidate result was produced.", and a store `unknown` state whose process reason is
-`missing_identity` reads "… is starting."). For a failed operation `#monitor-cause` shows "Cause (from the
+`missing_identity` reads "… is starting."). A preparation with `preparation_error`
+shows that fixed category as its cause; see [preparation diagnostics](#preparation-refusal-and-parent-failure-diagnostics).
+Otherwise, for a failed operation `#monitor-cause` shows "Cause (from the
 log): <last exception line>" (`operationOutcome.cause`, the last line shaped like
 `Name(Error|Exception|Failure|Refusal): …`; a line over 300 characters is cut at the
 last space before character 300, trailing punctuation dropped, and ends with "…", never
@@ -2452,7 +2486,7 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   no module is left, and Review/Save refuse (`draft_incomplete`) until no problem
   remains, so the saved file is never invalid. A deletion nobody reads, with no other
   edits, is a targeted byte-preserving removal; otherwise the combined document is
-  rendered canonically. Deleting every module shows the §7.2 empty state.
+  patched while preserving untouched literals. Deleting every module shows the §7.2 empty state.
 - Disabled Save shows `#editor-save-reason` inline ("Fix N problems to save",
   "Checking…", "Saving…"); disabled Next: Run shows `#workflow-next-reason` ("Save a
   version to run" or "Not set up for runs").
@@ -3063,3 +3097,112 @@ requests `?refresh=1` and is disabled while observing. `GET /api/tasks` items ca
 so existing check/editor job digests and observations are byte-identical. The
 transport refuses a passed result whose `package`/`sample_counts` presence does not
 match the request.
+
+### Preparation refusal and parent failure diagnostics
+
+Run retains the last typed Prepare response for the exact in-page intent across
+`unknown_operation` polling. It renders HTTP status, fixed server code/message,
+and, when supplied, the UUID `error.blocking_operation_id` as a Monitor link.
+The UUID comes from the admission owner's blocking claim, never from exception
+text or the derived active pointer. This does not certify non-admission: the
+existing two-read absence and explicit dismissal rules still govern Forget.
+Only an initial response with `admission_not_attempted` is labeled `Prepare refused`;
+other typed errors say the outcome is unconfirmed. A retained response overrides
+only `unknown_operation` polls; transport and other check errors show their current
+message, including unreachable-server guidance.
+The phrase `after Retry` is used only after an explicit Retry dispatch in this
+page. Refusal and retry evidence are page-local, cleared on intent change; a
+reload resumes observation without inventing a remembered refusal or retry.
+
+`StatusView.preparation_error` is omitted except for a verified failed preparation
+receipt with an error, a preparation in `operation_failed` (except deliberate
+`cancelled_while_queued`), or a preparation with `unknown/native_outcome_unresolved`
+completion. The latter reports an error without a verified result and explicitly
+keeps the outcome unresolved; it does not enable Start over or release admission.
+`service.preparation_error` uses `tools.setup_review.summary_errors.error_category`
+for legacy receipt diagnostics and renders fixed filesystem,
+invalid-input/changed-source, child-worker, or generic preparation messages.
+Child-worker failures direct the author to the native log; parent failures direct
+them to the server/operation log.
+Neither exception text nor task-defined exception class names reach that field.
+Run and Monitor cause summaries prefer this field over log extraction, including
+an outstanding asynchronous log read. Raw logs remain explicit diagnostic evidence
+for task authors. Parent catches log full tracebacks through server logging;
+operation children inherit the private operation log. Receipts and their identities
+are unchanged.
+
+Non-loop candidate/preparation interruptions use `operation_process_exited` and
+`operation_process_exiting` from the operation owner. The shared outcome renderer
+explains stopped processes versus unresolved writers; only verified termination
+allows new work. Native-chain continuation recovery is unchanged.
+
+Pre-dispatch preparation failures have no receipt but still carry a fixed
+`preparation_error`. Run and Monitor use that field instead of automatically
+extracting a cause from the private operation traceback. Explicit log access
+remains available to task authors. The shared category owner classifies live
+exceptions by hierarchy and legacy text by recognized built-in/standard class
+identities (including `JSONDecodeError`); unknown custom names remain generic.
+
+
+### Safe Task, GPU and setup failure projection
+
+`setup_review.summary_errors.error_category` is the single classifier for live
+exceptions and serialized standard exception names. `TaskSummaries._run` logs the
+serialized stage/type/message server-side, then projects only
+`summary_error_message(failure.exception_type)`. Task-defined class names and raw
+messages never enter `SummaryFailure.message`. `SandboxUnavailable` keeps the
+existing unavailable hint. Unexpected console observation failures retain their
+traceback in the server logger while returning fixed summary category text.
+Composition diagnostic artifacts are unchanged; this is a console projection boundary.
+
+`error_messages.console_error_message` logs the live exception/traceback and maps
+the shared category to fixed console text. GPU import/allocation/profile/startup
+failures and setup validation/registry/route failures use it. Existing status codes,
+setup-relative leftover-folder guidance and the GPU success result remain unchanged.
+The CLI GPU probe uses Python logging on stderr (including inside its child), so
+operators retain diagnostic output; that output is not a browser view model.
+Server/CLI diagnostic logs can contain private causes and must be handled accordingly.
+
+Regression owners: `test_error_projection.py`, `test_setups.py`, and the AST sweep
+`test_error_projection_guard.py`. The sweep rejects direct str/repr conversions,
+exception interpolation, and serialized message forwarding outside logging. It is
+not whole-program taint analysis. Precisely enumerated pre-existing statements in
+`error_projection_followups.json` are retained for the separate settings/import/
+authoring audit #1328; no Task-summary or GPU leak is exempted. SetupRefused's
+already projected `message` remains the route carrier. New statements are not
+allowed by this baseline. The deadline regression models 332 GiB using patched
+stat sizes over empty files, without allocating large sparse files.
+
+Browser evidence: `tests/browser/console_error_projection.mjs` injects a synthetic
+private cause in the real HTTP fixture (`setups_fixture --error-projections`) and
+checks Task and setup-dialog text, response bodies and server logging. The ordinary
+Task and experiment-setup witnesses continue to cover the surrounding navigation.
+
+
+Editor `/review` and `AuthoringError.proposal` responses apply `safe_review` at the
+console adapter. It copies `task_reference_update.observation` and
+`current_observation`, logs each native failure privately, and replaces only the
+failure's `message` and `exception_type` with fixed summary text and the shared
+category identifier. Native authoring objects and diagnostic artifacts remain
+unchanged. Ordinary reviews and successful observations retain their existing
+representation. Both observations are sanitized before the browser's JSON details
+renderer receives them; client-side hiding is not the protection boundary.
+
+Registry stale errors retain exactly the two `_REGISTRY_ERRORS` literals owned by
+`setups._read`: private-file mode guidance and invalid-registry-schema guidance.
+`_registry_problem` compares the complete exception args tuple to these constants,
+returns the constant on a match, and otherwise uses fixed generic category text.
+It never trusts arbitrary SettingsInvalid text. Raw causes remain in logging;
+joined stale messages do not contain `. ;`/`.;` punctuation.
+
+The AST guard additionally checks format calls/percent formatting, exception args,
+and chained `x.result.failure.message` access, and counts duplicate statement
+occurrences (multiple raw expressions in one statement count once). Named safe
+projection calls are boundaries for the syntactic scan. Explicit reviewed baseline
+entries retain fixed guidance and typed legacy carriers for #1328. Alias, dynamic
+attribute, whole-model serialization, safe-owner shadowing and JavaScript gaps are
+listed in #1339; behavioral HTTP/browser sentinel tests cover the editor model
+projection independently of this syntactic guard. The editor browser witness
+renders real sanitized HTTP observations through the production JSON details
+component, using synthetic visibility gates only; it does not qualify saving or
+scientific compatibility.

@@ -48,6 +48,7 @@ from tools.candidate_prepare.reusable_models import ReusablePreparationReceipt
 from tools.candidate_worker import CandidateTokenSnapshot
 from tools.candidate_worker.loop_stop import JudgeBoundaryVerdict
 from tools.candidate_worker.models import CandidateRunReceipt
+from tools.setup_review.summary_errors import error_category
 
 from .config import host_scheduling, validate_config
 from .files import credentials
@@ -204,6 +205,36 @@ def with_run_resources(
             update={"request": request, "resources": selection.resources}
         ).model_dump_json()
     )
+
+
+def preparation_error(snapshot: OperationSnapshot) -> str | None:
+    """Project legacy receipt diagnostics as fixed categories, never exception text/names."""
+    receipt = snapshot.receipt
+    if (
+        snapshot.kind in {"prepare", "prepare_reusable"}
+        and snapshot.state == "operation_failed"
+        and snapshot.reason != "cancelled_while_queued"
+    ):
+        return "Preparation failed before reporting a result. See the operation log for details."
+    if (
+        snapshot.kind in {"prepare", "prepare_reusable"}
+        and snapshot.state == "unknown"
+        and snapshot.reason == "native_outcome_unresolved"
+    ):
+        return "Preparation reported an error without a verified result. Its outcome remains unresolved; inspect the operation log."
+    if not isinstance(receipt, (CandidatePreparationReceipt, ReusablePreparationReceipt)):
+        return None
+    if receipt.status != "failed" or not receipt.error:
+        return None
+    if receipt.error.startswith("preparation child exit "):
+        return (
+            "Preparation worker failed while building its inputs. See the native log for details."
+        )
+    return {
+        "filesystem": "Filesystem error while preparing the run. See the server log for details.",
+        "invalid": "Invalid input or changed source while preparing the run. See the server log for details.",
+        "unexpected": "Preparation failed while checking or building its inputs. See the server log for details.",
+    }[error_category(receipt.error)]
 
 
 class CandidateConsole:
@@ -395,6 +426,7 @@ class CandidateConsole:
             **snapshot.model_dump(exclude={"receipt", "receipt_digest"}),
             outcome=outcome_evidence(self.config.operation_store, snapshot),
             seed=seed_readback(snapshot),
+            preparation_error=preparation_error(snapshot),
             native_status=receipt.status if receipt else None,
             graph_trace=receipt.graph_trace if isinstance(receipt, CandidateRunReceipt) else None,
             native_id=native_id,

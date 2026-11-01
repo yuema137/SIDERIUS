@@ -613,8 +613,9 @@ def test_selected_current_admission_distinguishes_gap_from_capacity(
     )
     monkeypatch.setattr(native, "sample", lambda *a: current)
     refusal = native.admit_phase(sandbox, "training")
-    assert refusal["status"] == (
-        "skipped_resource_admission" if fault == "capacity" else "aborted_infrastructure"
+    assert refusal["status"] == "skipped_resource_admission"
+    assert state.current_admission.refusal_kind == (
+        "resource" if fault == "capacity" else "environment"
     )
     assert state.current_observer is None
 

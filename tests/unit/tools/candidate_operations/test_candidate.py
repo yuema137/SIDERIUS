@@ -156,3 +156,34 @@ def test_native_identity_binding_preserves_default_and_validates_before_effects(
     assert (receipt.preparation_id if kind == "prepare" else receipt.run_id) == (
         identity if kind == "prepare" else identity.hex
     )
+
+
+def test_dead_nonloop_candidate_releases_for_new_work(prepared, tmp_path, monkeypatch):
+    """A fixed candidate's dead tree must not keep the store busy indefinitely."""
+    from tools.candidate_operations.files import publish
+    from tools.candidate_operations.process import current_identity
+    from tools.candidate_operations.store import load_record, operation_path
+
+    config = OperationStoreConfig(
+        state_root=str(tmp_path / "state"),
+        preparation_roots=(str(tmp_path),),
+        candidate_roots=(str(tmp_path),),
+    )
+    submission = CandidateOperation(request_id=uuid4(), request=prepared)
+    monkeypatch.setattr("tools.candidate_operations.submit.spawn", lambda *a: None)
+    submit_operation(config, submission, launch_environment={"OPENAI_API_KEY": "offline-fixture"})
+    record = load_record(config, submission.request_id)
+    identity = current_identity(record)
+    publish(operation_path(config, submission.request_id) / "process.json", identity)
+    monkeypatch.setattr(
+        "tools.candidate_operations.process._stat", lambda pid: ("Z", identity.start_ticks)
+    )
+    monkeypatch.setattr("tools.candidate_operations.host_liveness.session_members", lambda pid: 0)
+    assert read_operation(config, submission.request_id).reason == "operation_process_exited"
+    replacement = submission.model_copy(update={"request_id": uuid4()})
+    assert (
+        submit_operation(
+            config, replacement, launch_environment={"OPENAI_API_KEY": "offline-fixture"}
+        ).operation_id
+        == replacement.request_id
+    )
