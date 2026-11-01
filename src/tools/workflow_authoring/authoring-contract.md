@@ -41,9 +41,10 @@ are inert descriptions and do not validate executable readiness. Unsupported
 source is viewable but cannot be overwritten by this API until repaired
 externally. Review accepts an expected base SHA-256 plus a discriminated
 source/document proposal. It reads and validates the base, renders documents
-with the existing renderer, refuses source/rendered output above 32 KiB and
+by patching the exact source, refuses source/rendered output above 32 KiB and
 returns exact proposed bytes/hash/diff.
-Rendering may lose comments and formatting; that change appears in the diff, and
+Collection additions/removals may change surrounding comments and formatting;
+that change appears in the diff, and
 `ReviewView.removed_comments` lists every comment of the current file that the
 exact proposed bytes no longer contain (tokenizer `COMMENT` texts, stripped;
 repeated texts count separately; a file that does not tokenize falls back to `#`
@@ -242,10 +243,10 @@ insertions: `source_edits.insert_external` appends each new external to the lite
 `externals` tuple, then `insert_node` appends each node and its position. Every
 anchor byte, including comments, is kept and the result is re-parsed. A `document`
 (edits of saved content: moves, inspector, loop) or `bindings` (`BindingPatch` on
-saved sockets, which may read pending results) renders the combined document
-canonically through `inspect_draft` and `render_workflow_source`, exactly like a
-`DocumentProposal`/`DraftProposal`. So only a draft whose saved content is unedited
-keeps author comments. The browser omits `document` when it equals the anchor, and
+saved sockets, which may read pending results) validates the combined document
+through `inspect_draft`, then patches it through `update_workflow_source`, like a
+`DocumentProposal`/`DraftProposal`. Untouched value spans remain exact. The browser
+omits `document` when it equals the anchor, and
 moving only pending cards does not edit saved positions.
 
 `POST /api/editor/{project_id}/nodes-draft` accepts `NodeDraftsRequest(expected_sha256,
@@ -327,20 +328,11 @@ source-authored. The template is inert until reviewed and saved.
 
 `ReviewRequest` accepts `LoopProposal(kind="loop", source, loop)`: the exact
 complete proposal source is parsed, only `definition.loop` is replaced (`null`
-removes it), and the result is rendered through the normal canonical renderer,
-which revalidates endpoints and `final_iteration > 0` (strict integer). It then
-follows the ordinary review, task acceptance and Save boundary. Parsing source
-rather than a browser JSON document keeps other authored values exact (browser
-JSON turns `2.0` into `2`), so add-then-remove on a canonical source restores its
-original bytes and declaration digest, and unchanged loop proposals publish no
-bytes. A declaration without a loop renders and digests exactly as before.
-Endpoint rewiring and loop execution admission (interpretation profile, native
-loop owner) remain outside the editor.
-
-Byte preservation holds only for an already-canonical source (one the canonical
-renderer produced). Review re-renders the whole declaration, so a hand-formatted or
-commented source is rewritten into canonical form by its first reviewed loop edit;
-the diff shows that rewrite before Save.
+removes it), and `source_updates.update_workflow_source` patches that value and
+revalidates the result. It follows ordinary review, task acceptance and Save.
+Unchanged loop proposals publish no bytes. Other values retain their exact
+source spelling, including noncanonical numeric notation, escapes and comments.
+Endpoint rewiring and loop execution admission remain outside the editor.
 
 Stop conditions travel inside the same `LoopProposal.loop` as
 `AuthoredLoop.stop_conditions`; the editor adds no separate proposal, model or
@@ -570,5 +562,56 @@ Inspection reports these as `incomplete` with `problems`; Review refuses
 reader patches, `document` edits or problems, deletions are targeted byte removals
 (`source_edits.remove_nodes`) followed by the targeted insertions; otherwise the
 combined document (patched, then without the deleted nodes and positions) is validated
-and rendered canonically. `NodeEditSummary.removed` lists the deleted ids. Tests:
+and patched while preserving untouched literals. `NodeEditSummary.removed` lists
+the deleted ids. Tests:
 `tests/unit/tools/test_workflow_node_drafts.py`.
+
+## Untouched source literals (issue #961)
+
+`workflows.definition.source_updates` owns recursive source patching, reusing
+`source_edits` UTF-8 offsets and import insertion and `source` parsing/rendering.
+Document and binding-draft proposals optionally carry `source`, the exact reviewed
+anchor (the browser always supplies it); legacy callers omit it to use disk source.
+The existing expected SHA-256 conflict and exact Save checks remain authoritative.
+Task-reference updates patch disk source; loop/node proposals patch their source.
+
+Unchanged models, mapping values and collection members retain their exact byte
+spans. Declaration collections match retained members by `id`, `node` or `name`;
+other sequences match positions. Changed scalar values use the existing literal
+renderer. New constructors extend imports. Removed/new members may change the
+container's formatting/comments, reported in the normal review diff.
+
+Browser document proposals compare numeric values in binary64, because JavaScript
+cannot distinguish `2.0` from `2`, signed zero after serialization, or integers
+that round to the same Number. Such unchanged projections keep the source value,
+including its Python type and full integer precision. This is numeric comparison,
+not JS number formatting. To change those distinctions or literal spelling,
+submit exact Python through `SourceProposal`; the source editor remains exact.
+The non-browser patcher defaults to type- and signed-zero-sensitive comparison.
+No-op proposals retain the complete source and digest. Explicitly edited values
+still change their identities. Canonical generation of new templates is unchanged.
+
+Regression evidence: `tests/unit/tools/test_workflow_literal_preservation.py` and
+`tests/browser/editor_literal_preservation.mjs` cover no-op, task, position,
+training and combined drafts, numeric notation, signed zero, large integers,
+escaped strings, booleans/null, CRLF and exact saved bytes.
+
+`BrowserDocument` / `BrowserDraft` restore unchanged browser projections from the
+bounded `source` before native model admission, including integers beyond the
+binary64 range (which JSON.stringify turns into null). `DraftRequest` also carries
+this source, so binding inspection uses the same recovery as Review. Recovery
+retains only values indistinguishable from the baseline browser projection;
+changed/new values still pass through the native JSON model validator. Exact
+Python source is required to distinguish a deliberate null from overflow or to
+edit a numeric type/precision that JavaScript cannot represent.
+
+The admission regression uses an authored `final_iteration` beyond binary64 range:
+its browser projection is null, which cannot enter the native loop model unless
+recovery runs first. A separate source-less `DocumentProposal` regression checks
+disk-source numeric comparison during Review and Save; such callers cannot use
+pre-admission recovery without an anchor. Both paths share `source_updates._equal`
+as the numeric comparison authority.
+
+Already-canonical sources remain canonical after patching. The updater first
+retains source values, then uses the existing canonical renderer, preserving
+canonical loop add/remove byte parity and the renderer's validation diagnostics.

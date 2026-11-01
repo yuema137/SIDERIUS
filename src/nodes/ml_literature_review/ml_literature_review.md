@@ -80,7 +80,10 @@ dataset profile, normalized model-I/O contract, task description and metric.
 binder requires an explicit physical data root; literature review does not train
 or score those data. The workspace is selected before importing composition/plugin
 dependencies, and the task binding stays active through input validation and
-`run()`, then unwinds even if the run raises. The module
+`run()`, then unwinds even if the run raises. The cold-script regression checks
+workspace binding on every composition import and records the first uncached
+import as the startup event; cached helper imports are permitted. It also requires
+actual synthesis prompt transport and persisted output, with network disabled. The module
 form `python -m nodes.ml_literature_review.ml_literature_review ...` is
 equivalent; the short package form does not work because the package rebind
 has no `__path__` for a `__main__` lookup.

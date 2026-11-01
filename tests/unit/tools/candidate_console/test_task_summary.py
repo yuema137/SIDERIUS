@@ -262,16 +262,16 @@ def test_console_failure_message_is_bounded(console_config):
 def test_data_walk_deadline_tracks_remaining_work(tmp_path, monkeypatch, finish_at):
     """Expiry after the last stat/close is complete; before another entry is partial.
 
-    Sparse 1 GiB shards model a 332-file scientific dataset without allocating data.
+    Patched stat sizes model 332 1 GiB shards without creating large files.
     A clock driven by filesystem events avoids depending on monotonic call counts.
     """
     import os
+    import stat
 
     from tools.candidate_console import task_summary
 
     for index in range(332):
-        with (tmp_path / f"{index:03}.h5").open("wb") as stream:
-            stream.truncate(1024**3)
+        (tmp_path / f"{index:03}.h5").touch()
     with os.scandir(tmp_path) as listing:
         entries = sorted(listing, key=lambda entry: entry.name)
     now = 0.0
@@ -287,7 +287,9 @@ def test_data_walk_deadline_tracks_remaining_work(tmp_path, monkeypatch, finish_
                 finish_at == "before_next" and self.index == 0
             ):
                 now = 10.0
-            return self.entry.stat(**kwargs)
+            fields = list(self.entry.stat(**kwargs))
+            fields[stat.ST_SIZE] = 1024**3
+            return os.stat_result(fields)
 
         def is_dir(self, **kwargs):
             return self.entry.is_dir(**kwargs)

@@ -1683,9 +1683,9 @@ stay local in the loop draft state (`loopDrafts`, separate from training drafts)
 and block Review and circuit edits exactly as an invalid limit does. Cross-field
 rules (one per kind, `completed_bodies < final_iteration`) are the declaration's:
 a refused loop review reads "Review refused the research loop: …" with the
-diagnostic `field_path`. Loop edits preserve bytes only for an already-canonical
-source; Review re-renders the whole declaration, so hand-formatted or commented
-sources are rewritten (visible in the diff). The panel
+diagnostic `field_path`. Loop edits patch exact source values; untouched literals
+retain their original bytes, including in hand-formatted sources (see the authoring
+contract). The panel
 does not draw a back-edge or annotate cards, and it shares the source-dirty,
 conflict and saving fences of the unified draft. Capture review (`ReusableCaptureReview.loop`)
 reports the executed request's authored loop, refusing a request loop that differs
@@ -2486,7 +2486,7 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   no module is left, and Review/Save refuse (`draft_incomplete`) until no problem
   remains, so the saved file is never invalid. A deletion nobody reads, with no other
   edits, is a targeted byte-preserving removal; otherwise the combined document is
-  rendered canonically. Deleting every module shows the §7.2 empty state.
+  patched while preserving untouched literals. Deleting every module shows the §7.2 empty state.
 - Disabled Save shows `#editor-save-reason` inline ("Fix N problems to save",
   "Checking…", "Saving…"); disabled Next: Run shows `#workflow-next-reason` ("Save a
   version to run" or "Not set up for runs").
@@ -3142,3 +3142,67 @@ extracting a cause from the private operation traceback. Explicit log access
 remains available to task authors. The shared category owner classifies live
 exceptions by hierarchy and legacy text by recognized built-in/standard class
 identities (including `JSONDecodeError`); unknown custom names remain generic.
+
+
+### Safe Task, GPU and setup failure projection
+
+`setup_review.summary_errors.error_category` is the single classifier for live
+exceptions and serialized standard exception names. `TaskSummaries._run` logs the
+serialized stage/type/message server-side, then projects only
+`summary_error_message(failure.exception_type)`. Task-defined class names and raw
+messages never enter `SummaryFailure.message`. `SandboxUnavailable` keeps the
+existing unavailable hint. Unexpected console observation failures retain their
+traceback in the server logger while returning fixed summary category text.
+Composition diagnostic artifacts are unchanged; this is a console projection boundary.
+
+`error_messages.console_error_message` logs the live exception/traceback and maps
+the shared category to fixed console text. GPU import/allocation/profile/startup
+failures and setup validation/registry/route failures use it. Existing status codes,
+setup-relative leftover-folder guidance and the GPU success result remain unchanged.
+The CLI GPU probe uses Python logging on stderr (including inside its child), so
+operators retain diagnostic output; that output is not a browser view model.
+Server/CLI diagnostic logs can contain private causes and must be handled accordingly.
+
+Regression owners: `test_error_projection.py`, `test_setups.py`, and the AST sweep
+`test_error_projection_guard.py`. The sweep rejects direct str/repr conversions,
+exception interpolation, and serialized message forwarding outside logging. It is
+not whole-program taint analysis. Precisely enumerated pre-existing statements in
+`error_projection_followups.json` are retained for the separate settings/import/
+authoring audit #1328; no Task-summary or GPU leak is exempted. SetupRefused's
+already projected `message` remains the route carrier. New statements are not
+allowed by this baseline. The deadline regression models 332 GiB using patched
+stat sizes over empty files, without allocating large sparse files.
+
+Browser evidence: `tests/browser/console_error_projection.mjs` injects a synthetic
+private cause in the real HTTP fixture (`setups_fixture --error-projections`) and
+checks Task and setup-dialog text, response bodies and server logging. The ordinary
+Task and experiment-setup witnesses continue to cover the surrounding navigation.
+
+
+Editor `/review` and `AuthoringError.proposal` responses apply `safe_review` at the
+console adapter. It copies `task_reference_update.observation` and
+`current_observation`, logs each native failure privately, and replaces only the
+failure's `message` and `exception_type` with fixed summary text and the shared
+category identifier. Native authoring objects and diagnostic artifacts remain
+unchanged. Ordinary reviews and successful observations retain their existing
+representation. Both observations are sanitized before the browser's JSON details
+renderer receives them; client-side hiding is not the protection boundary.
+
+Registry stale errors retain exactly the two `_REGISTRY_ERRORS` literals owned by
+`setups._read`: private-file mode guidance and invalid-registry-schema guidance.
+`_registry_problem` compares the complete exception args tuple to these constants,
+returns the constant on a match, and otherwise uses fixed generic category text.
+It never trusts arbitrary SettingsInvalid text. Raw causes remain in logging;
+joined stale messages do not contain `. ;`/`.;` punctuation.
+
+The AST guard additionally checks format calls/percent formatting, exception args,
+and chained `x.result.failure.message` access, and counts duplicate statement
+occurrences (multiple raw expressions in one statement count once). Named safe
+projection calls are boundaries for the syntactic scan. Explicit reviewed baseline
+entries retain fixed guidance and typed legacy carriers for #1328. Alias, dynamic
+attribute, whole-model serialization, safe-owner shadowing and JavaScript gaps are
+listed in #1339; behavioral HTTP/browser sentinel tests cover the editor model
+projection independently of this syntactic guard. The editor browser witness
+renders real sanitized HTTP observations through the production JSON details
+component, using synthetic visibility gates only; it does not qualify saving or
+scientific compatibility.

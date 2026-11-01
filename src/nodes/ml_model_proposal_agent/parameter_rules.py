@@ -37,6 +37,17 @@ def render_proposal_parameter_rules(
         "other rules validate supplied values. Include every known model input "
         "dimension in baseline_config."
     )
+    if any(
+        path.startswith("loss_config.")
+        for rules in (task_rules, workflow_rules)
+        if rules is not None
+        for path in rules.rules
+    ):
+        lines.append(
+            "Loss-field rules apply only while the field is active for the selected loss_type; "
+            "they do not restrict your loss choice. Inactive rules are logged and recorded "
+            "for the attempt. Rules fixing an incompatible loss_type are refused as dead rules."
+        )
     return GENERATED_MODEL_CONFIG_GUIDANCE + "\n\n" + "\n".join(lines)
 
 

@@ -43,7 +43,7 @@ from agent.schemas.ordering import (
     resolve_ordering,
     validate_ordering_shape,
 )
-from agent.schemas.parameter_rules import ParameterRules
+from agent.schemas.parameter_rules import InactiveParameterRule, ParameterRules
 from agent.schemas.preflight import StaticPreflightEvidence
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
@@ -415,6 +415,11 @@ class ExperimentMemory(BaseModel):
 
 
 class ExperimentRecord(BaseModel):
+    inactive_parameter_rules: tuple[InactiveParameterRule, ...] = Field(
+        default=(),
+        exclude_if=lambda value: not value,
+        description="Rules inactive for this attempt's selected loss; not applied constraints.",
+    )
     record_type: Literal["experiment", "attempt_failure"] = "experiment"
     exp_id: str
     status: Literal[
@@ -1251,6 +1256,12 @@ class ExperimentPlan(BaseModel):
     """
 
     model_config = ConfigDict(populate_by_name=True)
+
+    inactive_parameter_rules: tuple[InactiveParameterRule, ...] = Field(
+        default=(),
+        exclude_if=lambda value: not value,
+        description="Rules inactive for this attempt's selected loss; not applied constraints.",
+    )
 
     # --- Hyperparameter decisions ---
     model_type: str = Field(

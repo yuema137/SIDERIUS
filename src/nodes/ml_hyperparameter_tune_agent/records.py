@@ -80,6 +80,9 @@ from nodes.ml_hyperparameter_tune_agent.feedback import (
     _build_trial_validity_feedback,
     _render_gate_exhaustion_log_line,
 )
+from nodes.ml_hyperparameter_tune_agent.parameter_rule_receipts import (
+    attach_inactive_parameter_rules,
+)
 from nodes.ml_hyperparameter_tune_agent.policy import (
     _compute_termination_state,
     _json_safe_reference,
@@ -775,6 +778,7 @@ def _emit_record(
     # emit a record its own labelled run refuses at the next resume.
     if experiment_arm is not None:
         record["experiment_arm"] = experiment_arm
+    attach_inactive_parameter_rules(record)
     ExperimentRecord.model_validate(record)
     sandbox.save_record(record)
 
