@@ -2249,3 +2249,21 @@ strict JSON, preserving typed non-finite floats. Load with the output schema's
 [core contract](../../core/core-contract.md#versioned-non-finite-record-json-issue-1111)
 owns metadata, legacy projection and digest impact. Legacy records may contain null where a float was non-finite. New native output
 and `LocalRecorder` writes preserve that float through the versioned encoding.
+
+### Conditional loss rule receipts
+
+Parameter rules on loss fields apply only while active for the effective loss
+route. Fixed-rule dead combinations are author errors; a planner-selected
+inactive field does not refuse the plan. Shared rule resolution logs each
+inactive constraint and fills typed `ExperimentPlan.inactive_parameter_rules`.
+`parameter_rule_receipts.inactive_parameter_rule_record` transports nonempty
+receipts through `record_params` only (never executor arguments); `_emit_record`
+uses `attach_inactive_parameter_rules` to promote them onto the validated
+`ExperimentRecord` before saving, for success and refusal/failure paths alike.
+The receipt records path, task/workflow owner, selected loss type, declared rule
+and `inactive_for_selected_loss`. Planner history exposes it in recent and
+condensed records; empty fields are omitted to preserve unaffected bytes.
+Receipts are recomputed for each effective plan, so changing to an active loss
+re-enables enforcement. Tests: `test_inactive_loss_parameter_rules.py` and
+`test_inactive_rule_receipts.py` cover declaration, resolution, live tuner
+persistence and planner disclosure with stubbed execution.

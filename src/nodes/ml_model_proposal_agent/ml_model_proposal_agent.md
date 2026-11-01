@@ -494,3 +494,12 @@ strict JSON, preserving typed non-finite floats. Load with the output schema's
 [core contract](../../core/core-contract.md#versioned-non-finite-record-json-issue-1111)
 owns metadata, legacy projection and digest impact. Legacy records may contain null where a float was non-finite. New native output
 and `LocalRecorder` writes preserve that float through the versioned encoding.
+
+### Conditional loss parameter rules
+
+Rule guidance states conditional loss-field applicability when loss rules are
+present; train/model-only and empty-rule prompts keep their prior bytes.
+`resolve_proposal_baseline_config` uses shared resolution: dead rules under a
+rule-fixed loss type fail, while planner-selected inactive fields are skipped
+with log disclosure. Unknown proposal types defer activity. The tuner recomputes
+and persists typed attempt receipts; proposal metadata is not receipt authority.

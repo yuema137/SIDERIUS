@@ -243,11 +243,12 @@ def test_production_tuner_input_matches_pre_extraction_oracle(
     assert actual_planner_assembly == current_planner.identity.assembly_sha256
     assert actual.expected_planner_strategy == current_planner.identity
     # The content hash changed because #1111 decodes persisted history before
-    # rendering. Preserve the archived oracle and pin the reviewed new bytes.
+    # rendering, combined with #1314 retaining condensed inactive-rule receipts.
+    # Preserve the archived oracle and pin the reviewed new bytes.
     baseline_content = expected["expected_planner_strategy"].pop("content_sha256")
     assert baseline_content == "73b7df9cad19e398695f057ef322e3ad01d07e1d3e0a6c0f85e918d06594c562"
     assert payload["expected_planner_strategy"].pop("content_sha256") == (
-        "3925330560b77fab1623f0bbdde89bc02fbf2c60c6eb287307d2ba2983c7831d"
+        "b11d3c2f0413ee1018e7afffafa6f6ec073b9b43f487ce6586ad2f696ccbe72e"
     )
     # Issue #983 — the workflow generates a run seed per run (a seed-owned
     # path); the oracle predates it. Keep its bytes and check the forwarded

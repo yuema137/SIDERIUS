@@ -156,3 +156,24 @@ reader. The [core contract](../../core/core-contract.md#versioned-non-finite-rec
 owns the encoding and legacy behavior. Do not reimplement null/string conversion
 in a node or protocol. The census walks all reachable output field annotations,
 including `Any` containers and required float leaves.
+
+## Conditional loss rules and attempt receipts
+
+`LossConfig.inactive_parameter_values` owns activity. A rule constrains its
+field only when active; it never implicitly restricts planner loss choice.
+`ParameterRules` and the combined ownership gate refuse dead rules when exact
+or singleton-allowed declarations fix an incompatible type. The shared
+resolver repeats this check, then skips inactive field constraints for a
+planner-selected type and logs the decision. Missing inactive values need not
+exist and inactive predicates are not called. Active rules retain ordinary
+exact/conflict/value enforcement.
+
+`InactiveParameterRule` contains `path`, `owner` (task/workflow), `loss_type`,
+`rule` (typed `ParameterRule`) and `reason="inactive_for_selected_loss"`.
+`apply_parameter_rules` recomputes `ExperimentPlan.inactive_parameter_rules`
+every call; the tuner transports it to the identically typed
+`ExperimentRecord.inactive_parameter_rules` at the common emission boundary.
+Both fields default to empty and are excluded from dumps when empty, preserving
+legacy no-receipt record shapes. Planner history retains the record field even
+when condensed. Unknown proposal types defer activity; omitted strict-plan types
+use the LossConfig default. Ordinary LossConfig normalization is unchanged.

@@ -160,3 +160,14 @@ Finite/null prompt bytes remain unchanged. Non-finite values retain the
 existing numeric prompt-text rendering after decoding; historical null
 records remain null. The detailed serialization/paper-impact owner is
 [core record contract](../core/core-contract.md#raw-consumer-boundary-and-prompt-rendering).
+
+## Structured evaluation declaration boundary
+
+Task compositions may carry an opt-in `evaluation` declaration with component
+meanings, quantitative selection and constraints, or rubric references. E1 validates
+and fingerprints this declaration; agent prompts do not consume it yet. Launch
+therefore refuses the `evaluation rendering` capability until #1293 wires the shared
+renderer. An absent declaration keeps existing prompt bytes. Rubric judgment is
+never arithmetic in MetricOrder; #1297 owns any new candidate-result projector and
+versioned judge evidence. The exact schema and future Health/source-metric binding
+are in the [evaluation contract](../execute_tools/evaluation-contract.md).

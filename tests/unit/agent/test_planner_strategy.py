@@ -200,11 +200,12 @@ def test_conditional_provider_system_text_reaches_final_request(monkeypatch):
 # this change is refused (previous assembly 7bc6513b...).
 # Deliberately moved by #1111: prompt entry points decode persisted history.
 # Finite text is unchanged; non-finite evidence no longer leaks storage strings.
+# Combined with #1314's retention of inactive-rule receipts in condensed history.
 NATIVE_PLANNER_IDENTITY_PIN = {
     "name": "native-timing-v1",
     "version": "1",
-    "content_sha256": "3925330560b77fab1623f0bbdde89bc02fbf2c60c6eb287307d2ba2983c7831d",
-    "assembly_sha256": "5366121171d2c1157ae3698da284ca39bfbb06566bd2646b56b2e170d837292b",
+    "content_sha256": "b11d3c2f0413ee1018e7afffafa6f6ec073b9b43f487ce6586ad2f696ccbe72e",
+    "assembly_sha256": "79bb612dd9c1516b6fb7cef28b79f6e376b630f3996244ce7eb8ca0b44cd0523",
 }
 
 
