@@ -59,6 +59,8 @@ version in the zip's name. That number is the package version from
    inside this folder as an independent check; every line should end in `OK`.
    Steps 3 and 4 also verify the listed files, but `fetch_data.py` cannot check
    its own code, which is already running when it checks the bundle.
+   Run only bundles from the releases page or your own build: `SHA256SUMS`
+   proves the files are intact, not who made them.
 
 2. Create your private key file and the console workspace. The first command
    creates an empty key file that only you can read (mode `600`; its folder must
