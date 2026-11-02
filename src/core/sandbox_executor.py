@@ -1952,7 +1952,13 @@ class TidmadSandbox:
             error_msg = _format_subprocess_error(e, "Scoring")
             print(f"--- Scoring Script Error ---\n{error_msg}")
             status = "oom_host_ram" if _is_oom_failure(e) else "error"
-            return {"status": status, "message": error_msg}
+            from execute_tools.evaluation_child import scoring_refusal_fields
+
+            return {
+                "status": status,
+                "message": error_msg,
+                **scoring_refusal_fields(score_json_path),
+            }
         except Exception as e:
             from core.local_code.failure import raise_if_code_package_failure
 

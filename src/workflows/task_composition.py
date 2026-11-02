@@ -114,7 +114,13 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from agent.schemas.task_config import ForwardContract
     from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
     from execute_tools.dataset_config import DatasetProfile
-    from execute_tools.evaluation_metric import EvaluationMetric, RunMetric, ScoreabilityContract
+    from execute_tools.evaluation_metric import (
+        EvaluationMetric,
+        MetricSpec,
+        RunMetric,
+        ScoreabilityContract,
+    )
+    from execute_tools.evaluation_results import SelectionBinding
     from execute_tools.health_checks._composition import TaskHealthBinding
     from execute_tools.task_data_path import TaskDataPath
     from workflows.evaluation_composition import ResolvedEvaluation
@@ -256,6 +262,20 @@ class RunTaskComposition:
     forward_contract: ForwardContract
     semantic_fingerprint: str
     provenance: CompositionProvenance
+
+    @property
+    def selection_binding(self) -> SelectionBinding | None:
+        from workflows.evaluation_selection import selection_binding
+
+        return selection_binding(self)
+
+    @property
+    def selection_metric_spec(self) -> MetricSpec:
+        """Effective ranking declaration; the source metric remains executable."""
+        from workflows.evaluation_selection import effective_metric_spec
+
+        return effective_metric_spec(self.metric.spec, self.evaluation)
+
     evaluation: ResolvedEvaluation | None = None
     code_package: CapturedCodePackage | None = None
     deliverable_naming: Any = None
@@ -1920,6 +1940,7 @@ def build_task_composition_ref(task_composition: Any) -> TaskCompositionRef | No
 
     objective = getattr(task_composition, "objective", None)
     return TaskCompositionRef(
+        selection_binding=getattr(task_composition, "selection_binding", None),
         model_probe_context=model_probe_context_for(task_composition),
         semantic_fingerprint=task_composition.semantic_fingerprint,
         task_data_path_id=type(task_composition.task_data_path).task_data_path_id,
@@ -2389,7 +2410,19 @@ def compose_observables_from_manifest(manifest_path: str):
 
 
 def compose_metric_from_manifest(manifest_path: str) -> EvaluationMetric:
+    """The run's PRIMARY metric; see :func:`compose_scoring_child_bindings`."""
+    return compose_scoring_child_bindings(manifest_path)[0]
+
+
+def compose_scoring_child_bindings(
+    manifest_path: str,
+) -> tuple[EvaluationMetric, RunTaskComposition | None]:
     """The run's PRIMARY metric, composed from its manifest. Step 11 C5.
+
+    Returns the metric and, ONLY when the manifest declares ``evaluation``,
+    the one full composition the child needs for deterministic selection
+    (#1294). An absent-evaluation child composes the metric section alone,
+    exactly as before; it never pays for a full plugin/code-package load.
 
     The child-process counterpart of the metric half of
     :func:`compose_run_task_bindings`, and deliberately **only** that half:
@@ -2420,21 +2453,25 @@ def compose_metric_from_manifest(manifest_path: str) -> EvaluationMetric:
     """
     resolved_manifest = os.path.abspath(manifest_path)
     raw = _read_manifest(resolved_manifest)
+    composition: RunTaskComposition | None = None
     if "evaluation" in raw:
         from workflows.evaluation_composition import require_evaluation_runtime
 
-        require_evaluation_runtime(compose_run_task_bindings(manifest_path).evaluation)
-    with composition_package(raw.get("code_package"), os.path.dirname(resolved_manifest)):
-        metric, _declaration, _plugin = _compose_metric(
-            _section(raw, "metric", resolved_manifest), os.path.dirname(resolved_manifest)
-        )
+        composition = compose_run_task_bindings(manifest_path)
+        require_evaluation_runtime(composition.evaluation)
+        metric = composition.metric
+    else:
+        with composition_package(raw.get("code_package"), os.path.dirname(resolved_manifest)):
+            metric, _declaration, _plugin = _compose_metric(
+                _section(raw, "metric", resolved_manifest), os.path.dirname(resolved_manifest)
+            )
     from execute_tools.evaluation_metric import EvaluationMetric
 
     if not isinstance(metric, EvaluationMetric):
         raise TaskCompositionError(
             "this metric requires complete candidate evaluation, not the local scoring child"
         )
-    return metric
+    return metric, composition
 
 
 def _load_declared_dataset_profile(
@@ -3153,6 +3190,9 @@ def bind_run_task_composition(
     from workflows.task_config import bind_task_config
 
     require_evaluation_runtime(composition.evaluation)
+    from workflows.evaluation_admission import require_formula_route
+
+    require_formula_route(composition)
 
     if not physical_data_root:
         raise CompositionDataRootMissing(

@@ -34,7 +34,7 @@ from execute_tools.evaluation_spec import (
 IMPLEMENTED_CAPABILITIES: Mapping[str, bool] = MappingProxyType(
     {
         "evaluation rendering": True,
-        "formula aggregation": False,
+        "formula aggregation": True,
         "feasibility constraints": False,
         "measurements": False,
         "rubric components": False,
