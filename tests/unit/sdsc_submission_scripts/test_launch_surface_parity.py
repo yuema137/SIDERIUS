@@ -15,6 +15,9 @@ This module closes the remaining boundaries statically:
 
 * every flag the shell can emit is accepted by the Python CLI (an
   unrecognized flag is an argparse hard error at chain start);
+* every Python CLI flag is accepted by the shell parser unless it is listed
+  as chain-owned/excluded with a reason (a workflow passing an unaccepted
+  runner flag to run_chain.sh stops at ``Unknown arg``);
 * every kwarg run_workflow passes to a protocol function is accepted by
   that function's signature (a stray kwarg is a TypeError at runtime);
 * every kwarg a protocol passes to a Pydantic input constructor is a
@@ -32,6 +35,7 @@ from __future__ import annotations
 import ast
 import inspect
 import re
+import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -108,6 +112,68 @@ class TestShellToCli:
         assert not unknown, (
             f"build_app_args can emit flags run_one_iteration.py rejects "
             f"(argparse hard error at chain start): {sorted(unknown)}"
+        )
+
+
+# Runner flags the chain deliberately does not accept, each with the reason
+# the chain owns or excludes that input. Every other runner flag must be a
+# chain flag: a fixed workflow passing it to run_chain.sh otherwise stops at
+# ``Unknown arg`` before the first iteration (v1.1.0 freeze defect).
+CHAIN_EXCLUDED_RUNNER_FLAGS = {
+    "--help": "per-process help, not a run input",
+    "--start_iteration": "the chain loop owns the iteration index",
+    "--iteration": "deprecated alias of --start_iteration",
+    "--source_paths": "deprecated alias of --seed_paths",
+    "--replace_iteration_manifest": "per-iteration repair; the chain recovers via --auto_resume",
+    "--replacement_reason": "companion of --replace_iteration_manifest",
+    "--print_resolved_launch_config": "single-process inspection that exits before running",
+    "--gpu_memory_limit_gb": "not implemented end to end by the runner",
+    "--human_advice_propose": "chain advice travels as one --advice artifact",
+    "--human_advice_implement": "chain advice travels as one --advice artifact",
+    "--human_advice_validate": "chain advice travels as one --advice artifact",
+    "--human_advice_tune": "chain advice travels as one --advice artifact",
+    "--human_advice_interpret": "chain advice travels as one --advice artifact",
+    "--human_advice_analysis": "chain advice travels as one --advice artifact",
+}
+
+
+def _chain_rejected(flags: list[tuple[str, bool]]) -> set[str]:
+    """Flags ``parse_chain_args`` reports as ``Unknown arg`` (run, not regex)."""
+    probes = "\n".join(
+        f'[[ "$( (parse_chain_args --workspace w --run_name r {flag}'
+        f"{' 1' if takes_value else ''}) 2>&1 >/dev/null )\" == 'Unknown arg: '* ]] && echo {flag}"
+        for flag, takes_value in flags
+    )
+    result = subprocess.run(
+        ["bash", "-c", f"source '{CHAIN_LIB}'\n{probes}"],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    return set(result.stdout.split())
+
+
+class TestCliToShell:
+    def test_every_runner_flag_is_a_chain_flag_unless_excluded(self):
+        from workflows.standard_cli import build_parser
+
+        flags = [
+            (flag, action.nargs != 0)
+            for action in build_parser()._actions
+            for flag in action.option_strings
+            if flag.startswith("--")
+        ]
+        rejected = _chain_rejected(flags)
+        missing = rejected - set(CHAIN_EXCLUDED_RUNNER_FLAGS)
+        assert not missing, (
+            f"run_one_iteration.py flags run_chain.sh rejects with 'Unknown arg': "
+            f"{sorted(missing)} — add a parse_chain_args case and forward it in "
+            "build_app_args, or exclude it here with the reason"
+        )
+        stale = set(CHAIN_EXCLUDED_RUNNER_FLAGS) - rejected
+        assert not stale, (
+            f"excluded flags the chain now accepts or the runner lost: {sorted(stale)}"
         )
 
 
