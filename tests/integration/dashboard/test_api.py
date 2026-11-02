@@ -31,6 +31,7 @@ def _make_record(
         "model_type": model_type,
         "timestamp": "2026-01-01 00:00:00",
         "denoising_score": score,
+        "metric_result": {"metric_id": "fixture_score", "direction": "higher"},
         "params": {
             "model_config": {},
             "train_config": {"lr": 0.001, "epochs": epochs, "batch_size": 4, "device": "cpu"},
@@ -270,3 +271,22 @@ def test_api_reads_versioned_scores_without_exposing_storage_tags(client, data_d
     assert response.status_code == 200
     assert METADATA not in response.text
     assert '"-Infinity"' not in response.text
+
+
+def test_legacy_records_are_readable_but_unranked(client: TestClient, data_dir: str) -> None:
+    record = _make_record("legacy_trial", score=100.0)
+    record.pop("metric_result")
+    path = os.path.join(data_dir, "punet", "v1", "agent", "summary_v1_agent.json")
+    _write_json(path, [record])
+    response = client.get("/api/models/punet/leaderboard")
+    assert response.status_code == 200
+    entry = response.json()["entries"][0]
+    assert entry["rank"] is None
+    assert entry["denoising_score"] == 100.0
+    assert entry["metric_ranking"] == "metric direction unavailable / metric_spec absent"
+    response = client.get("/api/models/punet")
+    assert response.status_code == 200
+    overview = response.json()
+    assert overview["best_agent_score"] is None
+    assert overview["metric_identity_unavailable_rows"] == 1
+    assert overview["metric_ranking_unavailable"] == entry["metric_ranking"]

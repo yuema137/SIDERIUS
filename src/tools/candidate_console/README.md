@@ -964,6 +964,11 @@ iteration** is forced Formal. With `max_rounds=1` there is no Trial round;
 with `max_rounds=2` the first may be Trial and the second is Formal. Increasing
 **Final iteration** repeats the loop; it does not add tuning rounds inside it.
 
+If a one-tuning-round edit is refused because your Trial settings would never apply,
+select **Train & tune**, open **Training settings**, and set **Tuning rounds per iteration**
+to at least 2. The field's help explains the policy and shows its minimum of 1;
+the review reminder names the same control.
+
 The framework's `formal_portion=0.1` uses 10% of the training scope. For example,
 1,077 CSV training rows × 0.1 gives about 108 rows: **3 steps/epoch** with batch
 size 32 and the incomplete batch dropped. Keeping that batch adds a step.

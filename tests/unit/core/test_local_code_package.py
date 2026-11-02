@@ -67,6 +67,11 @@ def test_relocation_identity_but_distinct_runtime_paths_and_helper_drift(tmp_pat
             modules.append(module)
             assert Path(module.__file__).parent == captured.root
     assert modules[0] is not modules[1]
+    # A re-capture of an already-loaded root is the same location: it must
+    # reuse that root's modules, not take the next same-content namespace.
+    again = package(first.root, sources)
+    with bind_code_package(again), acquire_module(again.root / "entry.py") as module:
+        assert module is modules[0]
     changed = package(first.root, {**sources, "helper.py": "VALUE = 8\n"})
     assert changed.identity.digest != first.identity.digest
 

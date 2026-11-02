@@ -269,9 +269,11 @@ class MetricResult(BaseModel):
     """One attempt's evaluation — the record-facing, ADDITIVE payload.
 
     ``scalar`` is the metric's mandatory result. It is typed ``float | None``
-    ONLY because the storage boundary (``coerce_nonfinite_to_none``, exactly as
-    for ``denoising_score``) writes a non-finite sentinel such as the scorer's
-    ``-inf`` as ``null``, and a persisted record must re-validate; a metric
+    ONLY because legacy storage (``coerce_nonfinite_to_none`` before #1111 for
+    records and #1316 for scoring-child output, exactly as for
+    ``denoising_score``) wrote a non-finite sentinel such as the scorer's
+    ``-inf`` as ``null``, and such a record must re-validate. Current writers
+    keep the float through ``core.record_encoding``; a metric
     handle never produces ``None`` itself — a deliverable that cannot be
     scored yields :class:`NotScoreableResult`, not a result with no scalar.
     """

@@ -20,6 +20,7 @@ from execute_tools.evaluation_metric import (
     METRIC_IDENTITY_UNAVAILABLE,
     metric_identity_from_record,
 )
+from execute_tools.metric_order import finite_score
 from execute_tools.persisted_ranking import corpus_order as _corpus_order
 
 
@@ -203,7 +204,9 @@ class LocalJsonDataSource(DataSource):
                     continue
                 status = rec.get("status", "unknown")
                 status_counts[status] = status_counts.get(status, 0) + 1
-                if rec.get("denoising_score") is None:
+                # None, NaN and ±inf are never ranked or best (#1316): trial
+                # collapse records keep their non-finite score as evidence.
+                if not finite_score(rec.get("denoising_score")):
                     continue
                 if metric_identity_from_record(rec) is None:
                     # §4.2 case B/C: inspectable, raw value still shown
@@ -258,7 +261,7 @@ class LocalJsonDataSource(DataSource):
                 if status_filter and rec.get("status") != status_filter:
                     continue
                 score = rec.get("denoising_score")
-                if score is None:
+                if not finite_score(score):
                     continue
                 entry = {
                     "exp_id": rec.get("exp_id"),
