@@ -31,6 +31,7 @@ from execute_tools.historical_model_inference import (
 )
 
 from .analysis_code_sandbox import (
+    PROBE_TIMEOUT_S,
     AnalysisCodeSandbox,
     AnalysisCodeSandboxError,
     AnalysisCodeSandboxUnavailable,
@@ -127,7 +128,7 @@ def _pre_execution_result(
     inp: DataAnalysisInput,
     item: ResolvedAnalysisInvocation,
     plan: AnalysisPlan,
-    status: Literal["failed", "refused"],
+    status: Literal["failed", "refused", "timed_out"],
     failure_type: str,
     message: str,
     materialization_occurred: bool,
@@ -210,7 +211,27 @@ def execute_resolved_action(
         (ResolvedGeneratedProgramInvocation, ResolvedGeneratedExperimentSkillInvocation),
     ):
         sandbox = AnalysisCodeSandbox()
-        capability = sandbox.probe()
+        # The probe may not outlive the continuing allocation (#1447).
+        capability = sandbox.probe(
+            timeout_s=min(PROBE_TIMEOUT_S, max(0.0, deadline_monotonic_s - time.monotonic()))
+        )
+        if not capability.available and time.monotonic() >= deadline_monotonic_s:
+            return AnalysisActionExecutionOutcome(
+                result=_pre_execution_result(
+                    inp=inp,
+                    item=item,
+                    plan=plan,
+                    status="timed_out",
+                    failure_type="timed_out",
+                    message="the continuing analysis allocation expired during the "
+                    "generated-code sandbox probe",
+                    materialization_occurred=False,
+                    started_at=started_at,
+                    started_monotonic=started_monotonic,
+                ),
+                inference_receipts=(),
+                inspected_asset_ids=(),
+            )
         if not capability.available:
             return AnalysisActionExecutionOutcome(
                 result=_pre_execution_result(
