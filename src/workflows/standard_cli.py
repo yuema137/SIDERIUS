@@ -223,6 +223,11 @@ def build_parser() -> argparse.ArgumentParser:
         "mode-agnostic --max_epochs.",
     )
     parser.add_argument(
+        "--score_units_metric",
+        default=None,
+        help="Explicit effective metric id for active score-unit tuner settings.",
+    )
+    parser.add_argument(
         "--skip_formal_min_delta",
         type=float,
         default=-1.0,

@@ -57,7 +57,7 @@
     reach(!gateway);
     if (!response.ok) {
       if (response.status === 401) {
-        connected = false; revision++; token = ''; publish();
+        connected = false; revision++; token = ''; storeId = null; publish();
         status('Connection unavailable. Reconnect to confirm observations; pending requests and drafts are retained.');
       }
       const fallback = value === null ? `Server error (${response.status}).` : 'The console refused this request.';
@@ -97,11 +97,20 @@
     }
     return response.blob();
   }
-  window.consoleSession = Object.freeze({request, download, choices, subscribe(listener) { listeners.add(listener); }, get connected() { return connected; }, get revision() { return revision; }, get reachable() { return reachable; }, get operationsStoreId() { return storeId; }, get hostLedger() { return hostLedger; }});
+  // Never migrate the legacy global UUID: its owning store is unknowable.
+  function rememberedOperation() {
+    try { return storeId ? localStorage.getItem('siderius.operation_id.v1/' + storeId) || '' : ''; }
+    catch { return ''; }
+  }
+  function rememberOperation(id) {
+    try { if (storeId && id) localStorage.setItem('siderius.operation_id.v1/' + storeId, id); }
+    catch { /* Optional convenience; explicit operation links remain usable. */ }
+  }
+  window.consoleSession = Object.freeze({request, download, choices, rememberedOperation, rememberOperation, subscribe(listener) { listeners.add(listener); }, get connected() { return connected; }, get revision() { return revision; }, get reachable() { return reachable; }, get operationsStoreId() { return storeId; }, get hostLedger() { return hostLedger; }});
   document.getElementById('access-form').addEventListener('submit', async event => {
     event.preventDefault();
     token = document.getElementById('token').value.trim(); document.getElementById('token').value = '';
-    revision++; const version = revision; connected = false; publish(); status('Connecting…');
+    revision++; const version = revision; connected = false; storeId = null; publish(); status('Connecting…');
     const selected = window.consoleNavigation?.operation;
     try {
       try { await (selected ? request('operations/' + selected) : choices()); }

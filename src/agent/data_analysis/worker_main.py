@@ -9,6 +9,7 @@ from pathlib import Path
 from agent.schemas.data_analysis.common import canonical_json_bytes
 from agent.schemas.data_analysis.skills import SkillPayload
 from core.durable_io import publish_bytes_write_once
+from core.record_encoding import model_record_value
 
 from .loader import load_selected_skill
 from .skill_runtime import SkillRuntime
@@ -41,7 +42,7 @@ def run_worker(request: SkillWorkerRequest) -> SkillWorkerResponse:
         )
     parameters = loaded.validate_parameters(request.parameters)
     validated = ValidatedParameters(
-        parameters=parameters.model_dump(mode="json"),
+        parameters=model_record_value(parameters),
         parameter_schema_sha256=loaded.parameter_schema_sha256,
         validated_parameters_sha256=loaded.validated_parameters_sha256(parameters),
     )

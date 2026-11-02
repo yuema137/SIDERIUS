@@ -335,25 +335,26 @@ non-finite numbers at their owners (`NumericRange`, `ParameterRule`), so no such
 value reaches transport.
 Ingress may write such a value as a string (for example `"-inf"`).
 
-Every other candidate-worker JSON write declares its artifact class through
-`record_json.artifact_json` (issue #1046), and the class picks one existing
-owner; there is no third encoding:
+Candidate-worker record writes use `record_json.artifact_json(kind="record")`,
+which delegates to the versioned strict encoding in
+[`core/record_encoding.py`](../../core/record_encoding.py). The
+[core contract](../../core/core-contract.md#versioned-non-finite-record-json-issue-1111)
+owns metadata, typed float paths, legacy decoding and identity effects.
+Unknown artifact classes raise `ValueError`.
 
-- `record`: files that people and the dashboard read, namely captured node
-  records such as `run_output_<run_name>.json` and the request/receipt control
-  documents. These use the storage owner
-  `execute_tools.scoring_utils.coerce_nonfinite_to_none`: strict JSON, with
-  inf/NaN written as `null`, exactly as the native tuner writes `run_output`.
-- `internal`: documents a later worker phase rereads and compares, namely node
-  inputs, the proposal seed, fan-out payloads and the graph tuning input. These
-  use the unit-transport JSON-constant encoding
-  (`unit_transport.constants_json`), so an inf/NaN value survives the reread.
+`kind="internal"` names documents a later phase rereads: `request.json`, node
+inputs, proposal seed, fan-out payloads and graph tuning input. These retain
+`unit_transport.constants_json`. Control receipts use the same versioned record owner, with the existing
+bounded control encoder enforcing its byte limit. Whether a value may be non-finite remains with its
+schema; encoding does not grant admission to invalid inputs.
 
-`capture_record` compares an existing native record with the returned output
-after projecting the output through the same storage owner. A `-inf` no-signal
-sentinel or a NaN therefore no longer reads as "native record disagrees", and
-the in-memory output, with `-inf` intact, is what the worker passes on.
-Whether a value may be nonfinite stays with its owner (issue #1012).
+`capture_record` preserves native bytes, comparing new records through the
+shared lossless encoding (NaN-safe, with infinity sign preserved). Legacy
+unversioned records are compared with their old null projection; the in-memory
+output remains intact. New native records are decoded by their owning output
+schema. Adaptor readback dispatches on the recorded `encoding_version`, absent
+only for legacy records, and recomputes both record and emitted-output bytes
+under that version. No historical receipt or artifact is rewritten.
 
 Passed validation returns typed in-memory outputs to training. Missing model
 or loss sources refuse before construction/staging. The shared construction
@@ -1929,7 +1930,11 @@ them. For the first ready node:
   `subprocess_env(cuda_visible_devices=placement.cuda_visible_devices)` (slot
   UUID, or `""` for a CPU unit, which hides every GPU) and
   `PYTEST_ADDOPTS` gaining `-p no:cacheprovider` (concurrent validators share no
-  `.pytest_cache`; serial pytest commands are unchanged). Queued: the loop waits
+  `.pytest_cache`; serial pytest commands are unchanged). A unit that cannot
+  start (publishing its invocation, `prepare_child`'s `LocalCodeError`, a
+  `Popen` `OSError`) fails alone, as in the serial path: `failed`, a `raised`
+  receipt carrying its placement, its routes decided, and running units drain
+  (#1108). Queued: the loop waits
   for a running unit to finish. Strict FIFO: nothing overtakes the first ready
   unit (decision B3-Q4).
 Before each readiness step the loop collects every unit that has already exited,
@@ -1977,9 +1982,14 @@ Cancellation. SIGTERM during parallel dispatch raises `UnitTerminated` in the
 worker (`unit_processes.TermGate`). Any exit from the loop with units running
 (that signal, an exception, `SystemExit`/`KeyboardInterrupt` re-raised from a
 unit) terminates every running unit's process group (`terminate_observed_group`,
-TERM, 1 s grace, KILL) before propagating. SIGTERM is held, then delivered,
+TERM, 1 s grace, KILL) before propagating. A `terminate` that raises for one
+unit does not stop the cleanup: every other group is still terminated, then the
+first error propagates. SIGTERM is held, then delivered,
 around the spawn-and-register of a unit (so a signal cannot orphan a unit not
-yet registered) and during that cleanup (so a second signal cannot abort it). An outer timeout or operator cancel kills the sandbox; every unit
+yet registered) and during that cleanup (so a second signal cannot abort it).
+A held signal is delivered when the outermost held block exits, however it
+exits: an exception leaving the block is chained as the `__cause__` of the
+`UnitTerminated`, so a failing cleanup never drops the termination (#1108). An outer timeout or operator cancel kills the sandbox; every unit
 is in its PID namespace and ends with it. Stop and Pause keep body-boundary
 meaning: the active body, including queued units, finishes (decision B3-Q5).
 
@@ -1996,7 +2006,8 @@ otherwise.
 
 Tests: `tests/unit/tools/candidate_worker/test_parallel_dispatch.py` (serial
 golden in any completion order, slot never exceeded, drain + forged receipt,
-SIGTERM kills real unit groups), `test_parallel_lock.py`,
+SIGTERM kills real unit groups, a unit that cannot start fails alone, a held
+signal survives an exceptional exit, one failing termination), `test_parallel_lock.py`,
 `tests/unit/agent/test_token_unit.py`.
 
 
@@ -2007,3 +2018,16 @@ reason `profile`, `shape` or `feedback`. Messages are fixed, path-free text;
 `require_loop` raises that refusal for existing effect and evidence boundaries.
 Operations must render this typed reason instead of inferring a policy from the
 request after catching an arbitrary `ValueError`.
+
+## Formula selection binding
+
+Worker graph and loop admission use the composed effective selection metric.
+Every formula metric threshold, including thresholds in unvisited branches and
+adaptors, must explicitly name that metric before dispatch. Captured interpretation
+and tuning evidence must reconcile to the same effective spec. Raw component
+threshold targets are refused; source metric values remain Health inputs.
+`score_units_metric` is a supported launch field: under formula selection a fresh
+training document with `degenerate_penalty_score` must set it to the effective id
+(the same `admit_evaluation_settings` rule as the direct workflow). The
+[evaluation contract](../../execute_tools/evaluation-contract.md#deterministic-selection-runtime)
+owns the schema, generated id and refusal rules.

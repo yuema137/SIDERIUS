@@ -2,6 +2,16 @@
 
 > Selects and executes authorized scientific-analysis skills under a bounded resource envelope, then returns a structured `DataAnalysisReport`.
 
+
+## Structured evaluation prompt context
+
+Structured-output calls and repairs receive the shared block. Units and meanings inform analysis without granting scoring or feasibility authority.
+
+The run-scoped composition supplies this context through the shared append path.
+Absence adds no bytes and never enters the new boundary under historical profiles.
+The [evaluation contract](../../execute_tools/evaluation-contract.md#evaluation-prompt-rendering)
+owns formatting, profile admission and runtime capability distinctions.
+
 ## Position in the pipeline
 
 - **CLI entry**: **absent** — standalone callers use the Python capability API because task-owned materialization is an executable protocol object, not an arbitrary filesystem convention.
@@ -296,3 +306,11 @@ generation, synthesis and promotion. It grants no data access. Present context
 participates in input identity; absent context is omitted from serialization.
 See the [disclosure contract](../../../docs/agent-reference/mechanisms/constraint-disclosure.md)
 for the explicit historical transport and rendering requirements.
+
+### Canonical numeric records
+
+The [UTF-8 identity contract](../../agent/schemas/data_analysis/canonical-identity-contract.md)
+owns strict non-finite encoding, typed record readback, legacy null limitations
+and identity/prompt compatibility. `AnalysisRunStore` publishes those canonical
+bytes; exact-input resume compares the same bytes and never treats an archived
+null as a current non-finite measurement.

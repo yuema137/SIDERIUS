@@ -187,3 +187,12 @@ view-consuming check, including the §3.2a error/failed boundary.
 `tests/unit/execute_tools/health_checks/` — the health-core census, verdict
 manifest, composition refusals, plugin-binding lifecycle, and the per-check
 suites.
+
+## Formula selection inputs
+
+When formula selection is active, the round boundary projects the source primary
+scalar and source per-sample evidence from the typed child evaluation result before
+calling Health. Selection-scalar validity remains a separate check. The
+[evaluation contract](../evaluation-contract.md#deterministic-selection-runtime)
+owns this transport and its refusal behavior; Health thresholds never acquire
+utility units implicitly.

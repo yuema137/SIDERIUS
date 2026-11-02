@@ -1,5 +1,6 @@
 """Verify native output ownership and capture only absent native records."""
 
+import json
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -8,6 +9,8 @@ from agent.schemas.custom_loss_contract import merge_task_owned_custom_loss
 from agent.schemas.hyperparam_tuning import TaskCompositionRef
 from agent.schemas.implementor import ImplementorOutput
 from core.durable_io import publish_bytes_write_once
+from core.record_encoding import METADATA, encoded_record, model_record_value
+from execute_tools.scoring_utils import coerce_nonfinite_to_none
 from ml_models.plugin_binding import (
     active_run_model_plugins,
     declared_package_model,
@@ -15,17 +18,25 @@ from ml_models.plugin_binding import (
 )
 from workflows.attempt_storage import ImplAttemptStorage
 
-from .record_json import artifact_json, stored_projection
+from .record_json import artifact_json
 
 
 def capture_record(path: Path, output: BaseModel) -> None:
     """Preserve a node's bytes; missing native persistence is worker-owned."""
     if path.exists():
-        recorded = type(output).model_validate_json(path.read_bytes())
-        # Native writers store records through the storage owner (inf/NaN ->
-        # null), so compare against the output projected the same way; the
-        # caller keeps the in-memory output, -inf sentinels intact (#1046).
-        if recorded != stored_projection(output):
+        raw = json.loads(path.read_bytes())
+        if METADATA in raw:
+            recorded = type(output).model_validate_json(path.read_bytes())
+            matches = encoded_record(model_record_value(recorded)) == encoded_record(
+                model_record_value(output)
+            )
+        else:
+            # Legacy native records used null for non-finite values. Compare
+            # their storage image without revalidating required floats as None.
+            matches = coerce_nonfinite_to_none(raw) == coerce_nonfinite_to_none(
+                model_record_value(output)
+            )
+        if not matches:
             raise ValueError(f"native record disagrees with returned output: {path}")
         return
     publish_bytes_write_once(str(path), artifact_json(output, kind="record", indent=2) + b"\n")

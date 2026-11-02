@@ -638,9 +638,12 @@ def test_native_run_output_with_nonfinite_scores_is_not_a_disagreement(
     assert receipt.status == "completed", receipt.error
     (path,) = Path(receipt.workspace).rglob("run_output_*.json")
     raw = path.read_text()
-    assert "Infinity" not in raw and "NaN" not in raw
+    import math
+
+    json.loads(raw, parse_constant=lambda token: pytest.fail(f"bare constant: {token}"))
     saved = training.HyperparamTuningOutput.model_validate_json(raw)
-    assert saved.best_denoising_score is None and saved.best_formal_denoising_score is None
+    assert saved.best_denoising_score == float("-inf")
+    assert math.isnan(saved.best_formal_denoising_score)
     result = decode_transport(
         NodeUnitResult,
         read_graph_control(Path(receipt.workspace) / "candidate_run/units/train/result.json"),

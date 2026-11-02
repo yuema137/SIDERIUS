@@ -54,7 +54,6 @@ from execute_tools.evaluation_metric import (
     MetricResult,
     NotScoreableResult,
 )
-from execute_tools.health_checks.config import default_health_policy_path
 from execute_tools.health_checks.schemas import (
     PerSampleEvidence,
 )
@@ -97,7 +96,6 @@ from nodes.ml_hyperparameter_tune_agent.records import (
 )
 from nodes.ml_hyperparameter_tune_agent.round_health import (
     apply_round_health,
-    build_evaluation_payload_fn,
     build_target_path_fn,
 )
 from nodes.ml_hyperparameter_tune_agent.runtime import (
@@ -117,6 +115,7 @@ from nodes.ml_hyperparameter_tune_agent.runtime import (
     apply_forecast_time_authority,
     is_evidence_refusal,
 )
+from nodes.ml_hyperparameter_tune_agent.scoring_transport import adopt_child_score, health_arguments
 
 # `_emit_record` is the node's ONE record-emission point, called from four
 # modules. Same reasoning as `_runtime._run_skill`: resolve it through its
@@ -1435,28 +1434,13 @@ def _run_local_evaluation_phase(
             #   ATTEMPTED for a trial round, so this branch is also where
             #   every un-composed FORMAL round has always gone. The old
             #   comment named a condition the code never tested.
-            score_res = _runtime._run_skill("denoising_score_skill", sandbox, **active_params)
-            _require_successful_scoring_result(score_res)
-            # F2 — carry the same three round facts the anchor route
-            # produces in-process, so the round-boundary gate evaluation
-            # below is genuinely route-independent rather than an anchor
-            # branch with a second entrance.
             #
-            # `per_sample_evidence` is TRANSPORTED, never inferred. The
-            # child sets `file_vector` from `MetricResult.per_sample`,
-            # which is `None` exactly when the metric declares no
-            # per-sample concept — so D18's mapping applies verbatim. A
-            # payload that omits the key entirely has stated NOTHING, and
-            # absence must not be read as `scalar_only`: that is the
-            # distinction `PerSampleEvidence.UNDECLARED` exists to keep.
-            _child_results = score_res.get("results", {}) or {}
-            final_scalar = _child_results.get("denoising_score")
-            file_vector = list(_child_results.get("file_vector") or [])
-            per_sample_evidence = (
-                PerSampleEvidence.for_per_sample(_child_results.get("file_vector"))
-                if "file_vector" in _child_results
-                else PerSampleEvidence.UNDECLARED
-            )
+            # Status, formula evidence and per-sample transport are adopted
+            # by `scoring_transport.adopt_child_score`.
+            score_res = _runtime._run_skill("denoising_score_skill", sandbox, **active_params)
+            child = adopt_child_score(bindings, score_res, _require_successful_scoring_result)
+            final_scalar, file_vector = child.scalar, child.file_vector
+            per_sample_evidence = child.per_sample
     except ScopeViolationError as e:
         # DataScope DS5 — non-retryable: terminate the run
         # (must precede the generic handler below, which
@@ -1519,35 +1503,15 @@ def _run_local_evaluation_phase(
     # Evaluate, merge score-validity and stamp the verdict are one
     # responsibility and therefore one call; the boundary owns them, this
     # function keeps sequencing. Full rationale, and the deliberately
-    # unpersisted `evaluated` residual, in `round_health`.
+    # unpersisted `evaluated` residual, in `round_health`. Under formula
+    # selection, `round_health` hands task checks the SOURCE values
+    # (`evaluation_child.source_health_inputs`), never the utility.
     apply_round_health(
         score_res,
         merge_score_validity=_merge_score_validity_failure,
-        enabled=agent_input.health_gate_enabled,
-        round_index=round_index,
-        config_path=agent_input.health_checks_config,
-        production_config_path=default_health_policy_path(),
-        task_health_binding=(
-            agent_input.task_composition_ref.task_health_binding
-            if agent_input.task_composition_ref is not None
-            else None
-        ),
+        **health_arguments(bindings, prepared, identity, _denoised_fn),
         healthgate_mode=agent_input.healthgate_mode,
         result_authority=agent_input.result_authority,
-        model_name=model_type,
-        run_name=run_name,
-        exp_id=exp_id,
-        models_dir=(
-            sandbox.dirs.get("models") if isinstance(getattr(sandbox, "dirs", None), dict) else None
-        ),
-        denoised_filename_fn=_denoised_fn,
-        evaluation_payload_fn=build_evaluation_payload_fn(
-            task_data_path=bindings.run_task_data_path,
-            deliverable_dir=sandbox.base_dir,
-            exp_id=exp_id,
-            run_name=run_name,
-            model_type=model_type,
-        ),
         target_path_fn=_target_fn,
         file_vector=file_vector,
         denoising_score=final_scalar,

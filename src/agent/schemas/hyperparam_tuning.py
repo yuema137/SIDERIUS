@@ -50,6 +50,7 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.training_diagnosis import TrainingDiagnosis
 from core.checkpoint_selection import SelectedCheckpoint
 from core.planner_strategy_identity import PlannerStrategyIdentity
+from core.record_encoding import RecordModel
 from core.record_role import AttemptRole, RecordRoleError, is_formal_role
 from core.retired_seed_pins import RetiredSeedPins, split_retired_seed_pins
 
@@ -80,6 +81,11 @@ from core.training_seeds import SeedContext
 from execute_tools.dataset_config import NUM_FILES, DataScope
 from execute_tools.evaluation_execution import CandidateEvaluationResult
 from execute_tools.evaluation_metric import MetricResult, MetricSpecField, NotScoreableResult
+from execute_tools.evaluation_results import (
+    EvaluationEvidence,
+    SelectionBinding,
+    validate_record_evaluation,
+)
 from execute_tools.health_checks._composition import TaskHealthBinding
 from execute_tools.health_checks.schemas import PersistedHealthGateResult
 from execute_tools.training_history import TrainingHistory
@@ -414,7 +420,7 @@ class ExperimentMemory(BaseModel):
     )
 
 
-class ExperimentRecord(BaseModel):
+class ExperimentRecord(RecordModel):
     inactive_parameter_rules: tuple[InactiveParameterRule, ...] = Field(
         default=(),
         exclude_if=lambda value: not value,
@@ -866,6 +872,10 @@ class ExperimentRecord(BaseModel):
     # them so identity, direction and value are machine-readable on every
     # record for Steps 07a/09; every record written before Step 06 validates
     # unchanged (optional, default None).
+    evaluation_result: EvaluationEvidence | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
     metric_result: MetricResult | None = Field(
         default=None,
         description=(
@@ -1006,6 +1016,7 @@ class ExperimentRecord(BaseModel):
         there ``denoising_score`` is the gate policy's penalty by design.
         ``metric_result`` and ``metric_refusal`` are mutually exclusive.
         """
+        validate_record_evaluation(self.evaluation_result, self.metric_result, self.metric_refusal)
         if self.metric_result is not None and self.metric_refusal is not None:
             raise ValueError(
                 "metric_result and metric_refusal are mutually exclusive: an attempt is "
@@ -1549,6 +1560,9 @@ class TaskCompositionRef(BaseModel):
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
+    selection_binding: SelectionBinding | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     model_probe_context: ModelProbeContext | None = Field(
         default=None,
@@ -2099,6 +2113,8 @@ class HyperparamTuningInput(BaseModel):
             "comment above)."
         ),
     )
+    score_units_metric: str | None = Field(default=None, exclude_if=lambda value: value is None)
+
     skip_formal_min_delta: float = Field(
         default=-1.0,
         description=(
@@ -3664,7 +3680,7 @@ class PhysicalRejection(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class HyperparamTuningOutput(BaseModel):
+class HyperparamTuningOutput(RecordModel):
     """
     Full report produced by a completed tune_ml_hyperparam_agent run.
 

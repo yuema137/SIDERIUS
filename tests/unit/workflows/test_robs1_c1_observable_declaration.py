@@ -253,14 +253,15 @@ class TestFingerprintAdditivity:
         this framework-owned example's identity did not move because of an
         unconditional observable key. The current receipt includes later,
         independent semantic declarations and the Quickstart task plugin's
-        output-artifact inventory, which legitimately changes plugin identity.
+        output-artifact inventory and #1342 sampling-seed refusal, which
+        legitimately change plugin identity. Evaluation remains absent.
         """
         path = os.path.join(REPO_ROOT, "configs", "task_composition", "quickstart.yaml")
         from tests.helpers.preflight_fingerprint import capture_pre_estimator_fingerprints
 
         legacy = capture_pre_estimator_fingerprints(monkeypatch)
         current = compose_run_task_bindings(path)
-        assert legacy == ["5afaff5876223154c1214d2d4b2b7ce90c603f729ac963c8c3907d8f48c6b21d"]
+        assert legacy == ["326197d79814cd71cd3c2be8ca04caa22cb211fffdcfb26004f864c471eb4a4b"]
         assert current.semantic_fingerprint != legacy[0]
 
     def test_the_fingerprint_key_is_absent_for_none_and_for_an_empty_list(self):

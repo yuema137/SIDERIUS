@@ -37,7 +37,7 @@ from .host_ledger import (
     write_state,
 )
 from .host_liveness import GRANT_FILE, PLACEMENT_FILE
-from .host_queue import QUEUE_FILE, HostQueueTicket
+from .host_queue import QUEUE_FILE, RESERVATION_FILE, HostQueueTicket, HostReservationTicket
 from .models import (
     CandidateOperation,
     OperationFailure,
@@ -150,6 +150,10 @@ class LedgerSlot(HostSlot):
             )
             publish(path / QUEUE_FILE, ticket)
         else:
+            # The child confirms its entry in this ledger before any work (#1108).
+            publish(
+                path / RESERVATION_FILE, HostReservationTicket(ledger_root=self.host.ledger_root)
+            )
             publish(path / PLACEMENT_FILE, placement)
             if self.admitted.parallel:
                 publish(path / GRANT_FILE, HostGrant(budget=self.host.budget, placement=placement))
@@ -307,7 +311,20 @@ def admit(
     decision = plan_dispatch((*waiting, unit), running, budget, on_refusal="continue")
     own = [p for p in decision.placements + decision.refused if p.unit_id == str(operation_id)]
     if own[0].decision == "refused":
-        raise OperationFailure("resource_refused", "; ".join(own[0].reasons))
+        reasons = "; ".join(own[0].reasons)
+        if request.parallel is not None:
+            # Every envelope quantity is clamped to the budget, never below the run's
+            # own declaration: only that floor can still exceed the idle budget.
+            reasons = (
+                "the run's resources declaration exceeds this host budget (its parallel "
+                f"units are already clamped to it); lower resources: {reasons}"
+            )
+        raise OperationFailure("resource_refused", reasons)
+    if own[0].decision == "queued" and len(state.queued) >= budget.max_queued_operations:
+        raise OperationFailure(
+            "host_queue_full",
+            f"host queue limit {budget.max_queued_operations} reached; retry after capacity frees",
+        )
     return Admitted(
         placement=own[0], state=state, resources=resources, parallel=request.parallel is not None
     )

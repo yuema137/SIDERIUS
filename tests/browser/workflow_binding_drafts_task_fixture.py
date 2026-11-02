@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 import uvicorn
 
+from tests.browser.fixture_metadata import emit_metadata
 from tests.integration.tools.test_changed_task_candidate import changed_candidate
 from tests.unit.tools.candidate_console.conftest import console_config
 from tests.unit.tools.candidate_prepare.conftest import selection
@@ -95,17 +96,14 @@ def main() -> None:
                 "editor_projects": (project,),
             }
         )
-        print(
-            json.dumps(
-                {
-                    "origin": origin,
-                    "source": str(source_path),
-                    "token": Path(config.auth_token_file).read_text(),
-                    "saved_binding": targets[0].binding.model_dump(mode="json"),
-                    "choice_id": targets[0].choice_id,
-                }
-            ),
-            flush=True,
+        emit_metadata(
+            {
+                "origin": origin,
+                "source": str(source_path),
+                "token": Path(config.auth_token_file).read_text(),
+                "saved_binding": targets[0].binding.model_dump(mode="json"),
+                "choice_id": targets[0].choice_id,
+            }
         )
         uvicorn.run(
             create_app(config),

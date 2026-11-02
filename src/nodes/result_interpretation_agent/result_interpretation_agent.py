@@ -46,6 +46,7 @@ from agent.schemas.interpretation import (
 )
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from core.generated_artifact_name import validate_generated_artifact_name
+from core.record_encoding import decode_record, record_json
 from execute_tools.metric_order import MetricOrder
 from ml_models.model_descriptions import get_model_description
 from nodes.llm_settings import INTERPRET, node_bridge_kwargs
@@ -1100,7 +1101,7 @@ class ResultInterpretationAgent:
                 os.makedirs(workspace, exist_ok=True)
                 out_path = os.path.join(workspace, f"interpretation_{run_name}.json")
                 with open(out_path, "w", encoding="utf-8") as f:
-                    f.write(output.model_dump_json(indent=4))
+                    f.write(record_json(output, indent=4).decode())
                 print(f"Interpretation saved -> {out_path}")
 
                 # V8 Domain 3 — append per-iter row to chain-root evolution log.
@@ -1215,7 +1216,7 @@ class ResultInterpretationAgent:
                 os.makedirs(workspace, exist_ok=True)
                 out_path = os.path.join(workspace, f"interpretation_{run_name}.json")
                 with open(out_path, "w", encoding="utf-8") as f:
-                    f.write(output.model_dump_json(indent=4))
+                    f.write(record_json(output, indent=4).decode())
                 print(f"  [DEGRADED] Interpretation saved -> {out_path}")
 
                 _append_evolution_log(
@@ -1381,7 +1382,7 @@ def main():
             f"Run tune_ml_hyperparam_agent first, or check --workspace and --run_name."
         )
     with open(output_path, encoding="utf-8") as f:
-        run_data = json.load(f)
+        run_data = decode_record(json.load(f))
 
     # Build ModelRunSummary from run output
     from agent.schemas.hyperparam_tuning import HyperparamTuningOutput

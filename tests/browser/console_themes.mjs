@@ -11,7 +11,7 @@ import {tmpdir} from 'node:os';
 import {createRequire} from 'node:module';
 import {dirname, resolve, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 import {showAllConsoleSections} from './console_view_flags.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -20,7 +20,6 @@ const screenshots = process.env.CONSOLE_SCREENSHOT_DIR || await mkdtemp(join(tmp
 await mkdir(screenshots, {recursive: true});
 const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.workflow_editor_server'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
 let serverErrors = ''; server.stderr.on('data', chunk => { serverErrors += chunk; });
-const lines = createInterface({input: server.stdout});
 let browser;
 const key = 'siderius.console.theme';
 async function waitUntil(predicate) {
@@ -31,11 +30,7 @@ async function waitUntil(predicate) {
   }
 }
 try {
-  const metadata = await new Promise((accept, reject) => {
-    const timeout = setTimeout(() => reject(new Error('Server startup timeout')), 15000);
-    lines.once('line', line => { clearTimeout(timeout); accept(JSON.parse(line)); });
-    server.once('exit', code => { clearTimeout(timeout); reject(new Error(`Server exit ${code}: ${serverErrors}`)); });
-  });
+  const metadata = await waitForMetadata(server, {timeoutMs: 15000});
   const require = createRequire(import.meta.url);
   const {chromium} = require(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
@@ -276,5 +271,5 @@ try {
   console.log(`PASS: rendered normal/hover/focus button contrast, theme preferences, keyboard/focus, read/write-denied storage and preserved old preference, retained inspector/source/review/monitor identities; no theme API calls/reloads/new timers; fixture screenshots ${screenshots}`);
 } finally {
   if (browser) await browser.close();
-  server.kill('SIGTERM'); lines.close();
+  server.kill('SIGTERM');
 }

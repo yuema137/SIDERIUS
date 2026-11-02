@@ -168,7 +168,11 @@ pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")
 
 def test_template_absence_and_other_configuration_envelopes_are_unchanged(tmp_path):
     raw = proposal({"model_type": "novel", "segmentation_size": None, "width": 64})
-    raw["baseline_config"]["train_config"]["lr_schedule"] = {"kind": "step", "gamma": 0.5}
+    raw["baseline_config"]["train_config"]["lr_schedule"] = {
+        "kind": "step",
+        "step_size_epochs": 2,
+        "gamma": 0.5,
+    }
     raw["baseline_config"]["loss_config"]["weights"] = [1.0, 2.0]
     result = ProposalOutput.model_validate(raw, context={"implementation_bound": True})
     assert local_full_spec(result, storage(tmp_path)).baseline_config == raw["baseline_config"]
