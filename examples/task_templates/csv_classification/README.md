@@ -199,6 +199,9 @@ states the rule for coding agents.
   `plugins/_csv_metrics.py` and the `id` (and, if lower is better,
   `direction`) in the metric declaration; see
   [bring your own metric](../../../docs/guides/bring-your-own-metric.md).
+- Describe the score's meaning and units to every agent, or combine it with
+  other metrics: uncomment the `evaluation:` example in `task.yaml` and follow
+  [declare how your task judges candidates](../../../docs/guides/evaluation/README.md).
 - More locked or limited parameters: add rules under `parameter_rules`; the
   [composition reference](../../../docs/reference/task-composition.md#section-shapes)
   lists the forms.

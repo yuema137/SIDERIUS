@@ -1,5 +1,15 @@
 # HyperparamTuningAgent
 
+
+## Structured evaluation prompt context
+
+Planner and reflector receive the shared block through their existing constraint append calls. deterministic_ranking is visible when declared; this renderer does not implement formula or rubric execution.
+
+The run-scoped composition supplies this context through the shared append path.
+Absence adds no bytes and never enters the new boundary under historical profiles.
+The [evaluation contract](../../execute_tools/evaluation-contract.md#evaluation-prompt-rendering)
+owns formatting, profile admission and runtime capability distinctions.
+
 ## Live output names
 
 After native input validation, `run()` checks `storage.local.run_name` whenever
@@ -1304,6 +1314,17 @@ test_step05a_{checkpoint0_baselines,run_bound_profile,checkpoint_a_replay}.py`.
 Design: `docs/design/generic_framework_upgrade/
 step_05a_tuner_data_selection.md`.
 
+
+## Effective evaluation selection
+
+The executable `run_metric` remains the source metric. The composition's
+`SelectionBinding` supplies the effective spec for `run_order`, planner/reflector
+metric labels and final output stamps. `scoring_transport.py` validates child
+results and builds Health invocation context; `round_health.py` projects source
+values before Health evaluation. Formula records retain typed `evaluation_result`
+evidence and have no fabricated effective per-file vector. See the
+[evaluation runtime contract](../../execute_tools/evaluation-contract.md#deterministic-selection-runtime)
+for supported routes, required evidence, refusal records and `score_units_metric`.
 
 ## Evaluation metric handle (Step 06, 2026-08)
 

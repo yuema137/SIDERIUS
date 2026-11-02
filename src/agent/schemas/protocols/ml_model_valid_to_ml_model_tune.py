@@ -121,6 +121,7 @@ def local_validated_model(
     # HyperparamTuningInput schema defaults so omitting them at the
     # CLI surface reproduces pre-v16 behaviour.
     skip_formal_min_delta: float = -1.0,
+    score_units_metric: str | None = None,
     bypass_formal_time_budget_min_delta: float = 0.0,
     # Lane F3 — the elevated bypass ceiling; None = no extension (schema
     # default's safety semantics travel through unchanged).
@@ -408,6 +409,7 @@ def local_validated_model(
         validation_max_samples=validation_max_samples,
         validation_max_phase_seconds=validation_max_phase_seconds,
         skip_formal_min_delta=skip_formal_min_delta,
+        score_units_metric=score_units_metric,
         bypass_formal_time_budget_min_delta=bypass_formal_time_budget_min_delta,
         bypass_formal_time_budget_minutes=bypass_formal_time_budget_minutes,
         current_run_best_formal_score=current_run_best_formal_score,

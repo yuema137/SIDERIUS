@@ -127,7 +127,7 @@
     viewport.dataset.outsideCards = String(outside.length);
     const zoom = host.querySelector('.circuit-zoom'); if (zoom) zoom.textContent = `${Math.round(view.scale * 100)} %`;
     note.textContent = outside.length
-      ? `${outside.length} of ${cards.length} modules are partly outside the view. Scroll the canvas or use Fit to view.`
+      ? `${outside.length} of ${cards.length} modules are partly outside the view. Scroll the canvas to reach them. Fit keeps text at 75% or larger; if the graph is too large, it shows the selected or first module.`
       : `All ${cards.length} modules are in view.`;
     // Edge shadows mark each side that still has content to scroll to.
     const shadows = [];
@@ -142,6 +142,15 @@
     const world = host.querySelector('.circuit-world');
     world.style.transform = scale === 1 ? '' : `scale(${scale})`;
     sizeWorld(); updateVisibility();
+  }
+  // Centre a normal card; for a card taller/wider than the viewport, keep its heading
+  // and leading edge reachable rather than centring on an invisible middle section.
+  function frameModule(viewport) {
+    const heading = host.querySelector('.editor-node[aria-pressed="true"]') || host.querySelector('.editor-node');
+    const card = heading?.closest('.circuit-card');
+    if (!card) return;
+    viewport.scrollLeft = card.offsetLeft * view.scale - Math.max(0, (viewport.clientWidth - card.offsetWidth * view.scale) / 2);
+    viewport.scrollTop = card.offsetTop * view.scale - Math.max(0, (viewport.clientHeight - card.offsetHeight * view.scale) / 2);
   }
   // Fit the whole graph into the canvas: the union of every card's box plus FIT_PAD on each side,
   // scrolled to that box's origin (view only; never below the legibility floor FIT_MIN).
@@ -161,7 +170,9 @@
     const available = {width: viewport.clientWidth - 2, height: (Number.isFinite(max) ? max : viewport.clientHeight) - 2};
     const scale = geometry.fitScale(content, available, FIT_MIN);
     applyScale(scale);
-    viewport.scrollLeft = origin.x * scale; viewport.scrollTop = origin.y * scale; updateVisibility();
+    viewport.scrollLeft = origin.x * scale; viewport.scrollTop = origin.y * scale;
+    if (content.width * scale > viewport.clientWidth || content.height * scale > viewport.clientHeight) frameModule(viewport);
+    updateVisibility();
   }
   function draw() {
     if (!host) return;

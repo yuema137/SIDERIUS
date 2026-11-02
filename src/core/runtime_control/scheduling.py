@@ -137,6 +137,10 @@ class HostBudget(BaseModel):
     cpu_slots: PositiveCount
     max_concurrent_units: PositiveCount
     source: BudgetSource
+    #: Host operation waiters only; zero requires immediate placement.
+    max_queued_operations: Annotated[NonNegativeInt, Field(strict=True)] = Field(
+        default=0, exclude_if=lambda value: value == 0
+    )
     #: Decision B3-Q6: the operator accepts that units sharing one GPU contend for
     #: wall time, so time-budgeted runs may share a slot. Omitted when false, so
     #: a budget that does not set it keeps its digest.
