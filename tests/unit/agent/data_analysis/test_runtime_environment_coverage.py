@@ -1,19 +1,30 @@
-"""runtime_environment_identity covers the generated-program supervision path (#1493).
+"""runtime_environment_identity covers the generated-program supervision path (#1493, #1500).
 
 A persisted generated program is reused only while ``runtime_environment_identity``
-is unchanged. The supervisor ``AnalysisCodeSandbox`` stops a program through
-``process_termination.terminate_process_group``, which delegates signalling and
-reaping to core ``core.runtime_control.process_group``. A behaviour change in
-any module on that path must move the identity, so each one must be hashed.
+is unchanged. A behaviour change in any module on the supervisor's path must move
+the identity, so each one must be hashed.
 
-The path is derived from imports, not listed here: start at the module that
-defines ``AnalysisCodeSandbox`` and follow first-party imports that stay in the
-supervisor's own package or in the core process-supervision package that owns
-``terminate_observed_group``. A full import closure is not usable: through the
-schemas and persistence it reaches about 250 modules, including model and
-training code that has nothing to do with supervision. A supervision helper
-moved into another core package would not be followed; this rule covers moves
-within the two owning packages.
+The path is derived from imports, not listed here, in two bounded steps:
+
+1. Start at the module that defines ``AnalysisCodeSandbox`` and follow
+   first-party imports transitively, but only inside the supervisor's own
+   package (``agent/data_analysis/``) and the core process-supervision package
+   that owns ``terminate_observed_group`` (``core/runtime_control/``). Today this
+   gives ``analysis_code_sandbox.py``, ``process_termination.py`` and
+   ``core/runtime_control/process_group.py``.
+2. Add every other ``core/`` module that a step-1 module imports directly (one
+   hop). Today: ``execution_deadline.py`` (allocation expiry, so the stop time),
+   ``training_seeds.py`` (``NUMPY_SEED_MASK``), ``campaign_identity.py`` and
+   ``durable_io.py``. Each must be hashed or listed in ``UNHASHED_CORE_IMPORTS``
+   with a reason; an unclassified new import fails the test.
+
+The hop is not followed further. A full import closure is not usable: through
+the schemas and persistence it reaches about 40 modules from the sandbox (about
+250 from all hashed files), including model and training code unrelated to
+supervision. The direct core imports are the owners whose symbols the
+supervisor calls; their own dependencies (for example ``core.seeding`` behind
+``training_seeds``) serve other callers. A supervision helper moved into a
+non-core package outside step 1 would not be followed.
 """
 
 from __future__ import annotations
@@ -41,6 +52,16 @@ def _source(obj: type | Callable[..., object]) -> Path:
 SUPERVISOR = _source(AnalysisCodeSandbox)
 SIGNALLING_OWNER = _source(process_termination.terminate_observed_group)
 SUPERVISION_PACKAGES = (SUPERVISOR.parent, SIGNALLING_OWNER.parent)
+CORE_ROOT = SRC_ROOT / "core"
+
+# Direct core imports that do not define what an accepted program computes or
+# when it is stopped, so they stay out of the identity.
+UNHASHED_CORE_IMPORTS = {
+    # validate_path_component only rejects unsafe ids before launch.
+    "core/campaign_identity.py": "path-component validation",
+    # publish_bytes_write_once only makes request/output publication atomic.
+    "core/durable_io.py": "atomic write-once publication",
+}
 
 
 def _module_file(dotted: str) -> Path | None:
@@ -81,6 +102,15 @@ def _supervision_path() -> set[str]:
     return {path.relative_to(SRC_ROOT).as_posix() for path in seen}
 
 
+def _direct_core_imports(path_modules: set[str]) -> set[str]:
+    return {
+        imported.relative_to(SRC_ROOT).as_posix()
+        for module in path_modules
+        for imported in _imported_files(SRC_ROOT / module)
+        if imported.is_relative_to(CORE_ROOT)
+    } - path_modules
+
+
 def _hashed_runtime_files(monkeypatch: pytest.MonkeyPatch) -> set[str]:
     captured: list[dict[str, Any]] = []
     real = generated_programs.canonical_sha256
@@ -101,5 +131,9 @@ def test_runtime_identity_hashes_every_supervision_path_module(
     path = _supervision_path()
     # The derivation must reach the module that actually signals the group.
     assert SIGNALLING_OWNER.relative_to(SRC_ROOT).as_posix() in path, sorted(path)
-    missing = sorted(path - _hashed_runtime_files(monkeypatch))
+    direct_core = _direct_core_imports(path)
+    stale = sorted(set(UNHASHED_CORE_IMPORTS) - direct_core)
+    assert not stale, f"exclusions no longer imported by the supervisor path: {stale}"
+    required = (path | direct_core) - set(UNHASHED_CORE_IMPORTS)
+    missing = sorted(required - _hashed_runtime_files(monkeypatch))
     assert not missing, f"runtime_environment_identity does not hash {missing}"
