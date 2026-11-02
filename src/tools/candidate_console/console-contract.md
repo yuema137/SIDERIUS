@@ -2601,12 +2601,19 @@ legacy preparation, candidate and native-chain launch controls. The old global
 Connect clears the previous session's store identity. Without an explicit Monitor
 UUID, the convenience input is cleared during reconnection and restored only after
 validated choices identify the current store; malformed stored UUIDs are ignored.
+Disconnect, 401 and Connect retain the last Monitor observation (facts, logs and
+tokens), including observations opened by legacy Prepare/Launch without a route UUID.
+The page retains the last identified store separately from session connection state.
+Across connection changes, a different identified store resets that observation;
+same-store reconnect preserves it. An explicit route UUID is then selected again
+against the new store.
 Restoration only fills the input; it never submits a read or launch. Explicit UUID
 routes win and retain independent operation-only authentication. Until choices
 identify the store, reads/writes of remembered selection are no-ops; storage failures
 also leave explicit monitoring available. No credential or request payload is stored.
 `tests/browser/operation_selection.mjs` covers shared-origin store switching, reload,
-legacy isolation, reconnect, explicit route precedence, native launch persistence
+legacy isolation, 401-after-Prepare observation retention, same-store reconnect,
+changed-store observation reset, explicit route precedence, native launch persistence
 and unavailable localStorage using synthetic observations, without native execution.
 
 
