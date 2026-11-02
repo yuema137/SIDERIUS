@@ -462,8 +462,10 @@ holds the budget digest: while one exists a different budget is refused
 
 Loop resume. A `candidate_loop_resume` under a ledger reserves with its root
 candidate's `resources` and launch request (timeout, environment names,
-devices), placed or queued like a candidate; a root without `resources` still
-refuses `resources_required`. A placed segment publishes `sandbox.json` like a
+devices), placed or queued like a candidate. Waiting resumes consume the same
+`max_queued_operations` allowance; a full or disabled queue refuses
+`host_queue_full`. A root without `resources` still refuses
+`resources_required`. A placed segment publishes `sandbox.json` like a
 candidate. A resume submitted without a ledger whose root ran placed (the root's
 operation directory holds `placement.json`) refuses `host_ledger_required`
 before any claim: it would otherwise run unaccounted beside placed runs.
