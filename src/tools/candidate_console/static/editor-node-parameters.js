@@ -26,13 +26,12 @@
     if (bounds.length) parts.push(`Range: ${bounds.join(', ')}`);
     return parts.join(' · ');
   }
-  // A settings reminder, not a second validator: native admission still decides why
-  // a request is refused. Reuse the schema's explanation instead of copying CLI remedies.
+  // Native refusal identity is authoritative; do not infer scheduling from draft values.
   function reviewHint(training, launch, error) {
-    if (launch?.max_rounds !== 1 || error.status !== 422) return '';
-    const validation = error.code === 'validation' || (error.code === 'source' &&
-      (error.value?.diagnostics || []).some(item => item.code === 'validation'));
-    if (!validation) return '';
+    if (error.status !== 422) return '';
+    const schedule = error.code === 'trial_override_schedule' || (error.code === 'source' &&
+      (error.value?.diagnostics || []).some(item => item.code === 'trial_override_schedule'));
+    if (!schedule) return '';
     const control = training?.controls.find(item => item.name === 'max_rounds');
     return control?.help.description ? `Check ${control.label} in Training settings. ${control.help.description}` : '';
   }

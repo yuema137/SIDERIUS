@@ -76,6 +76,18 @@ Use trusted local project directories. A lost connection leaves a save unconfirm
 until you inspect disk again. See the [authoring contract](authoring-contract.md)
 for exact limits, refusals and concurrency behavior.
 
+## Advice and data-folder ports
+
+The Validate node's **Advice text** port accepts free-text guidance, such as
+"Check the held-out split." **Data folder** accepts the path to your task data.
+These ports cannot share a connection even though both values are strings.
+
+If an older `workflow.py` supplies Validate's `human_advice` through an external
+binding or custom adaptor, change that binding's contract from `optional.text`
+to `optional.advice-text`, including the connected adaptor ports and output.
+Keep data-folder bindings as `optional.text`. Review the updated declaration
+before saving; see the [compatibility reference](../../workflows/definition/contract-names.md#compatibility-for-authored-validation-advice).
+
 ## View a hand-written workflow.py without changing it
 
 To only look at the file as a canvas of nodes and their ports, complete steps

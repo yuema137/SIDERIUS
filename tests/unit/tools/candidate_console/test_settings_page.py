@@ -270,7 +270,9 @@ def test_publish_refuses_a_settings_folder_linked_after_its_canonical_check(
     assert settings.is_symlink(), "the swap must happen inside the publish step"
     assert response.status_code == 422 and response.json()["error"]["code"] == "settings_invalid"
     assert (aside / "global_settings.json").read_bytes() == before
+    # The stable lock is retained; failed publication still leaves no temporary payload.
     assert sorted(path.name for path in aside.iterdir()) == [
+        ".global_settings.json.lock",
         "console-token",
         "console.json",
         "global_settings.json",

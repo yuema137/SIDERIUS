@@ -6,7 +6,11 @@ and operation evidence readers retain the default first iteration.
 
 from pathlib import Path
 
-from workflows.definition.models import NATIVE_INTERPRETATION_PROFILE
+from workflows.definition.models import (
+    NATIVE_INTERPRETATION_PROFILE,
+    NATIVE_LITERATURE_PROFILE,
+    NATIVE_PROPOSAL_FAMILIES_PROFILE,
+)
 
 
 def candidate_proposal_dir(workspace: Path, run_name: str, *, iteration: int = 1) -> Path:
@@ -30,8 +34,8 @@ def candidate_control_dir(workspace: Path, *, iteration: int = 1) -> Path:
 # Profiles whose proposal diagnostics are per node; every other profile keeps the
 # fixed and G1 singular paths.
 _PER_NODE_PROPOSAL_PROFILES = (
-    "native-proposal-families/v1",
-    "native-literature-candidate/v1",
+    NATIVE_PROPOSAL_FAMILIES_PROFILE,
+    NATIVE_LITERATURE_PROFILE,
     NATIVE_INTERPRETATION_PROFILE,
     "native-literature-collection/v1",
     "native-literature-split/v1",

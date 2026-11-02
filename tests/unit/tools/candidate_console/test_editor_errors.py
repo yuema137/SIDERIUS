@@ -112,3 +112,51 @@ def test_editor_observations_are_safe_only_at_http_boundary(
     )
     assert SECRET in caplog.text
     assert SECRET in observed[0].model_dump_json(), "Do not mutate native authoring diagnostics"
+
+
+@pytest.mark.parametrize("surface", ["document", "source"])
+@pytest.mark.parametrize(
+    "portion, expected", [(0.2, "trial_override_schedule"), (-1, "validation")]
+)
+def test_editor_preserves_only_the_native_trial_schedule_code(
+    editor_config, surface, portion, expected
+):
+    """A one-round draft with an unrelated bad portion must not receive schedule advice."""
+    import json
+
+    from tests.unit.workflows.test_reusable_training import training_document
+    from workflows.definition import render_workflow_source
+
+    document = training_document({"launch": {"max_rounds": 2, "trial_portion": 0.2}})
+    source = render_workflow_source(document)
+    editor_config.editor_projects[0].source_file.write_text(source)
+    headers = {
+        "Authorization": "Bearer " + Path(editor_config.auth_token_file).read_text(),
+        "Origin": editor_config.browser_origin,
+    }
+    with TestClient(create_app(editor_config), base_url=editor_config.browser_origin) as client:
+        current = client.get("/api/editor/example", headers=headers).json()
+        if surface == "document":
+            payload = json.loads(document.model_dump_json())
+            payload["training_settings"]["launch"] = {
+                "max_rounds": 1,
+                "trial_portion" if portion > 0 else "formal_portion": portion,
+            }
+            proposal = {"kind": "document", "document": payload}
+        else:
+            proposed = source.replace("'max_rounds': 2", "'max_rounds': 1")
+            field = "trial_portion" if portion > 0 else "formal_portion"
+            proposed = proposed.replace("'trial_portion': 0.2", f"'{field}': {portion}")
+            assert proposed != source
+            proposal = {"kind": "source", "source": proposed}
+        response = client.post(
+            "/api/editor/example/review",
+            headers=headers,
+            json={"expected_sha256": current["sha256"], "proposal": proposal},
+        )
+    assert response.status_code == 422, response.text
+    body = response.json()
+    code = body["error"]["code"] if surface == "document" else body["diagnostics"][0]["code"]
+    assert code == expected
+    assert "plan_overrides" not in response.text
+    assert editor_config.editor_projects[0].source_file.read_text() == source

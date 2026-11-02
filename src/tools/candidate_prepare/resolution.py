@@ -25,10 +25,14 @@ from workflows.definition.candidate import ADAPTORS_NOT_ADMITTED, candidate_node
 from workflows.definition.fanout import execution_families
 from workflows.definition.models import (
     NATIVE_INTERPRETATION_PROFILE,
+    NATIVE_LITERATURE_PROFILE,
     DeclarationModel,
     Identifier,
     Location,
     NativeInterpretationProfile,
+    NativeLiteratureProfile,
+    NativeProposalFamiliesProfile,
+    NativeProposalFanoutProfile,
 )
 
 from .layout import (
@@ -64,9 +68,9 @@ class ResolvedReusableCandidate(DeclarationModel):
     preparation_options: CandidatePreparationOptions
     execution_profile: (
         Literal[
-            "native-proposal-fanout/v1",
-            "native-proposal-families/v1",
-            "native-literature-candidate/v1",
+            NativeProposalFanoutProfile,
+            NativeProposalFamiliesProfile,
+            NativeLiteratureProfile,
             NativeInterpretationProfile,
         ]
         | None
@@ -103,7 +107,7 @@ def managed_request_supported(
     return (
         (capability == "proposal" and contract == "proposal.input")
         or (
-            execution_profile == "native-literature-candidate/v1"
+            execution_profile == NATIVE_LITERATURE_PROFILE
             and capability == "literature"
             and contract == "literature.input"
         )
@@ -121,7 +125,7 @@ def check_candidate_roles(document: ReusableWorkflowDocument, proposal_ids: set[
     if document.execution_profile is not None:
         result_roles.add("implementation")
     managed_roles = set(managed_argument_roles(document.execution_profile))
-    if document.execution_profile == "native-literature-candidate/v1":
+    if document.execution_profile == NATIVE_LITERATURE_PROFILE:
         managed_roles.add(("proposal.input", "proposal_input"))
     externals = {item.id: item for item in document.definition.externals}
     used: set[str] = set()
@@ -134,7 +138,7 @@ def check_candidate_roles(document: ReusableWorkflowDocument, proposal_ids: set[
                 and (
                     (node.id in proposal_ids and external.contract == "proposal.input")
                     or (
-                        document.execution_profile == "native-literature-candidate/v1"
+                        document.execution_profile == NATIVE_LITERATURE_PROFILE
                         and node.capability == "literature"
                         and external.contract == "literature.input"
                     )

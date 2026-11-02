@@ -416,3 +416,13 @@ with `--target_score_metric`. The shared tuner launch surface transports
 `--score_units_metric` without adding an argument when the shell launcher omits it.
 See the [runtime contract](../execute_tools/evaluation-contract.md#deterministic-selection-runtime)
 for the single authority on formula semantics and unsupported combinations.
+
+### Standard pseudo launch resource decision
+
+When `--is_pseudo_training` selects `StubSandbox`, `run_one_iteration.main` invokes
+`core.pseudo_admission.resolve_pseudo_admission` before constructing the workflow.
+No host ceiling is required: the stub starts no subprocess. Optional
+`SIDERIUS_SUBPROCESS_RSS_GB` declarations are validated and recorded; malformed
+values print the standard `LAUNCH REFUSED` line and exit 2. This decision is
+independent of GPU visibility. `--is_pseudo_llm` alone keeps real execution and
+its admission. The preflight adapter rechecks the same owner for direct callers.

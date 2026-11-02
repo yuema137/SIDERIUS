@@ -31,7 +31,7 @@ from agent.skills.evaluate_vram_skill.probe_budgets import InconclusivePreflight
 from core.record_role import observed_attempt_role
 from core.runtime_control.records import AdmissionRecord
 from core.runtime_control.session import RuntimeControlPolicy, WatchdogConfig
-from core.sandbox_executor import TidmadSandbox
+from core.sandbox_executor import StubSandbox, TidmadSandbox
 from nodes.ml_hyperparameter_tune_agent.policy import (
     _latest_trial_inference_marginal,
     resolve_round_trial_mode,
@@ -250,7 +250,11 @@ def _handle_prephase_gpu_measurement(
     governs, and reimplementing any of that here would put O-7's accounting
     in the one scope where it is hardest to see.
 
-    **Three applicability rules, none of them a feature flag.**
+    **Applicability rules, none of them a feature flag.**
+
+    *Synthetic execution never measures a GPU.* A `StubSandbox` may retain
+    the host device identity for provenance; that identity does not turn
+    synthetic execution into a real candidate workload.
 
     *Trial rounds are not measured.* O-7 governs formal execution, and a
     trial round's admission posture already proceeds while recording what it
@@ -293,7 +297,7 @@ def _handle_prephase_gpu_measurement(
     The task projection is opaque to this coordinator. Dataset vocabulary and
     materialization remain owned by the bound TaskDataPath implementation.
     """
-    if is_trial:
+    if is_trial or isinstance(sandbox, StubSandbox):
         return PrephaseOutcome.PROCEED
 
     # TYPE-checked, not merely present. `getattr(sandbox, "device_identity",
