@@ -17,7 +17,7 @@ as the running example.
 
 ## What works today
 
-The section is new in SIDERIUS 1.1. Almost all of it can already be declared,
+The section is new in SIDERIUS 1.1. Almost all of it can be declared,
 checked and shown to the agents, but some parts cannot drive a run yet. When
 a run starts, a launch check refuses any declaration whose runtime is not
 available, so nothing is silently ignored.
@@ -25,7 +25,7 @@ available, so nothing is silently ignored.
 | You declare | Checked and shown to agents | A run can launch with it |
 | --- | --- | --- |
 | Meanings, units and ranges, with `selection: {kind: primary}` (step 2) | yes | yes |
-| A weighted combination, `selection: {kind: formula}` (step 3) | yes | once [#1377](https://github.com/Galileo-Sandbox/SIDERIUS/pull/1377) lands (issue #1294); if the step 6 check prints `Launch check: admitted` for a formula, your checkout already has it |
+| A weighted combination, `selection: {kind: formula}` (step 3) | yes | yes |
 | A natural-language balancing rule, `selection: {kind: rubric_balance}` (step 4) | yes | not yet: issue #1297 |
 | Rubric components, `kind: rubric` (step 4) | yes | not yet: issue #1297 |
 | Requirements, `constraints:` (step 5) | yes | not yet: issue #1295 |
@@ -253,12 +253,10 @@ because further changes no longer move its utility. If the exchange rate is
 not the one you mean scientifically, change the weights or the bounds in
 your own `task.yaml` until it is.
 
-### Once #1377 lands
+### What a formula changes in a run
 
-The formula is checked and shown to agents today, but the launch check
-refuses to run it until pull request #1377 merges. Run the step 6 check:
-`Launch check: admitted` for a formula means your checkout already has it.
-With #1377:
+A run can launch with a formula, and the step 6 check prints
+`Launch check: admitted` for it. With a formula:
 
 - the run ranks candidates by a new score named
   `evaluation.weighted_sum.v1.<identity>`; the step 6 check prints it as
@@ -270,13 +268,17 @@ With #1377:
   `--target_score_metric <effective_metric_id>`, and research-loop stop
   conditions that compare a score must use the same id. A threshold written
   for the main metric is refused rather than compared with the utility;
-- tuner settings measured in score units (enabled formal skip/bypass gates
-  and the degeneration penalty) need `--score_units_metric
-  <effective_metric_id>` for the same reason;
+- two optional tuner settings are measured in score units:
+  `--enable_chain_incumbent_formal_gates` (the formal skip/bypass gates) and
+  `--degenerate_penalty_score`. When you set either one, also pass
+  `--score_units_metric <effective_metric_id>` for the same reason;
 - formulas work only when your task's own metric code scores the candidates
-  (the CSV template does). Other scoring routes are refused at launch
-  (anchor-normalized scoring and an external `CandidateEvaluationExecutor`;
-  see the [evaluation contract](../../../src/execute_tools/evaluation-contract.md)).
+  (the CSV template does). Other scoring routes are refused: an external
+  `CandidateEvaluationExecutor` when the run binds the task, and
+  anchor-normalized scoring before the first training attempt. The step 6
+  check does not test the scoring route, so `Launch check: admitted` does not
+  prove your task scores its own candidates; see the
+  [evaluation contract](../../../src/execute_tools/evaluation-contract.md).
 
 ## Step 4: a balancing rule in words
 
@@ -420,21 +422,27 @@ model plugins and can be ignored. It prints three things:
 
 1. **The block the agents see**, from `[TASK EVALUATION]` to
    `[END TASK EVALUATION]`.
-2. **The inspection**: `warnings`, `marginal_rates` (step 3),
+2. **The inspection**: for a formula first `effective_metric_id`,
+   `effective_direction` and `effective_units`; then `warnings`,
+   `marginal_rates` (step 3),
    `required_capabilities` (the runtime parts your declaration needs) and
    `identity` (a 64-character fingerprint of the declaration).
 3. **The launch check.** For the step 2 example it ends with
-   `Launch check: admitted` and exit status 0. For the formula of step 3
-   it ends, until #1377 lands, with exit status 1 and:
+   `Launch check: admitted` and exit status 0. The formula of step 3
+   ends the same way, and the inspection above it shows the
+   `effective_metric_id` `evaluation.weighted_sum.v1.<identity>`, the
+   `effective_units` `utility [0,1]` and the `marginal_rates` of step 3.
+
+   For the parts of steps 4 and 5 it ends with exit status 1 and a message
+   such as the following, naming `feasibility constraints`, `rubric balancing`
+   or `rubric components`:
 
    ```text
-   Launch check: Evaluation composition succeeded, but launch requires unimplemented capabilities: formula aggregation. Their runtime owners must land before this task can run.
+   Launch check: Evaluation composition succeeded, but launch requires unimplemented capabilities: feasibility constraints. Their runtime owners must land before this task can run.
    ```
 
-   The same message, naming `feasibility constraints`, `rubric balancing` or
-   `rubric components`, appears for the parts of steps 4 and 5. A real run
-   performs this check before it reads any data, and stops with the same
-   message.
+   A real run performs this check before it reads any data, and stops with the
+   same message.
 
 A mistake in the declaration stops the script at the composition call with
 `Composition refused: evaluation could not be composed:` followed by the

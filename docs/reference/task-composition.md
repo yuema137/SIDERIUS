@@ -1015,9 +1015,9 @@ not the scientific values being measured. Invalid fields are named in compositio
 errors. Agent prompts delimit the declaration block and indent multiline prose.
 
 The optional `evaluation` section declares candidate selection separately from
-training `objective`. It composes, validates and renders for agents. Primary-only metric selection can
-launch; formula aggregation, feasibility, measurement and rubric runtime capabilities
-remain independently guarded. An absent section adds no semantic payload key or prompt
+training `objective`. It composes, validates and renders for agents. Primary-only metric selection
+and weighted-sum formula selection on the native task-owned scoring route can launch;
+feasibility, measurement and rubric runtime capabilities remain independently guarded. An absent section adds no semantic payload key or prompt
 bytes. Full fingerprints can still change with the release's estimation assembly.
 
 ```yaml

@@ -552,15 +552,44 @@ class GlobalMseMetric(EvaluationMetric):
         return squared_error_sum / element_count, None, ()
 
 
+class EvaluationInputsScoreability(ScoreabilityContract):
+    """Acceptance of a generated formula selection spec (#1294).
+
+    Requires evaluated component evidence, not just existing files. Registered
+    in the framework vocabulary below so a persisted effective ``MetricSpec``
+    round-trips to an EQUAL spec; the arithmetic and evidence owners live in
+    ``evaluation_aggregation`` / ``evaluation_results``.
+    """
+
+    contract_id: str = "evaluation_inputs/v1"
+    evaluation_sha256: str
+    required_components: tuple[str, ...]
+
+    def check(self, deliverables: Mapping[int, str]) -> ScoreabilityVerdict:
+        return self.evidence_verdict(
+            (
+                ScoreabilityFailure(
+                    requirement="component_evidence",
+                    detail="Evaluate source metrics before aggregation.",
+                ),
+            )
+        )
+
+    def evidence_verdict(self, failures: tuple[ScoreabilityFailure, ...]) -> ScoreabilityVerdict:
+        return ScoreabilityVerdict(contract_id=self.contract_id, failures=failures)
+
+
 # ---------------------------------------------------------------------------
 # Declared-spec rebinding — the declaration IS the spec (D14-2 C5)
 # ---------------------------------------------------------------------------
+
 
 #: The declared-contract vocabulary: contract_id → concrete class. A
 #: DECLARATION lookup, not a plugin surface — grows only when a new contract
 #: class is added in this module.
 _SCOREABILITY_CONTRACT_TYPES: dict[str, type[ScoreabilityContract]] = {
     "deliverable_presence": PresenceScoreabilityContract,
+    "evaluation_inputs/v1": EvaluationInputsScoreability,
 }
 
 

@@ -72,6 +72,7 @@ FORMAL_MAX_EPOCHS=""
 HEALTHGATE_MODE=blocking
 RESULT_AUTHORITY=scientific
 SKIP_FORMAL_MIN_DELTA=-1.0
+SCORE_UNITS_METRIC=""
 BYPASS_FORMAL_TIME_BUDGET_MIN_DELTA=0.0
 BYPASS_FORMAL_TIME_BUDGET_MINUTES=""             # Lane F3: empty == omit == no bypass ceiling extension
 LLM_MODEL=""  # Omitted routing is resolved by the Python configuration owner.
@@ -330,6 +331,7 @@ parse_chain_args() {
         --formal_max_epochs)      FORMAL_MAX_EPOCHS="$2"; shift 2 ;;
         --healthgate_mode)                    HEALTHGATE_MODE="$2"; shift 2 ;;
         --result_authority)                   RESULT_AUTHORITY="$2"; shift 2 ;;
+        --score_units_metric) SCORE_UNITS_METRIC="$2"; shift 2 ;;
         --skip_formal_min_delta)              SKIP_FORMAL_MIN_DELTA="$2"; shift 2 ;;
         --bypass_formal_time_budget_min_delta) BYPASS_FORMAL_TIME_BUDGET_MIN_DELTA="$2"; shift 2 ;;
         --bypass_formal_time_budget_minutes) BYPASS_FORMAL_TIME_BUDGET_MINUTES="$2"; shift 2 ;;
@@ -533,6 +535,7 @@ build_app_args() {
         ${FORMAL_MAX_EPOCHS:+--formal_max_epochs "$FORMAL_MAX_EPOCHS"}
         --healthgate_mode "$HEALTHGATE_MODE"
         --result_authority "$RESULT_AUTHORITY"
+        ${SCORE_UNITS_METRIC:+--score_units_metric "$SCORE_UNITS_METRIC"}
         --skip_formal_min_delta "$SKIP_FORMAL_MIN_DELTA"
         --bypass_formal_time_budget_min_delta "$BYPASS_FORMAL_TIME_BUDGET_MIN_DELTA"
         ${BYPASS_FORMAL_TIME_BUDGET_MINUTES:+--bypass_formal_time_budget_minutes "$BYPASS_FORMAL_TIME_BUDGET_MINUTES"}
