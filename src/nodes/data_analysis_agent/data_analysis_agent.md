@@ -283,6 +283,22 @@ this binding up to 3.8 s (5.8 s for a SIGTERM-ignoring child); after it, at
 most 0.021 s beyond an uninterruptible publication (1.03 s when SIGTERM is
 ignored).
 
+Generated programs (`AnalysisCodeSandbox.execute`, reached through
+`execute_generated_program`) follow the same binding under the
+`analysis.generated_program` boundary: the absolute expiry is bound on entry,
+so the capability probe and the fsync'd request publication are charged to the
+allocation; the program timeout (`min(per_skill_timeout_s,
+resource_request.wall_time_s)`, or less when the caller passes the remaining
+allocation) starts at launch, and the program stops at the earlier of the two.
+Termination uses the same `terminate_observed_group` owner, grace and leader
+wait as skill workers. The capability probe has a 10 s ceiling
+(`PROBE_TIMEOUT_S`) and is also bounded by the remaining allocation, both in
+`execute` and in the pre-materialization probe in `execute_resolved_action`. A
+probe cut short by the allocation is a timeout, not missing isolation: the
+invocation records status and `failure_type` `timed_out` without launching
+generated code (no `worker_pid` is recorded, because none exists). A probe that fails before expiry still refuses with
+`generated_code_sandbox_unavailable`.
+
 ### Generated artifact paths
 
 The generated function receives `output_directory`, the artifact certification
