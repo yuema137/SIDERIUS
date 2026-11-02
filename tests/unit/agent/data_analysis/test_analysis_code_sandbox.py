@@ -605,6 +605,7 @@ def test_generated_program_stops_at_the_continuing_allocation_within_the_termina
 
     assert receipt.status == "timed_out"
     assert overrun_s < bound_s
+    assert receipt.worker_pid is not None
     assert not process_group_alive(receipt.worker_pid)
 
 
@@ -626,5 +627,5 @@ def test_capability_probe_cannot_run_past_the_continuing_allocation(
 
     assert overrun_s < 0.5
     assert receipt.status == "timed_out"
-    assert receipt.worker_pid == os.getpid()
+    assert receipt.worker_pid is None
     assert not (tmp_path / "control" / "request.json").exists()

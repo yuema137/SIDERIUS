@@ -884,7 +884,7 @@ def test_sandbox_probe_cannot_outlive_the_continuing_allocation(
         json.loads(line) for line in (root / "skill_results.jsonl").read_text().splitlines()
     ]
     assert result["status"] == "timed_out"
-    assert result["failure"]["failure_type"] == "timeout"
+    assert result["failure"]["failure_type"] == "timed_out"
     assert result["failure"]["materialization_occurred"] is False
 
 

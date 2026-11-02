@@ -222,7 +222,7 @@ def execute_resolved_action(
                     item=item,
                     plan=plan,
                     status="timed_out",
-                    failure_type="timeout",
+                    failure_type="timed_out",
                     message="the continuing analysis allocation expired during the "
                     "generated-code sandbox probe",
                     materialization_occurred=False,

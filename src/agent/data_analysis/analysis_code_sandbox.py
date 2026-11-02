@@ -71,7 +71,8 @@ class SandboxExecutionReceipt:
     payload: SkillPayload | None
     failure_type: str | None
     failure_message: str | None
-    worker_pid: int
+    #: ``None`` when no generated process was launched.
+    worker_pid: int | None
     started_at: str
     finished_at: str
     stdout_sha256: str
@@ -232,7 +233,7 @@ def _unlaunched_timeout(reason: str) -> SandboxExecutionReceipt:
         payload=None,
         failure_type="timed_out",
         failure_message=f"generated program was not launched: {reason}",
-        worker_pid=os.getpid(),
+        worker_pid=None,
         started_at=now,
         finished_at=now,
         stdout_sha256=_EMPTY_SHA256,
@@ -387,6 +388,33 @@ class AnalysisCodeSandbox:
             unshare_path=self._unshare,
         )
 
+    def _admit_within_allocation(self) -> float | None | SandboxExecutionReceipt:
+        """Bind the allocation expiry, then probe isolation within it.
+
+        The absolute expiry is bound on entry, so the capability probe and the
+        fsync'd request publication are charged to the continuing allocation
+        rather than added after it (#1447, as #1425 for skill workers); the
+        program timeout still starts at launch. Returns that expiry (``None``
+        outside an allocation), or an unlaunched ``timed_out`` receipt when
+        the allocation expires first.
+        """
+
+        allocation_expires_at = _allocation_expiry("analysis.generated_program")
+        probe_timeout_s = PROBE_TIMEOUT_S
+        if allocation_expires_at is not None:
+            probe_timeout_s = min(probe_timeout_s, allocation_expires_at - time.monotonic())
+        if probe_timeout_s <= 0.0:
+            return _unlaunched_timeout("the continuing allocation expired before the probe")
+        capability = self.probe(timeout_s=probe_timeout_s)
+        if capability.available:
+            return allocation_expires_at
+        if allocation_expires_at is not None and time.monotonic() >= allocation_expires_at:
+            # The allocation cut the probe short: a timeout, not missing isolation.
+            return _unlaunched_timeout(
+                "the continuing allocation expired during the capability probe"
+            )
+        raise AnalysisCodeSandboxUnavailable(capability.reason or "sandbox unavailable")
+
     def execute(
         self,
         *,
@@ -401,24 +429,10 @@ class AnalysisCodeSandbox:
         max_host_memory_gb: float,
         program_seed: int,
     ) -> SandboxExecutionReceipt:
-        # Bind the continuing allocation's absolute expiry on entry, so the
-        # capability probe and the fsync'd request publication are charged to
-        # it rather than added after it (#1447, as #1425 for skill workers).
-        # ``timeout_s`` (the per-skill/program timeout) still starts at launch.
-        allocation_expires_at = _allocation_expiry("analysis.generated_program")
-        probe_timeout_s = PROBE_TIMEOUT_S
-        if allocation_expires_at is not None:
-            probe_timeout_s = min(probe_timeout_s, allocation_expires_at - time.monotonic())
-        if probe_timeout_s <= 0.0:
-            return _unlaunched_timeout("the continuing allocation expired before the probe")
-        capability = self.probe(timeout_s=probe_timeout_s)
-        if not capability.available:
-            if allocation_expires_at is not None and time.monotonic() >= allocation_expires_at:
-                # The allocation cut the probe short: a timeout, not missing isolation.
-                return _unlaunched_timeout(
-                    "the continuing allocation expired during the capability probe"
-                )
-            raise AnalysisCodeSandboxUnavailable(capability.reason or "sandbox unavailable")
+        admission = self._admit_within_allocation()
+        if isinstance(admission, SandboxExecutionReceipt):
+            return admission
+        allocation_expires_at = admission
         for path, label in (
             (source_path, "generated source"),
             (self._runner, "sandbox runner"),

@@ -284,9 +284,8 @@ wait as skill workers. The capability probe has a 10 s ceiling
 (`PROBE_TIMEOUT_S`) and is also bounded by the remaining allocation, both in
 `execute` and in the pre-materialization probe in `execute_resolved_action`. A
 probe cut short by the allocation is a timeout, not missing isolation: the
-invocation records `timed_out` (`failure_type="timeout"` before
-materialization; sandbox disposition `timed_out` after it) without launching
-generated code. A probe that fails before expiry still refuses with
+invocation records status and `failure_type` `timed_out` without launching
+generated code (no `worker_pid` is recorded, because none exists). A probe that fails before expiry still refuses with
 `generated_code_sandbox_unavailable`.
 
 ### Generated artifact paths
