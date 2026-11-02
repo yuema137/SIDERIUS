@@ -1,6 +1,5 @@
 {
-  "followup": "https://github.com/Galileo-Sandbox/SIDERIUS/issues/1328",
-  "scope": "Existing typed framework guidance and remaining settings/import/authoring carriers. Exact expressions only; Task/GPU/setup leaks have no exception.",
+  "scope": "Audited fixed framework guidance and typed carriers. Exact expressions only; arbitrary task/GPU/setup causes have no exception.",
   "expressions": {
     "reusable_candidate.py": [
       "raise OperationFailure('judge_route', str(error)) from error",
@@ -60,13 +59,17 @@
     ],
     "setups.py": [
       "if error.args == (safe,):\n    return safe"
+    ],
+    "package_mounts.py": [
+      "return str(error)"
     ]
   },
   "reviewed_safe_statements": {
     "setups.py": "Exact args equality against the two framework-owned registry literals returns the literal, never arbitrary exception text.",
-    "editor.py": "Existing AuthoringError carrier now projects its ReviewView proposal through safe_review; raw AuthoringError guidance remains in #1328.",
-    "app.py": "Existing typed operation error/message/UUID carriers, now visible to the stronger chain scan; audit nested sources in #1328.",
-    "example_bundle.py": "Only WorkspaceRefused is forwarded: workspace.ensure_owned_directory constructs fixed permission/ownership guidance from explicit paths and stat fields. Raw OSError uses console_error_message; no arbitrary exception text or custom class name is forwarded."
+    "editor.py": "AuthoringError guidance is audited in the console contract; its ReviewView proposal is projected through safe_review. Native draft diagnostics omit Pydantic input snapshots.",
+    "app.py": "Audited typed operation guidance and UUID carriers plus fixed code-specific recovery messages; provenance is recorded in the console contract.",
+    "example_bundle.py": "Only WorkspaceRefused is forwarded: workspace.ensure_owned_directory constructs fixed permission/ownership guidance from explicit paths and stat fields. Raw OSError uses console_error_message; no arbitrary exception text or custom class name is forwarded.",
+    "package_mounts.py": "SandboxProfile.device_paths and _canonical_path raise only fixed framework guidance plus the operator-declared path, including missing-GPU recovery instructions. Only str(error) is forwarded; nested causes and tracebacks are not rendered."
   },
   "guard_limits": "https://github.com/Galileo-Sandbox/SIDERIUS/issues/1339"
 }

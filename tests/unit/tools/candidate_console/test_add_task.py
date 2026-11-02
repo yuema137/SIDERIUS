@@ -249,7 +249,7 @@ def test_add_task_refuses_and_check_warns_about_a_device_the_sandbox_cannot_pass
     the host, so the first sign was a refused GPU launch that blamed the device list.
 
     Fails if add-task writes an entry naming a missing path or a non-device file, if
-    the refusal does not name the path with safe recovery guidance, or if check
+    the refusal does not name the path with the sandbox's own reason, or if check
     either stays silent about such a hand-written entry or fails the whole console
     on it (a node like /dev/nvidia-uvm may appear only after first CUDA use).
     """
@@ -259,8 +259,12 @@ def test_add_task_refuses_and_check_warns_about_a_device_the_sandbox_cannot_pass
     plain.write_text("")
     absent = "/dev/siderius-absent-node0"
     argv = ("add-task", "--config", str(config), "--manifest", str(manifest), "--device")
-    why = "Invalid value. See the diagnostic log for details. Use existing canonical character-device paths under /dev."
-    for device in (absent, str(plain), "/dev/../dev/null"):
+    for device, why in (
+        (absent, f"declared path does not exist: {absent}"),
+        (str(plain), "devices must be explicit character-device paths under /dev"),
+        # Exists and is a character device, but is not canonical: the sandbox refuses it.
+        ("/dev/../dev/null", "use a canonical absolute path without symlink aliases or '..'"),
+    ):
         code, _, err = _main(monkeypatch, capsys, *argv, "/dev/null", device)
         assert code == 2
         assert f"candidate_devices names {device}, which the run sandbox refuses ({why})" in err
@@ -273,7 +277,7 @@ def test_add_task_refuses_and_check_warns_about_a_device_the_sandbox_cannot_pass
     assert code == 0, err
     assert (
         f"Warning: Task quickstart: Device {absent} cannot be passed into the run sandbox "
-        f"({why}); a run given it will be refused."
+        f"(declared path does not exist: {absent}); a run given it will be refused."
     ) in err
     assert "/dev/null" not in err
 

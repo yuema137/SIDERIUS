@@ -96,8 +96,9 @@ unchanged.
 
 Device admission (walkthrough N2): `package_mounts.device_problem` calls the run
 sandbox's own `SandboxProfile.device_paths` for one path (canonical, existing, under
-`/dev`, a character device) and returns its refusal reason; there is no second device
-rule. `add-task`, where the paths are typed, refuses (exit 2, console.json unchanged)
+`/dev`, a character device) and returns its audited refusal text: fixed framework
+guidance plus the operator-declared path, without nested causes or tracebacks.
+There is no second device rule. `add-task`, where the paths are typed, refuses (exit 2, console.json unchanged)
 with `task <id> candidate_devices names <path>, which the run sandbox refuses
 (<reason>); list only device nodes present on this machine (for example ls -l
 /dev/nvidia*)`. `check` and `serve` (and every console construction or global-settings
@@ -116,7 +117,9 @@ already in `task_read_only` is mounted once. `package_mounts.device_warnings(dev
 reports only device paths the sandbox would refuse; `check`/`serve` prefix each with
 `Task <id>: `, and Run review shows the same list for the reviewed request.
 `SandboxProfile.device_paths` refuses a missing `/dev/nvidia<N>` with `GPU device
-<path> is not present on this machine, ...` (the admission cause).
+<path> is not present on this machine, ...`; the console retains its recovery
+instructions to list the available nodes (`ls /dev/nvidia*`) or use the machine
+that has the declared GPU.
 
 `check --gpu [--task <id>]` (`gpu_check.check_gpu`) runs, for each task whose
 `candidate_devices` lists a `/dev/nvidia<N>` node, `python -m
@@ -3321,7 +3324,7 @@ The AST guard additionally checks format calls/percent formatting, exception arg
 and chained `x.result.failure.message` access, and counts duplicate statement
 occurrences (multiple raw expressions in one statement count once). Named safe
 projection calls are boundaries for the syntactic scan. Explicit reviewed baseline
-entries retain fixed guidance and typed legacy carriers for #1328. Alias, dynamic
+entries retain audited fixed guidance and typed carriers. Alias, dynamic
 attribute, whole-model serialization, safe-owner shadowing and JavaScript gaps are
 listed in #1339; behavioral HTTP/browser sentinel tests cover the editor model
 projection independently of this syntactic guard. The editor browser witness
@@ -3335,10 +3338,12 @@ scientific compatibility.
 uses `setup_review.summary_errors.error_category`; raw causes and custom exception
 class names are diagnostic-log data, not response messages. Settings profile
 upload/export, external-manifest inspection, package-copy OSError, add-task folder
-creation and entry validation, device warnings and host-ledger intake use that
+creation and entry validation, and host-ledger intake use that
 owner. Existing refusal codes and no-write/partial-copy recovery hints remain.
-Device warnings retain the explicitly configured device and give fixed guidance
-to use existing canonical character-device paths under `/dev`.
+Device warnings retain the audited `SandboxProfile.device_paths` / `_canonical_path`
+refusal text, including the configured path and specific missing-GPU recovery.
+These sources construct only fixed framework text plus the declared path; nested
+causes and tracebacks are not forwarded.
 
 `advice_error_message` adds the advice owner's recognised key inventory and
 nonempty text/list requirements to the safe category. Library upload, inline

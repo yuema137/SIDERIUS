@@ -74,14 +74,27 @@ def test_external_manifest_cli_keeps_cause_private(task_workspace, monkeypatch, 
     assert "Invalid value." in err
 
 
-def test_device_warning_keeps_cause_private(monkeypatch, caplog):
+def test_device_warning_retains_fixed_guidance_without_nested_cause(monkeypatch):
+    def refuse(paths):
+        raise ValueError(
+            "devices must be explicit character-device paths under /dev"
+        ) from ValueError(SENTINEL)
+
     monkeypatch.setattr(
-        "tools.candidate_console.package_mounts.SandboxProfile.device_paths", _raise_private
+        "tools.candidate_console.package_mounts.SandboxProfile.device_paths", refuse
     )
     (warning,) = device_warnings(("/dev/example",))
-    assert "/dev/example" in warning and "Invalid value." in warning
-    assert SENTINEL not in warning and "PrivateTaskError1328" not in warning
-    assert SENTINEL in caplog.text
+    assert "devices must be explicit character-device paths under /dev" in warning
+    assert SENTINEL not in warning
+
+
+def test_missing_gpu_warning_retains_host_recovery_guidance(monkeypatch):
+    device = "/dev/nvidia987654321"
+    exists = Path.exists
+    monkeypatch.setattr(Path, "exists", lambda path: False if str(path) == device else exists(path))
+    (warning,) = device_warnings((device,))
+    assert f"GPU device {device} is not present on this machine" in warning
+    assert "(ls /dev/nvidia*) or run on the machine that has it" in warning
 
 
 def test_advice_upload_does_not_echo_unrecognised_keys(workspace):
