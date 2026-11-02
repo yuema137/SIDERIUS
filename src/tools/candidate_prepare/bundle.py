@@ -9,6 +9,7 @@ from tools.candidate_worker.models import CandidateRunRequest
 from tools.workflow_preview.models import FileObservation, WorkflowBindings, WorkflowPreviewRequest
 from tools.workflow_preview.preview import observe_bindings
 from workflows.definition import WorkflowDocument
+from workflows.definition.models import NativeInterpretationProfile
 
 from .admission import canonical
 from .declaration import candidate_document
@@ -76,7 +77,7 @@ def build_candidate(
         "native-proposal-fanout/v1",
         "native-proposal-families/v1",
         "native-literature-candidate/v1",
-        "native-interpretation-candidate/v1",
+        NativeInterpretationProfile,
     ]
     | None = None,
 ) -> tuple[CandidateRunRequest, WorkflowBindings]:

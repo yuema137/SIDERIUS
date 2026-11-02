@@ -3261,3 +3261,11 @@ projection independently of this syntactic guard. The editor browser witness
 renders real sanitized HTTP observations through the production JSON details
 component, using synthetic visibility gates only; it does not qualify saving or
 scientific compatibility.
+
+### Execution profile browser binding
+
+`profile_assets.add_profile_assets` serves `/execution-profiles.js` from the
+workflow declaration owner `NATIVE_INTERPRETATION_PROFILE`. The index loads it
+before editor and captured-run scripts; `window.executionProfiles.nativeInterpretation`
+is their shared lookup. It contains no task state or credentials and changes no
+profile admission or serialized identifier.

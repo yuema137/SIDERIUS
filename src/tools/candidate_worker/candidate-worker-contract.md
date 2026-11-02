@@ -1961,7 +1961,7 @@ published write-once as `parallel_budget.json` in its control directory.
 
 Trace v2 verifier (`parallel_evidence.drained_entries`, the one parallel-v1
 check `verify_graph_trace` calls). `scheduling="parallel-v1"` must equal
-`request.parallel` being set; a serial trace returns no drained entries. For a
+`request.parallel` being set; a serial trace returns `None`. For a
 parallel trace: (e) `parallel_budget.json` must have the digest of the run's
 admitted budget (`parallel.budget`, or the `run_budget()` of the host grant of
 the segment that ran the iteration); (d) a receipt exists exactly for every
@@ -1973,10 +1973,27 @@ with the state (`returned` for an outcome with a record, `raised` or
 (a) start and end events are one permutation of 1..2n, and a queue mark precedes
 its start; (f) each placement, re-planned with `plan_dispatch` beside the
 placements running when it started, is placed on the slot it recorded; and no
-entry starts after the first failed entry ended.
-`replay_readiness(..., drained=...)` then accepts a dispatched node where the
-serial replay would close it as blocked only if its own sources permit it.
-Serial traces verify exactly as before.
+entry starts after the first failed entry ended. It returns a
+`graph_evidence.DrainWindow` (`ended`: the `ended_event` of every dispatched
+entry; `failure_end`: the `ended_event` of the first failed entry, `None`
+without a failure).
+
+`replay_readiness(..., drained=window)` replays a parallel trace without the
+declaration-order failure stop, because parallel dispatch follows completion
+order: a later-declared unit can fail while an earlier-declared sibling is
+still running, and then a node the serial order would dispatch next (for
+example `check0` after `build0`) is never dispatched (#1386). Per step: a node
+readiness dispatches must be recorded dispatched (its receipt already proves it
+started before the failure ended; readiness proves its sources permitted it);
+a node readiness closes must carry that closure. When `failure_end` is set, any
+entry may instead carry the drain closure `blocked`/`dependency_not_successful`,
+whatever the serial order would have done next; and a `skipped` closure is
+accepted only if every source (through sources closed without dispatch) ended
+before `failure_end`, since a closure decided after the failure was collected
+is `blocked`. Still refused: a `blocked` entry in a parallel trace without a
+failure, a dispatched entry whose own source failed or that lies in a
+non-selected arm, a selected arm recorded `skipped`, and a skip decided after
+the failure. Serial traces (`drained=None`) verify exactly as before.
 
 Cancellation. SIGTERM during parallel dispatch raises `UnitTerminated` in the
 worker (`unit_processes.TermGate`). Any exit from the loop with units running
@@ -2006,8 +2023,11 @@ otherwise.
 
 Tests: `tests/unit/tools/candidate_worker/test_parallel_dispatch.py` (serial
 golden in any completion order, slot never exceeded, drain + forged receipt,
+a later-declared failure draining an earlier-declared unit,
 SIGTERM kills real unit groups, a unit that cannot start fails alone, a held
-signal survives an exceptional exit, one failing termination), `test_parallel_lock.py`,
+signal survives an exceptional exit, one failing termination), `test_readiness.py`
+(parallel replay: drain closures accepted, closures the drain cannot produce refused),
+`test_parallel_lock.py`,
 `tests/unit/agent/test_token_unit.py`.
 
 

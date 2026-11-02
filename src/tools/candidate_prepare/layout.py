@@ -12,7 +12,7 @@ from workflows.definition import (
     ReusableWorkflowDocument,
 )
 from workflows.definition.fanout import execution_families
-from workflows.definition.models import DeclarationModel
+from workflows.definition.models import NATIVE_INTERPRETATION_PROFILE, DeclarationModel
 
 
 class StorageRecord(DeclarationModel):
@@ -118,7 +118,7 @@ def graph_storage_bindings(document: ReusableWorkflowDocument) -> dict[str, str]
 
 def interpretation_external_bindings(document: ReusableWorkflowDocument) -> dict[str, str]:
     """Name managed protocol payloads generated from the existing native preparation."""
-    if document.execution_profile != "native-interpretation-candidate/v1":
+    if document.execution_profile != NATIVE_INTERPRETATION_PROFILE:
         return {}
     shape = execution_families(document.definition, document.execution_profile)
     assert shape.interpretation is not None

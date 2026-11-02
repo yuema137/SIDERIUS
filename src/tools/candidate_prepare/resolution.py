@@ -23,7 +23,13 @@ from workflows.definition import (
 )
 from workflows.definition.candidate import ADAPTORS_NOT_ADMITTED, candidate_nodes
 from workflows.definition.fanout import execution_families
-from workflows.definition.models import DeclarationModel, Identifier, Location
+from workflows.definition.models import (
+    NATIVE_INTERPRETATION_PROFILE,
+    DeclarationModel,
+    Identifier,
+    Location,
+    NativeInterpretationProfile,
+)
 
 from .layout import (
     graph_literature_bindings,
@@ -61,7 +67,7 @@ class ResolvedReusableCandidate(DeclarationModel):
             "native-proposal-fanout/v1",
             "native-proposal-families/v1",
             "native-literature-candidate/v1",
-            "native-interpretation-candidate/v1",
+            NativeInterpretationProfile,
         ]
         | None
     ) = Field(default=None, exclude_if=lambda value: value is None)
@@ -75,7 +81,7 @@ def managed_argument_roles(execution_profile: str | None) -> frozenset[tuple[str
     interpretation profile, its context inputs); any other managed routing is refused.
     """
     roles = {("storage", "storage"), ("native-training.settings", "settings")}
-    if execution_profile == "native-interpretation-candidate/v1":
+    if execution_profile == NATIVE_INTERPRETATION_PROFILE:
         roles.update(
             (contract, name)
             for name, contract in {
@@ -102,7 +108,7 @@ def managed_request_supported(
             and contract == "literature.input"
         )
         or (
-            execution_profile == "native-interpretation-candidate/v1"
+            execution_profile == NATIVE_INTERPRETATION_PROFILE
             and capability == "interpretation"
             and contract == "interpretation.input"
         )
@@ -133,7 +139,7 @@ def check_candidate_roles(document: ReusableWorkflowDocument, proposal_ids: set[
                         and external.contract == "literature.input"
                     )
                     or (
-                        document.execution_profile == "native-interpretation-candidate/v1"
+                        document.execution_profile == NATIVE_INTERPRETATION_PROFILE
                         and node.capability == "interpretation"
                         and external.contract == "interpretation.input"
                     )
@@ -171,9 +177,7 @@ def check_candidate_roles(document: ReusableWorkflowDocument, proposal_ids: set[
         if isinstance(item, ManagedCandidateBinding) and item.contract == "proposal.input"
     ]
     expected_proposals = (
-        0
-        if document.execution_profile == "native-interpretation-candidate/v1"
-        else len(proposal_ids)
+        0 if document.execution_profile == NATIVE_INTERPRETATION_PROFILE else len(proposal_ids)
     )
     if len(proposals) != expected_proposals:
         raise ValueError("Exactly one managed proposal binding per proposal is required")
