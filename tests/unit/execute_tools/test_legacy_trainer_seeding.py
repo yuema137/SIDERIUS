@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import random
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pytest
@@ -37,7 +38,10 @@ def _run(tmp_path: Path, seed: int | None) -> dict:
         DataLoader(TensorDataset(inputs, inputs), batch_size=2),
         {"models": str(tmp_path)},
         "legacy",
-        seed_plan=None if seed is None else TrainingSeedPlan(SeedContext(run_seed=seed)),
+        # Deliberate untyped-caller input for the runtime refusal witness.
+        seed_plan=cast(TrainingSeedPlan, None)
+        if seed is None
+        else TrainingSeedPlan(SeedContext(run_seed=seed)),
     )
 
 
@@ -73,7 +77,7 @@ def test_direct_call_seeds_before_model_construction(tmp_path, monkeypatch, plug
 
 
 def test_missing_plan_refuses_before_construction(tmp_path, monkeypatch):
-    """An omitted plan must not reach model construction or publish a checkpoint."""
+    """An explicit None must not reach model construction or publish a checkpoint."""
 
     def unexpected_model(_config):
         pytest.fail("model construction preceded the seed precondition")

@@ -14,6 +14,7 @@ import glob
 import json
 import os
 
+from core.record_encoding import decode_record
 from dashboard.data_sources.base import DataSource
 from execute_tools.evaluation_metric import (
     METRIC_IDENTITY_UNAVAILABLE,
@@ -73,7 +74,7 @@ class LocalJsonDataSource(DataSource):
         """Read a summary JSON file. Returns [] on any error."""
         try:
             with open(path, encoding="utf-8") as f:
-                data = json.load(f)
+                data = decode_record(json.load(f))
             return data if isinstance(data, list) else []
         except (OSError, json.JSONDecodeError):
             return []

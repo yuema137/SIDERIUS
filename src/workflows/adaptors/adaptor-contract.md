@@ -159,7 +159,11 @@ every admission, the ranking, metric id/direction, one contribution per emitted
 output and `OutputDigest(port, index, status, sha256)` where `sha256` is
 `canonical_sha256(value)` (sorted-key, compact, ASCII JSON of
 `model_dump(mode="json")`, the encoding of `WorkflowDefinition.declaration_digest`;
-owner `core/canonical_json.py`, shared with custom adaptors). The record test pins a literal digest.
+owner `core/canonical_json.py`, shared with custom adaptors). New records declare
+`encoding_version` from `core.record_encoding`; non-finite outputs use that
+owner's strict typed-path encoding. The worker replay helper reads absent version
+as legacy and reproduces the historical bytes/digests without rewriting them.
+See the [core encoding contract](../../core/core-contract.md#versioned-non-finite-record-json-issue-1111). The record test pins a literal digest.
 An LLM COMBINE record adds `strategy_evidence = StrategyEvidenceRef(path, sha256)`
 (B6-8a): `path` is `<adaptor-id>.judge/strategy.json` relative to the adaptor
 directory and `sha256` is `StrategyResult.evidence_sha256`, the anchor readback

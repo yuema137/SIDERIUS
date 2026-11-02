@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from core.record_encoding import decode_record
 from core.record_log import (
     RECORD_LOG_BASENAME,
     RecordHistoryUnreadable,
@@ -44,8 +45,16 @@ def _rec(exp_id: str, **extra) -> dict:
     return {"exp_id": exp_id, "status": "success", "denoising_score": 1.0, **extra}
 
 
+def _read(payload):
+    """Inspect record data; encoding itself has separate round-trip regressions."""
+    value = json.loads(payload)
+    return (
+        [decode_record(row) for row in value] if isinstance(value, list) else decode_record(value)
+    )
+
+
 class TestAppendOnlyCase:
-    def test_summary_bytes_are_identical_to_the_legacy_writer(self, tmp_path):
+    def test_summary_bytes_preserve_format_and_declare_encoding(self, tmp_path):
         """DEFECT: a projection/format drift changes the bytes of the view
         every reader in U5's list consumes (tuner, dashboard, scripts,
         REC-3). Expected bytes come from ``json.dump``'s documented
@@ -55,17 +64,22 @@ class TestAppendOnlyCase:
         for r in records:
             rec.save_record(r)
         assert _summary_path(tmp_path).read_bytes() == json.dumps(
-            records, indent=4, ensure_ascii=False
+            [
+                {**row, "$siderius_encoding": {"version": "siderius.nonfinite/v1", "floats": []}}
+                for row in records
+            ],
+            indent=4,
+            ensure_ascii=False,
         ).encode("utf-8")
         lines = _log_path(tmp_path).read_text(encoding="utf-8").splitlines()
-        assert [json.loads(line) for line in lines] == records
+        assert [_read(line) for line in lines] == records
         assert rec.get_summary() == records
 
     def test_every_record_gets_an_atomic_detail_file(self, tmp_path):
         rec = _recorder(tmp_path)
         rec.save_record(_rec("e1"))
         detail = tmp_path / "records" / RUN / "e1.json"
-        assert json.loads(detail.read_text(encoding="utf-8")) == _rec("e1")
+        assert _read(detail.read_text(encoding="utf-8")) == _rec("e1")
         assert not [n for n in os.listdir(detail.parent) if n.endswith(".tmp")]
 
 
@@ -81,7 +95,7 @@ class TestUpsertContract:
         rec.save_record(_rec("A", version=2))
 
         assert rec.get_summary() == [_rec("A", version=2), _rec("B")]
-        assert json.loads(_summary_path(tmp_path).read_text()) == [_rec("A", version=2), _rec("B")]
+        assert _read(_summary_path(tmp_path).read_text()) == [_rec("A", version=2), _rec("B")]
         # The history is append-only: the superseded version is still evidence.
         assert len(_log_path(tmp_path).read_text().splitlines()) == 3
 
@@ -104,10 +118,10 @@ class TestCrashRecovery:
 
         assert rec.get_summary() == [_rec("e1"), _rec("e2")]
         # The view was repaired in place from the canonical log.
-        assert json.loads(_summary_path(tmp_path).read_text()) == [_rec("e1"), _rec("e2")]
+        assert _read(_summary_path(tmp_path).read_text()) == [_rec("e1"), _rec("e2")]
 
         rec.save_record(_rec("e3"))
-        assert json.loads(_summary_path(tmp_path).read_text()) == [
+        assert _read(_summary_path(tmp_path).read_text()) == [
             _rec("e1"),
             _rec("e2"),
             _rec("e3"),
@@ -136,10 +150,10 @@ class TestCrashRecovery:
         monkeypatch.setattr(os, "replace", real_replace)
 
         # The view on disk is the OLD, intact one (never torn) ...
-        assert json.loads(_summary_path(tmp_path).read_text()) == [_rec("e1")]
+        assert _read(_summary_path(tmp_path).read_text()) == [_rec("e1")]
         # ... and a fresh open sees the full history and repairs the view.
         assert _recorder(tmp_path).get_summary() == [_rec("e1"), _rec("e2")]
-        assert json.loads(_summary_path(tmp_path).read_text()) == [_rec("e1"), _rec("e2")]
+        assert _read(_summary_path(tmp_path).read_text()) == [_rec("e1"), _rec("e2")]
 
     def test_a_crash_before_the_detail_file_leaves_history_untouched(self, tmp_path, monkeypatch):
         """ORDER: detail file, then log, then view. Fails if the log gains
@@ -157,7 +171,7 @@ class TestCrashRecovery:
         with pytest.raises(OSError, match="detail file"):
             rec.save_record(_rec("e2"))
         assert len(_log_path(tmp_path).read_text().splitlines()) == 1
-        assert json.loads(_summary_path(tmp_path).read_text()) == [_rec("e1")]
+        assert _read(_summary_path(tmp_path).read_text()) == [_rec("e1")]
 
     def test_a_torn_log_tail_is_skipped_and_the_next_append_recovers(self, tmp_path):
         """DEFECT: a crash mid-append leaves a partial last line; refusing
@@ -223,13 +237,13 @@ class TestKilledWriter:
         for position, record in enumerate(records):
             assert record == {"exp_id": f"e{position:05d}", "i": position, "payload": "x" * 4096}
             detail = tmp_path / "records" / RUN / f"{record['exp_id']}.json"
-            assert json.loads(detail.read_text(encoding="utf-8")) == record
+            assert _read(detail.read_text(encoding="utf-8")) == record
         # The derived view was rebuilt from the log and is complete.
-        assert json.loads(_summary_path(tmp_path).read_text(encoding="utf-8")) == records
+        assert _read(_summary_path(tmp_path).read_text(encoding="utf-8")) == records
         # At most the LAST line of the log may be torn; every other parses.
         lines = log.read_text(encoding="utf-8").split("\n")
         for line in lines[:-2]:
-            json.loads(line)
+            _read(line)
 
 
 class TestLegacyWorkspaces:
@@ -247,8 +261,8 @@ class TestLegacyWorkspaces:
 
         rec.save_record(_rec("new"))
         lines = _log_path(tmp_path).read_text().splitlines()
-        assert [json.loads(line) for line in lines] == [*legacy, _rec("new")]
-        assert json.loads(_summary_path(tmp_path).read_text()) == [*legacy, _rec("new")]
+        assert [_read(line) for line in lines] == [*legacy, _rec("new")]
+        assert _read(_summary_path(tmp_path).read_text()) == [*legacy, _rec("new")]
 
     def test_an_unreadable_summary_without_a_log_raises_instead_of_reading_empty(self, tmp_path):
         """THE AMPLIFIER, legacy shape: with no log to rebuild from, a torn

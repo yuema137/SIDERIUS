@@ -42,6 +42,7 @@ from agent.schemas.vocab import VocabEntry
 from core.capability_registry import CapabilityContractSnapshot
 from core.generated_artifact_name import validate_generated_artifact_name
 from core.hardware_context import HardwareContext
+from core.record_encoding import RecordModel
 from execute_tools.dataset_config import (
     DataScope,
     declares_tidmad_topology,
@@ -1194,7 +1195,7 @@ class ProposalInput(BaseModel):
     )
 
 
-class ProposalOutput(BaseModel):
+class ProposalOutput(RecordModel):
     """
     Output of ml_model_proposal_agent.
 

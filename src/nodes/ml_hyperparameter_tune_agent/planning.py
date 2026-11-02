@@ -42,6 +42,10 @@ from nodes.ml_hyperparameter_tune_agent.contracts import (
 from nodes.ml_hyperparameter_tune_agent.health_coverage import (
     validate_attempt_health_coverage,
 )
+from nodes.ml_hyperparameter_tune_agent.parameter_rule_receipts import (
+    inactive_parameter_rule_record,
+)
+from nodes.ml_hyperparameter_tune_agent.plan_logging import render_effective_plan
 from nodes.ml_hyperparameter_tune_agent.policy import (
     _apply_mode_override_chain,
     _apply_plan_overrides,
@@ -919,10 +923,6 @@ def prepare_attempt(
     exp_id = f"{model_type}_{run_name}_{total_attempts:03d}"
     hypothesis = plan.hypothesis
 
-    print(f"Action: {model_type.upper()} | ID: {exp_id}")
-    print(f"Hypothesis: {hypothesis}")
-    print(f"Reasoning: {plan.reasoning or 'No reasoning provided.'}")
-
     # Save validated TrialConfig
     _persist_trial_config(sandbox.dirs["configs"], exp_id, trial_config)
 
@@ -938,6 +938,11 @@ def prepare_attempt(
     # Lane D / F15 — close the tracker (the model channel is not plan-visible).
     execution_provenance = resolution.finish_with_model(
         plan, executed_model_type=model_type, trial_config=trial_config
+    )
+    print(
+        render_effective_plan(
+            exp_id=exp_id, model_type=model_type, plan=plan, provenance=execution_provenance
+        )
     )
     active_params = {
         "exp_id": exp_id,
@@ -962,6 +967,7 @@ def prepare_attempt(
 
     # Clean params for records — exclude bulky SampleSet dicts
     record_params = {
+        **inactive_parameter_rule_record(plan),
         **training_batch_fit_record(execution_provenance),
         "exp_id": exp_id,
         "run_name": run_name,
