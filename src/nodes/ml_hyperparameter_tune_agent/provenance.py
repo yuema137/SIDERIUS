@@ -103,6 +103,15 @@ def _is_default_materialization(authored: str, executed: str) -> bool:
     return authored == ABSENT and executed in _EMPTY_EXECUTED
 
 
+def _resolved_value_text(value: str, authority: str) -> str:
+    """Explain omitted request keys without inventing downstream default values."""
+    if value != ABSENT:
+        return value
+    if authority == "operator_plan_overrides":
+        return "not supplied in resolved configuration; plan_overrides uses whole-dictionary replacement"
+    return "not supplied in the resolved configuration"
+
+
 class ResolutionTracker:
     """Watches one attempt's plan across its resolution steps.
 
@@ -139,7 +148,8 @@ class ResolutionTracker:
     def record(self, plan: Any, authority: str) -> None:
         """Attribute to ``authority`` every field it moved away from authored."""
         current = _flatten(plan.model_dump())
-        for path, value in current.items():
+        for path in set(self._authored) | set(current):
+            value = current.get(path, ABSENT)
             if path in _MIRROR_PATHS:
                 continue
             authored = self._authored.get(path, ABSENT)
@@ -188,7 +198,7 @@ class ResolutionTracker:
                 ResolutionEvent(
                     field_path=path,
                     proposed=authored,
-                    executed=executed,
+                    executed=_resolved_value_text(executed, claims.get(path, "unattributed")),
                     authority=claims.get(path, "unattributed"),
                 )
             )
