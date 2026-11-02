@@ -11,7 +11,8 @@ Two sources feed ``SetupRegistry``:
   and the 0700 recovery directory ``projects/<setup_id>/.recovery``.
 
 ``SetupStore`` is the only writer of the registry file: compare-and-swap on the
-sha256 of the bytes it last read or wrote, then the global-settings private
+sha256 of the bytes it last read or wrote under a shared private file lock, then
+the global-settings private
 publish (``settings_service._publish_private``). An ID present in both sources
 fails startup. Creation is allowed only when console.json sets
 ``experiment_setups.browser_creatable``; it never overwrites or deletes, and a
@@ -40,7 +41,7 @@ from workflows.definition import ReusableTaskReferences, TaskBinding
 
 from .config_errors import MissingConfigFile
 from .error_messages import console_error_message
-from .files import open_directory, private_bytes
+from .files import open_directory, private_bytes, private_file_lock
 from .models import ConsoleConfig, TaskChoice
 from .settings_file import SettingsInvalid
 from .settings_models import ExperimentSetupsPolicy, Id, Label
@@ -178,10 +179,8 @@ class SetupStore:
         workspace: Path | None,
         policy: ExperimentSetupsPolicy | None = None,
     ) -> SetupStore:
-        """Read the registry; an unknown task or an ID shared with editor_projects fails."""
-        if workspace is None:
-            return cls()
-        entries, digest = _read(registry_path(workspace))
+        """Read and validate one snapshot: tasks, unique IDs and all setup project paths."""
+        entries, digest = ((), None) if workspace is None else _read(registry_path(workspace))
         store = cls(workspace, policy, entries, digest)
         tasks = {task.task_id for task in config.tasks}
         for entry in entries:
@@ -189,7 +188,9 @@ class SetupStore:
                 raise SettingsInvalid(
                     f"experiment setup {entry.setup_id!r} names unknown task {entry.task_id!r}"
                 )
-        SetupRegistry(config, store).setups()  # ID collisions fail here
+        # Validate the exact loaded snapshot, including app construction after an earlier check.
+        for project in SetupRegistry(config, store).projects():
+            check_setup_project(project, config)
         return store
 
     def entries(self) -> tuple[SetupEntry, ...]:
@@ -268,11 +269,12 @@ class SetupStore:
     def _publish(self, workspace: Path, entry: SetupEntry, created: str) -> None:
         from .settings_service import _publish_private
 
-        self._check_unchanged(workspace, created=created)
         document = SetupsFile(schema_version=SETUPS_SCHEMA, setups=(*self._entries.values(), entry))
         payload = (document.model_dump_json(indent=2) + "\n").encode()
         try:
-            _publish_private(registry_path(workspace), payload)
+            with private_file_lock(registry_path(workspace)):
+                self._check_unchanged(workspace, created=created)
+                _publish_private(registry_path(workspace), payload)
         except (OSError, OperationFailure):
             raise SetupRefused(
                 409,

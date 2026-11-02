@@ -343,3 +343,21 @@ def _share_host_ledger(console, tmp_path):
     root = tmp_path / "host-ledger"
     root.mkdir(mode=0o700)
     console.host = HostScheduling(ledger_root=str(root), budget=_budget())
+
+
+def test_edited_setup_refuses_another_tasks_prepared_context(monkeypatch):
+    """The edited path must enforce setup task binding before reading any workflow."""
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    console = Mock(spec=CandidateConsole)
+    console.setups.runnable.return_value = SimpleNamespace(project=object(), task_id="task-a")
+    console.resolve_prepared_context.return_value = (object(), SimpleNamespace(task_id="task-b"))
+    monkeypatch.setattr(
+        "tools.candidate_console.edited_candidate.WorkflowAuthoring",
+        lambda *_: pytest.fail("workflow read before task policy refusal"),
+    )
+    selection = EditedRunSelection(prepare_operation_id=uuid4(), expected_source_sha256="a" * 64)
+    with pytest.raises(OperationFailure) as refused:
+        EditedCandidate(console)._checked_review("created", selection)
+    assert refused.value.detail.code == "task_policy"

@@ -27,6 +27,8 @@ attempts usually carry this label, because the framework routinely resolves
 their mode (`is_trial`) and data portions, not only when an operator overrides
 a value. The list is kept even after older records are shortened to a summary;
 there, very long values such as file lists are cut to a short head and tail.
+This shortens each value, not the whole entry: all changed fields and their
+names remain, so many changes or long field names can still make a large summary.
 The record's `status` still says whether the attempt actually ran. A record
 whose plan ran exactly as proposed looks the same as before.
 
