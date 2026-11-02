@@ -32,6 +32,22 @@ metric:
     file: plugins/_csv_metrics.py
     symbol: BalancedAccuracyMetric
 
+# OPTIONAL: tell every agent what the score means. Uncomment the block to use
+# it; while it stays commented the task is exactly as shipped. With
+# `selection: kind: primary`, models are still ranked by the metric above.
+# Formulas, constraints and rubric rules: docs/guides/evaluation/README.md in
+# the SIDERIUS checkout.
+# evaluation:
+#   components:
+#     - kind: metric
+#       id: balanced_accuracy
+#       metric: balanced_accuracy        # the metric id declared above
+#       meaning: Mean per-class recall on validation.csv; each class counts equally.
+#       units: fraction (0 to 1), mean over classes
+#       range: {lower: 0.0, upper: 1.0}  # descriptive only; no clipping or rescaling
+#   selection:
+#     kind: primary
+
 objective:
   config:
     loss_type: ce
