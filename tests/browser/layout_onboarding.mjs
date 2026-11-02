@@ -22,7 +22,7 @@ import {tmpdir} from 'node:os';
 import {createRequire} from 'node:module';
 import {dirname, resolve, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[name], `Set ${name}`);
@@ -30,7 +30,6 @@ const evidence = process.env.CONSOLE_EVIDENCE_DIR || await mkdtemp(join(tmpdir()
 await mkdir(evidence, {recursive: true});
 const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.workflow_editor_server'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
 let errors = ''; server.stderr.on('data', chunk => {errors += chunk;});
-const lines = createInterface({input: server.stdout});
 const KEY = 'siderius.console.tour.v1';
 let browser;
 async function waitUntil(predicate, label = 'Browser condition') {
@@ -38,14 +37,7 @@ async function waitUntil(predicate, label = 'Browser condition') {
   while (!(await predicate())) { if (Date.now() > deadline) throw new Error(`${label} timed out`); await new Promise(r => setTimeout(r, 50)); }
 }
 try {
-  const metadata = await new Promise((accept, reject) => {
-    const timer = setTimeout(() => reject(new Error(`Server startup timeout: ${errors}`)), 15000);
-    lines.on('line', line => {
-      try { const value = JSON.parse(line); if (!value.origin || !value.token) return; clearTimeout(timer); lines.close(); accept(value); }
-      catch { /* Native plugin registration may write one informational line first. */ }
-    });
-    server.once('exit', code => {clearTimeout(timer); reject(new Error(`Server ${code}: ${errors}`));});
-  });
+  const metadata = await waitForMetadata(server, {timeoutMs: 15000});
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
   const context = await browser.newContext({viewport: {width: 1440, height: 1100}, colorScheme: 'light'});
