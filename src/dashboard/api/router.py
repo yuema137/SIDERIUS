@@ -182,6 +182,8 @@ def model_overview(model: str):
         total_experiments=raw.get("total_experiments", 0),
         status_counts=StatusCounts(**raw.get("status_counts", {})),
         runs=raw.get("runs", []),
+        metric_identity_unavailable_rows=raw.get("metric_identity_unavailable_rows", 0),
+        metric_ranking_unavailable=raw.get("metric_ranking_unavailable"),
     )
 
 
