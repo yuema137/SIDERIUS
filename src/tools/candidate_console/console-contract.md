@@ -2593,6 +2593,22 @@ console and theme browser harnesses exercise the shared shell and disclosures.
 These are local browser witnesses; they do not qualify native execution, complete
 circuit editing, results, resume or production deployment.
 
+Remembered Monitor input is scoped by `session.js` to
+`siderius.operation_id.v1/<operations_store_id>`. Its `rememberOperation` and
+`rememberedOperation` methods are the sole persistence owner for Monitor and the
+legacy preparation, candidate and native-chain launch controls. The old global
+`siderius.operation_id` is ignored, never migrated: it has no attributable store.
+Connect clears the previous session's store identity. Without an explicit Monitor
+UUID, the convenience input is cleared during reconnection and restored only after
+validated choices identify the current store; malformed stored UUIDs are ignored.
+Restoration only fills the input; it never submits a read or launch. Explicit UUID
+routes win and retain independent operation-only authentication. Until choices
+identify the store, reads/writes of remembered selection are no-ops; storage failures
+also leave explicit monitoring available. No credential or request payload is stored.
+`tests/browser/operation_selection.mjs` covers shared-origin store switching, reload,
+legacy isolation, reconnect, explicit route precedence, native launch persistence
+and unavailable localStorage using synthetic observations, without native execution.
+
 
 ## Reusable capture consumption
 
