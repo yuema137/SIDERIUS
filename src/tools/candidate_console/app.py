@@ -13,6 +13,7 @@ from starlette.exceptions import HTTPException
 
 from tools.candidate_operations import LogReadRequest
 from tools.candidate_operations.models import OperationFailure, UnknownOperation
+from workflows.definition.source import validation_code
 
 from .boundary import RequestBoundary
 from .edited_routes import edited_router
@@ -129,8 +130,8 @@ def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -
 
     @app.exception_handler(RequestValidationError)
     @app.exception_handler(ValidationError)
-    async def invalid(request: Request, error: Exception):
-        return error_response(422, "validation", "invalid request fields")
+    async def invalid(request: Request, error: RequestValidationError | ValidationError):
+        return error_response(422, validation_code(error.errors()), "invalid request fields")
 
     @app.exception_handler(FileNotFoundError)
     async def missing(request: Request, error: Exception):

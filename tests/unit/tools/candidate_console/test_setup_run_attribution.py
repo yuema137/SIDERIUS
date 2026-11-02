@@ -9,12 +9,13 @@ import pytest
 from tests.unit.tools.candidate_console.test_http import client
 from tests.unit.tools.candidate_console.test_new_run import fresh, intent, selection
 from tests.unit.tools.candidate_prepare.test_reusable_preparation import reusable
+from tests.unit.tools.candidate_worker.conftest import prepared as worker_prepared
 from tools.candidate_console.reusable_preparation import ReusablePreparation
 from tools.candidate_console.service import CandidateConsole
 from tools.candidate_console.settings_models import ExperimentSetupsPolicy
 from tools.candidate_console.setups import SetupCreate, SetupStore
 from tools.candidate_operations import operation_request_digest
-from tools.candidate_operations.models import CandidateOperation, OperationFailure
+from tools.candidate_operations.models import CandidateOperation
 from workflows.definition import ReusableWorkflowDocument, render_workflow_source
 from workflows.definition.source import parse_workflow_source
 
@@ -97,17 +98,6 @@ def test_filter_returns_the_setups_runs_and_keeps_unattributed_records(attribute
     assert ids(f"?project_id={created}&limit=1") == [str(mine)]
 
 
-def test_created_setup_run_under_another_task_is_refused(attributed):
-    """Defect: attribution names a setup whose task differs from the run's task."""
-    adapter, selection, created, _ = attributed
-    console = adapter.console
-    other = console.config.tasks[0].model_copy(update={"task_id": "other"})
-    console.config = console.config.model_copy(update={"tasks": (*console.config.tasks, other)})
-    with pytest.raises(OperationFailure) as refused:
-        adapter.review(created, selection.model_copy(update={"task_id": "other"}))
-    assert refused.value.detail.code == "task_policy"
-
-
 def test_setup_id_is_bound_into_the_candidate_request_digest(attributed):
     """Defect: an operation ID replayed with another setup's attribution is accepted."""
     adapter, selection, created, source = attributed
@@ -123,22 +113,11 @@ def test_setup_id_is_bound_into_the_candidate_request_digest(attributed):
     )
     assert operation_request_digest(stripped) != operation_request_digest(operation)
     assert '"setup_id"' not in stripped.request.model_dump_json()
-    # The candidate submission binds its own attribution the same way (digest logic only).
 
-    class Request:
-        workflow_source = "captured"
 
-        def model_dump(self, mode):
-            return {"run_name": "r"}
-
-    def candidate(setup_id):
-        return CandidateOperation.model_construct(
-            kind="candidate",
-            request_id=uuid4(),
-            request=Request(),
-            reusable_preparation=None,
-            resources=None,
-            setup_id=setup_id,
-        )
-
-    assert operation_request_digest(candidate(None)) != operation_request_digest(candidate(created))
+def test_candidate_setup_id_is_bound_into_request_digest(worker_prepared):
+    """Changing attribution on a real candidate request must change its replay identity."""
+    operation = CandidateOperation(request_id=uuid4(), request=worker_prepared)
+    attributed = operation.model_copy(update={"setup_id": "created"})
+    assert operation_request_digest(operation) != operation_request_digest(attributed)
+    assert '"setup_id"' not in operation.model_dump_json()

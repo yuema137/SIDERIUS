@@ -328,3 +328,24 @@ def test_registry_refusal_preserves_fixed_recovery_guidance(workspace, problem):
     assert expected in response.json()["error"]["message"]
     assert ".;" not in response.text
     assert "private-raw-registry-sentinel" not in response.text
+
+
+def test_app_revalidates_registry_projects_loaded_after_startup_check(workspace):
+    """A valid schema/task ID must not smuggle unchecked project paths into the app."""
+    from tools.candidate_console.app import create_app
+    from tools.candidate_console.config import validate_config
+
+    resolved = _load(workspace)
+    store = resolved.config.operation_store
+    config = resolved.config.model_copy(
+        update={
+            "operation_store": store.model_copy(
+                update={"candidate_roots": (*store.candidate_roots, str(workspace / "projects"))}
+            )
+        }
+    )
+    validate_config(config, workspace=workspace)  # no registered projects yet
+    assert _create(_client(resolved)).status_code == 201
+    # A separate console published the setup after this console's startup check.
+    with pytest.raises(ValueError, match="recovery must be separate"):
+        create_app(config, resolved.settings)

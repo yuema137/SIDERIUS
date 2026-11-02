@@ -149,8 +149,10 @@ A successful data command ends with `Data ready in .../data/NAME`.
    instead; a folder that is `/`, your home folder or one holding the console's
    settings, token or credentials is refused, so move such files into
    `tasks/<name>/`. A task ID that already exists is refused. If someone else changes
-   `console.json` while `add-task` runs, it writes nothing and asks you to run it
-   again.
+   `console.json` before `add-task` checks it, it writes nothing and asks you to
+   run it again. Concurrent `add-task` commands take turns checking and saving,
+   so one cannot overwrite the other’s update. Stop those commands before editing
+   `console.json` by hand; text editors do not use the same lock.
 
    After writing, `add-task` creates the task's output folders and runs the same
    check as step 3. It ends with `Restart the console to load the new task.`: a
@@ -481,7 +483,9 @@ workspace library, so the browser never types a server path.
    `console.json` sets `data_root` shows "Set in console.json" instead.
 5. Select **Save settings**. Success reads "Saved; active after server
    restart". Restart the `serve` command to use the new values; until then the
-   page lists what is saved but not yet active. **Values in effect** shows each
+   page lists what is saved but not yet active. If another console saves first,
+   your stale save is refused; reload the settings and apply your changes again.
+   **Values in effect** shows each
    value the running console uses, where it comes from and its server path.
 
 Saving and importing need `"global_settings": {"browser_writable": true}` in
@@ -648,6 +652,9 @@ example a research loop and a single step); every run belongs to one setup.
 2. Select **New setup…**. Choose how it starts: a template (the research loop with your
    own advice is preselected) or **Blank**. Enter a label and select **Create setup**.
    The console writes `siderius_workspace/projects/<setup id>/workflow.py` and opens it.
+   If another console has updated the setup list, creation is refused instead of
+   overwriting that update. Restart this console and try again. If a folder was
+   already created, the refusal names it; its files are kept for recovery.
    If the dialog says creating setups is turned off, the console operator adds
    `"experiment_setups": {"browser_creatable": true}` to
    `siderius_workspace/settings/console.json` and restarts the console.
@@ -971,8 +978,11 @@ with `max_rounds=2` the first may be Trial and the second is Formal. Increasing
 
 If a one-tuning-round edit is refused because your Trial settings would never apply,
 select **Train & tune**, open **Training settings**, and set **Tuning rounds per iteration**
-to at least 2. The field's help explains the policy and shows its minimum of 1;
-the review reminder names the same control.
+to at least 2, or remove the Trial overrides if you intend to run only Formal.
+The field's help explains the policy and shows its minimum of 1. When the server
+refuses Trial overrides that cannot run, the review reminder says to check
+**Tuning rounds per iteration** in **Training settings**. An unrelated invalid
+setting does not trigger this reminder.
 
 The framework's `formal_portion=0.1` uses 10% of the training scope. For example,
 1,077 CSV training rows × 0.1 gives about 108 rows: **3 steps/epoch** with batch

@@ -22,7 +22,7 @@ def validate_config(
 
     from .package_mounts import check_package_mounts
     from .settings_file import SettingsInvalid, protected_paths
-    from .setups import SetupRegistry, SetupStore, check_setup_project
+    from .setups import SetupStore
 
     config = ConsoleConfig.model_validate_json(config.model_dump_json())
     store = config.operation_store
@@ -32,7 +32,7 @@ def validate_config(
             raise ValueError("configured output roots must exist")
     # Every experiment setup (legacy editor_projects and registry entries) is read
     # through the one registry; an ID collision or unknown task fails here.
-    setup_projects = SetupRegistry(config, SetupStore.load(config, workspace)).projects()
+    SetupStore.load(config, workspace)
     for task in config.tasks:
         for root, allowed in (
             (task.preparation_root, store.preparation_roots),
@@ -92,8 +92,6 @@ def validate_config(
             workspace != root and workspace.is_relative_to(root) for root in candidate_roots
         ):
             raise ValueError("recorded example workspace must be inside a candidate root")
-    for project in setup_projects:
-        check_setup_project(project, config)
     token(config.auth_token_file)
     if config.credential_file is not None:
         # Validate private file facts and JSON/dotenv shape, without selecting/printing values.

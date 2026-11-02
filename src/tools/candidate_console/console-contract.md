@@ -185,7 +185,7 @@ Owner: `add_task.py`; CLI `python -m tools.candidate_console add-task --config
   must validate and `check_package_mounts` and `check_candidate_devices` (device
   admission above) must pass for the new task.
 - Write: the new entry is appended to `tasks[]` of the parsed document (other keys
-  keep their order), serialized with `json.dumps(indent=2)`. `publish_task` re-reads
+  keep their order), serialized with `json.dumps(indent=2)`. `publish_task` holds `files.private_file_lock(console.json)` across re-reading
   the file and refuses when its bytes differ from the bytes read
   (`console.json changed since add-task read it; nothing was written`), then
   publishes through `settings_service._publish_private` (temp file 0600, fsync,
@@ -771,7 +771,7 @@ JSON ≤256 KiB). Refusals are `{"error": {code, message}}` and never echo input
 | Route | Effect | Refusals |
 | --- | --- | --- |
 | `GET /api/settings` | `SettingsView`: `enabled`, `writable`, `settings_sha256` (file on disk), `pending`, `active` + `active_sha256` (startup snapshot), `restart_required = settings_sha256 != active_sha256`, `rows`, choice cards (allowlist IDs and library files whose bytes match their name), `data_roots` (ID/label), `tasks` (with the `data_root` origin), `workspace_root`, `WorkspaceReadiness`, `host` | — |
-| `PUT /api/settings` | `SettingsWrite{expected_sha256, settings}`; under one process lock: re-read the file no-follow and compare sha256 (absent matches only `null`), resolve console.json with the candidate settings, run `validate_resolved`, then publishes 0600 through the parent opened with `files.open_directory` (temp file `O_EXCL\|O_NOFOLLOW`, complete write via `files.write_all`, fsync, `os.replace` with `src_dir_fd`/`dst_dir_fd`, design §5.1; on any failure before the replace the temp file is removed and the previous file is untouched; a failed removal is added as a note to the original error and the 422 says a temporary file may remain). If the directory fsync after a successful replace fails, the save stands: 200 with the new `settings_sha256` and `SettingsView.notice` saying durability is not confirmed; returns the new view. A readable but invalid file keeps its digest, so a Save may replace it under the same CAS | 403 `read_only` (no policy, `browser_writable=false`, or no context); 409 `stale`; 422 `settings_unreadable` (not a private 0600 regular file; names the fix); 422 `settings_invalid` with the `SettingsInvalid` predicate, a generic validation message, or an unavailable/linked settings folder |
+| `PUT /api/settings` | `SettingsWrite{expected_sha256, settings}`; under its thread lock and `files.private_file_lock(global_settings.json)`: re-read the file no-follow and compare sha256 (absent matches only `null`), resolve console.json with the candidate settings, run `validate_resolved`, then publishes 0600 through the parent opened with `files.open_directory` (temp file `O_EXCL\|O_NOFOLLOW`, complete write via `files.write_all`, fsync, `os.replace` with `src_dir_fd`/`dst_dir_fd`, design §5.1; on any failure before the replace the temp file is removed and the previous file is untouched; a failed removal is added as a note to the original error and the 422 says a temporary file may remain). If the directory fsync after a successful replace fails, the save stands: 200 with the new `settings_sha256` and `SettingsView.notice` saying durability is not confirmed; returns the new view. A readable but invalid file keeps its digest, so a Save may replace it under the same CAS | 403 `read_only` (no policy, `browser_writable=false`, or no context); 409 `stale`; 422 `settings_unreadable` (not a private 0600 regular file; names the fix); 422 `settings_invalid` with the `SettingsInvalid` predicate, a generic validation message, or an unavailable/linked settings folder |
 | `POST /api/settings/library` | `LibraryUpload{kind: "llm"\|"advice", label (1..63), content}`; content bytes are validated first (`parse_llm_config_bytes` → 422 `invalid_file` "Not an LLM profile: …"; `parse_advice_bytes(label="upload")` → 422 with the owner's message), then published with `publish_bytes_write_once` (0600) to `library/<kind>/<slug>-<sha12>.json` after `canonical(dir)`; `slug` lowercases the label to `[a-z0-9-]`, ≤50; returns `LibraryRef` | 403 `read_only`; 422 `invalid_file` or empty slug; 409 `exists` when that name holds different bytes (identical bytes return the existing ref); 409 `unavailable` without a library directory |
 | `POST /api/settings/exports` | `ExportRequest{project_id, task_id, name (Id), expected_source_sha256}` (`settings_export.py`): reads the project's saved source with `WorkflowAuthoring.read` and requires its sha256 to equal the request; creates `exported_configs` (0700, ownership-checked via `workspace.ensure_owned_directory`) and `mkdir(name, 0700, dir_fd)` exclusively; writes `workflow.py` (source bytes), `llm.json` (`config_bytes(task.llm_config_file)`) and, only when non-empty, `advice.json`, each `O_CREAT\|O_EXCL\|O_NOFOLLOW` 0600 relative to that descriptor. `advice.json` maps `preparation_options.proposal_advice`/`implementation_advice`/`validation_advice` → `propose`/`implement`/`validate` and `training_settings.launch.human_advice_tune` → `tune`, omits empty values, and is validated with `parse_advice_bytes` before writing; returns `ExportResult{name, files}` | 403 `read_only` (same opt-in as PUT); 404 unknown project/task; 409 `stale`, `unavailable`, or `exists` with a free-name suggestion that is itself a valid ≤80-character name (an interrupted export's directory stays taken; nothing is deleted); 422 `invalid_workflow` (saved source does not parse, so advice cannot be read), `invalid_profile` (`parse_llm_config_bytes` refuses the task profile, as `--llm_config` would) or `invalid_advice`. Any other `OSError` while writing files is the generic 500; the partly written directory stays and its name stays taken |
 | `GET /api/settings/exports/{name}/{file}` | `file` ∈ `workflow.py`/`llm.json`/`advice.json`; opened `O_NOFOLLOW` beneath `files.open_directory(exported_configs/<name>)`, regular file ≤1 MiB; `application/octet-stream` attachment. The browser fetches it through `consoleSession.download` (bearer header) and saves a Blob | 404; 422 unknown file name |
@@ -797,9 +797,17 @@ from `GET /api/settings` rows, the origin of the resolved `llm_config_file` and
 
 `SettingsView.problem` names an unusable settings file on disk and its recovery
 (chmod 600, fix/restore, or Save over a readable invalid file); `pending` is then
-`null` and the view still returns 200. CAS limitation: the lock is per process.
-Two console processes serving one workspace can both pass the digest check before
-either replaces the file; the later replace wins. Serve one console per workspace.
+`null` and the view still returns 200. Cooperative file writers use
+`files.private_file_lock(path)`: exclusive `flock` on `.<filename>.lock` beside
+the target, held from the final re-read/comparison through atomic replacement.
+The lock is a stable owned regular inode, mode 0600, one link, opened through
+no-follow directory descriptors. It is never replaced or unlinked; descriptor
+close releases it, including on exceptions/process exit. The existing thread
+locks still protect in-memory state. This protocol covers global settings,
+experiment setups and add-task's console.json writes. A waiting stale writer
+re-reads after acquisition and refuses instead of overwriting the winner.
+Manual editors or external writers that do not take this lock are outside its
+exclusion guarantee; stop concurrent writers before editing those files.
 The folder listing reports `409 root_changed` when an allowlisted root is no longer
 canonical (it now contains a link or moved).
 
@@ -1406,7 +1414,11 @@ unknown task, or a `setup_id` equal to an `editor_projects` ID raises
 `SettingsInvalid`, so `check`/`serve` fail at startup (`validate_config(...,
 workspace=…)`). Every setup project (both sources) passes
 `check_setup_project`: `WorkflowAuthoring(project)` path checks and recovery
-separate from every run output root.
+separate from every run output root. `SetupStore.load` owns these checks on the
+exact snapshot it returns, including the re-read in `create_app`; `validate_config`
+delegates to that same loader. Changes between an earlier check and app creation
+cannot bypass registry project validation. This does not pin project source bytes
+against later edits; authoring/admission retain their existing validation owners.
 
 **Readers.** All seven former `editor_projects` readers go through the registry:
 `app.create_app` (one `SetupStore` given to `CandidateConsole`; `console.setups`
@@ -1440,7 +1452,7 @@ console.json only.
 | Route | Behaviour | Refusals |
 | --- | --- | --- |
 | `GET /api/tasks/{task_id}/setups` | `SetupList{setups: [SetupView{setup_id, label, runnable, saved_version, refs_match_task}], browser_creatable}` for setups whose task is `task_id`; `browser_creatable` is `SetupStore.creatable`, the predicate `POST` enforces; `saved_version` is the sha256 of the saved source (`null` if unreadable); `refs_match_task` compares the source's resolved refs with the task's | 404 `not_found` (unknown task) |
-| `POST /api/tasks/{task_id}/setups` | `SetupCreate{label, template_id: TemplateId \| null}` → 201 `SetupView`. Renders `templates.render_shape(template_id, ReusableTaskReferences(manifest=task_manifest, data_root=data_root), binding)` (`null`: `blank_document()`, a single Propose node fed by `proposal.input`, since a declaration needs one node). `binding` is the task's `task_revision` only after `observe_target` + `identity_matches` pass; no `task_revision` writes no binding. Under the store lock: CAS pre-check, `setup_id` = label slug (`-2`, `-3`… past registered IDs and existing folders), `projects/` via `ensure_owned_directory`, `mkdir` 0700, `.recovery` 0700, `workflow.py` write-once 0600, `check_setup_project`, then CAS re-check and `_publish_private` of the whole registry | 403 `read_only`; 404 `not_found`; 409 `identity_mismatch`/`inspection_failed` with a blocked `finding` (nothing created); 409 `stale` (file changed since load/last write; restart); 409 `unavailable`/`invalid_setup`/`exists`. After folders exist, a refusal names `projects/<id>/` left in place; nothing is deleted or overwritten |
+| `POST /api/tasks/{task_id}/setups` | `SetupCreate{label, template_id: TemplateId \| null}` → 201 `SetupView`. Renders `templates.render_shape(template_id, ReusableTaskReferences(manifest=task_manifest, data_root=data_root), binding)` (`null`: `blank_document()`, a single Propose node fed by `proposal.input`, since a declaration needs one node). `binding` is the task's `task_revision` only after `observe_target` + `identity_matches` pass; no `task_revision` writes no binding. Under the store lock: CAS pre-check, `setup_id` = label slug (`-2`, `-3`… past registered IDs and existing folders), `projects/` via `ensure_owned_directory`, `mkdir` 0700, `.recovery` 0700, `workflow.py` write-once 0600, `check_setup_project`, then `private_file_lock(experiment_setups.json)` across the CAS re-check and `_publish_private` of the whole registry | 403 `read_only`; 404 `not_found`; 409 `identity_mismatch`/`inspection_failed` with a blocked `finding` (nothing created); 409 `stale` (file changed since load/last write; restart); 409 `unavailable`/`invalid_setup`/`exists`. After folders exist, a refusal names `projects/<id>/` left in place; nothing is deleted or overwritten |
 
 **Run attribution.** The console records the selected setup on reusable runs:
 `ReusableCandidatePreparationRequest.setup_id` (set by `ReusablePreparation` to the
@@ -1450,7 +1462,14 @@ check). Both are optional, `^[a-zA-Z0-9_-]{1,80}$`, and omitted when `None`, so
 older records and their request digests are byte-identical. When present they are
 bound into the operation request digest (the prepare one through its request; the
 candidate one by `store.digest`), so a replay with another attribution is a
-conflict. Legacy `editor_projects` runs are attributed too.
+conflict. Legacy `editor_projects` runs are attributed too. Compatibility is
+forward-only for records containing `setup_id`: older builds that do not declare
+that field refuse it as an extra field. Attribution does not compare setup IDs:
+if setup B aliases setup A’s captured project root and source path, and the task
+policy matches, A’s capture may be launched under B. Preparation remains attributed
+to A and the candidate to B. Same task alone is insufficient: `check_capture_policy`
+refuses distinct project/source paths, so separate console-created setup folders
+cannot exchange captures. Captured bindings and run admission checks still apply.
 
 | `GET /api/operations?project_id=` | rows attributed to that setup | 422 for a malformed ID |
 |---|---|---|
@@ -1465,8 +1484,10 @@ Records without attribution have `project_id: null` and appear only unfiltered.
 list never claims completeness the scan did not have.
 
 CAS: `SetupStore` holds the sha256 of the bytes it last read or wrote; a write
-from another process (or a hand edit) refuses with `stale` and leaves the file
-unchanged. `add-task --from-bundle` is the one other caller of
+from another process, or a hand edit observed by the final locked re-read,
+refuses with `stale` and leaves the file unchanged. Cooperating writers cannot
+interleave the comparison and replace; nonparticipating editors are outside the
+lock guarantee described under global settings. `add-task --from-bundle` is the one other caller of
 `SetupStore.create` (see "Example bundles"). Templates for an opened project keep using `instantiate`, which now
 delegates to `render_shape`.
 
@@ -1805,10 +1826,14 @@ gets `.has-required-unbound` and a small `.circuit-problem-badge` count; the sof
 ring is on the unconnected socket itself.
 For a refused one-tuning-round review, `editorNodeParameters.reviewHint` appends
 the native `max_rounds` help description and names **Tuning rounds per iteration**
-in **Training settings**. It is a settings reminder, not a diagnosis or a browser
-admission rule: it applies only to explicit `max_rounds=1` with HTTP 422 request
-validation, or source diagnostics containing a `validation` code. Conflict,
-authentication and source syntax errors do not earn this reminder. Loop reviews
+in **Training settings**. It applies only when HTTP 422 carries the native
+`trial_override_schedule` error code, directly or in a source diagnostic. The
+native `validate_trial_override_schedule` validator owns this refusal identity;
+`workflows.definition.source.validation_code` allowlists it for both boundaries.
+All other validation types map to `validation`; messages remain fixed and no
+input/context or arbitrary error type is forwarded. The browser does not inspect
+`max_rounds` to infer the cause. Conflict, authentication, unrelated invalid
+settings and source syntax errors do not earn this reminder. Loop reviews
 retain their existing loop-specific guidance. Native error redaction is unchanged.
 `tests/browser/editor_max_rounds_help.mjs` exercises schema help/minimum projection,
 the refused one-round edit and successful correction to two with a preserved Trial
@@ -3357,9 +3382,12 @@ messages merely because the condition examines an exception.
 
 The guard checks aliased returns, message/detail/error/content keywords,
 JSONResponse/dict/json serialization and whole-carrier model_dump/model_dump_json
-calls. Four newly visible existing statements are individually reviewed in the
+calls. Five newly visible existing statements are individually reviewed in the
 exact baseline: SetupRefused finding serialization and response alias, the
-SourceDiagnostic response, and the code-filtered admission-not-attempted response.
+SourceDiagnostic response, the code-filtered admission-not-attempted response,
+and `example_bundle.copy_package`'s `AddTaskRefused` raise. The package-copy
+message comes from audited `WorkspaceRefused` guidance or `console_error_message`;
+its suffix adds fixed partial-copy guidance and the explicit target path.
 Their owners supply framework guidance; there are no whole-file exemptions.
 Existing #1328 repairs remove their own legacy entries independently.
 

@@ -303,7 +303,10 @@ and `force_formal_round=true` would discard them. This limit applies within each
 research-loop iteration, independently of the loop's iteration count.
 The native launch JSON schema exposes a minimum of 1 and explains the forced-Formal
 last tuning round. Its description is shared with the editor's one-round review
-reminder; the browser does not reproduce the native admission predicate. Raising
+reminder; the browser keys it on the native `trial_override_schedule` refusal
+code (direct HTTP or source diagnostic), not the authored `max_rounds` value.
+The projected minimum of 1 has a Python read/review regression witness in
+`tests/unit/tools/test_workflow_authoring.py`. Raising
 the control to at least 2 permits Trial tuning rounds before the final Formal tuning
 round, but does not force the planner to choose Trial.
 `TrainingInspector.policy` (`TrainingChoiceControl`, `policy_controls`) projects the two
