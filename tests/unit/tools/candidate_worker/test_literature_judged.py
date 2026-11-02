@@ -112,6 +112,75 @@ def test_a_tampered_debate_turn_fails_verification(prepared, native_runner, find
         verify_graph_trace(request, parent, receipt)
 
 
+def test_an_adaptor_record_swapped_after_its_digest_check_is_refused(
+    prepared, native_runner, findings, monkeypatch, tmp_path
+):
+    """#1476: ``_replay_context`` and ``verify_adaptors`` re-read the adaptor record
+    after the trace's ``record_sha256`` check without re-hashing it. A writer that
+    replaces the record and its judge evidence in that window with those of a second
+    judged decision (here a ranking that differs only below the top 2, so every
+    output and downstream record is unchanged) produced a self-consistent record
+    the recomputation agreed with, and verification accepted bytes no trace
+    attests. Both reads must re-hash the bytes they parse; without that
+    ``pytest.raises`` fails."""
+    import shutil
+
+    from core.canonical_json import canonical_json_bytes
+    from tools.candidate_worker import adaptor_phase, graph_evidence
+    from tools.candidate_worker.adaptor_llm import (
+        JudgeAdaptorContext,
+        judge_evidence_dir,
+        run_judge_routes,
+    )
+
+    from .test_graph_training import swap_after
+
+    seeded(findings)
+    judge_bridge(
+        monkeypatch, DebateBridge(order=["reviews:3", "reviews:1", "reviews:0", "reviews:2"])
+    )
+    request = literature_judged_request(
+        prepared,
+        combine=debate_rank(),
+        select={"kind": "top-k/v1", "k": 2},
+        distribute={"kind": "per-item/v1", "count": 2, "on_short": "fail"},
+        reviews=REVIEWS,
+    )
+    receipt, parent = run(request)
+    assert receipt.status == "accepted", receipt.error
+    verify_graph_trace(request, parent, receipt)
+    # The second decision: the same items judged again with the bottom two reversed.
+    judge_bridge(
+        monkeypatch, DebateBridge(order=["reviews:3", "reviews:1", "reviews:2", "reviews:0"])
+    )
+    trace = receipt.graph_trace
+    entries = {item.node_id: item for item in (*trace.nodes, *trace.adaptors)}
+    (adaptor,) = request.preview.document.definition.adaptors
+    elsewhere = tmp_path / "second_decision"
+    _, record = adaptor_phase.decide(
+        adaptor,
+        entries,
+        iteration=1,
+        judge=JudgeAdaptorContext(
+            workspace=elsewhere,
+            run_name=parent.run_name,
+            run_id=parent.run_id,
+            routes=run_judge_routes(request, parent),
+            declarations=None,
+        ),
+    )
+    path = Path(entries[adaptor.id].record_path)
+    forged = canonical_json_bytes(record)
+    assert forged != path.read_bytes()
+    evidence = judge_evidence_dir(Path(parent.workspace), adaptor.id, 1)
+    shutil.rmtree(evidence)
+    shutil.copytree(judge_evidence_dir(elsewhere, adaptor.id, 1), evidence)
+    swapped = swap_after(monkeypatch, graph_evidence, "record_digest", path, forged)
+    with pytest.raises(ValueError, match="graph native record mismatch"):
+        verify_graph_trace(request, parent, receipt)
+    assert swapped == [path]
+
+
 def test_merge_k1_feeds_one_stamped_merged_review(prepared, native_runner, findings, monkeypatch):
     """Defect: the merged value reaches the proposal without framework provenance, or the
     adaptor emits more than the one declared value."""

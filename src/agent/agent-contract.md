@@ -189,13 +189,23 @@ not a scientific architecture or a useful predictor.
 An output extent that is neither fixed nor shared with the input raises
 `UnsupportedStubShapeError`, identifying the unresolved output axis before
 plugin execution. Unbound bridge fixtures and legacy prose-only declarations
-retain the historical 256-token sequence stub. The projection emits float32;
-output contracts excluding float32 remain unsupported and fail the existing candidate output check. Real provider calls,
-prompt templates and task declarations are unchanged. Explicit-contract pseudo
-plugin bytes and their downstream artifact identities change. The conservative
-`rendering_assembly_digest` and planner strategy assembly identity also change
-because their source closures include `llm_bridge.py`, even though real-provider
-prompt templates are unchanged. Resume/preflight identity checks remain strict.
+retain the historical 256-token sequence stub.
+
+The projection is cast to the first floating dtype in the output contract's
+`admissible` order (`float16`, `bfloat16`, `float32` or `float64`) and
+materialized with `.contiguous()`, so in-place or `.view` loss steps see owned
+storage rather than an expanded alias. An output contract with no floating
+admissible dtype raises `UnsupportedStubShapeError` from `stub_model_code`,
+naming the declared dtypes, before candidate execution or the smoke/repair loop.
+The unbound legacy stub is unchanged.
+
+`stub_model.py` is outside the `rendering_assembly_digest` and planner strategy
+source closures: it produces pseudo plugin bytes, not prompts. Edits confined to
+it change explicit-contract pseudo plugin bytes and their downstream artifact
+identities, but not those assembly identities. Edits to `StubLLMBridge` in
+`llm_bridge.py` still change both closures. Real provider calls, prompt
+templates and task declarations are unaffected. Resume/preflight identity checks
+remain strict.
 
 `tests/unit/agent/llm_bridge/test_stub_task_shapes.py` covers negative float
 inputs, image classification, sequence classification, row classification and

@@ -955,3 +955,85 @@ def test_console_outcome_reads_failed_proposal_iteration(
     assert evidence is not None
     assert evidence.completed_iterations == 1
     assert evidence.failed_phases == ("proposal",)
+
+
+def test_loop_consumers_refuse_a_body_record_swapped_after_verification(
+    prepared, loop_tuner, interpretation_provider
+):
+    """#1477: after ``verify_graph_trace`` accepted a body, the loop consumers re-read
+    its native records with ``Path.read_bytes`` and never re-hashed them against the
+    trace's ``record_sha256``, so a record replaced in that window (a forged score,
+    proposal or narrative) fed chain history, the tried-body summary, judge facts
+    and the stop score. Every consumer read must re-hash the bytes it parses; a
+    reverted site parses the forgery and its ``pytest.raises`` fails."""
+    import json
+    from types import SimpleNamespace
+
+    from tools.candidate_worker.loop_evidence import (
+        advance_body,
+        initial_history,
+        summarize_tried_bodies,
+    )
+    from tools.candidate_worker.loop_judge import _body_projection
+    from tools.candidate_worker.loop_stop import project_body_score
+    from workflows.definition.fanout import execution_families
+
+    request = loop_request(prepared)
+    receipt = launch_candidate(request)
+    assert receipt.status == "completed", receipt.error
+    parent = initial(request).model_copy(update={"run_id": receipt.run_id})
+    bodies = verify_loop(request, parent, receipt)
+    body = bodies[0]
+    shape = execution_families(
+        request.preview.document.definition, request.preview.execution_profile
+    )
+    interpretation = shape.interpretation.interpretation
+    proposal = shape.interpretation.proposal
+    tuning = shape.tuning
+    score = project_body_score(request, body, 1)
+    # Only ``summary.metric_id``/``direction`` are read before the projected copy.
+    summary = SimpleNamespace(
+        metric_id="score", direction="higher", model_copy=lambda update: update
+    )
+    asked = SimpleNamespace(summary=summary, model_copy=lambda update: update)
+    consumers = {
+        "advance_body": lambda: advance_body(
+            request, parent, body, initial_history(request, parent)
+        ),
+        "summarize_tried_bodies": lambda: summarize_tried_bodies(
+            request, (body,), (score,), asked, resumed_at=0
+        ),
+        "_body_projection": lambda: _body_projection(request, parent, body, score, 1),
+        "project_body_score": lambda: project_body_score(request, body, 1),
+    }
+    forgeries = {
+        interpretation: ("take_home_message", "forged narrative"),
+        proposal: ("model_name", "forged_model"),
+        tuning: ("best_valid_formal_denoising_score", 1.0e9),
+    }
+    reads = (
+        ("advance_body", interpretation),
+        ("advance_body", proposal),
+        ("advance_body", tuning),
+        ("summarize_tried_bodies", proposal),
+        ("summarize_tried_bodies", tuning),
+        ("_body_projection", tuning),
+        ("_body_projection", interpretation),
+        ("project_body_score", tuning),
+    )
+    records = {item.node_id: Path(item.record_path) for item in body.graph_trace.nodes}
+    for consumer, node in reads:
+        path = records[node]
+        original = path.read_bytes()
+        field, value = forgeries[node]
+        raw = json.loads(original)
+        assert field in raw and raw[field] != value
+        path.write_bytes(json.dumps({**raw, field: value}, indent=2).encode())
+        try:
+            with pytest.raises(ValueError, match="graph native record mismatch"):
+                consumers[consumer]()
+        finally:
+            path.write_bytes(original)
+    # Restored records are the traced bytes again: every consumer reads them.
+    for call in consumers.values():
+        call()

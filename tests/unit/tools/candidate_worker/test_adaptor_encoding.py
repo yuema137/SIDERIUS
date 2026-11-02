@@ -126,10 +126,19 @@ def test_version_downgrade_is_refused_by_the_trusted_record_anchor(prepared, mon
     legacy_output = json.dumps({"score": number}, sort_keys=True, separators=(",", ":")).encode()
     raw = record.model_dump(mode="json", exclude={"encoding_version"})
     raw["outputs"][0]["sha256"] = hashlib.sha256(legacy_output).hexdigest()
-    path.write_bytes(json.dumps(raw, sort_keys=True, separators=(",", ":")).encode())
+    forged = json.dumps(raw, sort_keys=True, separators=(",", ":")).encode()
+    path.write_bytes(forged)
     output_path.write_bytes(legacy_output)
+    # Recomputation alone (over the forgery's own digest) accepts it ...
+    self_anchored = entry.model_copy(update={"record_sha256": hashlib.sha256(forged).hexdigest()})
     assert adaptor_phase.verify_adaptors(
-        request, parent, (), (entry,), workspace=workspace, iteration=1
+        request, parent, (), (self_anchored,), workspace=workspace, iteration=1
     )
+    # ... only the trace's unchanged anchor refuses it, at the digest check and at
+    # the record read inside readback (#1476).
     with pytest.raises(ValueError, match="graph adaptor record mismatch"):
         _check_adaptor_entry(entry, slot, states)
+    with pytest.raises(ValueError, match="graph native record mismatch"):
+        adaptor_phase.verify_adaptors(
+            request, parent, (), (entry,), workspace=workspace, iteration=1
+        )
