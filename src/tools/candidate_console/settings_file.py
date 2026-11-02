@@ -264,7 +264,7 @@ def advice_bytes(path: Path, *, label: str) -> bytes:
     try:
         parse_advice_bytes(payload, label=label)
     except AdviceArtifactError as error:
-        raise SettingsInvalid(advice_error_message(error)) from None
+        raise SettingsInvalid(f"{label}: {advice_error_message(error)}") from None
     return payload
 
 
