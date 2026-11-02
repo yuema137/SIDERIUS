@@ -315,6 +315,7 @@ def test_catalog_matches_exact_native_protocol_signatures():
         "interpretation.input": InterpretationInput,
         "interpretation.output": InterpretationOutput,
         "optional.text": str | None,
+        "optional.advice-text": str | None,
         "optional.expert-advice": ExpertAdviceInput | None,
         "optional.expert-context": list[ExpertContextItem] | None,
         "optional.parameter-rules": ParameterRules | None,
@@ -400,3 +401,26 @@ def test_many_instances_have_no_prototype_node_count_limit():
         len(WorkflowDefinition(task=graph.task, externals=graph.externals, nodes=nodes).nodes)
         == 1500
     )
+
+
+def test_validation_advice_requires_its_own_contract():
+    """Data-folder strings must not become advice through a shared primitive type."""
+    payload = definition().model_dump(mode="json")
+    payload["externals"].append(
+        {"id": "advice", "contract": "optional.advice-text", "location": "advice.json"}
+    )
+    payload["nodes"][2]["request"] = {
+        "kind": "protocol",
+        "protocol": "proposed-implementation-to-validation",
+        "arguments": [
+            {"name": "proposal", "source": {"kind": "result", "node": "propose"}},
+            {"name": "implementation", "source": {"kind": "result", "node": "implement"}},
+            {"name": "storage", "source": {"kind": "external", "binding": "storage"}},
+            {"name": "human_advice", "source": {"kind": "external", "binding": "advice"}},
+        ],
+    }
+    graph = WorkflowDefinition.model_validate_json(json.dumps(payload))
+    assert graph.externals[-1].location == "advice.json"
+    payload["externals"][-1]["contract"] = "optional.text"
+    with pytest.raises(ValidationError, match=r"human_advice: requires optional.advice-text"):
+        WorkflowDefinition.model_validate_json(json.dumps(payload))

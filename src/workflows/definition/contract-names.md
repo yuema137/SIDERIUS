@@ -50,6 +50,7 @@ only colour and shape per id.
 | `interpretation.input` | Run summaries | produced | Condensed summaries of one or more finished training runs. |
 | `interpretation.output` | Results analysis | produced | A reading of run results with per-model scores and the best and worst models. |
 | `optional.text` | Data folder | external | The path of the folder that holds the task's data, as you provide it. |
+| `optional.advice-text` | Advice text | setting | Free-text guidance written by a person for a code review. |
 | `optional.expert-advice` | Expert advice | setting | Advice written by a person for a module to consider. |
 | `optional.expert-context` | Expert notes | setting | Context items from people or analysis modules that inform a model design. |
 | `optional.parameter-rules` | Parameter rules | setting | Limits on which model and training parameters may change and how. |
@@ -73,15 +74,23 @@ only colour and shape per id.
 
 ## Semantic schema types
 
-`optional.text` (the `data_dir` argument) and `optional.model-id` (the
-`llm_model_id` argument) both carry native `str | None` but mean different
-things and stay separate, not interconnectable, contract ids.
-`SEMANTIC_SCHEMAS` keys each by its own semantic type
-(`semantic.DataFolderPath`, `semantic.LanguageModelName`), so they read
-"Data folder" and "Language model name". These labels are local to the
-definition catalog; native signatures, contract ids and wire formats are
-unchanged. A future primitive-typed contract with its own meaning gets its own
-semantic type here.
+`optional.text` (`data_dir`), `optional.model-id` (`llm_model_id`) and
+`optional.advice-text` (the validation join's `human_advice`) all carry native
+`str | None`. Their meanings differ, so their contract ids are not interchangeable.
+`SEMANTIC_SCHEMAS` assigns `semantic.DataFolderPath`, `semantic.LanguageModelName`
+and `semantic.AdviceText` respectively. Native Python signatures and JSON string
+payloads remain unchanged.
+
+### Compatibility for authored validation advice
+
+The `proposed-implementation-to-validation.human_advice` argument now requires
+`optional.advice-text`. Existing external bindings and custom-adaptor ports or
+outputs that supplied this argument using `optional.text` must explicitly migrate
+to the new id. Data-folder bindings retain `optional.text`; there is no alias or
+automatic conversion between paths and advice. Migrating a declaration or adaptor
+manifest changes its content-derived identity. Omitted advice needs no migration.
+This catalog change does not expand execution-profile admission or add managed
+advice bindings. Structured `optional.expert-advice` remains a separate type.
 
 ## Validation
 

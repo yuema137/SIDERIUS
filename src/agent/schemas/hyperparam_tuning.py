@@ -24,6 +24,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from pydantic_core import PydanticCustomError
 
 from agent.llm_settings import DEFAULT_LLM_PROVIDER, ProviderName, default_model_for_provider
 from agent.prompt_templates.timing_attribution import TIMING_SPLIT_SEMANTICS
@@ -1714,8 +1715,9 @@ def validate_trial_override_schedule(
         # only auto-bundling route), and that surface HAS NO
         # force-formal flag — so the universally-typeable remedies
         # lead, and the force-formal escape is marked chain-path-only.
-        raise ValueError(
-            f"plan_overrides carries trial-scoped key(s) {sorted(trial_scoped)} "
+        raise PydanticCustomError(
+            "trial_override_schedule",
+            "plan_overrides carries trial-scoped key(s) {trial_scoped} "
             "but max_rounds=1 with force_formal_round=True forces the run's "
             "only round to FORMAL, so the override would apply to zero "
             "rounds (formal workload comes from --formal_strategy / "
@@ -1726,7 +1728,8 @@ def validate_trial_override_schedule(
             "--max_rounds so trial rounds exist, or drop the trial-scoped "
             "request (--is_trial / the trial overrides); on the CHAIN "
             "launcher only, --no-force_formal_round makes the final round "
-            "honor the trial plan (the tuner node CLI has no such flag)."
+            "honor the trial plan (the tuner node CLI has no such flag).",
+            {"trial_scoped": str(sorted(trial_scoped))},
         )
 
 

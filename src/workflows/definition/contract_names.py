@@ -24,15 +24,20 @@ you provide. Sockets show direction with arrows, not names."""
 ADAPTOR_ARROW = " → "
 OPTIONAL_SUFFIX = " | None"
 
-# Semantic schema types for contracts whose native type is a bare primitive. Two
+# Semantic schema types for contracts whose native type is a bare primitive. Three
 # catalog ids carry ``str | None`` with different meanings and stay separate
 # (not interconnectable), so each is keyed by its own semantic type here. These
 # labels are local to the definition catalog: native signatures, contract ids and
 # wire formats are unchanged.
 DATA_FOLDER_PATH = "semantic.DataFolderPath"
+ADVICE_TEXT = "semantic.AdviceText"
 LANGUAGE_MODEL_NAME = "semantic.LanguageModelName"
 SEMANTIC_SCHEMAS = MappingProxyType(
-    {"optional.text": DATA_FOLDER_PATH, "optional.model-id": LANGUAGE_MODEL_NAME}
+    {
+        "optional.text": DATA_FOLDER_PATH,
+        "optional.model-id": LANGUAGE_MODEL_NAME,
+        "optional.advice-text": ADVICE_TEXT,
+    }
 )
 
 
@@ -134,6 +139,11 @@ SCHEMA_NAMES = MappingProxyType(
             "Data folder",
             "The path of the folder that holds the task's data, as you provide it.",
             "external",
+        ),
+        ADVICE_TEXT: SchemaName(
+            "Advice text",
+            "Free-text guidance written by a person for a code review.",
+            "setting",
         ),
         LANGUAGE_MODEL_NAME: SchemaName(
             "Language model name",

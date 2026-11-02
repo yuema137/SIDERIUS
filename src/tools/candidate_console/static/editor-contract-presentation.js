@@ -27,6 +27,7 @@
     'native-training.settings': {colour: 'tuning', shape: 'capsule'},
     'storage': {colour: 'neutral', shape: 'capsule'},
     'llm-provider': {colour: 'magenta', shape: 'capsule'},
+    'optional.advice-text': {colour: 'validation', shape: 'diamond'},
     'optional.text': {colour: 'neutral', shape: 'diamond'},
     'optional.model-id': {colour: 'magenta', shape: 'diamond'},
     'optional.expert-advice': {colour: 'tuning', shape: 'diamond'},
