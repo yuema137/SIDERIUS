@@ -13,6 +13,8 @@ GraphCapability = Literal[
     "proposal", "implementation", "validation", "literature", "interpretation", "tuning", "adaptor"
 ]
 GraphState = Literal["pending", "running", "succeeded", "rejected", "failed", "blocked", "skipped"]
+DISPATCHED_STATES: frozenset[GraphState] = frozenset(("succeeded", "rejected", "failed"))
+
 GraphReason = Literal[
     "dependency_not_successful",
     "native_failure",
