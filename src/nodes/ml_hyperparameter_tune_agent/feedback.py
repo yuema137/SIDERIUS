@@ -25,7 +25,11 @@ from agent.schemas.health_feedback import (
 from agent.schemas.hyperparam_tuning import (
     GateExhaustionInfo,
 )
-from agent.schemas.planner_timing import RoleTimingContext
+from agent.schemas.planner_timing import (
+    PortionField,
+    RoleTimingContext,
+    ValidationPortionClamp,
+)
 from agent.skills.evaluate_vram_skill.evidence import preflight_memory_fields
 from agent.utils.architectural_pattern_tagger import (
     TIME_FACTOR_THRESHOLD,
@@ -762,6 +766,29 @@ def executed_round_workload(prepared) -> RoleTimingContext | None:
     return next((role for role in timing.roles if role.mode == mode), None)
 
 
+def executed_validation_clamps(prepared) -> tuple[ValidationPortionClamp, ...]:
+    """The portions planning's ``validation_max_portion`` ceiling reduced (issue #1496).
+
+    Reads planning's own before/after pair rather than repeating the ceiling
+    arithmetic: ``_planned_portions`` holds each portion from its selected
+    source, and ``cfg_*_portion`` holds what ``TrialConfig`` executes. Between
+    the two, only the validation ceiling (``min``) can lower a portion, so a
+    lower executed value is exactly a clamp. Without a ceiling the pair is
+    equal and nothing is returned.
+    """
+    planned = prepared._planned_portions
+    executed: dict[PortionField, float] = {
+        "trial_portion": prepared.cfg_trial_portion,
+        "train_portion": prepared.cfg_train_portion,
+        "eval_portion": prepared.cfg_eval_portion,
+    }
+    return tuple(
+        ValidationPortionClamp(field=field, source_value=planned[field], executed_value=value)
+        for field, value in executed.items()
+        if value < planned[field]
+    )
+
+
 def invoke_reflection(
     brain,
     *,
@@ -816,4 +843,7 @@ def invoke_reflection(
         # Issue #1472 — the executed round's workload sources, so the Data
         # Volume Context names the knob that set this round's portions.
         round_workload=executed_round_workload(prepared),
+        # Issue #1496 — portions validation_max_portion capped below their
+        # source, so the reflector does not blame the source knob.
+        validation_clamps=executed_validation_clamps(prepared),
     )
