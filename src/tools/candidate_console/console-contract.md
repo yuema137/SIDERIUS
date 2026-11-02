@@ -1793,10 +1793,14 @@ gets `.has-required-unbound` and a small `.circuit-problem-badge` count; the sof
 ring is on the unconnected socket itself.
 For a refused one-tuning-round review, `editorNodeParameters.reviewHint` appends
 the native `max_rounds` help description and names **Tuning rounds per iteration**
-in **Training settings**. It is a settings reminder, not a diagnosis or a browser
-admission rule: it applies only to explicit `max_rounds=1` with HTTP 422 request
-validation, or source diagnostics containing a `validation` code. Conflict,
-authentication and source syntax errors do not earn this reminder. Loop reviews
+in **Training settings**. It applies only when HTTP 422 carries the native
+`trial_override_schedule` error code, directly or in a source diagnostic. The
+native `validate_trial_override_schedule` validator owns this refusal identity;
+`workflows.definition.source.validation_code` allowlists it for both boundaries.
+All other validation types map to `validation`; messages remain fixed and no
+input/context or arbitrary error type is forwarded. The browser does not inspect
+`max_rounds` to infer the cause. Conflict, authentication, unrelated invalid
+settings and source syntax errors do not earn this reminder. Loop reviews
 retain their existing loop-specific guidance. Native error redaction is unchanged.
 `tests/browser/editor_max_rounds_help.mjs` exercises schema help/minimum projection,
 the refused one-round edit and successful correction to two with a preserved Trial
@@ -3352,9 +3356,12 @@ messages merely because the condition examines an exception.
 
 The guard checks aliased returns, message/detail/error/content keywords,
 JSONResponse/dict/json serialization and whole-carrier model_dump/model_dump_json
-calls. Four newly visible existing statements are individually reviewed in the
+calls. Five newly visible existing statements are individually reviewed in the
 exact baseline: SetupRefused finding serialization and response alias, the
-SourceDiagnostic response, and the code-filtered admission-not-attempted response.
+SourceDiagnostic response, the code-filtered admission-not-attempted response,
+and `example_bundle.copy_package`'s `AddTaskRefused` raise. The package-copy
+message comes from audited `WorkspaceRefused` guidance or `console_error_message`;
+its suffix adds fixed partial-copy guidance and the explicit target path.
 Their owners supply framework guidance; there are no whole-file exemptions.
 Existing #1328 repairs remove their own legacy entries independently.
 

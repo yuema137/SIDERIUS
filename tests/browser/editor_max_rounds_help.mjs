@@ -42,7 +42,9 @@ try {
   const reviewResponse = () => page.waitForResponse(response => response.url().endsWith('/reusable/review') && response.request().method() === 'POST');
   const refusal = reviewResponse();
   await page.locator('#editor-review').click();
-  assert.equal((await refusal).status(), 422);
+  const refused = await refusal;
+  assert.equal(refused.status(), 422);
+  assert.equal((await refused.json()).error.code, 'trial_override_schedule');
   await page.locator('#editor-status').filter({hasText: 'invalid request fields'}).waitFor();
   const status = await page.locator('#editor-status').textContent();
   assert.match(status, /Training settings.*Use at least 2 to allow Trial before Formal/);
@@ -65,10 +67,18 @@ try {
     return [
       window.editorNodeParameters.reviewHint(training, {max_rounds: 1}, {status: 409, code: 'conflict'}),
       window.editorNodeParameters.reviewHint(training, {max_rounds: 1}, {status: 422, code: 'source', value: {diagnostics: [{code: 'syntax'}]}}),
-      window.editorNodeParameters.reviewHint(training, {max_rounds: 2}, {status: 422, code: 'validation'}),
+      window.editorNodeParameters.reviewHint(training, {max_rounds: 1}, {status: 422, code: 'validation'}),
     ];
   });
   assert.deepEqual(hints, ['', '', '']);
+  const typedHints = await page.evaluate(() => {
+    const training = {controls: [{name: 'max_rounds', label: 'Tuning rounds per iteration', help: {description: 'native help'}}]};
+    return [
+      window.editorNodeParameters.reviewHint(training, {}, {status: 422, code: 'trial_override_schedule'}),
+      window.editorNodeParameters.reviewHint(training, {}, {status: 422, code: 'source', value: {diagnostics: [{code: 'trial_override_schedule'}]}}),
+    ];
+  });
+  for (const hint of typedHints) assert.match(hint, /Check Tuning rounds per iteration/);
   assert.deepEqual(faults, []);
   console.log('PASS: schema help and minimum; refused one-round remedy; two-round correction; no saves or launches');
 } finally {
