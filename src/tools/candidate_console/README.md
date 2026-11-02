@@ -551,8 +551,10 @@ size**, **Fit to view**) change only the view. If the whole graph cannot fit at 
 **Fit to view** brings the selected module into view, or the first module if none is
 selected. The note below the canvas explains the limit; scroll inside the canvas
 to reach the remaining modules. Optional inputs that no wire feeds are
-folded into a "+N optional" row on each card; expand it to connect one. If saved cards overlap, the canvas says so;
-**Tidy up** arranges them (one edit you can undo).
+folded into a "+N optional" row on each card; expand it to connect one. Cards without
+saved positions adjust their spacing when you expand details or return to the
+Workflow tab. This changes only the view. Saved positions stay where you put them;
+if those cards overlap, **Tidy up** arranges them (one edit you can undo).
 
 **Check the workflow** (bottom right) sends a small dot along every connection in the
 order the modules run, then along the research loop's dashed feedback wire (when there is a loop). If
