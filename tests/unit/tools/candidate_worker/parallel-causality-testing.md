@@ -6,12 +6,18 @@ The README in the parent directory owns invocation commands and opt-in usage.
 
 ## Dispatcher classes and bounded default lane
 
-The full matrix retains the original 180 executions of `launch_candidate`
-through `parallel_dispatch`: 12 configured failure sets × 5 holds (0, 1, 3, 8,
-13 polls) × 3 unit limits (1, 2, 4). The fake starter runs the real unit child
-with offline native fixtures; it delays reporting completion, not the scientific
-work itself. No dispatcher or verifier is replaced. Product order is failure
-set, hold, then unit limit; `trace-N` is the original zero-based product index.
+The full matrix executes 288 `launch_candidate` calls through `parallel_dispatch`:
+12 configured failure sets × 8 four-node hold profiles × 3 unit limits (1, 2, 4).
+Hold vectors are ordered `build0, build1, check0, check1`, measured in polls:
+`(0,0,0,0)`, `(1,0,1,0)`, `(3,0,3,0)`, `(8,0,8,0)`, `(13,0,13,0)`,
+`(0,3,1,1)`, `(8,8,1,2)`, `(3,0,0,2)`. The last three profiles let the
+second build outlive the first and let either check overlap a sibling build.
+They vary all four holds without requiring a Cartesian product of every poll
+count. The fake starter runs the real unit child with offline native fixtures;
+it delays reporting completion, not the scientific work itself. No dispatcher
+or verifier is replaced. Indices 0–179 preserve the original five-profile
+product; 180–287 cross all failure sets with the last three profiles. Within
+each block the product order is failure set, hold vector, then unit limit.
 
 Classification is by each node's outcome relative to the first failed receipt's
 end event, in order `propose, build0, build1, check0, check1`:
@@ -22,7 +28,10 @@ end event, in order `propose, build0, build1, check0, check1`:
 - `f`: already running at the first failure, then failed during drain.
 - `-`: never dispatched.
 
-All 180 previously captured dispatcher traces reduce to these 17 signatures.
+All 288 full-matrix dispatcher traces reduce to the following 23 signatures.
+The original coupled-hold block (indices 0–179) produces only 17; the
+independent profiles add six classes where a check overlaps a sibling build
+(`SSDF-`, `SSFD-`, `SFS-D`, `SSfF-`, `SSFf-`, `SFS-f`).
 The default lane retains one witness for each signature and asserts that the
 actual receipt timing still produces that signature. It also keeps concurrent
 success (`trace-8`) beside single-slot success (`trace-0`), asserting actual
@@ -48,6 +57,12 @@ unit overlap. Unit limits 1, 2, and 4 remain represented.
 | 94 | SSSFf | First check fails; second check also fails during drain |
 | 112 | SfS-F | Second check fails; earlier-declared build fails during drain |
 | 135 | F---- | Proposal fails before either branch starts |
+| 196 | SFS-D | First build fails while second check drains successfully |
+| 202 | SSFD- | Second build fails while first check drains successfully |
+| 217 | SSDF- | First check fails while second build drains successfully |
+| 250 | SFS-f | First build fails; second check also fails during drain |
+| 253 | SSfF- | First check fails; second build also fails during drain |
+| 256 | SSFf- | Second build fails; first check also fails during drain |
 
 The equivalence preserves the first-failure owner, dispatch/non-dispatch set,
 final outcomes, and whether each dispatched entry completed before the cut or
@@ -60,8 +75,8 @@ in every representative. This is an equivalence for this fixture's failure/drain
 coverage, not a claim to enumerate all DAG schedules or graph shapes. The direct,
 route-control, fan-in, and skipped-arm regressions separately cover those edges.
 
-`SIDERIUS_FULL_PARALLEL_CAUSALITY=1` restores every original combination at
-collection time. Other values select the 18 representatives. Full opt-in runs
+`SIDERIUS_FULL_PARALLEL_CAUSALITY=1` selects all 288 combinations at
+collection time. Other values select the 24 representatives. Full opt-in runs
 retain the signature assertions for those representatives and receipt verification
 for every combination. Adding a new graph shape or failure mode requires revisiting
 this classification; silently dropping a signature assertion is not a runtime fix.

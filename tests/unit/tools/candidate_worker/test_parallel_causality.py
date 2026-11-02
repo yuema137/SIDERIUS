@@ -94,7 +94,11 @@ _FAILURES = (
     ("build0", "build1", "check0", "check1"),
     ("build1", "check1"),
 )
-# Original product index -> expected per-node outcome at the first failure.
+# Hold vectors are build0, build1, check0, check1. Preserve the original
+# matrix first, then cross independent branch/check timings with every failure set.
+_HOLDS = tuple((hold, 0, hold, 0) for hold in (0, 1, 3, 8, 13))
+_CROSS_BRANCH_HOLDS = ((0, 3, 1, 1), (8, 8, 1, 2), (3, 0, 0, 2))
+# Product index -> expected per-node outcome at the first failure.
 _REPRESENTATIVES = {
     0: "SSSSS",
     8: "SSSSS",
@@ -114,16 +118,24 @@ _REPRESENTATIVES = {
     94: "SSSFf",
     112: "SfS-F",
     135: "F----",
+    196: "SFS-D",
+    202: "SSFD-",
+    217: "SSDF-",
+    250: "SFS-f",
+    253: "SSfF-",
+    256: "SSFf-",
 }
 
 
 def _enumeration_cases():
     full = os.environ.get("SIDERIUS_FULL_PARALLEL_CAUSALITY") == "1"
+    combinations = (
+        *product(_FAILURES, _HOLDS, (1, 2, 4)),
+        *product(_FAILURES, _CROSS_BRANCH_HOLDS, (1, 2, 4)),
+    )
     return [
         pytest.param(failing, hold, units, _REPRESENTATIVES.get(index), id=f"trace-{index}")
-        for index, (failing, hold, units) in enumerate(
-            product(_FAILURES, (0, 1, 3, 8, 13), (1, 2, 4))
-        )
+        for index, (failing, hold, units) in enumerate(combinations)
         if full or index in _REPRESENTATIVES
     ]
 
@@ -156,11 +168,11 @@ def _receipt_order(record: UnitReceipt | None, first: int | None) -> str:
 def test_real_dispatcher_causality_enumeration(
     prepared, native_runner, monkeypatch, units, hold, failing, expected
 ):
-    """Real dispatcher representatives; opt in to all 180 timing/capacity combinations."""
+    """Real dispatcher representatives; opt in to all 288 timing/capacity combinations."""
     starter = _Starter(
         3,
         failing=frozenset(failing),
-        hold={"build0": hold, "build1": 0, "check0": hold, "check1": 0},
+        hold=dict(zip(("build0", "build1", "check0", "check1"), hold, strict=True)),
     )
     monkeypatch.setattr(parallel_dispatch, "start_unit", starter)
     monkeypatch.setattr(parallel_dispatch, "POLL_SECONDS", 0)
