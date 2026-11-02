@@ -1501,6 +1501,13 @@ def _run_bound_iteration(
             f"do not reflect real LLM / training behaviour.",
             file=sys.stderr,
         )
+    if args.is_pseudo_training:
+        print(
+            f"[PSEUDO-MODE] evaluation ceiling validation_max_samples="
+            f"{args.validation_max_samples}; the task's build_eval_scope bounds "
+            f"synthetic deliverables to it (override with --validation_max_samples).",
+            file=sys.stderr,
+        )
 
     # Iteration directory: {workspace}/iter_{N:03d}. S2 / U5 (#258): the
     # manifest slot is decided HERE — a second launch into an iteration that

@@ -426,3 +426,16 @@ No host ceiling is required: the stub starts no subprocess. Optional
 values print the standard `LAUNCH REFUSED` line and exit 2. This decision is
 independent of GPU visibility. `--is_pseudo_llm` alone keeps real execution and
 its admission. The preflight adapter rechecks the same owner for direct callers.
+
+`standard_cli.normalize_args` resolves the pseudo evaluation ceiling through
+`core.pseudo_admission.resolve_pseudo_validation_max_samples`: with
+`--is_pseudo_training` and no `--validation_max_samples`, the launch records
+`PSEUDO_VALIDATION_MAX_SAMPLES` (256 rows) as `validation_max_samples`. An
+explicit value always wins; launches without `--is_pseudo_training` keep the
+parsed value (normally `None`), so real execution is unchanged. The value flows
+through the ordinary launch config, run-invariants lock, setup inspection and
+`ScopeBuildRequest.max_samples`; the task's `build_eval_scope` applies it, so
+selection stays task-owned, deterministic and order-preserving. Health coverage
+is then checked against the bounded scope; a task whose bound cannot cover its
+Health demand is refused by `TaskHealthCoverageError` during attempt planning.
+`run_one_iteration` prints the resolved ceiling in the `[PSEUDO-MODE]` banner.

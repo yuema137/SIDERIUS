@@ -2201,6 +2201,7 @@ class StubSandbox(TidmadSandbox):
             run_name=run_name,
             model_type=model_type,
             task_scopes=task_scopes,
+            max_samples=(runtime_policy or {}).get("validation_max_samples"),
         )
         return {
             "status": "success",
