@@ -1468,7 +1468,22 @@ The planner and reflector prompts render, from landed authorities:
   trends, best validation epoch, drift after it, and the train–validation gap
   when the two were comparable. **No calibrated label** — no "overfitting",
   "converged" or "plateau" — because 07a deliberately derived none, and a
-  renderer that supplied one would silently pick a threshold nobody declared.
+  renderer that supplied one would silently pick a threshold nobody declared;
+* **data-volume owner (issue #1472)** — the reflector's Data Volume Context
+  states `round_mode` and labels the executed training/evaluation portions
+  (reflection-context keys `trial_portion` / `eval_portion`, unchanged) with the
+  knob that set them. `feedback.py::executed_round_workload` selects, from the
+  retained `prepared.timing_context`, the `RoleTimingContext` whose `mode`
+  equals `trial_config.mode`; its `WorkloadSource` bindings come from
+  `policy.py::_sample_set_sources`, the same selection execution uses, and
+  `agent/prompt_templates/tuner/rendering.py::render_reflector_data_volume_portions`
+  renders them. A Formal round with `formal_training_scope_source='operator'`
+  shows `formal_portion` / `formal_eval_portion` as operator-set and advises
+  against recommending `trial_portion`, which cannot change Formal training; with
+  `'agent'` the training portion is `plan.trial_portion` and the advice names that
+  source; Trial and single_file rounds keep "Recommend increasing trial_portion".
+  With no matching role (`round_workload=None`) the block names both owners
+  instead of choosing one.
 
 What they do NOT see: the raw `training_history`, `training_diagnosis`, `static_observations`,
 `metric_result` and `metric_refusal` record keys — and, since Step 10 / P2b,
@@ -1491,7 +1506,8 @@ history JSON. The reflector receives the `TrainingDiagnosis` only — never the
 brain.plan(...,  task_render=<TunerTaskRender>,   # built once at run scope
                  metric_spec=run_metric.spec)
 brain.reflect(..., metric_spec=run_metric.spec,
-                   training_diagnosis=<the attempt's 07a diagnosis>)
+                   training_diagnosis=<the attempt's 07a diagnosis>,
+                   round_workload=<executed RoleTimingContext | None>)  # #1472
 ```
 
 All four are REQUIRED at a real render; the bridge raises `ValueError` rather

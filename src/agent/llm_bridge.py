@@ -83,7 +83,7 @@ from agent.prompts import (
 )
 from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.llm_retry import RetryPolicy
-from agent.schemas.planner_timing import PlannerTimingContext
+from agent.schemas.planner_timing import PlannerTimingContext, RoleTimingContext
 from agent.schemas.telemetry import (
     LLMBridgeContextError,
     TokenCounts,
@@ -1310,6 +1310,7 @@ class LLMBridge:
         task_render: TunerTaskRender | None = None,
         execution_provenance: Any = None,
         constraint_context: ConstraintContext | None = None,
+        round_workload: RoleTimingContext | None = None,
     ) -> dict:
         """
         Uses the Reflector logic to transform results into new Memory entries.
@@ -1381,6 +1382,7 @@ class LLMBridge:
             training_diagnosis=training_diagnosis,
             metric_spec=metric_spec,
             execution_provenance=execution_provenance,
+            round_workload=round_workload,
         )
 
         # Internal call site: label is fixed (§1.5). Provider is the

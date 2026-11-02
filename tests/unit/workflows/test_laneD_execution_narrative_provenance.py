@@ -391,6 +391,7 @@ class TestProductionActuallyRoutesThroughTheBoundary:
         class _Prepared:
             hypothesis = STALE_PROSE
             execution_provenance = provenance
+            timing_context = None
 
         class _Brain:
             def reflect(self, exp_id, hypothesis, results, context, **kwargs):

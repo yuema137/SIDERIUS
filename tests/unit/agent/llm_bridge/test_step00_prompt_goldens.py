@@ -327,7 +327,29 @@ class TestPB2Reflector:
             "(decreasing; best ep 0) · gap +0.0032 (comparable)"
         )
         assert expected.count(historical) == 1
-        assert without_incomplete_disclosure(user) == expected.replace(historical, lossless)
+        # #1472 — without retained round workload sources the Data Volume
+        # Context names no single owner; it states both instead of advising
+        # trial_portion for a round that may be Formal.
+        historical_volume = (
+            "  trial_portion         : 0.05\n"
+            "  eval_portion          : 0.1\n"
+            "  ⚠ If training_psd_segments << baseline_psd_segments, poor scores may be from\n"
+            "     insufficient data, NOT bad hyperparameters. Recommend increasing trial_portion.\n"
+        )
+        unattributed_volume = (
+            "  round_mode            : N/A\n"
+            "  trial_portion         : 0.05  (executed training portion)\n"
+            "  eval_portion          : 0.1  (executed evaluation portion)\n"
+            "  ⚠ If training_psd_segments << baseline_psd_segments, poor scores may be from\n"
+            "     insufficient data, NOT bad hyperparameters. The training portion is set by\n"
+            "     plan.trial_portion on Trial rounds and by the operator's formal_portion /\n"
+            "     formal_train_portion on Formal rounds (the plan's portions only when\n"
+            "     formal_training_scope_source='agent'); recommend the knob for this round's mode.\n"
+        )
+        assert expected.count(historical_volume) == 1
+        assert without_incomplete_disclosure(user) == expected.replace(
+            historical, lossless
+        ).replace(historical_volume, unattributed_volume)
 
 
 # ---------------------------------------------------------------------------
