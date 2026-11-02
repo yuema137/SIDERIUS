@@ -3,7 +3,7 @@
 A SIDERIUS run trains many candidate models and keeps the best one. Out of the
 box, "best" means one thing: the highest (or lowest) value of the task's main
 metric. Often a scientist means more than that. You may want the agents to
-know that the score is a recall in a fraction of rows, to trade accuracy
+know that the score is the mean per-class recall, a number from 0 to 1, to trade accuracy
 against a second error measure, or to require a minimum accuracy.
 
 The optional `evaluation:` section of your task manifest (`task.yaml`) says
@@ -25,7 +25,7 @@ available, so nothing is silently ignored.
 | You declare | Checked and shown to agents | A run can launch with it |
 | --- | --- | --- |
 | Meanings, units and ranges, with `selection: {kind: primary}` (step 2) | yes | yes |
-| A weighted combination, `selection: {kind: formula}` (step 3) | yes | once [#1377](https://github.com/Galileo-Sandbox/SIDERIUS/pull/1377) lands (issue #1294) |
+| A weighted combination, `selection: {kind: formula}` (step 3) | yes | once [#1377](https://github.com/Galileo-Sandbox/SIDERIUS/pull/1377) lands (issue #1294); if the step 6 check prints `Launch check: admitted` for a formula, your checkout already has it |
 | A natural-language balancing rule, `selection: {kind: rubric_balance}` (step 4) | yes | not yet: issue #1297 |
 | Rubric components, `kind: rubric` (step 4) | yes | not yet: issue #1297 |
 | Requirements, `constraints:` (step 5) | yes | not yet: issue #1295 |
@@ -78,7 +78,9 @@ agent's prompt.
 Add the section with one *component* per quantity. A component points at a
 declared metric and adds its scientific meaning. This example assumes that
 the task also declares a secondary metric `worst_class_error` (the error rate
-on the hardest class, lower is better):
+on the hardest class, lower is better). Without a secondary metric, keep
+only the first component; that is the commented example in the template's
+`task.yaml`.
 
 ```yaml
 evaluation:
@@ -87,13 +89,13 @@ evaluation:
       id: balanced_accuracy             # your name for this component
       metric: balanced_accuracy         # a declared metric id
       meaning: Mean per-class recall on validation.csv; each species counts equally.
-      units: fraction of rows
+      units: fraction (0 to 1), mean over classes
       range: {lower: 0.0, upper: 1.0}   # descriptive only
     - kind: metric
       id: worst_class_error
       metric: worst_class_error         # declared under secondary_metrics:
       meaning: Error rate on the hardest species.
-      units: fraction of rows
+      units: fraction (0 to 1) of the hardest class's rows
       range: {lower: 0.0, upper: 1.0}
   selection:
     kind: primary                       # still rank by the main metric
@@ -127,12 +129,12 @@ These are task-declared evaluation rules, not observed results.
 Components:
 - balanced_accuracy (metric: balanced_accuracy)
   Meaning: Mean per-class recall on validation.csv; each species counts equally.
-  Units: fraction of rows
+  Units: fraction (0 to 1), mean over classes
   Preference: maximize (higher is better)
   Descriptive range: [0, 1] (descriptive only)
 - worst_class_error (metric: worst_class_error)
   Meaning: Error rate on the hardest species.
-  Units: fraction of rows
+  Units: fraction (0 to 1) of the hardest class's rows
   Preference: minimize (lower is better)
   Descriptive range: [0, 1] (descriptive only)
 Selection:
@@ -254,7 +256,9 @@ your own `task.yaml` until it is.
 ### Once #1377 lands
 
 The formula is checked and shown to agents today, but the launch check
-refuses to run it until pull request #1377 merges. With #1377:
+refuses to run it until pull request #1377 merges. Run the step 6 check:
+`Launch check: admitted` for a formula means your checkout already has it.
+With #1377:
 
 - the run ranks candidates by a new score named
   `evaluation.weighted_sum.v1.<identity>`; the step 6 check prints it as
@@ -263,18 +267,22 @@ refuses to run it until pull request #1377 merges. With #1377:
   score;
 - any score threshold you set must name that new id, because 0.8 utility is
   not 0.8 balanced accuracy. For example `--target_score 0.8` also needs
-  `--target_score_metric <effective_metric_id>`, and loop stop conditions or
-  routing thresholds must use the same id. A threshold written for the main
-  metric is refused rather than compared with the utility;
-- formulas run only through the task's own scoring step; tasks scored
-  with anchor normalization or through an external candidate-evaluation
-  executor are refused.
+  `--target_score_metric <effective_metric_id>`, and research-loop stop
+  conditions that compare a score must use the same id. A threshold written
+  for the main metric is refused rather than compared with the utility;
+- tuner settings measured in score units (enabled formal skip/bypass gates
+  and the degeneration penalty) need `--score_units_metric
+  <effective_metric_id>` for the same reason;
+- formulas work only when your task's own metric code scores the candidates
+  (the CSV template does). Other scoring routes are refused at launch
+  (anchor-normalized scoring and an external `CandidateEvaluationExecutor`;
+  see the [evaluation contract](../../../src/execute_tools/evaluation-contract.md)).
 
 ## Step 4: a balancing rule in words
 
 Some trade-offs are judgments, not formulas: "when two models are within
 0.01 balanced accuracy, prefer the simpler one". `rubric_balance` records
-such a rule for SIDERIUS's LLM judges. It needs a rubric file declared in
+such a rule for SIDERIUS's [LLM judges](../workflow-declarations.md#7-literature-reviews-and-llm-aggregation). It needs a rubric file declared in
 the manifest's `rubrics:` section, for example
 `declared/rubrics/deployability_v1.yaml`:
 
@@ -302,7 +310,7 @@ evaluation:
       id: balanced_accuracy
       metric: balanced_accuracy
       meaning: Mean per-class recall on validation.csv; each species counts equally.
-      units: fraction of rows
+      units: fraction (0 to 1), mean over classes
   selection:
     kind: rubric_balance
     rubric: {id: deployability, version: "1"}
@@ -314,7 +322,7 @@ evaluation:
 What the rule decides, and what it does not:
 
 - `guidance` and the rubric are shown to every agent, and, once issue #1297
-  lands, they are used by the judged steps of a workflow, where an LLM judge
+  lands, they are used by the [judged steps of a workflow](../workflow-declarations.md#7-literature-reviews-and-llm-aggregation), where an LLM judge
   already chooses between candidates.
 - The rule never produces a number. It cannot be a formula term or a
   constraint, and it is never compared like a metric.
@@ -325,8 +333,16 @@ What the rule decides, and what it does not:
 
 A rubric can also be listed as a component (`kind: rubric`, with `id`,
 `meaning` and `rubric: {id, version}`), so the agents see it as qualitative
-evidence. It has no units, range or direction. Both forms are refused at
-launch until issue #1297 lands.
+evidence. It has no units, range or direction:
+
+```yaml
+    - kind: rubric
+      id: judgment
+      meaning: Whether the model is practical to run on the field instrument.
+      rubric: {id: deployability, version: "1"}
+```
+
+Both forms are refused at launch until issue #1297 lands.
 
 ## Step 5: hard requirements (constraints)
 
@@ -380,7 +396,8 @@ try:
 except TaskCompositionError as error:
     sys.exit(f"Composition refused: {error}")
 if task.evaluation is None:
-    sys.exit("No evaluation section: candidates are ranked by the main metric.")
+    print("No evaluation section: candidates are ranked by the main metric.")
+    sys.exit(0)
 context = build_evaluation_prompt_context(task.evaluation, task.metric.spec, task.judge_task)
 print(render_evaluation_spec(context))
 print(json.dumps(task.evaluation.inspect(), indent=2))
@@ -419,7 +436,7 @@ model plugins and can be ignored. It prints three things:
    performs this check before it reads any data, and stops with the same
    message.
 
-A mistake in the declaration stops the script at step 1 with
+A mistake in the declaration stops the script at the composition call with
 `Composition refused: evaluation could not be composed:` followed by the
 reason, such as:
 
@@ -437,10 +454,16 @@ reason, such as:
 | `... Input should be a valid number` | a number written as a string, such as `threshold: '0.9'` |
 | `... term.lower must be less than term.upper` | term bounds in the wrong order or equal (`range.lower must be less than range.upper` for a component range) |
 
+A file that is not valid YAML at all, for example an unquoted `op: >=`,
+stops at the same call with a different prefix:
+`Composition refused: task composition manifest at '...' is not valid YAML (...)`.
+
 Validation messages also name the field path, for example
 `selection.formula.formula.weighted_sum.params.terms.0.out_of_range`.
 
 ## Limits
+
+These limits are owned by the [evaluation contract](../../../src/execute_tools/evaluation-contract.md).
 
 - At most 32 components and 64 constraints in one section.
 - `meaning` and `guidance`: at most 1000 characters each. `units`: at most

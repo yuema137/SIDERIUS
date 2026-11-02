@@ -43,7 +43,7 @@ metric:
 #       id: balanced_accuracy
 #       metric: balanced_accuracy        # the metric id declared above
 #       meaning: Mean per-class recall on validation.csv; each class counts equally.
-#       units: fraction of validation rows
+#       units: fraction (0 to 1), mean over classes
 #       range: {lower: 0.0, upper: 1.0}  # descriptive only; no clipping or rescaling
 #   selection:
 #     kind: primary

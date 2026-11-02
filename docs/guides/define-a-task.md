@@ -15,7 +15,8 @@ Answer these before writing anything:
 1. Is your task **supervised** — inputs, targets, and a scalar notion of better?
 2. Can "better" be **one number with a declared direction**? If your real goal is
    a trade-off between two quantities, decide now which one selects models. The
-   other becomes a secondary metric, which will *not* influence selection.
+   other becomes a secondary metric, which will *not* influence selection
+   until formula selection is available in your release.
    The optional `evaluation` section can describe both quantities to the agents
    and declare a weighted trade-off or requirements; its
    [author guide](evaluation/README.md) states which declarations a run can
