@@ -26,6 +26,16 @@
     if (bounds.length) parts.push(`Range: ${bounds.join(', ')}`);
     return parts.join(' · ');
   }
+  // A settings reminder, not a second validator: native admission still decides why
+  // a request is refused. Reuse the schema's explanation instead of copying CLI remedies.
+  function reviewHint(training, launch, error) {
+    if (launch?.max_rounds !== 1 || error.status !== 422) return '';
+    const validation = error.code === 'validation' || (error.code === 'source' &&
+      (error.value?.diagnostics || []).some(item => item.code === 'validation'));
+    if (!validation) return '';
+    const control = training?.controls.find(item => item.name === 'max_rounds');
+    return control?.help.description ? `Check ${control.label} in Training settings. ${control.help.description}` : '';
+  }
   // Schema default and native preview are advanced detail (tour #9): raw JSON values.
   function nativeText(control) {
     const help = control.help || {};
@@ -166,5 +176,5 @@
     const button = node('button', 'Edit loop and stop settings', group, 'secondary'); button.type = 'button';
     button.addEventListener('click', open);
   }
-  window.editorNodeParameters = Object.freeze({training: render, modelOwner: renderModelOwner, loopPointer: renderLoopPointer, helpText});
+  window.editorNodeParameters = Object.freeze({training: render, modelOwner: renderModelOwner, loopPointer: renderLoopPointer, helpText, reviewHint});
 })();
