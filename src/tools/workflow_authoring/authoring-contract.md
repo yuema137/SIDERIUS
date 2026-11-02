@@ -370,10 +370,14 @@ endpoints and `final_iteration`, all derived from the template document);
 unsaved `source`); `GET /api/editor/advice-targets` -> `AdviceTargets`.
 
 Templates are reusable v2 shapes with no task, data, advice, output-type or
-training values except the launch policy pair, which training admission requires
-and has no default for, and the training mode: `training_settings={"launch":
+implicit training values. Explicit starting settings include the launch policy pair, which training admission requires
+and has no default for, the training mode, and user-task workload settings: `training_settings={"launch":
 DECLARED_LAUNCH_POLICY}` = `healthgate_mode="blocking"`, `result_authority="scientific"`,
-`is_trial=true`. Blocking lets the task's own blocking Health checks invalidate a
+`is_trial=true`, `formal_portion=1.0`, `max_rounds=2`. These portion/round values
+are template choices, not native defaults: they preserve the whole training
+scope for small user tasks and allow Trial before the forced Formal tuning round.
+All three catalog shapes, CSV New setup, and the Quickstart bundle use these
+settings. Existing saved workflows and paper configurations are not rewritten. Blocking lets the task's own blocking Health checks invalidate a
 round while its recording checks only record (`observe_only` is refused at training
 admission when the task declares blocking checks); scientific standing lets
 Health-valid results form the run's authoritative score (with `diagnostic` every
@@ -383,7 +387,7 @@ launch and CLI defaults. Explicit `false` selects `single_file` mode, which Run
 review, training admission and tuner startup still refuse for a task whose dataset profile has no TIDMAD topology
 (`execute_tools.dataset_config.single_file_mode_refusal`). These values are written
 visibly in the rendered source and are editable in the Train & tune inspector
-(**Trial/formal mode** is a training control); all other launch values stay native
+(**Trial/formal mode** is a training control); remaining launch values stay native
 defaults:
 
 | id | Shape | Profile |

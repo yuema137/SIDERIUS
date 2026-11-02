@@ -10,14 +10,13 @@ import {spawn} from 'node:child_process';
 import {createRequire} from 'node:module';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 import {showAllConsoleSections} from './console_view_flags.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[name], `Set ${name}`);
 const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.workflow_editor_server'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
 let errors = ''; server.stderr.on('data', chunk => {errors += chunk;});
-const lines = createInterface({input: server.stdout});
 const rejected = '56565656-5656-4656-8656-565656565656';
 const running = '78787878-7878-4878-8878-787878787878';
 const unknown = '9a9a9a9a-9a9a-4a9a-8a9a-9a9a9a9a9a9a';
@@ -26,17 +25,7 @@ const paused = 'dededede-dede-4ede-8ede-dededededede';
 const delay = ms => new Promise(done => setTimeout(done, ms));
 let browser;
 try {
-  const metadata = await new Promise((accept, reject) => {
-    const timer = setTimeout(() => reject(new Error(`Server startup timeout: ${errors}`)), 15000);
-    lines.on('line', line => {
-      try {
-        const value = JSON.parse(line);
-        if (!value.origin || !value.token) return;
-        clearTimeout(timer); lines.close(); accept(value);
-      } catch { /* Native plugin registration may write one informational line first. */ }
-    });
-    server.once('exit', code => {clearTimeout(timer); reject(new Error(`Server ${code}: ${errors}`));});
-  });
+  const metadata = await waitForMetadata(server, {timeoutMs: 15000});
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
   showAllConsoleSections(browser);

@@ -178,6 +178,8 @@ document = ReusableWorkflowDocument(
             "result_authority": "diagnostic",
             "require_probe_runner": True,
             "is_trial": True,
+            # Use all small-example training data for the Formal tuning round.
+            "formal_portion": 1.0,
             "max_rounds": 2,
             "trial_max_epochs": 1,
             "formal_max_epochs": 2,
