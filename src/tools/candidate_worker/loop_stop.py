@@ -497,13 +497,15 @@ def project_body_score(
     from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
     from workflows.definition.fanout import execution_families
 
+    from .graph_evidence import read_traced_record
+
     tuning = execution_families(
         request.preview.document.definition, request.preview.execution_profile
     ).tuning
     assert tuning is not None and body.graph_trace is not None and body.status == "completed"
-    path = next(item for item in body.graph_trace.nodes if item.node_id == tuning).record_path
-    assert path is not None
-    output = HyperparamTuningOutput.model_validate_json(Path(path).read_bytes())
+    entry = next(item for item in body.graph_trace.nodes if item.node_id == tuning)
+    # Re-hashed against the trace: the score feeds stop decisions (#1477).
+    output = HyperparamTuningOutput.model_validate_json(read_traced_record(entry, bounded=False))
     return BodyScore(
         iteration=iteration,
         valid_formal=output.best_valid_formal_denoising_score,

@@ -946,6 +946,18 @@ digest check and a parse is therefore refused, never parsed. `bounded=True` (the
 default) keeps the 4 MiB `read_graph_control` limit where the read already had it;
 the `verify_graph_training` and interpretation reads stay unbounded as before. Both read
 without following a final symlink, as `record_digest` does.
+The same owner serves the other readers of traced records. `verify_adaptors` reads
+each adaptor record once through `read_traced_record` (bounded) and uses those bytes
+both for the LLM COMBINE strategy-evidence anchor (`_replay_context`) and for the
+byte comparison with the recomputation, so a record and judge evidence swapped
+together after the digest check are refused (#1476). The loop consumers of a
+verified body (`loop_evidence.advance_body` and `summarize_tried_bodies`,
+`loop_judge._body_projection`, `loop_stop.project_body_score`) read the
+interpretation, proposal and tuning records through
+`read_traced_record(entry, bounded=False)`, so chain history, the tried-body summary,
+stop-judge facts and the stop score never parse bytes the trace does not attest
+(#1477). Witnesses: `test_literature_judged.py::test_an_adaptor_record_swapped_after_its_digest_check_is_refused`,
+`test_finite_loop.py::test_loop_consumers_refuse_a_body_record_swapped_after_verification`.
 Witness: `tests/unit/tools/candidate_worker/test_adaptor_selection.py` (second
 branch trained when the first is rejected; all rejected; declared and reversed
 binding order over execution order; tampered record/output/closure; extra output

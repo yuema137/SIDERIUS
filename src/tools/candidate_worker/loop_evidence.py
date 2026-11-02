@@ -12,7 +12,12 @@ from workflows.definition.fanout import execution_families
 from workflows.research_history import advance_completed_history, history_metric, seed_history
 
 from .fanout_inputs import captured_contents
-from .graph_evidence import expected_nodes, read_graph_control, verify_graph_trace
+from .graph_evidence import (
+    expected_nodes,
+    read_graph_control,
+    read_traced_record,
+    verify_graph_trace,
+)
 from .layout import candidate_control_dir
 from .loop_stop import (
     MAX_TRIED_BODIES,
@@ -59,9 +64,7 @@ def advance_body(
     nodes = {item.node_id: item for item in body.graph_trace.nodes}
 
     def payload(node_id: str) -> bytes:
-        path = nodes[node_id].record_path
-        assert path is not None
-        return Path(path).read_bytes()
+        return read_traced_record(nodes[node_id], bounded=False)
 
     interpretation = InterpretationOutput.model_validate_json(
         payload(shape.interpretation.interpretation)
@@ -325,11 +328,12 @@ def summarize_tried_bodies(
     for body, score in zip(bodies[start:], scores[start:], strict=True):
         assert body.graph_trace is not None and body.status == "completed"
         nodes = {item.node_id: item for item in body.graph_trace.nodes}
-        proposal_path = nodes[shape.interpretation.proposal].record_path
-        tuning_path = nodes[shape.tuning].record_path
-        assert proposal_path is not None and tuning_path is not None
-        proposal = ProposalOutput.model_validate_json(Path(proposal_path).read_bytes())
-        tuning = HyperparamTuningOutput.model_validate_json(Path(tuning_path).read_bytes())
+        proposal = ProposalOutput.model_validate_json(
+            read_traced_record(nodes[shape.interpretation.proposal], bounded=False)
+        )
+        tuning = HyperparamTuningOutput.model_validate_json(
+            read_traced_record(nodes[shape.tuning], bounded=False)
+        )
         tried.append(
             TriedBody(
                 iteration=score.iteration,
