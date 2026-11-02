@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from core.runtime_control.gpu_execution_evidence import AttemptGpuExecution
     from core.runtime_control.gpu_requirement_evidence import AdmissionRequirementEvidence
-    from core.stub_sandbox import StubSandbox as StubSandbox
 
 from pydantic import StrictBool
 
@@ -1962,23 +1961,3 @@ class TidmadSandbox:
             raise_if_code_package_failure(e)
             print(f"--- Scoring Internal Error ---\n{e!s}")
             return {"status": "error", "message": str(e)}
-
-
-# ---------------------------------------------------------------------------
-# StubSandbox lives in ``core.stub_sandbox`` (issue #1475)
-# ---------------------------------------------------------------------------
-# This module's bytes are part of ``verifier_assembly_digest``; keeping the
-# pseudo sandbox elsewhere stops pseudo-only edits from moving that identity.
-# The lazy re-export below keeps ``from core.sandbox_executor import
-# StubSandbox`` working for ``nodes/ml_hyperparameter_tune_agent/runtime.py``
-# and ``execution.py``. Those importers sit inside the estimation (and, for
-# ``runtime.py``, the verifier) assembly closures, so rewriting their import
-# line would move those paper-facing identities for no behavioural reason.
-# New code imports ``core.stub_sandbox`` directly. An eager import is not
-# possible: ``core.stub_sandbox`` subclasses ``TidmadSandbox`` from here.
-def __getattr__(name: str) -> Any:
-    if name == "StubSandbox":
-        from core.stub_sandbox import StubSandbox
-
-        return StubSandbox
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
