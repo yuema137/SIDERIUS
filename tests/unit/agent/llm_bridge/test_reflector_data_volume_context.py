@@ -47,6 +47,11 @@ def _data_volume_block(tmp_path, *, mode: str, scope_source: str) -> str:
         execution_provenance=ExecutionProvenance(),
         timing_context=timing,
         trial_config=SimpleNamespace(mode=mode),
+        # No validation ceiling: planning's before/after portion pair is equal.
+        _planned_portions={"trial_portion": 0.05, "train_portion": 1.0, "eval_portion": 0.1},
+        cfg_trial_portion=0.05,
+        cfg_train_portion=1.0,
+        cfg_eval_portion=0.1,
     )
     bridge = BoundaryRecorderBridge()
     exp_id, _, results, reflection_context = reflect_fixture_args()

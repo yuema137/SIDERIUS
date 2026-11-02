@@ -19,6 +19,24 @@ class WorkloadSource(BaseModel):
     value: JsonValue = None
 
 
+PortionField = Literal["trial_portion", "train_portion", "eval_portion"]
+
+
+class ValidationPortionClamp(BaseModel):
+    """One executed portion that ``validation_max_portion`` reduced below its source.
+
+    Read from planning's own before/after pair (``_planned_portions`` and the
+    resolved ``cfg_*`` portions, the same pair recorded as
+    ``validation_workload_ceiling``); the ceiling is ``min``, so
+    ``executed_value`` is the configured ceiling whenever this record exists.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    field: PortionField
+    source_value: float
+    executed_value: float
+
+
 class RoleTimingContext(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     mode: Literal["trial", "formal", "single_file"]

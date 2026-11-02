@@ -248,11 +248,12 @@ def test_production_tuner_input_matches_pre_extraction_oracle(
     # #1289 then reworded the mode-choice step (Formal is not full-data).
     # #1472 labels the reflector's Data Volume Context portions by round mode
     # and source (prompts.py is part of the fingerprinted planner content).
+    # #1496 discloses validation_max_portion clamps in that same block.
     # Preserve the archived oracle and pin the reviewed new bytes.
     baseline_content = expected["expected_planner_strategy"].pop("content_sha256")
     assert baseline_content == "73b7df9cad19e398695f057ef322e3ad01d07e1d3e0a6c0f85e918d06594c562"
     assert payload["expected_planner_strategy"].pop("content_sha256") == (
-        "4f99e7be90242ec6e8628b734a7f06cf2843e12f575290c60649390462e75f51"
+        "6dc83ad5cbb0f4d51adf68bdbee08cb574de1c7a17fa9463663edd53415e12ad"
     )
     # Issue #983 — the workflow generates a run seed per run (a seed-owned
     # path); the oracle predates it. Keep its bytes and check the forwarded

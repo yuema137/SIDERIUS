@@ -1483,7 +1483,22 @@ The planner and reflector prompts render, from landed authorities:
   `'agent'` the training portion is `plan.trial_portion` and the advice names that
   source; Trial and single_file rounds keep "Recommend increasing trial_portion".
   With no matching role (`round_workload=None`) the block names both owners
-  instead of choosing one.
+  instead of choosing one;
+* **validation ceiling disclosure (issue #1496)** — when
+  `validation_max_portion` reduced an executed portion below its source value,
+  the Data Volume Context says so, in every round mode, one line per capped
+  field: `⚠ validation_max_portion capped <field> at <executed>, below its
+  source value <source> (<owner>)`. `feedback.py::executed_validation_clamps`
+  reads planning's own before/after pair (`PreparedAttempt._planned_portions`
+  versus `cfg_trial_portion` / `cfg_train_portion` / `cfg_eval_portion`, the
+  pair also recorded as `validation_workload_ceiling`) and never repeats the
+  ceiling arithmetic; the typed `planner_timing.ValidationPortionClamp` records
+  carry `field`, `source_value` and `executed_value`. When `trial_portion` or
+  `train_portion` was capped, the advice attributes a data-volume shortfall to
+  `validation_max_portion` instead of `plan.trial_portion` or `formal_portion`,
+  because raising the source cannot raise the executed value. A configured
+  ceiling that capped nothing renders no clamp text, and the #1472 wording is
+  unchanged.
 
 What they do NOT see: the raw `training_history`, `training_diagnosis`, `static_observations`,
 `metric_result` and `metric_refusal` record keys — and, since Step 10 / P2b,
@@ -1507,7 +1522,8 @@ brain.plan(...,  task_render=<TunerTaskRender>,   # built once at run scope
                  metric_spec=run_metric.spec)
 brain.reflect(..., metric_spec=run_metric.spec,
                    training_diagnosis=<the attempt's 07a diagnosis>,
-                   round_workload=<executed RoleTimingContext | None>)  # #1472
+                   round_workload=<executed RoleTimingContext | None>,  # #1472
+                   validation_clamps=<tuple[ValidationPortionClamp, ...]>)  # #1496
 ```
 
 All four are REQUIRED at a real render; the bridge raises `ValueError` rather

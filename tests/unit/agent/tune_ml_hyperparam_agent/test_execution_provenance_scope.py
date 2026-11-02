@@ -54,6 +54,8 @@ def _run_real_route(tmp_path, *, authored=None, **settings):
             metric_spec=kwargs.get("metric_spec"),
             training_diagnosis=kwargs.get("training_diagnosis"),
             execution_provenance=provenance,
+            round_workload=kwargs.get("round_workload"),
+            validation_clamps=kwargs.get("validation_clamps", ()),
         )
         captured.append((config, provenance, deepcopy(context), prompt))
         return deepcopy(FAKE_REFLECT_RESPONSE)
@@ -224,6 +226,83 @@ def test_single_file_execution_defaults_do_not_repeat_planned_strategies(tmp_pat
     for field in ("trial_strategy", "eval_strategy", "eval_portion", "target_files"):
         assert events[field].executed == repr(getattr(config, field))
         assert events[field].authority == "resolved_round_workload"
+
+
+# Issue #1496 — reflector Data Volume Context on the real route: planning
+# applies validation_max_portion, PreparedAttempt carries the before/after
+# portion pair, invoke_reflection forwards the clamps, and the prompt above is
+# rendered from the forwarded kwargs. Reverting the disclosure fails the first
+# test; disclosing whenever a ceiling is configured fails the second.
+
+
+def _real_route_blocks(tmp_path, **settings) -> dict[str, str]:
+    blocks = {}
+    for config, _, _, prompt in _run_real_route(tmp_path, **settings):
+        block = prompt.split("### Data Volume Context:", 1)[1].split("### INSTRUCTIONS:", 1)[0]
+        blocks[config.mode] = block
+    return blocks
+
+
+_CEILING_SETTINGS = {
+    "authored": {"trial_portion": 0.67, "train_portion": 0.71, "eval_portion": 0.79},
+    "formal_portion": 0.83,
+    "formal_train_portion": 0.89,
+    "formal_eval_portion": 0.97,
+}
+
+
+def test_validation_ceiling_is_named_as_the_binding_knob_in_both_modes(tmp_path):
+    blocks = _real_route_blocks(tmp_path, validation_max_portion=0.19, **_CEILING_SETTINGS)
+    expected_sources = {
+        "trial": {
+            "trial_portion": "0.67 (planner-set plan.trial_portion)",
+            "train_portion": "0.71 (planner-set plan.train_portion)",
+            "eval_portion": "0.79 (planner-set plan.eval_portion)",
+        },
+        "formal": {
+            "trial_portion": "0.83 (operator-set formal_portion)",
+            "train_portion": "0.89 (operator-set formal_train_portion)",
+            "eval_portion": "0.97 (operator-set formal_eval_portion)",
+        },
+    }
+    for mode, sources in expected_sources.items():
+        block = blocks[mode]
+        for field, source in sources.items():
+            assert (
+                f"  ⚠ validation_max_portion capped {field} at 0.19,\n"
+                f"     below its source value {source}.\n"
+            ) in block
+        assert "Attribute a data-volume shortfall to validation_max_portion." in block
+        assert "Recommend increasing" not in block
+        assert "shortfall to the operator's" not in block
+
+
+def test_non_binding_validation_ceiling_keeps_source_knob_advice(tmp_path):
+    blocks = _real_route_blocks(tmp_path, validation_max_portion=0.99, **_CEILING_SETTINGS)
+    assert all("validation_max_portion" not in block for block in blocks.values())
+    assert "NOT bad hyperparameters. Recommend increasing trial_portion.\n" in blocks["trial"]
+    assert (
+        "Attribute a data-volume shortfall to the operator's\n     formal_portion."
+        in (blocks["formal"])
+    )
+
+
+def test_single_file_round_data_volume_wording(tmp_path):
+    """Witness (#1496) for single_file wording: no executed portions are reported."""
+    blocks = _real_route_blocks(
+        tmp_path,
+        authored={"trial_portion": 0.37, "train_portion": 0.61},
+        is_trial=False,
+        max_rounds=1,
+    )
+    portions = blocks["single_file"].split("  round_mode", 1)[1]
+    assert portions == (
+        "            : single_file\n"
+        "  trial_portion         : None  (training portion; planner-set plan.trial_portion)\n"
+        "  eval_portion          : None  (evaluation portion; single_file workload)\n"
+        "  ⚠ If training_psd_segments << baseline_psd_segments, poor scores may be from\n"
+        "     insufficient data, NOT bad hyperparameters. Recommend increasing trial_portion.\n\n"
+    )
 
 
 pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")

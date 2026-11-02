@@ -28,7 +28,11 @@ from agent.prompt_templates.tuner.rendering import (
 )
 from agent.prompt_templates.tuner.runtime_evidence import render_training_epoch_evidence
 from agent.prompt_templates.tuner.timing_context import render_timing_context
-from agent.schemas.planner_timing import PlannerTimingContext, RoleTimingContext
+from agent.schemas.planner_timing import (
+    PlannerTimingContext,
+    RoleTimingContext,
+    ValidationPortionClamp,
+)
 from core.record_encoding import decode_record
 
 # Step 07 PR 07b (P2) — collapse advice about a health check the run does not
@@ -1376,6 +1380,7 @@ def get_reflector_user_prompt(
     metric_spec=None,
     execution_provenance=None,
     round_workload: RoleTimingContext | None = None,
+    validation_clamps: tuple[ValidationPortionClamp, ...] = (),
 ):
     """
     Constructs the prompt for the Reflector to summarize findings into Memory.
@@ -1394,6 +1399,11 @@ def get_reflector_user_prompt(
     round_workload (optional RoleTimingContext): the round's mode and workload
     sources; labels the executed trial_portion / eval_portion in the Data Volume
     Context with the knob that set them (issue #1472).
+
+    validation_clamps (tuple of ValidationPortionClamp): the executed portions
+    validation_max_portion reduced below their source value; disclosed in the
+    Data Volume Context so a capped portion is not attributed to its source
+    knob (issue #1496). Empty renders no clamp text.
     """
     # Step 07 PR 07b (P3) — the CURRENT attempt's dynamics, rendered from the
     # TrainingDiagnosis 07a derived. The reflector receives the diagnosis and
@@ -1442,7 +1452,9 @@ def get_reflector_user_prompt(
         # Issue #1472 — the executed portions are labelled and advised by the
         # round's workload sources, so a Formal round never reads its
         # operator-set formal_portion as the planner's trial_portion.
-        data_volume_portions = render_reflector_data_volume_portions(c, round_workload)
+        data_volume_portions = render_reflector_data_volume_portions(
+            c, round_workload, validation_clamps
+        )
         context_block = f"""
 ### Comparison Context (use this to judge the result):
   baseline_score        : {c.get("baseline_score", "N/A")}

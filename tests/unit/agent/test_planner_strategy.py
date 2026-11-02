@@ -217,11 +217,15 @@ def test_conditional_provider_system_text_reaches_final_request(monkeypatch):
 # names the round mode and the knob that set each executed portion, so a Formal
 # round no longer shows formal_portion as trial_portion (previous content
 # 8e373ea3..., assembly 35069313...).
+# Deliberately moved by #1496: the reflector's Data Volume Context (prompts.py,
+# llm_bridge.py) discloses portions validation_max_portion capped below their
+# source and names it as the binding knob; planner prompt bytes are unchanged
+# (previous content 4f99e7be..., assembly 55576b32...).
 NATIVE_PLANNER_IDENTITY_PIN = {
     "name": "native-timing-v1",
     "version": "1",
-    "content_sha256": "4f99e7be90242ec6e8628b734a7f06cf2843e12f575290c60649390462e75f51",
-    "assembly_sha256": "55576b32d4ebf7de9adb05b7398c1e3de242d6ad517fdcdd30b7379028461234",
+    "content_sha256": "6dc83ad5cbb0f4d51adf68bdbee08cb574de1c7a17fa9463663edd53415e12ad",
+    "assembly_sha256": "d512b2949b4a3c273ed5b1cd4722a99f6522bd36bb2a5e3d217579be11d4abe4",
 }
 
 
