@@ -123,7 +123,6 @@ class _PredictionBridge(_GeneratedProgramBridge):
                     "value_type": "number",
                 }
             ]
-            draft["resource_request"]["wall_time_s"] = 10.0
             return draft
         if label == "data_analysis.plan":
             plan = super().generate(system, user, label=label)
