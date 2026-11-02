@@ -2,21 +2,29 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from execute_tools.evaluation_metric import (
+    EvaluationInputsScoreability,
     MetricDirection,
     MetricResult,
     MetricSpecField,
     NotScoreableResult,
-    ScoreabilityContract,
     ScoreabilityFailure,
-    ScoreabilityVerdict,
 )
 from execute_tools.evaluation_spec import WeightedTerm
+
+__all__ = [
+    "ComponentEvaluation",
+    "EvaluationEvidence",
+    "EvaluationInputsScoreability",
+    "EvaluationTransportError",
+    "SelectionBinding",
+    "SelectionTerm",
+    "validate_record_evaluation",
+]
 
 
 class EvaluationTransportError(ValueError):
@@ -25,27 +33,6 @@ class EvaluationTransportError(ValueError):
     Distinct from a scientific refusal: transport errors never become a
     scoreable or not-scoreable verdict; the attempt fails as a scoring error.
     """
-
-
-class EvaluationInputsScoreability(ScoreabilityContract):
-    """Acceptance requires evaluated component evidence, not just existing files."""
-
-    contract_id: str = "evaluation_inputs/v1"
-    evaluation_sha256: str
-    required_components: tuple[str, ...]
-
-    def check(self, deliverables: Mapping[int, str]) -> ScoreabilityVerdict:
-        return self.evidence_verdict(
-            (
-                ScoreabilityFailure(
-                    requirement="component_evidence",
-                    detail="Evaluate source metrics before aggregation.",
-                ),
-            )
-        )
-
-    def evidence_verdict(self, failures: tuple[ScoreabilityFailure, ...]) -> ScoreabilityVerdict:
-        return ScoreabilityVerdict(contract_id=self.contract_id, failures=failures)
 
 
 class ComponentEvaluation(BaseModel):
