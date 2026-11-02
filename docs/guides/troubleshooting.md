@@ -47,10 +47,9 @@ scope builder bounds the evaluation scope to that many rows, so the smoke's
 cost does not grow with the dataset. A task whose scope builder ignores the
 ceiling is refused with `PseudoEvidenceUnsupported` before any prediction. A
 task whose bounded scope cannot cover its Health demand is refused with
-`TaskHealthCoverageError` while the attempt is planned. TIDMAD is one: its
-prefix clamp keeps only file 0. To accept a larger smoke there, pass
-`--formal_eval_portion 0.01 --validation_max_samples 10000` (two PSD segments
-per file, about five CPU minutes). Synthetic success checks wiring, not
+`TaskHealthCoverageError` while the attempt is planned; choose a smaller
+evaluation portion (`--formal_eval_portion`) with a larger explicit
+`--validation_max_samples` that covers it, accepting a larger smoke. Synthetic success checks wiring, not
 scientific quality or real-training correctness. If only the real run fails, inspect its actual error and execution
 resources.
 

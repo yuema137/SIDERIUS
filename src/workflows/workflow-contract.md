@@ -439,3 +439,10 @@ selection stays task-owned, deterministic and order-preserving. Health coverage
 is then checked against the bounded scope; a task whose bound cannot cover its
 Health demand is refused by `TaskHealthCoverageError` during attempt planning.
 `run_one_iteration` prints the resolved ceiling in the `[PSEUDO-MODE]` banner.
+Because it is the ordinary `validation_max_samples`, it also bounds an optional
+`--training_validation_portion` snapshot, appears wherever that value is
+disclosed (constraint disclosure, tuner timing context, setup-review packet;
+prompt bytes change only for `--is_pseudo_training` with a real LLM), and is
+pinned in the run-invariants lock: a pseudo workspace created before this
+default recorded `None` and refuses resume unless relaunched with an explicit
+matching value.
