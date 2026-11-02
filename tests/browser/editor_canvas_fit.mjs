@@ -99,7 +99,7 @@ try {
         `${label}: ${card.node} is outside the ${result.window.width}x${result.window.height} window`);
     }
     assert.equal(result.outside, '0', `${label}: the canvas reports cards outside the view`);
-    assert.match(await page.locator('.circuit-view-note').textContent(), /All 5 capabilities are in view/);
+    assert.match(await page.locator('.circuit-view-note').textContent(), /All 5 modules are in view/);
   };
   // Fit never zooms below 75% (cards stay legible); a graph larger than the canvas at 75%
   // scrolls inside the viewport, and the canvas says so.

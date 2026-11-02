@@ -527,7 +527,10 @@ external inputs such as storage. Only existing inputs can be rewired here.
 
 A large workflow opens zoomed out (never below 75%, so text stays readable; scroll the
 canvas for the rest). The controls at the bottom right of the canvas (zoom, **Actual
-size**, **Fit to view**) change only the view. Optional inputs that no wire feeds are
+size**, **Fit to view**) change only the view. If the whole graph cannot fit at 75%,
+**Fit to view** brings the selected module into view, or the first module if none is
+selected. The note below the canvas explains the limit; scroll inside the canvas
+to reach the remaining modules. Optional inputs that no wire feeds are
 folded into a "+N optional" row on each card; expand it to connect one. If saved cards overlap, the canvas says so;
 **Tidy up** arranges them (one edit you can undo).
 
