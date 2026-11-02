@@ -1498,7 +1498,13 @@ def _run_bound_iteration(
         print(
             f"[PSEUDO-MODE ACTIVE] {' + '.join(modes)} stub(s) engaged — "
             f"this run is a $0-cost wiring smoke; outputs are canned and "
-            f"do not reflect real LLM / training behaviour.",
+            f"do not reflect real LLM / training behaviour."
+            + (
+                f" Evaluation ceiling validation_max_samples={args.validation_max_samples}"
+                f" (override with --validation_max_samples)."
+                if args.is_pseudo_training
+                else ""
+            ),
             file=sys.stderr,
         )
 

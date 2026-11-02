@@ -18,6 +18,7 @@ from agent.schemas.health_feedback import HealthFeedbackRetentionPolicy
 from agent.schemas.hyperparam_tuning import DEFAULT_IS_TRIAL, TrainingValidationPortion
 from agent.schemas.ordering import parse_file_order_cli
 from agent.schemas.parameter_rules import ParameterRules
+from core.pseudo_admission import resolve_pseudo_validation_max_samples
 from core.retired_seed_pins import retired_pin_message
 from core.run_seed_lock import run_seed_argument
 from core.runtime_control.watchdog_policy import RuntimeWatchdogDeadlinePolicy
@@ -1122,7 +1123,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Swap TidmadSandbox → StubSandbox in the tuner agent. Skips "
         "real training and returns canned trial / formal scores. Use "
-        "for chain-wiring smoke tests; not for production runs.",
+        "for chain-wiring smoke tests; not for production runs. Records "
+        "--validation_max_samples 256 unless given, so synthetic "
+        "deliverables cost a bounded row count.",
     )
     parser.add_argument(
         "--max_failed_iterations",
@@ -1405,6 +1408,13 @@ def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
         )
     except ValueError as exc:
         parser.error(f"--workflow_parameter_rules is invalid: {exc}")
+
+    # Pseudo training writes synthetic deliverables for the whole evaluation
+    # scope. Resolve its row ceiling here, once, so the launch lock, setup
+    # inspection and the task's own scope builder all see the same value.
+    args.validation_max_samples = resolve_pseudo_validation_max_samples(
+        args.validation_max_samples, is_pseudo_training=args.is_pseudo_training
+    )
 
     # DS7 — deprecated no-op strategy flags (removal tracked as FU-2).
     if args.trial_strategy != "snapshot" or args.target_files is not None:

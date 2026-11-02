@@ -199,9 +199,18 @@ Unresolvable geometry and non-floating continuous output dtypes raise
 `PseudoEvidenceUnsupported`; task codec and data errors propagate. Legacy calls without evaluation scopes remain artifact-free.
 
 The task codec owns scope ordering, source context and storage. Batch size one
-bounds framework tensor lifetime, not task dataset/writer memory. A
-`pseudo_inference_<exp_id>_<run_name>.json` sidecar records `_pseudo_origin`
-and inference sample/batch counts. The existing saved-record marker remains
+bounds framework tensor lifetime, not task dataset/writer memory. The pseudo
+evaluation ceiling bounds the row count: `StubSandbox.execute_inference`
+forwards `runtime_policy["validation_max_samples"]` as `max_samples`, and
+`write_pseudo_deliverable` constructs `validation_dataset` to compare its
+length before any prediction; `run_generic_inference` constructs it again to
+iterate. Construction must therefore stay cheap (lazy rows), as the generic
+iterator already requires. A longer scope (a task whose
+`build_eval_scope` ignores `ScopeBuildRequest.max_samples`) raises
+`PseudoEvidenceUnsupported` naming the task, the count and the ceiling;
+nothing is written. `None` (direct callers without a runtime policy) skips the
+comparison. A `pseudo_inference_<exp_id>_<run_name>.json` sidecar records
+`_pseudo_origin`, `evaluation_max_samples` and inference sample/batch counts. The existing saved-record marker remains
 required: synthetic Health success is only wiring evidence. Fixed inference
 timings, absent runtime verification, training-cache merge order, legacy
 SampleSet scope checks and saved `_pseudo_origin` provenance remain in force.
