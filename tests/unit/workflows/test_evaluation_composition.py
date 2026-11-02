@@ -77,6 +77,40 @@ def compose(task, evaluation):
     return compose_run_task_bindings(str(path))
 
 
+@pytest.mark.parametrize("field", ["meaning", "units", "guidance", "components", "constraints"])
+def test_oversized_author_fields_refuse_composition_before_component_loading(
+    task, monkeypatch, field
+):
+    """Public composition errors retain field names and never reach plugin loaders."""
+    raw = declaration(task)
+    if field in ("meaning", "units"):
+        raw["components"][0][field] = "x" * (1001 if field == "meaning" else 129)
+    elif field == "guidance":
+        raw["selection"] = {
+            "kind": "rubric_balance",
+            "rubric": {"id": "unused", "version": "1"},
+            "guidance": "x" * 1001,
+            "deterministic_ranking": {"kind": "primary"},
+        }
+    elif field == "components":
+        raw["components"] = [dict(raw["components"][0], id=f"quality_{i}") for i in range(33)]
+    else:
+        raw["constraints"] = [{"component": "quality", "op": ">", "threshold": 0.0}] * 65
+    registry = builtin_registry()
+    loaded = []
+    original = registry["metric"].load
+
+    def load(component, context):
+        loaded.append(component.id)
+        return original(component, context)
+
+    registry["metric"] = replace(registry["metric"], load=load)
+    monkeypatch.setattr("workflows.evaluation_composition.builtin_registry", lambda: registry)
+    with pytest.raises(TaskCompositionError, match=field):
+        compose(task, raw)
+    assert not loaded
+
+
 def formula(evaluation):
     evaluation["selection"] = {
         "kind": "formula",

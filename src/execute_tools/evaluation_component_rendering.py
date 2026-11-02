@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 from agent.schemas.judge_task import RubricSpec, rubric_sha256
@@ -17,7 +18,9 @@ def number(value: float) -> str:
 
 
 def indent_text(value: str, prefix: str = "  ") -> str:
-    return value.replace("\n", "\n" + prefix)
+    """Keep authored lines inside their field even with non-LF line separators."""
+    normalized = re.sub(r"\r\n?|[\u2028\u2029]", "\n", value)
+    return normalized.replace("\n", "\n" + prefix)
 
 
 def render_metric_component(component: MetricComponent, context: ComponentRenderContext) -> str:

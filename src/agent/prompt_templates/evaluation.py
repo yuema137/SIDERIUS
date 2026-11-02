@@ -152,6 +152,7 @@ def render_evaluation_spec(context: EvaluationPromptContext | None) -> str:
     warnings = inspection(context.spec, context.components)["warnings"]
     if warnings:
         sections += ["Composition warnings:", *warnings]
+    sections.append("[END TASK EVALUATION]")
     return "\n".join(sections)
 
 

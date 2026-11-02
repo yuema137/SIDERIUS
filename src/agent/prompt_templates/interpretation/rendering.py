@@ -508,7 +508,7 @@ def _render_score_header(summary: ModelRunSummary) -> list[str]:
     from agent.evaluation_context import active_evaluation_prompt_context
 
     worst_label = (
-        "Worst recorded score"
+        "Worst recorded score "
         if active_evaluation_prompt_context() is not None
         else "Worst denoising score"
     )

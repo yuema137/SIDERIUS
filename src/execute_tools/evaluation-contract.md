@@ -28,8 +28,18 @@ Unknown plugin capability names fail closed through the same table.
 All declarations are frozen, strict Pydantic models with `extra="forbid"`.
 YAML lists become tuples only at declared sequence fields. Numbers are finite,
 not strings or booleans; means, ranges and units are never inferred from names.
+Author prose is bounded: component `meaning` and rubric-balance `guidance` have
+at most 1000 characters, matching the existing rubric criterion-description cap;
+metric `units` has at most 128 characters, enough for compound unit labels rather
+than another narrative field. An evaluation has at most 32 components and 64
+constraints: a bounded decision inventory with room for two bounds per component.
+These are declaration API limits, not scientific thresholds or a total token
+budget for plugin-rendered content. Composition errors retain the field name,
+and invalid declarations are refused before component loaders run.
 New fields must have defaults, and default values must be omitted from canonical
 identity (`exclude_defaults=True`). Explicit default and omitted default are equal.
+The size bounds add validation metadata only: no field, default, or serialization
+value changes. Existing valid declarations retain their evaluation identities.
 
 `EvaluationSpec` fields:
 
@@ -195,7 +205,13 @@ reload, model execution, measurement or judgment occurs during rendering.
 `agent/prompt_templates/evaluation.py:render_evaluation_spec` is the sole
 `evaluation.spec` boundary. It dispatches components through the composition's
 registry hooks. It emits `[TASK EVALUATION]`, interpretation rules, Components,
-Selection, Constraints, then any inspection warnings, in declaration order.
+Selection, Constraints, then any inspection warnings, in declaration order,
+and closes with `[END TASK EVALUATION]`. Builtin authored text normalizes CR,
+CRLF and Unicode line/paragraph separators to LF before continuation indentation;
+authored lines cannot acquire the unindented layout of framework section labels.
+Plugin hooks own their field formatting and can reuse `indent_text`. These text
+delimiters distinguish declaration prose from surrounding framework text; they
+do not make instruction-like author content trusted executable policy.
 Metric descriptions include meanings, units, MetricOrder direction words and
 optional descriptive ranges. Rubrics include resolved identity, integer scale
 and weighted criteria; they never receive a quantitative direction or unit.

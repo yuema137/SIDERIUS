@@ -1008,6 +1008,12 @@ setup failures retain their separate typed transport.
 
 ## Structured evaluation declarations (composition and inspection)
 
+Keep evaluation declarations concise: at most 32 components and 64 constraints.
+Each component meaning and rubric-balance guidance allows 1000 characters;
+metric units allow 128 characters. These limits bound authored declarations,
+not the scientific values being measured. Invalid fields are named in composition
+errors. Agent prompts delimit the declaration block and indent multiline prose.
+
 The optional `evaluation` section declares candidate selection separately from
 training `objective`. It composes, validates and renders for agents. Primary-only metric selection can
 launch; formula aggregation, feasibility, measurement and rubric runtime capabilities

@@ -121,6 +121,10 @@ def test_interpreter_primary_and_analysis_brief(tmp_path, monkeypatch, brief):
         else:
             scenario.test_constraints_reach_primary_interpretation_calls(tmp_path)
     assert bridges
+    if not brief:
+        assert any(
+            "Worst recorded score :" in user for bridge in bridges for _, _, user in bridge.calls
+        )
     for bridge in bridges:
         for _, _, user in bridge.calls:
             assert_evaluation(user)
