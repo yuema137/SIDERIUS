@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Sized
 from pathlib import Path
 
 import torch
@@ -17,11 +16,10 @@ from agent.schemas.model_io_contract import AxisRole, ModelIOContract
 from agent.skills.model_io_probe_skill import ProbeConstructionError
 from agent.skills.model_output_geometry import resolve_output_shape
 from core.generated_artifact_name import validate_generated_artifact_name
-from execute_tools.generic_inference import run_generic_inference
+from execute_tools.generic_inference import EvaluationSampleCeilingExceeded, run_generic_inference
 from execute_tools.model_input_dtype import resolve_contract_input_dtype
 from execute_tools.task_data_path import (
     DeliverableWriteRequest,
-    EvalMaterializationParams,
     TaskDataPath,
     active_task_data_path,
 )
@@ -73,25 +71,19 @@ class SyntheticPredictionModel(torch.nn.Module):
         return logits.scatter_(class_axis, indices, 1)
 
 
-def _require_bounded_scope(
-    task: TaskDataPath, scope: object, *, data_dir: str, max_samples: int | None
-) -> None:
-    """Refuse a scope the task did not bound to the run's evaluation ceiling."""
-    if max_samples is None:
-        return
-    dataset = task.validation_dataset(scope, EvalMaterializationParams(data_dir=data_dir))
-    if not isinstance(dataset, Sized):
-        raise TypeError("validation_dataset must return a sized, map-style dataset")
-    if len(dataset) > max_samples:
-        task_id = getattr(task, "task_data_path_id", type(task).__name__)
-        raise PseudoEvidenceUnsupported(
-            f"Pseudo inference refused: task data path {task_id!r} materialized "
-            f"{len(dataset)} evaluation samples, above validation_max_samples="
-            f"{max_samples}. Its build_eval_scope does not honour "
-            "ScopeBuildRequest.max_samples, so pseudo cost would follow dataset "
-            "size. Implement that ceiling in the task, or pass an explicit "
-            f"--validation_max_samples >= {len(dataset)} to accept this cost."
-        )
+def _unbounded_scope_refusal(
+    task: TaskDataPath, exceeded: EvaluationSampleCeilingExceeded
+) -> PseudoEvidenceUnsupported:
+    """Explain a scope the task did not bound to the run's evaluation ceiling."""
+    task_id = getattr(task, "task_data_path_id", type(task).__name__)
+    return PseudoEvidenceUnsupported(
+        f"Pseudo inference refused: task data path {task_id!r} materialized "
+        f"{exceeded.samples} evaluation samples, above validation_max_samples="
+        f"{exceeded.ceiling}. Its build_eval_scope does not honour "
+        "ScopeBuildRequest.max_samples, so pseudo cost would follow dataset "
+        "size. Implement that ceiling in the task, or pass an explicit "
+        f"--validation_max_samples >= {exceeded.samples} to accept this cost."
+    )
 
 
 def write_pseudo_deliverable(
@@ -108,10 +100,11 @@ def write_pseudo_deliverable(
 
     Batch one bounds framework tensor lifetime, not task dataset/writer storage.
     ``max_samples`` is the run's evaluation ceiling, which the task's own
-    ``build_eval_scope`` already applied. A scope that still materializes more
+    ``build_eval_scope`` already applied. ``run_generic_inference`` checks it
+    against the one dataset it builds; a scope that still materializes more
     rows is refused before any prediction, so pseudo cost never follows
-    dataset size. Legacy calls without an evaluation scope retain their
-    artifact-free behavior.
+    dataset size and the scope is materialized only once. Legacy calls
+    without an evaluation scope retain their artifact-free behavior.
     """
     scope = getattr(task_scopes, "evaluation", None)
     if scope is None:
@@ -124,22 +117,25 @@ def write_pseudo_deliverable(
         raise PseudoEvidenceUnsupported(
             "Pseudo evidence requires a bound task and Model-I/O contract"
         )
-    _require_bounded_scope(task, scope, data_dir=data_dir, max_samples=max_samples)
-    outcome = run_generic_inference(
-        data_path=task,
-        task_scope=scope,
-        model=SyntheticPredictionModel(contract).eval(),
-        device=torch.device("cpu"),
-        data_dir=data_dir,
-        batch_size=1,
-        input_dtype=resolve_contract_input_dtype(contract.input.dtype),
-        write_request=DeliverableWriteRequest(
-            output_dir=output_dir,
-            exp_id=exp_id,
-            run_name=run_name,
-            model_type=model_type,
-        ),
-    )
+    try:
+        outcome = run_generic_inference(
+            data_path=task,
+            task_scope=scope,
+            model=SyntheticPredictionModel(contract).eval(),
+            device=torch.device("cpu"),
+            data_dir=data_dir,
+            batch_size=1,
+            input_dtype=resolve_contract_input_dtype(contract.input.dtype),
+            write_request=DeliverableWriteRequest(
+                output_dir=output_dir,
+                exp_id=exp_id,
+                run_name=run_name,
+                model_type=model_type,
+            ),
+            max_samples=max_samples,
+        )
+    except EvaluationSampleCeilingExceeded as exceeded:
+        raise _unbounded_scope_refusal(task, exceeded) from exceeded
     provenance = {
         "_pseudo_origin": "stub_sandbox",
         "evaluation_max_samples": max_samples,
