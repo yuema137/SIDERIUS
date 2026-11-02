@@ -17,6 +17,12 @@ from unittest.mock import patch
 import pytest
 
 from agent.prompts import PLANNER_FULL_WINDOW, get_planner_user_prompt
+from agent.schemas.hyperparam_tuning import ExperimentPlan
+from nodes.ml_hyperparameter_tune_agent.parameter_rule_receipts import (
+    attach_attempt_receipts,
+    resolution_event_record,
+)
+from nodes.ml_hyperparameter_tune_agent.provenance import ResolutionTracker
 from tests.unit.agent.tune_ml_hyperparam_agent.test_physical_rejection_capture import (
     FAKE_PLAN,
     FAKE_VRAM_OK,
@@ -132,3 +138,47 @@ def test_unchanged_control_keeps_record_and_condensed_bytes(tmp_path, agent_with
     condensed = _planner_history(get_planner_user_prompt(history))[0]
     assert "resolution_events" not in condensed
     assert list(condensed["memory"]) == ["hypothesis", "conclusion", "round_index"]
+
+
+@pytest.mark.parametrize("files", [4, 2000])
+def test_condensed_list_valued_events_stay_bounded_for_many_file_tasks(files):
+    """A file-list event renders whole (``repr``) and grows with the task's file
+    count; condensed entries must cap it while the record and verbatim window
+    keep the full value. Fails if the condensed projection copies events
+    unbounded (2000 indices are ~10 kB per value) or truncates the record."""
+    authored = ExperimentPlan(
+        hypothesis="target files",
+        is_trial=True,
+        trial_strategy="target",
+        target_files=list(range(files)),
+    )
+    resolved = authored.model_copy(update={"target_files": list(reversed(range(files)))})
+    provenance = ResolutionTracker(authored).finish(resolved)
+    record = {
+        "exp_id": "many_files_001",
+        "status": "success",
+        "params": {**resolution_event_record(provenance), "train_config": {"lr": 0.001}},
+        "memory": {"hypothesis": "target files", "round_index": 1},
+    }
+    attach_attempt_receipts(record)
+    full = next(e for e in record["resolution_events"] if e["field_path"] == "target_files")
+    assert full["executed"] == repr(list(reversed(range(files))))  # persisted whole
+
+    history = [record] + [_later(i) for i in range(PLANNER_FULL_WINDOW)]
+    original = deepcopy(history)
+    condensed = _planner_history(get_planner_user_prompt(history))[0]
+    event = next(e for e in condensed["resolution_events"] if e["field_path"] == "target_files")
+    for value, whole in (
+        (event["proposed"], full["proposed"]),
+        (event["executed"], full["executed"]),
+    ):
+        assert len(value) <= 160  # stated bound per condensed event value
+        if len(whole) <= 120:
+            assert value == whole  # short values are never altered
+        else:
+            assert value.startswith(whole[:60]) and value.endswith(whole[-20:])
+            assert f"({len(whole)} chars; full value in the persisted record)" in value
+    assert len(json.dumps(condensed)) < 2_000  # whole entry independent of file count
+    recent = _planner_history(get_planner_user_prompt(history[:1]))[0]
+    assert recent["resolution_events"] == record["resolution_events"]  # verbatim stays full
+    assert history == original

@@ -835,6 +835,41 @@ SUPERSEDED_PROPOSAL_LABEL = (
 )
 
 
+#: #1322 — condensed entries keep each event's ``proposed``/``executed`` text
+#: up to this many characters. Values are pre-rendered reprs, and list-valued
+#: fields (``target_files``, file orders) grow with the task's file count, so an
+#: uncapped copy per condensed record would make the prompt grow as records x
+#: files. The verbatim window and persisted records keep the full text.
+CONDENSED_EVENT_VALUE_CHARS = 120
+_CONDENSED_EVENT_HEAD_CHARS = 60
+_CONDENSED_EVENT_TAIL_CHARS = 20
+
+
+def _bounded_event_value(text: str) -> str:
+    """Deterministic head/tail summary of one long rendered event value."""
+    if len(text) <= CONDENSED_EVENT_VALUE_CHARS:
+        return text
+    return (
+        f"{text[:_CONDENSED_EVENT_HEAD_CHARS]} … ({len(text)} chars; full value in the "
+        f"persisted record) … {text[-_CONDENSED_EVENT_TAIL_CHARS:]}"
+    )
+
+
+def _condensed_resolution_events(events: list) -> list:
+    """``events`` with long ``proposed``/``executed`` texts bounded; never mutates."""
+    bounded = []
+    for event in events:
+        if isinstance(event, dict):
+            event = {
+                k: _bounded_event_value(v)
+                if k in ("proposed", "executed") and isinstance(v, str)
+                else v
+                for k, v in event.items()
+            }
+        bounded.append(event)
+    return bounded
+
+
 def _label_superseded_proposal(rec: dict, memory: dict) -> dict:
     """``memory`` with the supersession label after ``hypothesis`` when overruled.
 
@@ -913,6 +948,8 @@ def _truncate_memory_history(
         # a record would be serialised one way inside the window and another
         # way outside it.
         entry = {k: rec[k] for k in rec if k in _CONDENSED_KEYS}
+        if entry.get("resolution_events"):
+            entry["resolution_events"] = _condensed_resolution_events(entry["resolution_events"])
         memory = rec.get("memory", {})
         if memory:
             entry["memory"] = _label_superseded_proposal(

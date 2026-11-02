@@ -249,7 +249,7 @@ def test_production_tuner_input_matches_pre_extraction_oracle(
     baseline_content = expected["expected_planner_strategy"].pop("content_sha256")
     assert baseline_content == "73b7df9cad19e398695f057ef322e3ad01d07e1d3e0a6c0f85e918d06594c562"
     assert payload["expected_planner_strategy"].pop("content_sha256") == (
-        "e68dbd0b1dd4231cf137db220cf3011a81efdf274577ee42dc7bc19fa196a4da"
+        "ec2b0c06e5bc3607209008b16ce8302dff3293e133602f7cd2404939d993ec66"
     )
     # Issue #983 — the workflow generates a run seed per run (a seed-owned
     # path); the oracle predates it. Keep its bytes and check the forwarded

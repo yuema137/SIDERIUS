@@ -1893,6 +1893,17 @@ resolution — and returns the original record/memory object when there is no
 receipt, so records without divergence and all archived histories render
 byte-identically. Persisted records are never mutated.
 
+Size bound: event values are `repr` text, and list-valued fields
+(`target_files`, file orders) grow with the task's file count, so copying them
+into every condensed entry would grow the prompt as records x files. Condensed
+entries therefore pass `resolution_events` through
+`_condensed_resolution_events`: each `proposed`/`executed` string longer than
+`CONDENSED_EVENT_VALUE_CHARS` (120) becomes its first 60 and last 20 characters
+around the marker `… (<N> chars; full value in the persisted record) …`
+(at most about 140 characters). Shorter values, `field_path` and `authority`
+are unchanged; the summary is deterministic. The verbatim window and the
+persisted record keep the full text.
+
 Divergence follows the existing tracker: formal-round `is_trial` lockout and
 `resolved_round_workload` portions are events, so most formal attempts in
 native runs (including TIDMAD paper-shaped runs) carry a receipt and the label,
@@ -1904,7 +1915,8 @@ assembly identity change (pins updated in `test_planner_strategy.py` and
 identities, and paper prompt-compat profiles requalify at freeze. Regression:
 `tests/unit/agent/tune_ml_hyperparam_agent/test_condensed_resolution_history.py`
 drives the real tuner loop for success, OOM skip and training failure with an
-operator `lr` lock beyond the verbatim window, plus an un-overridden control.
+operator `lr` lock beyond the verbatim window, plus an un-overridden control,
+and bounds a 2,000-file `target_files` event in condensed history.
 
 ### Reflection provenance
 

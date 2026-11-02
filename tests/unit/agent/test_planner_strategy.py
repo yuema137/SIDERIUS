@@ -206,8 +206,8 @@ def test_conditional_provider_system_text_reaches_final_request(monkeypatch):
 NATIVE_PLANNER_IDENTITY_PIN = {
     "name": "native-timing-v1",
     "version": "1",
-    "content_sha256": "e68dbd0b1dd4231cf137db220cf3011a81efdf274577ee42dc7bc19fa196a4da",
-    "assembly_sha256": "3e8d2c2408cfb368c015bcf0f17b86f0b5bc292c18ed4551673f8ca8e7a77ec7",
+    "content_sha256": "ec2b0c06e5bc3607209008b16ce8302dff3293e133602f7cd2404939d993ec66",
+    "assembly_sha256": "16cf419eb99be0a8a4e7298182ab39392d4f16169ea4803d250afc8e8c1c798a",
 }
 
 

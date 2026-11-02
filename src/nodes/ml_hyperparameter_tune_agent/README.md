@@ -20,12 +20,15 @@ preceding inheritance line identifies the winning trial. These are prepared
 request values; training results are reported separately after execution.
 
 The next planner sees the same distinction in its experiment history. Each
-record whose proposal was overridden keeps the planner's original hypothesis,
+record whose proposal was changed keeps the planner's original hypothesis,
 plus a `resolution_events` list (for example `train_cfg.lr` proposed `0.0001`,
-executed `0.002`) and a label saying the hypothesis was superseded. This holds
-even after older records are shortened to a summary. The record's `status`
-still says whether the attempt actually ran. Records with no override look
-exactly as before.
+executed `0.002`) and a label saying the hypothesis was superseded. Formal
+attempts usually carry this label, because the framework routinely resolves
+their mode (`is_trial`) and data portions, not only when an operator overrides
+a value. The list is kept even after older records are shortened to a summary;
+there, very long values such as file lists are cut to a short head and tail.
+The record's `status` still says whether the attempt actually ran. A record
+whose plan ran exactly as proposed looks the same as before.
 
 - [Public entry and CLI](ml_hyperparameter_tune_agent.py) · [full guide](ml_hyperparameter_tune_agent.md)
   (`cli.py` is a private parser/input adapter used by that entrypoint.)
