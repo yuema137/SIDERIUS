@@ -573,6 +573,83 @@ def test_timeout_terminates_the_worker_process_tree(tmp_path: Path) -> None:
 
 
 @pytest.mark.allow_real_subprocess
+def test_timed_out_disposition_survives_an_unreaped_descendant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1448: a post-timeout orphan check must not replace ``timed_out``.
+
+    The test process becomes a child subreaper that does not reap, so the
+    worker's killed grandchild stays a zombie in the worker's process group,
+    deterministically reproducing the "descendant not yet reaped by its new
+    parent" window. Before the fix the post-loop check reclassified the
+    timeout as ``orphaned_process_tree`` (a generic worker failure); now the
+    status stays ``timed_out`` and the orphan observation is kept as its own
+    fact in ``host_details``.
+    """
+    import ctypes
+
+    from agent.data_analysis import executor
+
+    pr_set_child_subreaper = 36
+    libc = ctypes.CDLL(None, use_errno=True)
+    pack_ref = _make_pack(tmp_path / "pack", _skill_source(), skill_id="orphan_skill")
+    skill = discover_skills((pack_ref,)).skills[0]
+    store = AnalysisRunStore(
+        StorageConfig(
+            backend="local",
+            local=LocalStorageConfig(workspace=str(tmp_path / "workspace"), run_name="run-1"),
+        ),
+        request_id="request-1",
+    )
+    validated = validate_skill_parameters(
+        skill,
+        resolve_skill_interface(
+            skill, control_directory=store.root / "control" / "interface-1", timeout_s=30.0
+        ),
+        {"max_items": 5},
+        control_directory=store.root / "control" / "validate-1",
+        timeout_s=30.0,
+    )
+    sleep_executable = shutil.which("sleep")
+    assert sleep_executable is not None
+    grandchild_pid_path = tmp_path / "grandchild.pid"
+    child = [
+        sys.executable,
+        "-c",
+        "import subprocess, time; "
+        f"p = subprocess.Popen([{sleep_executable!r}, '60']); "
+        f"open({str(grandchild_pid_path)!r}, 'w').write(str(p.pid)); time.sleep(60)",
+    ]
+    monkeypatch.setattr(executor, "_worker_command", lambda _request, _response: child)
+    skill_input, data = _skill_input(tmp_path, skill, time.monotonic() + 30.0)
+    assert libc.prctl(pr_set_child_subreaper, 1, 0, 0, 0) == 0
+    try:
+        result = execute_skill(
+            result_id="result-1",
+            skill=skill,
+            validated_parameters=validated,
+            skill_input=skill_input,
+            materialization_paths={"binding-1": str(data)},
+            store=store,
+            staging_directory=store.staging_directory("invocation-1"),
+            control_directory=store.root / "control" / "execute-1",
+            plan_sha256="4" * 64,
+            timeout_s=1.5,
+        )
+    finally:
+        libc.prctl(pr_set_child_subreaper, 0, 0, 0, 0)
+        if grandchild_pid_path.exists():
+            os.waitpid(int(grandchild_pid_path.read_text()), 0)
+
+    assert grandchild_pid_path.exists()
+    assert result.status == "timed_out"
+    assert result.provenance.host_details == {
+        "supervisor_disposition": "timed_out",
+        "orphaned_process_tree": True,
+    }
+
+
+@pytest.mark.allow_real_subprocess
 @pytest.mark.parametrize(("ignores_sigterm", "bound_s"), [(False, 0.75), (True, 1.75)])
 def test_worker_stops_at_the_continuing_allocation_within_the_termination_bound(
     tmp_path: Path,
@@ -594,7 +671,6 @@ def test_worker_stops_at_the_continuing_allocation_within_the_termination_bound(
     pack_ref = _make_pack(tmp_path / "pack", _skill_source(), skill_id="bounded_skill")
     skill = discover_skills((pack_ref,)).skills[0]
     publish = executor.publish_bytes_write_once
-    popen = executor.subprocess.Popen
     # A compliant child must already be in an interruptible sleep at expiry: an
     # interpreter still paging in its startup under host I/O load cannot act on
     # SIGTERM and would measure the kernel, not the supervisor.
@@ -617,12 +693,8 @@ def test_worker_stops_at_the_continuing_allocation_within_the_termination_bound(
         time.sleep(1.0)
         published_at.append(time.monotonic())
 
-    def controlled_child(cmd: list[str], *args, **kwargs):
-        assert cmd[1:3] == ["-m", "agent.data_analysis.worker_main"]
-        return popen(child, *args, **kwargs)
-
     monkeypatch.setattr(executor, "publish_bytes_write_once", stalled_publish)
-    monkeypatch.setattr(executor.subprocess, "Popen", controlled_child)
+    monkeypatch.setattr(executor, "_worker_command", lambda _request, _response: child)
     with execution_deadline(1.5) as allocation:
         with pytest.raises(SkillExecutorError, match="timed_out"):
             resolve_skill_interface(skill, control_directory=tmp_path / "control", timeout_s=30.0)

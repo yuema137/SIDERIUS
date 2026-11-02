@@ -835,6 +835,59 @@ def test_generated_program_is_persisted_before_plan_and_certified_as_evidence(
     ]
 
 
+def test_sandbox_probe_cannot_outlive_the_continuing_allocation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1447: the pre-materialization probe is bounded by the allocation.
+
+    A probe that hangs until its timeout used to run its fixed 10 s past a
+    3 s allocation and then report missing isolation. It is now cut at expiry
+    and the invocation records ``timed_out`` without materializing data.
+    """
+    import time
+
+    from agent.data_analysis.analysis_code_sandbox import SandboxCapabilityReceipt
+    from core.execution_deadline import ExecutionDeadlineExceeded
+
+    probe_timeouts: list[float] = []
+
+    def hanging_probe(self, *, timeout_s: float = 10.0) -> SandboxCapabilityReceipt:
+        probe_timeouts.append(timeout_s)
+        time.sleep(timeout_s)
+        return SandboxCapabilityReceipt(
+            available=False,
+            protocol_id="siderius.generated-analysis-sandbox.v1",
+            bubblewrap_path=None,
+            unshare_path=None,
+            reason="TimeoutExpired",
+        )
+
+    monkeypatch.setattr(AnalysisCodeSandbox, "probe", hanging_probe)
+    analysis_input = _input(tmp_path, wall_time_budget_s=3.0, per_skill_timeout_s=2.0)
+    agent = DataAnalysisAgent(
+        run_seed=11,
+        task_analysis_capability=_Capability(),
+        bridge_factory=lambda **_kwargs: _GeneratedProgramBridge(analysis_input=analysis_input),
+        provider="test",
+        model_id="fake",
+    )
+
+    started = time.monotonic()
+    with pytest.raises(ExecutionDeadlineExceeded):
+        agent.run(analysis_input)
+    elapsed_s = time.monotonic() - started
+
+    assert elapsed_s < 3.5
+    assert len(probe_timeouts) == 1 and probe_timeouts[0] < 3.0
+    root = tmp_path / "data_analysis" / "standalone" / "request"
+    (result,) = [
+        json.loads(line) for line in (root / "skill_results.jsonl").read_text().splitlines()
+    ]
+    assert result["status"] == "timed_out"
+    assert result["failure"]["failure_type"] == "timed_out"
+    assert result["failure"]["materialization_occurred"] is False
+
+
 @pytest.mark.allow_real_subprocess
 def test_plan_resolution_retries_generated_question_mismatch_without_widening(
     tmp_path: Path,
