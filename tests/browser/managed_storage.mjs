@@ -14,14 +14,13 @@ import {execFileSync, spawn} from 'node:child_process';
 import {createRequire} from 'node:module';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[name], `Set ${name}`);
 const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.workflow_editor_server'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
 let errors = '', browser;
 server.stderr.on('data', chunk => { errors += chunk; });
-const lines = createInterface({input: server.stdout});
 const waitUntil = async (predicate, what = 'condition') => {
   const deadline = Date.now() + 20000;
   while (!(await predicate())) { if (Date.now() > deadline) throw new Error(`${what} timed out`); await new Promise(r => setTimeout(r, 50)); }
@@ -45,11 +44,7 @@ for n in d.definition.nodes:
 print(json.dumps({'rows': rows, 'literal_storage': [e.id for e in d.definition.externals if getattr(e, 'kind', 'external') != 'managed_candidate' and e.contract == 'storage']}))
 `, path], {cwd: root, encoding: 'utf8', env: {...process.env, PYTHONPATH: resolve(root, 'src')}}));
 try {
-  const metadata = await new Promise((accept, reject) => {
-    const timer = setTimeout(() => reject(new Error(`startup timeout ${errors}`)), 30000);
-    lines.on('line', line => { try { const v = JSON.parse(line); if (v.origin && v.token) { clearTimeout(timer); lines.close(); accept(v); } } catch { /* info line */ } });
-    server.once('exit', code => { clearTimeout(timer); reject(new Error(`server ${code} ${errors}`)); });
-  });
+  const metadata = await waitForMetadata(server, {timeoutMs: 30000});
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
   const page = await browser.newPage({viewport: {width: 1440, height: 1100}}), faults = [];

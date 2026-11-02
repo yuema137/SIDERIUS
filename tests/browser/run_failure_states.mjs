@@ -14,7 +14,7 @@ import {createServer} from 'node:net';
 import {tmpdir} from 'node:os';
 import {dirname, resolve, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 import {showAllConsoleSections} from './console_view_flags.mjs';
 import {chooseFirstConfiguredTask} from './console_task_choice.mjs';
 
@@ -47,8 +47,7 @@ const status = (id, kind, digest, fields) => ({operation_id: id, kind, request_d
 let browser, predispatch = false;
 try {
   const provider = start('provider', root);
-  const lines = createInterface({input: provider.stdout});
-  const endpoint = await new Promise(done => lines.once('line', line => done(JSON.parse(line).endpoint))); lines.close();
+  const {endpoint} = await waitForMetadata(provider);
   const metadata = JSON.parse((await completed(start('setup', root, '--origin', origin, '--endpoint', endpoint, '--captures-count', '0'))).trim().split('\n').at(-1));
   start('serve', root);
   await until(async () => { try {return (await fetch(origin + '/')).ok;} catch {return false;} });

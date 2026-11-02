@@ -308,6 +308,11 @@ def admit(
     own = [p for p in decision.placements + decision.refused if p.unit_id == str(operation_id)]
     if own[0].decision == "refused":
         raise OperationFailure("resource_refused", "; ".join(own[0].reasons))
+    if own[0].decision == "queued" and len(state.queued) >= budget.max_queued_operations:
+        raise OperationFailure(
+            "host_queue_full",
+            f"host queue limit {budget.max_queued_operations} reached; retry after capacity frees",
+        )
     return Admitted(
         placement=own[0], state=state, resources=resources, parallel=request.parallel is not None
     )

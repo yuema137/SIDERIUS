@@ -553,7 +553,7 @@ Notes:
 - The trial-only smoke (canonical command above) remains correct for
   features that don't touch the formal path; the plans here add the
   formal-round variant with SMALL formal portions instead of the
-  dangerous full-dataset formal that motivated
+  expensive configured Formal workload that motivated
   `--no-force_formal_round`.
 - Estimated single-formal-round compute at Lite scale: setup ~20 s +
   training 1-5 min (unknown LLM-invented model, 25-100 ms/step band)
