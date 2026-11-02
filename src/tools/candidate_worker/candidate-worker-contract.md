@@ -933,6 +933,19 @@ its declared source and `stage_model_source` copies nothing, so no bytes are
 compared; under the selection profile a staged copy then contradicts the record and
 is refused. An unreadable staged or model file is a `ValueError` ("tuner staged
 model ..."), never an incidental `OSError`.
+
+**Record reads after the digest check (#1407).** The trace's `record_sha256`
+check (`record_digest`) proves a native record at one instant. Every later parse of
+a node record in `graph_evidence` goes through `read_traced_record(entry)`, which
+re-hashes the exact bytes it returns against `entry.record_sha256` and raises
+`ValueError("graph native record mismatch")` otherwise: the validation verdict,
+the judged-branch implementation and validation records (`verify_judged_branches`),
+the trained proposal, validation and tuner records (`verify_graph_training`), the
+staged implementation and the interpretation record. A record replaced between the
+digest check and a parse is therefore refused, never parsed. `bounded=True` (the
+default) keeps the 4 MiB `read_graph_control` limit where the read already had it;
+the `verify_graph_training` and interpretation reads stay unbounded as before. Both read
+without following a final symlink, as `record_digest` does.
 Witness: `tests/unit/tools/candidate_worker/test_adaptor_selection.py` (second
 branch trained when the first is rejected; all rejected; declared and reversed
 binding order over execution order; tampered record/output/closure; extra output

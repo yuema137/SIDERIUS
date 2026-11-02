@@ -243,15 +243,14 @@ def test_nonfinite_any_inputs_replay_under_their_recorded_encoding(
     verify_graph_trace(request, parent, receipt)
 
 
-def test_a_stripped_consumed_input_encoding_is_refused_by_the_record_anchor(
-    prepared, native_runner, monkeypatch
-):
-    """Threat model (#1326): ``consumed_input_encoding`` is dispatch, not authentication.
+def _stripped_encoding_forgery(prepared, monkeypatch):
+    """A verified judged run and its implementation record downgraded to the legacy digest.
 
-    A forger downgrades a current judged record (``inf`` in an ``Any`` field) by
-    removing its encoding and rewriting the stamp to the legacy digest the
-    historical verifier would accept. The trace's unchanged ``record_sha256``
-    anchor refuses it before any recomputation."""
+    The forgery removes ``consumed_input_encoding`` (an ``inf`` sits in an ``Any``
+    field) and rewrites the stamp to the legacy digest the historical verifier
+    accepts, so only the trace's ``record_sha256`` anchor can refuse it.
+    Returns ``(request, parent, receipt, path, forged bytes)``.
+    """
     from core.canonical_json import canonical_sha256
 
     _proposer_any_leaf(monkeypatch, float("inf"))
@@ -286,9 +285,69 @@ def test_a_stripped_consumed_input_encoding_is_refused_by_the_record_anchor(
     assert legacy != raw["consumed_input_sha256"]
     del raw["consumed_input_encoding"]
     raw["consumed_input_sha256"] = legacy
-    path.write_text(json.dumps(raw, indent=2))
+    return request, parent, receipt, path, json.dumps(raw, indent=2).encode()
+
+
+def test_a_stripped_consumed_input_encoding_is_refused_by_the_record_anchor(
+    prepared, native_runner, monkeypatch
+):
+    """Threat model (#1326): ``consumed_input_encoding`` is dispatch, not authentication.
+
+    A forger downgrades a current judged record (``inf`` in an ``Any`` field) by
+    removing its encoding and rewriting the stamp to the legacy digest the
+    historical verifier would accept. The trace's unchanged ``record_sha256``
+    anchor refuses it before any recomputation."""
+    request, parent, receipt, path, forged = _stripped_encoding_forgery(prepared, monkeypatch)
+    path.write_bytes(forged)
     with pytest.raises(ValueError, match="graph native record mismatch"):
         verify_graph_trace(request, parent, receipt)
+
+
+def test_a_judged_record_swapped_after_its_digest_check_is_refused(
+    prepared, native_runner, monkeypatch
+):
+    """#1407: ``verify_judged_branches`` re-read the implementation record after the
+    trace's ``record_sha256`` check without re-hashing it, so the downgrade forgery
+    above, written in that window, replayed against the legacy digest and was
+    accepted. The judged read must re-hash the bytes it parses; without that
+    ``pytest.raises`` fails."""
+    from .test_graph_training import swap_after
+
+    request, parent, receipt, path, forged = _stripped_encoding_forgery(prepared, monkeypatch)
+    swapped = swap_after(monkeypatch, graph_evidence, "record_digest", path, forged)
+    with pytest.raises(ValueError, match="graph native record mismatch"):
+        verify_graph_trace(request, parent, receipt)
+    assert swapped == [path]
+
+
+def test_a_judged_validation_swapped_after_its_verdict_check_is_refused(
+    prepared, native_runner, monkeypatch
+):
+    """#1407: ``verify_judged_branches`` re-read each validation record after its
+    hashed verdict check and compared only ``candidate_id``, so a record relabelled
+    ``passed: false`` in that window stood behind a ``succeeded`` trace entry.
+    The judged read must re-hash the bytes it parses; without that ``pytest.raises``
+    fails."""
+    from .test_graph_training import swap_after
+
+    bridge = DebateBridge(order=["proposals:2", "proposals:0", "proposals:1"])
+    monkeypatch.setattr("agent.judge.call.bridge_for_route", lambda route: bridge)
+    request = judged(prepared)
+    receipt, parent = run(request)
+    assert receipt.status == "accepted", receipt.error
+    node = next(
+        item
+        for item in receipt.graph_trace.nodes
+        if item.capability == "validation" and item.state == "succeeded"
+    )
+    path = Path(node.record_path)
+    raw = json.loads(path.read_bytes())
+    assert raw["passed"] is True
+    forged = json.dumps({**raw, "passed": False}, indent=2).encode()
+    swapped = swap_after(monkeypatch, graph_evidence, "_check_validation_verdict", path, forged)
+    with pytest.raises(ValueError, match="graph native record mismatch"):
+        verify_graph_trace(request, parent, receipt)
+    assert swapped == [path]
 
 
 def test_a_branch_run_on_a_nonfinite_variant_fails_verification(
