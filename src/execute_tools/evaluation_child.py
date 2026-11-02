@@ -147,16 +147,31 @@ def evaluation_record_fields(results: dict[str, Any]) -> dict[str, Any]:
     return {"evaluation_result": evidence.model_dump(mode="json")}
 
 
-def scoring_refusal_fields(path: str) -> dict[str, Any]:
-    """Recover only structured formula refusal evidence after a child exit."""
+def read_scoring_output(path: str) -> dict[str, Any]:
+    """The scoring child's ``--output_json`` payload, with non-finite values decoded.
+
+    The single parent-side reader of that file. The child writes it through
+    ``core.record_encoding``; a payload without encoding metadata is finite (or
+    a legacy null projection) and is returned unchanged.
+    """
     import json
     from pathlib import Path
 
+    from core.record_encoding import decode_record
+
+    payload = decode_record(json.loads(Path(path).read_text()))
+    if not isinstance(payload, dict):
+        raise ValueError("scoring output JSON must be an object")
+    return payload
+
+
+def scoring_refusal_fields(path: str) -> dict[str, Any]:
+    """Recover only structured formula refusal evidence after a child exit."""
     try:
-        payload = json.loads(Path(path).read_text())
+        payload = read_scoring_output(path)
     except (OSError, ValueError):
         return {}
-    if not isinstance(payload, dict) or "evaluation_result" not in payload:
+    if "evaluation_result" not in payload:
         return {}
     evidence = EvaluationEvidence.model_validate(payload["evaluation_result"])
     refusal = NotScoreableResult.model_validate(payload.get("not_scoreable"))

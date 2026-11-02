@@ -18,6 +18,7 @@ from agent.schemas.hyperparam_tuning import TaskCompositionRef
 from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import ProposalInput, ProposalOutput
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from core.record_encoding import ENCODING_VERSION, EncodingVersion, model_record_value
 from nodes.llm_settings import VALIDATE
 from workflows.attempt_storage import ImplAttemptStorage, impl_attempt_storage
 from workflows.definition import ExternalRequest, ExternalSource, ProtocolRequest
@@ -42,15 +43,30 @@ class NativeInputs:
     validator_model: str
 
 
-def consumed_input_sha256(seed: ProposalInput, proposal: ProposalOutput) -> str:
+def consumed_input_sha256(
+    seed: ProposalInput, proposal: ProposalOutput, *, version: EncodingVersion | None
+) -> str:
     """Digest of the proposal and seed one judged-branch implementation consumes.
 
     Stamped by the worker into ``ImplementorInput`` (echoed in the output record) and
     recomputed by ``graph_evidence.verify_judged_branches`` from the verified adaptor
     value and the owner's persisted seed, so it binds content, not ``candidate_id``.
+
+    ``version`` is the stamp's recorded ``consumed_input_encoding``. The worker
+    always stamps ``ENCODING_VERSION``: ``model_record_value`` keeps non-finite
+    floats inside ``Any`` fields, so ``inf``, ``NaN`` and ``None`` there have
+    distinct identities. ``None`` replays an unversioned historical stamp, whose
+    eager JSON-mode dump had already nulled those values. Finite inputs have one
+    digest under both.
     """
     from core.canonical_json import canonical_sha256
 
+    if version == ENCODING_VERSION:
+        return canonical_sha256(
+            {"proposal": model_record_value(proposal), "seed": model_record_value(seed)}
+        )
+    if version is not None:
+        raise ValueError("unsupported consumed-input encoding")
     return canonical_sha256(
         {"proposal": proposal.model_dump(mode="json"), "seed": seed.model_dump(mode="json")}
     )
