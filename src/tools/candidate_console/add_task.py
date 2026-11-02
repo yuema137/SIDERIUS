@@ -47,7 +47,7 @@ from tools.candidate_operations.models import OperationFailure
 from tools.workspace_sandbox.gpu import GPU_NODE
 
 from .error_messages import console_error_message
-from .files import canonical, config_bytes
+from .files import canonical, config_bytes, private_file_lock
 from .models import ConsoleConfig
 from .package_mounts import check_candidate_devices, check_package_mounts
 from .settings_file import SettingsInvalid
@@ -318,15 +318,16 @@ def publish_task(plan: TaskPlan) -> None:
     """Compare-and-swap on the bytes ``plan_task`` read, then an atomic 0600 replace."""
     from .settings_service import _publish_private
 
-    try:
-        current = config_bytes(str(plan.config_path))
-    except (OSError, OperationFailure):
-        current = None
-    if current != plan.read_bytes:
-        raise AddTaskRefused(
-            "console.json changed since add-task read it; nothing was written, run add-task again"
-        )
-    _publish_private(plan.config_path, plan.payload)
+    with private_file_lock(plan.config_path):
+        try:
+            current = config_bytes(str(plan.config_path))
+        except (OSError, OperationFailure):
+            current = None
+        if current != plan.read_bytes:
+            raise AddTaskRefused(
+                "console.json changed since add-task read it; nothing was written, run add-task again"
+            )
+        _publish_private(plan.config_path, plan.payload)
 
 
 def create_folders(plan: TaskPlan) -> None:
