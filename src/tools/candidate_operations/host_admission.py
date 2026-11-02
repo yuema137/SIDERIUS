@@ -180,13 +180,7 @@ def host_slot(
         yield HostSlot()
         return
     root_operation, resources = _declared(config, submission)
-    parallel = root_operation.request.parallel
-    if parallel is not None and parallel.budget is not None:
-        raise OperationFailure(
-            "parallel_budget",
-            "a ledger-placed parallel run schedules inside its reservation; "
-            "remove parallel.budget from the request",
-        )
+    _require_ledger_parallel(root_operation.request)
     _require_disjoint(host.ledger_root, config, root_operation)
     with locked_ledger(host.ledger_root) as root:
         state = sweep(root)
@@ -194,6 +188,17 @@ def host_slot(
             state, host.budget, submission.request_id, root_operation.request, resources
         )
         yield LedgerSlot(root, host, admitted)
+
+
+def _require_ledger_parallel(request: CandidateRunRequest) -> None:
+    """A ledger-placed parallel run schedules inside its reservation, never its own budget."""
+    parallel = request.parallel
+    if parallel is not None and parallel.budget is not None:
+        raise OperationFailure(
+            "parallel_budget",
+            "a ledger-placed parallel run schedules inside its reservation; "
+            "remove parallel.budget from the request",
+        )
 
 
 def _require_unplaced_loop(config: OperationStoreConfig, submission: OperationSubmission) -> None:
@@ -262,7 +267,10 @@ def loop_resume_resources(
     ``run_resources_conflict`` even when equal; a root without one requires the
     supplied declaration (``resources_required``). A predecessor segment's
     declaration is never inherited: each segment of an undeclared root supplies
-    its own. Host admission and the console's Resume review both call this.
+    its own. Under a ledger a root whose request carries ``parallel.budget``
+    refuses ``parallel_budget`` first, as ``host_slot`` does for every placed run,
+    so the console review refuses it too. Host admission and the console's
+    Resume review both call this.
     """
     if not ledger:
         if supplied is not None:
@@ -272,6 +280,8 @@ def loop_resume_resources(
                 "--host-ledger and --host-budget, or omit resources",
             )
         return None
+    if root is not None:
+        _require_ledger_parallel(root.request)
     declared = None if root is None else root.resources
     if supplied is not None:
         if declared is not None:

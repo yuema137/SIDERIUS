@@ -263,7 +263,7 @@ def test_resource_refusals_reach_the_browser_with_their_remedy(
     assert "private diagnostic" not in error["message"]
 
 
-def _resume_review_doubles(monkeypatch, root_resources):
+def _resume_review_doubles(monkeypatch, root_resources, parallel=None):
     """The owners stubbed at the service call site; ``loop_resume_resources`` stays real."""
     from types import SimpleNamespace
 
@@ -277,7 +277,7 @@ def _resume_review_doubles(monkeypatch, root_resources):
     preview = SimpleNamespace(document=SimpleNamespace(definition=SimpleNamespace(loop=loop)))
     root = CandidateOperation.model_construct(
         request_id=uuid4(),
-        request=SimpleNamespace(preview=preview, environment_names=()),
+        request=SimpleNamespace(preview=preview, environment_names=(), parallel=parallel),
         resources=root_resources,
     )
     monkeypatch.setattr(
@@ -341,21 +341,26 @@ def test_resume_review_binds_the_segment_reservation_of_an_undeclared_root(ledge
 
 
 @pytest.mark.parametrize(
-    ("ledger", "root_resources", "code"),
+    ("ledger", "root_resources", "budgeted", "code"),
     [
-        (True, RESOURCES, "run_resources_conflict"),
-        (False, None, "host_ledger_missing"),
+        (True, RESOURCES, False, "run_resources_conflict"),
+        (False, None, False, "host_ledger_missing"),
+        (True, None, True, "parallel_budget"),
     ],
-    ids=("root-declares-resources", "no-host-ledger"),
+    ids=("root-declares-resources", "no-host-ledger", "root-parallel-budget"),
 )
 def test_resume_review_refuses_a_reservation_admission_would_refuse(
-    ledgered, console_config, monkeypatch, ledger, root_resources, code
+    ledgered, console_config, monkeypatch, ledger, root_resources, budgeted, code
 ):
-    """A reservation beside the root's own (even an equal one) or without a ledger was
-    accepted at review, then refused or ignored at Resume."""
+    """A reservation beside the root's own (even an equal one), without a ledger, or for a
+    root whose parallel run brings its own ``parallel.budget`` was accepted at review, then
+    refused or ignored at Resume."""
+    from types import SimpleNamespace
+
     from tests.unit.tools.candidate_console.test_http import client
 
-    _resume_review_doubles(monkeypatch, root_resources)
+    parallel = SimpleNamespace(budget=SimpleNamespace()) if budgeted else None
+    _resume_review_doubles(monkeypatch, root_resources, parallel)
     api = client(ledgered if ledger else console_config)
     response = api.post(
         f"/api/operations/{uuid4()}/loop-resume-review",
@@ -363,7 +368,7 @@ def test_resume_review_refuses_a_reservation_admission_would_refuse(
     )
     assert response.status_code == 409
     assert response.json()["error"]["code"] == code
-    if ledger:  # the root's own declaration still reviews without one
+    if root_resources is not None:  # the root's own declaration still reviews without one
         assert api.get(f"/api/operations/{uuid4()}/loop-resume-review").status_code == 200
 
 

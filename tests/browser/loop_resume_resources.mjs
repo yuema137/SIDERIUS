@@ -7,6 +7,9 @@
  * summary shows the echoed reservation, the fieldset is fixed while the review is in flight, an
  * edit after review discards it, and Resume carries exactly the reviewed `resources` with its
  * `review_digest`.
+ * A retained request from before the reservation existed (no `resources`, never admitted) is
+ * dropped after a typed `unknown_operation` probe instead of overriding the newer review, and a
+ * Resume refused before any claim (`resource_refused`) is not retained.
  * A loop whose first run declared resources is reviewed with GET and sends none.
  * Fails if: the fieldset never appears (no `resources_required` handling), the review is a GET
  * without the values, an edited review still enables Resume, or the Resume body
@@ -26,6 +29,8 @@ const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.workflow_e
 let errors = ''; server.stderr.on('data', chunk => {errors += chunk;});
 const undeclared = '33333333-3333-4333-8333-333333333333';
 const declared = '44444444-4444-4444-8444-444444444444';
+const stale = '55555555-5555-4555-8555-555555555555'; // a retained, never-admitted request UUID
+const store = '0123456789abcdef0123456789abcdef';
 const digest = 'c'.repeat(64), bound = (cpus) => String(cpus).repeat(64).slice(0, 64);
 const ready = {required_names: ['OPENAI_API_KEY'], omitted_names: [], unresolved_routes: [], present_names: ['OPENAI_API_KEY'], missing_names: [], file_status: 'readable', ready: true, instructions: []};
 const delay = ms => new Promise(done => setTimeout(done, ms));
@@ -35,7 +40,8 @@ try {
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
   showAllConsoleSections(browser);
-  const page = await browser.newPage(), faults = [], reviews = [], resumes = [];
+  const page = await browser.newPage(), faults = [], reviews = [], resumes = [], probes = [];
+  let refuseNextResume = false;
   page.on('pageerror', error => faults.push(error.message));
   let hold = null; // When set, the next resources review waits for this promise.
   const paused = operation => ({operation_id: operation, kind: 'candidate', request_digest: 'a'.repeat(64), observed_at: 'fixture',
@@ -59,10 +65,12 @@ try {
     if (url.pathname === '/api/loop-resumes') {
       const body = JSON.parse(request.postData());
       resumes.push(body);
+      if (refuseNextResume) { refuseNextResume = false; return route.fulfill({status: 409, json: {error: {code: 'resource_refused', message: "the run's host resources exceed the host budget even when it is idle; lower them, then review again"}}}); }
       return route.fulfill({status: 202, json: {operation_id: body.request_id, kind: 'candidate_loop_resume', request_digest: 'b'.repeat(64), observed_at: 'fixture', observation: 'starting'}});
     }
     assert.equal(request.method(), 'GET', 'unexpected POST ' + url.pathname);
-    if (url.pathname === '/api/choices') return reply({operations_store_id: '0123456789abcdef0123456789abcdef', tasks: [], host_ledger: true});
+    if (url.pathname === `/api/operations/${stale}`) { probes.push(stale); return route.fulfill({status: 404, json: {error: {code: 'unknown_operation', message: 'this operation store has no operation with this ID'}}}); }
+    if (url.pathname === '/api/choices') return reply({operations_store_id: store, tasks: [], host_ledger: true});
     if (url.pathname.endsWith('/setups') && url.pathname.startsWith('/api/tasks/')) return reply({setups: []});
     if (url.pathname === '/api/tasks') return reply({tasks: [{task_id: 'synthetic', label: 'Synthetic task', revision: null}]});
     if (url.pathname === '/api/native-chain/choices' || url.pathname === '/api/recorded-examples') return reply([]);
@@ -84,6 +92,11 @@ try {
   const field = name => page.locator('#loop-resume-resources-' + name);
   await page.locator('#loop-resume-group').waitFor({state: 'visible'});
   assert.ok(await fieldset.isHidden(), 'nothing is asked before the review says it is needed');
+  // A Resume retained by an earlier attempt without host resources (e.g. before this console
+  // shared a ledger), refused before any claim and never admitted.
+  const retainedKey = `siderius.loop-resume.v2/${store}/${undeclared}`;
+  await page.evaluate(([key, value]) => localStorage.setItem(key, JSON.stringify(value)), [retainedKey,
+    {origin: metadata.origin, expected_receipt_digest: digest, request_id: stale}]);
 
   // 1. The plain review is refused; the refusal reveals the fieldset.
   await page.locator('#loop-resume-review').click();
@@ -106,6 +119,9 @@ try {
   assert.deepEqual(reviews.at(-1), {operation: undeclared, method: 'POST', body: {resources: {gpu_count: 0, host_memory_gib: 2, cpu_slots: 2, time_budgeted: false}}});
   release();
   await page.waitForFunction(() => !document.getElementById('loop-resume-resources').disabled);
+  // The stale record differs from the reviewed reservation: probed, proven absent, dropped.
+  assert.deepEqual(probes, [stale]);
+  assert.equal(await page.evaluate(key => localStorage.getItem(key), retainedKey), null, 'the never-admitted record is dropped');
 
   // 4. The review binds those values; a later edit discards it.
   await summary.filter({hasText: 'Host resources: Reserves no GPU, 2 GiB host memory and 2 CPU slots.'}).waitFor();
@@ -117,17 +133,29 @@ try {
   await page.locator('#loop-resume-review').click();
   await summary.filter({hasText: '3 GiB host memory and 2 CPU slots'}).waitFor();
 
-  // 5. Resume sends exactly the reviewed pair and retains it with the request UUID.
+  // 5. A Resume refused before any claim is not retained; the fields unlock for a new review.
+  refuseNextResume = true;
+  await resume.click();
+  await status.filter({hasText: 'Resume was not submitted'}).waitFor();
+  assert.equal(await page.evaluate(key => localStorage.getItem(key), retainedKey), null, 'a pre-claim refusal is not retained');
+  assert.equal(await fieldset.evaluate(el => el.disabled), false, 'the reservation can be edited again');
+  assert.notEqual(resumes[0].request_id, stale);
+  assert.deepEqual(resumes[0].resources, {gpu_count: 0, host_memory_gib: 3, cpu_slots: 2, time_budgeted: false});
+  await page.locator('#loop-resume-review').click();
+  await summary.filter({hasText: '3 GiB host memory and 2 CPU slots'}).waitFor();
+
+  // 6. Resume sends exactly the reviewed pair and retains it with a new request UUID.
   await resume.click();
   await page.waitForFunction(id => location.hash.startsWith('#monitor/') && location.hash !== '#monitor/' + id, undeclared);
-  assert.equal(resumes.length, 1);
-  assert.deepEqual(resumes[0].resources, {gpu_count: 0, host_memory_gib: 3, cpu_slots: 2, time_budgeted: false});
-  assert.equal(resumes[0].expected_review_digest, bound(2));
-  assert.equal(resumes[0].expected_receipt_digest, digest);
-  const kept = await page.evaluate(id => JSON.parse(localStorage.getItem(`siderius.loop-resume.v2/${window.consoleSession.operationsStoreId}/${id}`)), undeclared);
-  assert.deepEqual([kept.request_id, kept.resources, kept.expected_review_digest], [resumes[0].request_id, resumes[0].resources, bound(2)]);
+  assert.equal(resumes.length, 2);
+  assert.deepEqual(resumes[1].resources, {gpu_count: 0, host_memory_gib: 3, cpu_slots: 2, time_budgeted: false});
+  assert.equal(resumes[1].expected_review_digest, bound(2));
+  assert.equal(resumes[1].expected_receipt_digest, digest);
+  assert.ok(![stale, resumes[0].request_id].includes(resumes[1].request_id), 'a dropped request UUID is never reused');
+  const kept = await page.evaluate(key => JSON.parse(localStorage.getItem(key)), retainedKey);
+  assert.deepEqual([kept.request_id, kept.resources, kept.expected_review_digest], [resumes[1].request_id, resumes[1].resources, bound(2)]);
 
-  // 6. A loop whose first run declared resources: GET review, no fieldset, no resources sent.
+  // 7. A loop whose first run declared resources: GET review, no fieldset, no resources sent.
   await page.evaluate(id => { location.hash = 'monitor/' + id; }, declared);
   await page.locator('#loop-state').filter({hasText: 'paused at a completed iteration boundary'}).waitFor();
   await page.locator('#loop-resume-review').click();
@@ -136,10 +164,10 @@ try {
   assert.ok(!(await summary.textContent()).includes('Host resources'));
   await resume.click();
   await page.waitForFunction(id => location.hash.startsWith('#monitor/') && location.hash !== '#monitor/' + id, declared);
-  assert.deepEqual(Object.keys(resumes[1]).sort(), ['expected_receipt_digest', 'predecessor_operation_id', 'request_id']);
+  assert.deepEqual(Object.keys(resumes[2]).sort(), ['expected_receipt_digest', 'predecessor_operation_id', 'request_id']);
   await delay(100);
   assert.deepEqual(faults, []);
-  console.log('PASS: an undeclared loop root reveals the Resume resources fieldset on refusal, reviews them by POST, discards stale reviews, and Resume carries exactly the reviewed reservation; a declared root sends none.');
+  console.log('PASS: a stale never-admitted retained Resume is dropped, a pre-claim refusal is not retained, an undeclared loop root reveals the Resume resources fieldset on refusal, reviews them by POST, discards stale reviews, and Resume carries exactly the reviewed reservation; a declared root sends none.');
 } finally {
   if (browser) await browser.close();
   server.kill('SIGTERM');

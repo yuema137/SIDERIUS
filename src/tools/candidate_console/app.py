@@ -83,6 +83,8 @@ LOOP_RESUME_REFUSALS = {
     "review again without overriding them",
     "host_ledger_missing": "host resources need a host ledger in the console "
     "configuration; review without them",
+    "parallel_budget": "the loop's first run brings its own parallel budget, which a "
+    "host ledger does not accept; resume it from the command line without --host-ledger",
 }
 
 

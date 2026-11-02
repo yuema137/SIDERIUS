@@ -384,8 +384,10 @@ runs the owner review, then the operations owner's
 `loop_resume_resources(root, selection.resources, ledger=self.host is not None)`,
 so the review refuses what admission would: `resources_required` (ledger, root
 without `resources`, none supplied), `run_resources_conflict` (supplied beside
-the root's own declaration, even an equal one) and `host_ledger_missing`
-(supplied without a ledger), each 409 with a route-local fixed message. A
+the root's own declaration, even an equal one; unlike `with_run_resources`, which
+accepts an equal value, see the operations contract "Loop resume" for why),
+`host_ledger_missing` (supplied without a ledger) and `parallel_budget` (a root whose
+request carries `parallel.budget`), each 409 with a route-local fixed message. A
 supplied reservation is echoed as `LoopResumeReview.resources` and bound into
 `review_digest = bound_digest(expected_receipt_digest)`; both are omitted
 without one, so existing reviews keep their bytes. `LoopResumeSelection` carries
@@ -1279,7 +1281,19 @@ is sent. The summary appends "Host resources: " and the `describe` sentence of t
 echoed reservation. Any fieldset edit discards the review ("Host resources changed.
 Review again before resuming."); the fieldset is disabled while a review is pending, so the values sent are the ones shown. The Resume POST sends the
 retained `resources`/`expected_review_digest`; once retained, the fieldset is
-disabled like the advice textarea and is refilled from the record on re-review. On success the monitor selects the resumed
+disabled like the advice textarea and is refilled from the record on re-review.
+A Resume refused with 422, or 409 with a code returned before any operation is
+claimed (`stale_review`, `resources_required`, `run_resources_conflict`,
+`host_ledger_missing`, `host_ledger_required`, `parallel_budget`,
+`parallel_budget_required`, `resource_refused`, `parallel_unit_exceeds_capacity`,
+`placement_unreachable`; an admitted request UUID replays before any of them), drops
+the retained record and unlocks the advice and fieldset. A retained record whose
+`resources` differ from a newer successful review never overrides it silently: the
+client reads `GET /api/operations/<retained request_id>`; only `unknown_operation`
+drops the record (the newer review stands, with a new UUID on Resume). A readable
+operation keeps the record and its values, shown with "A Resume with other host
+resources was already admitted; Resume reconnects to it."; any other error refuses
+the review. On success the monitor selects the resumed
 segment, which reads "Resumed segment." and shows Stop and Pause while active and
 its per-body results once completed. A continued predecessor shows "Continued by
 <UUID>" (a Slow-control link) and no Resume. Witnesses:

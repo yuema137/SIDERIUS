@@ -16,6 +16,13 @@
   let request = null, last = null;
   // The Resume panel's host-resources fieldset (#1385), read and filled by run-scheduling.js.
   const RESOURCES = 'loop-resume-resources';
+  // Typed refusals the console or host admission returns before any operation is claimed
+  // (an admitted request UUID replays before these checks), so a retained request refused
+  // with one can never have started and is dropped, like a 422.
+  const PRE_CLAIM = new Set(['stale_review', 'resources_required', 'run_resources_conflict', 'host_ledger_missing',
+    'host_ledger_required', 'parallel_budget', 'parallel_budget_required', 'resource_refused',
+    'parallel_unit_exceeds_capacity', 'placement_unreachable']);
+  const sameReservation = (kept, review) => JSON.stringify(kept.resources ?? null) === JSON.stringify(review.resources ?? null);
   const counted = (status, verb) => status.outcome?.completed_iterations == null
     ? `${verb}; the iteration count is unavailable.`
     : `${verb} after ${status.outcome.completed_iterations} of ${status.loop.final_iteration} completed iteration${status.loop.final_iteration === 1 ? '' : 's'}.`;
@@ -242,7 +249,20 @@
     try {
       const review = await session().request(`operations/${current.id}/loop-resume-review`, reserved);
       // Prefill: a retained (possibly already sent) request's advice and reservation, else this segment's own advice.
-      const kept = retainedRecord(review, await storeId());
+      const store = await storeId();
+      let kept = retainedRecord(review, store);
+      if (kept && !sameReservation(kept, review)) {
+        // Never adopt another reservation silently. Only a typed absence proves the retained
+        // UUID was never admitted; then it is dropped and this review stands.
+        try {
+          await session().request('operations/' + kept.request_id);
+        } catch (error) {
+          if (error.code !== 'unknown_operation') throw error;
+          localStorage.removeItem(retainedKey(store, review.predecessor_operation_id));
+          kept = null; resume.locked = false;
+        }
+        if (kept) resume.error = 'A Resume with other host resources was already admitted; Resume reconnects to it.';
+      }
       const box = $('loop-resume-advice');
       if (kept) {
         box.value = kept.operator_advice || ''; resume.locked = true;
@@ -274,8 +294,9 @@
       if (current === request) location.hash = 'monitor/' + handle.operation_id;
     } catch (error) {
       if (error.stale) return;
-      if (error.status === 422) {
-        // Refused before admission: nothing was reserved, so the advice may be edited again.
+      if (error.status === 422 || PRE_CLAIM.has(error.code)) {
+        // Refused before admission: nothing was claimed, so the request is not retained and
+        // the advice and host resources may be edited again.
         localStorage.removeItem(retainedKey(store, review.predecessor_operation_id));
         resume.locked = false;
       }

@@ -528,6 +528,21 @@ is the one rule, also called by the console's Resume review:
 | no | any | present | `host_ledger_missing` (it would be ignored) |
 | no | any | absent | serial, unchanged |
 
+Under a ledger a root whose request carries `parallel.budget` refuses
+`parallel_budget` first (the same `_require_ledger_parallel` rule `host_slot` applies
+to every placed run), so the console review refuses it too.
+
+Equal values: the console's candidate path (`candidate_console.service._merged`,
+via `with_run_resources`) accepts a supplied value equal to one the reviewed
+operation already carries and refuses only a different one, under the same
+`run_resources_conflict` code. That merge is idempotent on a single
+`CandidateOperation`, whose stored `resources` field is the one value either way.
+A resume's supplied value instead becomes a separate `CandidateLoopResumeRequest`
+field beside the root's: accepting an equal copy would leave two declarations of
+one reservation (two authorities that could later diverge) and give the same
+resume two request digests. So a resume refuses any supplied value when the root
+declares one.
+
 `CandidateLoopResumeRequest.resources: OperationResources | None` is omitted when
 absent, so existing resume requests keep their bytes and request digest; when
 present it is part of the request digest, so reusing a request ID with other
