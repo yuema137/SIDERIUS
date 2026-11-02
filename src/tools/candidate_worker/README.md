@@ -6,6 +6,11 @@ the synchronous CLI use the same launch boundary. It requires Linux,
 [bubblewrap](../workspace_sandbox/README.md), an installed SIDERIUS environment,
 and an explicitly prepared native proposal seed.
 
+Read a saved node record with its native output model's `model_validate_json`.
+This restores typed non-finite values as well as reading older records. Raw JSON
+includes encoding metadata; details are in the
+[worker contract](candidate-worker-contract.md).
+
 To compare multiple implementations of one proposal, an advanced caller can select
 [the proposal-fanout profile](candidate-worker-contract.md#opt-in-proposal-fanout).
 Each implementation gets its own native files and validation. Prepare the explicit
