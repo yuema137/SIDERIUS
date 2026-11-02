@@ -2037,8 +2037,10 @@ SIGTERM kills real unit groups, a unit that cannot start fails alone, a held
 signal survives an exceptional exit, one failing termination), `test_readiness.py`
 (parallel replay: drain closures accepted, closures the drain cannot produce refused),
 `test_parallel_lock.py`, `test_parallel_causality.py` (direct, route-control and
-fan-in forgeries; 180 dispatcher traces varying failure sets, holds and unit
-counts; forgery tests fail when the causality check is disabled),
+fan-in forgeries and traversal through a skipped route arm; 18 default dispatcher
+representatives, with all 180 failure/hold/unit combinations opt-in; see
+`tests/unit/tools/candidate_worker/parallel-causality-testing.md` for equivalence
+classes and mutation witnesses),
 `tests/unit/agent/test_token_unit.py`.
 
 
