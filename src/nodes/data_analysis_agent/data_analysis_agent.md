@@ -290,8 +290,11 @@ so the capability probe and the fsync'd request publication are charged to the
 allocation; the program timeout (`min(per_skill_timeout_s,
 resource_request.wall_time_s)`, or less when the caller passes the remaining
 allocation) starts at launch, and the program stops at the earlier of the two.
-Termination uses the same `terminate_observed_group` owner, grace and leader
-wait as skill workers. The capability probe has a 10 s ceiling
+Termination uses the same wrapper as skill workers,
+`agent.data_analysis.process_termination.terminate_process_group`, which owns
+the shared poll interval (`SUPERVISION_POLL_S`, 0.02 s), SIGTERM grace
+(`TERMINATION_GRACE_S`, 1.0 s) and leader wait over the core
+`terminate_observed_group` owner. The capability probe has a 10 s ceiling
 (`PROBE_TIMEOUT_S`) and is also bounded by the remaining allocation, both in
 `execute` and in the pre-materialization probe in `execute_resolved_action`. A
 probe cut short by the allocation is a timeout, not missing isolation: the
