@@ -197,7 +197,7 @@
     if (error.code === 'unknown_operation') {
       if (evidence()?.confirming) return 'This console has no record of this run yet. Checking once more before offering Forget…';
       return evidence()?.forgettable
-        ? 'This console still has no record of this run after Retry. Nothing is running for it here: forget it to start another run.'
+        ? 'This console still has no record of this run after sending the request. Nothing is running for it here: forget it to start another run.'
         : 'This console has no record of this run. Retry sends the same launch again; it never starts a second run.';
     }
     if (error.unreachable) return 'Can\'t check: the server is unreachable. Retrying…';

@@ -752,6 +752,7 @@ context for later resolution, role applicability and additional constraints.
 
 _CONDENSED_KEYS = frozenset(
     {
+        "inactive_parameter_rules",
         "exp_id",
         "status",
         "model_type",

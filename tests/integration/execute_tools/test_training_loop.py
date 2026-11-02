@@ -38,6 +38,7 @@ import pytest
 import torch
 from torch.utils.data import DataLoader
 
+from core.training_seeds import SeedContext, TrainingSeedPlan
 from execute_tools.dataset_config import tidmad_topology
 from execute_tools.train_engine_sandbox import TIDMADDataset, run_experiment
 from ml_models.models_format_sandbox import (
@@ -171,7 +172,15 @@ def run_one(model_type, loss_type, h5_source, tmp_path, variant="A"):
     loss_cfg = LossConfig(loss_type=loss_type)
     loader = make_loader(h5_source, model_cfg)
 
-    results = run_experiment(model_cfg, train_cfg, loss_cfg, loader, sandbox_dirs, exp_id)
+    results = run_experiment(
+        model_cfg,
+        train_cfg,
+        loss_cfg,
+        loader,
+        sandbox_dirs,
+        exp_id,
+        seed_plan=TrainingSeedPlan(SeedContext(run_seed=42)),
+    )
     model_path = os.path.join(str(model_dir), f"model_{model_type}_{exp_id}_agent.pth")
     return results, model_path
 

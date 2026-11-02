@@ -146,6 +146,7 @@ def test_actual_cpu_paths_record_completed_epoch_rates(
                 DataLoader(dataset, batch_size=2, drop_last=True),
                 _sandbox(tmp_path, "run"),
                 "run",
+                seed_plan=TrainingSeedPlan(SeedContext(run_seed=42)),
             )
     assert result is not None
     assert interpret_training_results(result, expected_validation=False).history is not None
@@ -269,6 +270,7 @@ def test_scheduled_zero_step_attempt_does_not_publish_history(tmp_path, streamin
                 DataLoader(_Pairs(6), batch_size=8, drop_last=True),
                 dirs,
                 "empty",
+                seed_plan=TrainingSeedPlan(SeedContext(run_seed=42)),
             )
     from pathlib import Path
 

@@ -66,6 +66,8 @@ gpu_execution/<token>/
   inference/checkpoint.json
   inference/measurement.json
   startup/{request,loaded,authorized,consumed}.json
+  training-admission-<receipt-count>.json  # transient sampling only
+  inference-admission-<receipt-count>.json # transient sampling only
   training-terminal.json
   inference-terminal.json
 ```
@@ -73,12 +75,41 @@ gpu_execution/<token>/
 `GpuExecutionReceipt` contains policy, charged intervals, measurement, admission,
 protection and process lifecycle; inference adds the startup receipt. Raw child
 stdout/stderr and watchdog evidence remain available on failure. Existing successful
-or failed experiment emission includes the accumulated typed receipts. An evidence
-failure first persists terminal evidence, then reaches the tuner's existing
-`RuntimeEvidenceChannelError` stop path. If persistence itself fails, the returned
-in-memory receipt reports infrastructure failure and cannot claim a successful
+or failed experiment emission includes the accumulated typed receipts.
+Execution-evidence failures first persist terminal evidence, then reach the tuner's existing
+`RuntimeEvidenceChannelError` stop path. Persistent admission refusal and exhausted
+sampling instead reach `infrastructure_abort` through the shared phase owner.
+If persistence itself fails, the returned in-memory receipt reports infrastructure failure and cannot claim a successful
 write. An existing write-once receipt is never replaced. Cleanup targets only this
 attempt's existing checkpoint/sentinel/result/deliverable paths.
+
+All pre-launch admission refusals return `skipped_resource_admission` to
+`phase_admission.run_admitted_skill`, the single tuner recovery/record owner,
+which consumes core `AdmissionDecision.refusal_kind` classification.
+The evaluator receives `require_evidence=True`: protected trial execution requires
+usable accounting and ownership just as formal execution does, without relabelling
+its mode. Typed query failures and exceptions from `sample()` receive the existing
+`sampler_error` classification. Persistent evidence gaps stop immediately; capacity
+refusals retain the existing resource disposition. No refused phase launches a child.
+
+Each transient refusal writes `<phase>-admission-<receipt-count>.json`, preserving
+its charged segment and measurement before retry. It does not occupy the write-once
+terminal path. On exhaustion the tuner calls `finalize_admission_refusal` to publish
+the last receipt as `<phase>-terminal.json`; on recovery the normal phase result
+owns terminal publication. Direct executor callers receive the sampling receipt
+and must finalize it if they do not retry. Storage failure overrides recovery with
+`aborted_infrastructure`. Other refusal and execution outcomes publish terminal
+receipts immediately. No existing receipt is overwritten.
+
+Re-entry clears only current admission/observer/startup/lifecycle/child-error state.
+It retains the attempt token, measured phase object, bound checkpoint and cumulative
+`MeasurementAllowance`. Every call charges its actual preparation duration.
+`pause_admission_retry` charges backoff as a separate preparation segment, capped
+by the remaining allowance, so waiting cannot renew the absolute deadline.
+Exhausted allowance refuses before
+calling the executor body. Source/checkpoint/input validation runs again on every
+call, and observer creation happens only after fresh admission. Inference retry
+never re-enters training. Admission recovery never retries launched work.
 
 Complete measured capacity refusal retains resource disposition. Unknown admission,
 stale identity, unavailable runtime monitoring, startup failure or cleanup/storage
@@ -102,3 +133,11 @@ source checks, refusals and persistence; they do not qualify actual GPU performa
 telemetry or four-mode onboarding. Full `run_chain` setup review, custom external
 evaluators, hard RSS quotas on scientific work and peak guarantees remain outside
 this interface.
+
+Admission recovery evidence: `tests/unit/core/test_protected_admission_recovery.py`
+drives both native executor entrypoints through the shared tuner owner with
+synthetic accounting and a stubbed child boundary. Its trial/formal × ordinary/isolated
+matrix covers recovery, sampling exceptions, exhaustion, persistent refusal,
+allowance exhaustion and terminal publication failure, retained measurement and
+checkpoint, and durable sampling/terminal receipts. Existing native execution tests
+exercise the real CPU process supervisor and checkpoint startup handshake.

@@ -41,7 +41,7 @@ def test_process_identity_never_trusts_pid_alone(admitted, monkeypatch):
     assert observe(identity).status == "unknown"
 
 
-def test_native_exception_is_unknown_and_keeps_slot(admitted, monkeypatch):
+def test_native_exception_is_unknown_and_keeps_slot(admitted, monkeypatch, caplog):
     """Even an exception after a mock dispatch may mean paid work already occurred."""
     config, submission, record = admitted
     record = record.model_copy(update={"runtime": runtime_identity()})
@@ -57,6 +57,7 @@ def test_native_exception_is_unknown_and_keeps_slot(admitted, monkeypatch):
         importlib.import_module("tools.candidate_operations.child"), "prepare_candidate", dispatched
     )
     assert execute(path) == 1
+    assert "secret must not appear in completion" in caplog.text
     assert read_operation(config, submission.request_id).state == "unknown"
     assert not releasable(config, submission.request_id)
     assert submit_operation(config, submission, launch_environment={}).observation == "existing"
@@ -143,3 +144,57 @@ def test_spawn_failure_and_pre_spawn_crash_are_distinct(admitted, monkeypatch):
     assert (
         submit_operation(config, next_submission, launch_environment={}).observation == "existing"
     )
+
+
+@pytest.mark.parametrize("members", [0, 1, None])
+def test_dead_nonloop_prepare_recovery_uses_session_owner(admitted, monkeypatch, members):
+    """A dead wrapper releases admission only after all writer sessions ended."""
+    from tools.candidate_operations import process
+    from tools.candidate_operations.store import require_available
+
+    config, submission, record = admitted
+    with locked_store(config) as root:
+        path = claim(root, record)
+    identity = current_identity(record)
+    publish(path / "process.json", identity)
+    monkeypatch.setattr(process, "_stat", lambda pid: ("Z", identity.start_ticks))
+    monkeypatch.setattr(
+        "tools.candidate_operations.host_liveness.session_members", lambda pid: members
+    )
+    snapshot = read_operation(config, submission.request_id)
+    assert snapshot.reason == (
+        "operation_process_exited" if members == 0 else "operation_process_exiting"
+    )
+    assert releasable(config, submission.request_id) == (members == 0)
+    with locked_store(config) as root:
+        if members == 0:
+            require_available(root, lambda op: releasable(config, op))
+            assert not (root / "active.json").exists()
+        else:
+            with pytest.raises(OperationFailure) as caught:
+                require_available(root, lambda op: releasable(config, op))
+            assert caught.value.detail.blocking_operation_id == submission.request_id
+
+
+def test_dead_prepare_completion_still_prevents_release(admitted, monkeypatch):
+    """A recorded unresolved outcome outranks observed death; never invent success."""
+    from tools.candidate_operations import process
+
+    config, submission, record = admitted
+    with locked_store(config) as root:
+        path = claim(root, record)
+    identity = current_identity(record)
+    publish(path / "process.json", identity)
+    publish(
+        path / "completion.json",
+        Completion(
+            operation_id=submission.request_id,
+            request_digest=record.request_digest,
+            outcome="unknown",
+            reason="native_outcome_unresolved",
+        ),
+    )
+    monkeypatch.setattr(process, "_stat", lambda pid: ("Z", identity.start_ticks))
+    monkeypatch.setattr("tools.candidate_operations.host_liveness.session_members", lambda pid: 0)
+    assert read_operation(config, submission.request_id).reason == "native_outcome_unresolved"
+    assert not releasable(config, submission.request_id)

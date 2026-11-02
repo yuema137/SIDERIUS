@@ -12,6 +12,7 @@
   let ids = null, tasksRevision = null, nameTouched = false, problem = '';
   // Bytes of the intent this page created; only that one auto-opens when prepared.
   let createdHere = null, openedFor = null;
+  let refusal = '', retried = false;
   function option(value, text) {
     const el = document.createElement('option');
     el.value = value;
@@ -100,6 +101,7 @@
     const id = intent.payload.selection.preparation_operation_id;
     $('operation-id').textContent = id;
     $('monitor').href = '#monitor/' + id;
+    $('monitor').textContent = 'Watch in Monitor';
     $('task').value = intent.payload.selection.task_id;
     $('name').value = intent.payload.selection.run_name;
     $('operation-status').textContent = 'Checking this preparation…';
@@ -111,6 +113,7 @@
         intent = stored;
         operation = null;
         problem = '';
+        refusal = ''; retried = false;
         retained();
         if (!intent) suggestName();
         if (intent) void check();
@@ -125,23 +128,26 @@
     if (value.state === 'starting' || value.state === 'active' || value.finishing) return 'Preparing… This usually takes under a minute.';
     // B8-2: the store reports `unknown` until the worker records its identity or outcome;
     // that is not a finished preparation and never reads as a failure.
+    if (value.state === 'unknown' && value.preparation_error) return value.preparation_error;
     if (value.state === 'unknown' && !value.receipt_available) {
       return value.process?.reason === 'missing_identity' ? 'Preparing… This usually takes under a minute.' : 'Checking status…';
     }
+    if (value.state === 'operation_failed' && value.preparation_error) return `${window.operationOutcome.sentence(value)} Start over to try again.`;
     if (value.state === 'operation_failed') return value.reason === 'spawn_failed'
       ? 'Preparation did not start: the worker could not be launched. Start over to try again.'
       : 'Preparation failed before reporting a result. Its evidence is kept in Monitor; start over to try again.' + causeLine(value);
     if (prepared()) return 'Prepared. Review and launch it in step 2.';
-    // #1145: the native error is in the preparation's worker log, not in the status.
+    if (value.preparation_error) return `${window.operationOutcome.sentence(value)} Details and logs are in Monitor. Start over to try again.`;
+    // Older observations may provide only the native log cause.
     return `${window.operationOutcome.sentence(value)} Its log is inputs/preparation/worker.log in this run's folder (Monitor shows it under Activity and logs, log source Native). Start over to try again.` + causeLine(value);
   }
   // L-2 for preparations (#1145): one cause line, read once from the end of its logs.
   let causeFor = null, causeText = '';
-  const causeLine = value => causeFor === value.operation_id && causeText ? ` Cause (from the log): ${causeText}` : '';
+  const causeLine = value => !value.preparation_error && causeFor === value.operation_id && causeText ? ` Cause (from the log): ${causeText}` : '';
   async function showCause(id) {
     causeFor = id; causeText = '';
     const found = await window.operationOutcome.readCause(session.request, id);
-    if (found && intent?.payload.selection.preparation_operation_id === id && causeFor === id) {
+    if (found && !operation?.preparation_error && intent?.payload.selection.preparation_operation_id === id && causeFor === id) {
       causeText = found;
       $('operation-status').textContent += ` Cause (from the log): ${found}`;
     }
@@ -149,10 +155,13 @@
   function display(value, exact) {
     if (!coordinator.observe('preparation', exact, value)) return;
     operation = value;
+    refusal = '';
+    $('monitor').href = '#monitor/' + value.operation_id;
+    $('monitor').textContent = 'Watch in Monitor';
     problem = '';
     $('operation-status').textContent = describe(value);
     controls();
-    if (window.operationOutcome.failed(value) && window.operationOutcome.terminal(value) && causeFor !== value.operation_id) void showCause(value.operation_id);
+    if (!value.preparation_error && window.operationOutcome.failed(value) && window.operationOutcome.terminal(value) && causeFor !== value.operation_id) void showCause(value.operation_id);
     if (prepared() && createdHere === JSON.stringify(exact) && openedFor !== createdHere) {
       openedFor = createdHere;
       $('open').click();
@@ -160,9 +169,10 @@
   }
   function unresolvedMessage(error) {
     if (error.code === 'unknown_operation') {
+      if (refusal) return refusal;
       if (evidence()?.confirming) return 'This console has no record of this preparation yet. Checking once more before offering Forget…';
       return evidence()?.forgettable
-        ? 'This console still has no record of this preparation after Retry. Nothing is running for it here: forget it to start over.'
+        ? `This console still has no record of this preparation${retried ? ' after Retry' : ''}. Nothing is running for it here: forget it to start over.`
         : 'This console has no record of this preparation. Retry sends the same request again; it never creates a second one.';
     }
     if (error.unreachable) return 'Can\'t check: the server is unreachable. Retrying…';
@@ -171,6 +181,10 @@
   async function dispatch(initial = false) {
     if (!session.connected || busy || !intent || !coordinator.same('preparation', intent)) return;
     const exact = intent;
+    if (!initial) retried = true;
+    refusal = '';
+    $('monitor').href = '#monitor/' + exact.payload.selection.preparation_operation_id;
+    $('monitor').textContent = 'Watch in Monitor';
     busy = true;
     controls();
     try {
@@ -183,7 +197,16 @@
         const refused = initial === true && error.value?.error?.admission_not_attempted === true;
         coordinator.observe('preparation', exact, null, refused);
         problem = refused ? 'refused' : 'unresolved';
-        $('operation-status').textContent = error.message + (refused
+        const blocker = error.value?.error?.blocking_operation_id;
+        if (error.status && error.code) {
+          refusal = `${refused ? 'Prepare refused' : 'Prepare response; outcome unconfirmed'} (${error.status}, ${error.code}): ${error.message}`;
+          if (typeof blocker === 'string' && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(blocker)) {
+            refusal += ` Blocking operation: ${blocker}. Open it in Monitor.`;
+            $('monitor').href = '#monitor/' + blocker;
+            $('monitor').textContent = 'Blocking operation ' + blocker;
+          }
+        }
+        $('operation-status').textContent = (refusal || error.message) + (refused
           ? ' Nothing was started (the request did not attempt admission). Start over and check the inputs again.'
           : ' The outcome is unconfirmed; this page keeps checking. Retry sends the same request.');
       }
@@ -326,6 +349,7 @@
     try { coordinator.save('preparation', exact); }
     catch (_) { status('Prepare not sent: this browser could not keep the request, or another run of this experiment setup is unresolved.'); return; }
     intent = exact;
+    refusal = ''; retried = false;
     createdHere = JSON.stringify(exact);
     operation = null;
     problem = '';

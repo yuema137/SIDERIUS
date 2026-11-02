@@ -1424,3 +1424,27 @@ is introduced; the console's Pause/Resume controls only call these functions.
 Offline tests separate operation and worker processes, exercise real native
 body/evidence construction with provider/training doubles, and cover required
 lifecycle/admission refusals; they are not paper qualification.
+
+### Non-loop abandonment and busy diagnostics
+
+For `prepare`, `prepare_reusable`, and non-loop `candidate`, `_read_record` applies
+the same no-completion/no-native-receipt recovery as authored loops. Verified
+wrapper exit plus `loop_recovery.sessions_ended` (delegating to
+`host_liveness.reservation_evidence`) projects `operation_failed` with
+`operation_process_exited`. Live or unobservable sessions instead project `unknown`
+with `operation_process_exiting`. `releasable` independently rechecks the same
+session evidence before admission releases the claim. No second liveness rule,
+new receipt, redispatch, namespace assumption, or scientific result is introduced.
+Existing completion records, including unresolved outcomes, retain precedence.
+Native-chain continuations keep their existing recovery owner.
+
+`require_available` attaches `OperationError.blocking_operation_id` to its `busy`
+refusal. This optional UUID names the actual scanned blocking claim, including a
+claim created before `active.json` publication; consumers need not parse exception
+text or guess from an active pointer. Other errors omit the field.
+
+A non-canonical operation directory is an `integrity` refusal whose diagnostic
+names the directory exactly as found; it does not attach a normalized UUID that
+would link to a different path. Cancel uses `terminal` for both loop and non-loop
+verified dead operations (`operation_failed`); unresolved writer sessions remain
+`not_running`. Neither case records a cancellation intent.

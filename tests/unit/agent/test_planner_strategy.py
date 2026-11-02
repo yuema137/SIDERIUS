@@ -198,11 +198,13 @@ def test_conditional_provider_system_text_reaches_final_request(monkeypatch):
 # the bound parallel unit (agent.token_unit). Serial rows are byte-identical, but
 # the bridge source is part of the planner assembly, so workspace resume across
 # this change is refused (previous assembly 7bc6513b...).
+# #1039 intentionally retains inactive loss-rule receipts in condensed history.
+# Existing workspaces retain their historical revision; identity mismatch still refuses resume.
 NATIVE_PLANNER_IDENTITY_PIN = {
     "name": "native-timing-v1",
     "version": "1",
-    "content_sha256": "73b7df9cad19e398695f057ef322e3ad01d07e1d3e0a6c0f85e918d06594c562",
-    "assembly_sha256": "535247aae36ff96838bf652f16e4e422c12013acb7fec365b0db3d2c3eb75d55",
+    "content_sha256": "0d84acbf792837001ae4dd2e991da75dbdba0dbdd4a1a324b2856a012ab23b17",
+    "assembly_sha256": "861ff718e9add6b268a0fe454e3e9f19bdbfc17503dab96683293d1bcb905da0",
 }
 
 

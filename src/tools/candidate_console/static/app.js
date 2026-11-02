@@ -235,9 +235,9 @@
       if (logText.length > 262144) logText = '[Earlier displayed text omitted]\n' + logText.slice(-262144);
       say('log', logText);
       // L-2: a failed run names its cause in one line, taken from the log shown below.
-      const failure = window.operationOutcome.failed(lastStatus) ? window.operationOutcome.cause(logText) : null;
+      const failure = lastStatus?.preparation_error || (window.operationOutcome.failed(lastStatus) ? window.operationOutcome.cause(logText) : null);
       $('monitor-cause').hidden = !failure;
-      say('monitor-cause', failure ? 'Cause (from the log): ' + failure : '');
+      say('monitor-cause', failure ? (lastStatus?.preparation_error ? 'Cause: ' : 'Cause (from the log): ') + failure : '');
       say('log-status', chunk.missing ? 'Log not available yet.' : `Log observed: ${chunk.observed_size} source bytes · Next byte offset: ${cursor}`);
       // One full read after a terminal state, then no further polling of this operation.
       if (terminal && epoch === monitorEpoch && (chunk.missing || cursor >= chunk.observed_size)) settled = id;

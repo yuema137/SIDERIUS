@@ -59,9 +59,10 @@ most one second before each later retry. If enforced admission
 keeps refusing because sampling fails or environment evidence or policy is missing,
 tuning stops so you can repair the environment. An inference sampling retry keeps the
 already trained model. See the [tuner contract](../../nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md)
-for classification and accounting. The separately selected protected native GPU
-execution path still stops on these failures; [issue #1280](https://github.com/Galileo-Sandbox/SIDERIUS/issues/1280)
-tracks recovery for that path.
+for classification and accounting. This also applies when you select protected
+native GPU execution: retries keep the measured phase and remaining preparation
+allowance. Only refused admission is retried; launched training or inference is
+never repeated by this recovery step.
 
 The measured demand is an empirical estimate, not a bound on every later input.
 This check does not add runtime GPU monitoring or supply missing trial/inference
@@ -427,6 +428,11 @@ Inspect `gpu_execution/<attempt-token>/training-terminal.json` and
 `inference-terminal.json` inside the executor's run directory. Measurement details
 are in the corresponding `training/measurement.json` and `inference/measurement.json`.
 Completed experiment records also carry the attempt's typed `gpu_execution` evidence.
+
+Temporary pre-launch sampling failures produce numbered `training-admission-*.json`
+or `inference-admission-*.json` receipts. The terminal file is written when that
+phase finishes or the tuner exhausts its sampling retries.
+
 A missing measurement, changed source/checkpoint, unavailable monitoring or failed
 cleanup stops the run as an infrastructure error. It is not evidence that the model
 should be smaller. A complete capacity refusal retains its resource refusal status.
