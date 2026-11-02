@@ -45,7 +45,7 @@ from execute_tools.health_checks.schemas import (
     GateAction,
     GateResult,
 )
-from execute_tools.metric_order import MetricOrder
+from execute_tools.metric_order import MetricOrder, finite_score
 
 
 class RoundDecision(StrEnum):
@@ -501,6 +501,10 @@ def _build_reflection_context(
     Returns:
         The reflector context dict — exactly the 23 keys WF-2 pins.
     """
+    # A non-finite current score has no rank, is never a new best and is never
+    # "more efficient": it is treated exactly as the null it used to arrive as.
+    if not finite_score(current_score):
+        current_score = None
     successful: list[dict] = [
         r
         for r in memory_history

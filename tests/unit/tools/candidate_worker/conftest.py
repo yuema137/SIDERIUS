@@ -162,7 +162,8 @@ def _prepare_request(
         selected_constructor_routes=observed.selected_constructor_routes,
         storage_policy="managed_fresh",
         run_name="candidate",
-        timeout_seconds=60.0,
+        # Includes durable fixture I/O on slow scratch; expiry has dedicated tests.
+        timeout_seconds=600.0,
         network=False,
         devices=(),
         read_only=(str(project), str(REPO)),

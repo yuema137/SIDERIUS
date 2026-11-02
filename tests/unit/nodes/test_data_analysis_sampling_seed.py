@@ -64,7 +64,12 @@ def _with_envelope(tmp_path: Path, seed: int | None):
     analysis_input = _input(tmp_path)
     policy = {} if seed is None else {"sampling_policy": {"seed": seed}}
     envelope = AnalysisResourceEnvelope.model_validate(
-        {"wall_time_budget_s": 15, "per_skill_timeout_s": 5, "preferred_device": "cpu", **policy}
+        {
+            "wall_time_budget_s": analysis_input.resource_envelope.wall_time_budget_s,
+            "per_skill_timeout_s": analysis_input.resource_envelope.per_skill_timeout_s,
+            "preferred_device": "cpu",
+            **policy,
+        }
     )
     return analysis_input.model_copy(update={"resource_envelope": envelope})
 

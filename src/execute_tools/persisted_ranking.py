@@ -43,7 +43,7 @@ from execute_tools.evaluation_metric import (
     metric_identity_unavailable_notice,
     reconcile_metric_identity,
 )
-from execute_tools.metric_order import MetricOrder
+from execute_tools.metric_order import MetricOrder, finite_score
 
 
 def partition_by_metric_identity(
@@ -128,7 +128,9 @@ def best_by_declared_metric(
         elif rankable or unranked:
             _notify(metric_identity_unavailable_notice(f"the {context} best record"))
         return None
-    return order.best(rankable, key=lambda record: record[score_key])
+    # NaN/±inf (and a null) are evidence, never the best record (#1316).
+    scored = [record for record in rankable if finite_score(record.get(score_key))]
+    return order.best(scored, key=lambda record: record[score_key]) if scored else None
 
 
 def _notify(message: str) -> None:
