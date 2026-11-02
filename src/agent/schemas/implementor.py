@@ -30,6 +30,7 @@ from agent.schemas.task_config import ForwardContract
 from core.capability_registry import CapabilityContractSnapshot, CapabilityMetadata
 from core.generated_artifact_name import validate_generated_artifact_name
 from core.hardware_context import HardwareContext
+from core.record_encoding import RecordModel
 
 # Fields the implementor is NEVER allowed to adjust. These are owned by the
 # proposer (dataset-level, global, knowable at proposal time). A violation
@@ -476,7 +477,7 @@ class ImplementorInput(BaseModel):
         return self
 
 
-class ImplementorOutput(BaseModel):
+class ImplementorOutput(RecordModel):
     """
     Output of ml_model_implementor.
 

@@ -10,12 +10,11 @@ import {spawn} from 'node:child_process';
 import {createRequire} from 'node:module';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[name], `Set ${name}`);
 const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.workflow_editor_server'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
 let errors = ''; server.stderr.on('data', chunk => {errors += chunk;});
-const lines = createInterface({input: server.stdout});
 let browser;
 
 const POLICY = {preparation_timeout_seconds: 300, candidate_timeout_seconds: 3600, candidate_network: true,
@@ -51,11 +50,7 @@ const view = (task, state, extra = {}) => ({schema_version: 'siderius.console-ta
   package: null, failure: null, unavailable: null, ...extra});
 
 try {
-  const metadata = await new Promise((accept, reject) => {
-    const timer = setTimeout(() => reject(new Error('Server startup timeout')), 15000);
-    lines.once('line', line => {clearTimeout(timer); accept(JSON.parse(line));});
-    server.once('exit', code => {clearTimeout(timer); reject(new Error(`Server ${code}: ${errors}`));});
-  });
+  const metadata = await waitForMetadata(server, {timeoutMs: 15000});
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
   const context = await browser.newContext({viewport: {width: 1280, height: 900}});
@@ -72,7 +67,7 @@ try {
     }
     const id = decodeURIComponent(url.pathname.split('/')[3]), task = TASKS.find(item => item.task_id === id);
     summaries.push(url.pathname + url.search);
-    if (id === 'broken') return route.fulfill({json: view(task, 'failed', {failure: {stage: 'composition', message: 'ImportError: cannot import name "PetsTaskDataPath" from plugins/pets_task.py'}})});
+    if (id === 'broken') return route.fulfill({json: view(task, 'failed', {failure: {stage: 'composition', message: 'Unexpected error while reading task summary facts.'}})});
     if (id === 'quickstart') {
       if (sandbox === 'missing') return route.fulfill({json: view(task, 'unavailable', {data_volume: null, unavailable: {reason: 'sandbox_missing', hint: 'Install bubblewrap (bwrap) and enable user namespaces, then Refresh.'}})});
       return route.fulfill({json: view(task, 'ready', {package: {...PACKAGE, identity: {...PACKAGE.identity, task_revision: null, revision_matches: null},
@@ -183,7 +178,7 @@ try {
   // Failed and unavailable states name their stage, message and hint.
   await page.locator('.task-item[data-task-id="broken"]').click();
   await page.locator('#task-summary-state[data-state="failed"]').waitFor();
-  assert.match(await text('#task-summary-state'), /stage: composition.*cannot import name.*Refresh/s);
+  assert.match(await text('#task-summary-state'), /stage: composition.*Unexpected error while reading task summary facts.*Refresh/s);
   await page.screenshot({path: '/tmp/task-panel-failed.png', fullPage: true});
   await page.locator('.task-item[data-task-id="quickstart"]').click();
   await page.locator('#task-summary-state[data-state="unavailable"]').waitFor();

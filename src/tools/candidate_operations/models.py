@@ -240,6 +240,8 @@ class ProcessIdentity(PreviewModel):
     boot_id: str
     pid: int = Field(gt=0)
     start_ticks: int = Field(ge=0)
+    # None preserves legacy observation; 0 records an unobservable namespace.
+    pid_namespace_inode: int | None = Field(default=None, ge=0)
 
 
 class ProcessObservation(PreviewModel):

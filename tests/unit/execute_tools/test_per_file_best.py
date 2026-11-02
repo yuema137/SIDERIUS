@@ -881,56 +881,16 @@ class TestTheHeaderNamesTheRunsOwnMetric:
 
 
 class TestTheProducerSerializationBoundary:
-    """The bytes production writes, read by the consumer that must read them.
-
-    The fixture above writes `output.model_dump_json()`. Production
-    (`nodes/ml_hyperparameter_tune_agent/records.py`, `finalize_run_output`)
-    writes `publish_json_atomically(output_path,
-    coerce_nonfinite_to_none(output.model_dump()), indent=4)` — the
-    `json.dump(..., indent=4)` bytes, published atomically since S2 / U5 —
-    and its own comment says why it coerces: `model_dump_json` emits
-    non-standard `-Infinity` tokens that break the dashboard's `JSON.parse`.
-
-    So the whole `-inf` no-signal path through `build_table` and the
-    `run_output_sha256` byte check has only ever been exercised against a
-    shape production never produces. Field drift was already caught -- the
-    fixture routes through `HyperparamTuningOutput`, and
-    `test_producer_to_artifact_transport.py` covers field reachability. The
-    SERIALIZATION FORM was not.
-
-    Scope, stated because it bounds the claim: driving `finalize_run_output`
-    end to end needs a full `RunBindings` and `RunExitSnapshot`, which is out
-    of proportion for a serialization contract. Instead the behavioural half
-    calls the REAL `coerce_nonfinite_to_none` and writes with the same
-    `json.dump` call production uses, and `test_production_writes_through_the_coercion`
-    binds that to production so the two cannot drift apart silently. Without
-    that second test this file would be asserting its own conventions again,
-    which is the defect it exists to fix.
-    """
+    """Exercise the actual native writer and its per-file consumer together."""
 
     @staticmethod
     def _write_as_production_does(path: str, output: HyperparamTuningOutput) -> None:
-        from core.durable_io import publish_json_atomically
-        from execute_tools.scoring_utils import coerce_nonfinite_to_none
+        from nodes.ml_hyperparameter_tune_agent.records import publish_run_output
 
-        publish_json_atomically(path, coerce_nonfinite_to_none(output.model_dump()), indent=4)
+        publish_run_output(path, output)
 
-    def test_production_writes_through_the_coercion(self):
-        """Reachability. If `records.py` stops coercing, coerces AFTER
-        serialising, or goes back to a truncating `open(path, "w")` write,
-        the round-trip below stops describing production."""
-        src = (REPO_ROOT / "src/nodes" / "ml_hyperparameter_tune_agent" / "records.py").read_text(
-            encoding="utf-8"
-        )
-        assert "coerce_nonfinite_to_none(agent_output.model_dump())" in src
-        assert "publish_json_atomically(output_path, safe_output, indent=4)" in src
-        assert "json.dump(safe_output" not in src
-        assert "f.write(agent_output.model_dump_json())" not in src
-
-    def test_a_no_signal_score_survives_as_null_not_as_a_nonstandard_token(self, tmp_path):
-        """`-inf` is the no-signal sentinel. It must reach disk as JSON `null`:
-        `-Infinity` is not RFC 8259 and the dashboard's `JSON.parse` rejects
-        it, which is a broken dashboard rather than a failed test."""
+    def test_a_no_signal_score_survives_as_a_typed_value_not_a_nonstandard_token(self, tmp_path):
+        """Strict JSON retains the no-signal float for its typed reader."""
         output = HyperparamTuningOutput(
             run_name="ser",
             model_type="punet",
@@ -947,8 +907,6 @@ class TestTheProducerSerializationBoundary:
         self._write_as_production_does(path, output)
 
         text = Path(path).read_text(encoding="utf-8")
-        for token in ("-Infinity", "Infinity", "NaN"):
-            assert token not in text, f"{token!r} reached disk; JSON.parse will reject it"
 
         # A strict RFC parser, not Python's permissive default -- which
         # accepts `-Infinity` and would hide the whole defect.
@@ -956,7 +914,10 @@ class TestTheProducerSerializationBoundary:
             raise AssertionError(f"non-standard JSON constant on disk: {value}")
 
         reloaded = json.loads(text, parse_constant=_refuse)
-        assert reloaded["best_valid_formal_denoising_score"] is None
+        assert reloaded["best_valid_formal_denoising_score"] == "-Infinity"
+        assert HyperparamTuningOutput.model_validate_json(
+            text
+        ).best_valid_formal_denoising_score == float("-inf")
 
     def test_the_consumer_reads_the_producers_bytes(self, tmp_path):
         """The join. `build_table` must treat the coerced `null` as no signal,

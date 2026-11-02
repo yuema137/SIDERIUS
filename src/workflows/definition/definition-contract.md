@@ -636,3 +636,22 @@ declaration identity. Settings participate in external-binding identity and cann
 be changed by a task-reference-only update. See the
 [preparation contract](../../tools/candidate_prepare/candidate-prepare-contract.md#reusable-native-literature-candidate)
 for the exact controls, child-composition trust boundary and resource restrictions.
+
+## Targeted document updates
+
+`source_updates.update_workflow_source(source, document, browser_numbers=False)`
+patches an existing restricted declaration and re-parses the result. It shares
+UTF-8 spans/import insertion with `source_edits` and literal rendering with
+`source.py`. Unchanged literal spans retain exact bytes; collection members are
+matched by declaration identity where available, otherwise by position. Changed
+containers can change surrounding formatting, but retained values are recursive.
+`browser_numbers=True` preserves source numbers whose binary64 projections are
+equal, avoiding JSON float/int, signed-zero and large-integer losses. Exact source
+proposals are required for distinctions the browser cannot represent. Canonical
+rendering remains the owner for new documents and declaration identity.
+`restore_browser_values(source, value)` performs the same numeric comparison over
+JSON-shaped data before typed model admission; it restores overflowed integers
+from null as well as rounded integers and floats. Authoring models own invoking
+it with bounded source and revalidating its result through the native schema.
+Already-canonical inputs remain canonical after patching, using retained source
+values and the existing renderer; new generation and identity rules are unchanged.

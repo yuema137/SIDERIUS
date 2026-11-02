@@ -9,9 +9,11 @@ canonical identity). The existing task composer delegates to these owners.
 
 `evaluation:` is optional. Absence preserves previous semantic fingerprint inputs,
 source metric behavior and prompt bytes. Presence permits composition and inspection,
-but launch currently refuses: `evaluation rendering` is not implemented until
-#1293. Formula aggregation (#1294), feasibility (#1295), measurements (#1296) and
-rubric execution (#1297) have independent capability gates. Composition never
+and primary-only metric declarations can launch with evaluation rendering.
+Weighted-sum formula aggregation (#1294) launches on the supported native route
+described in [Deterministic selection runtime](#deterministic-selection-runtime).
+Feasibility (#1295), measurements (#1296) and rubric execution (#1297) still have
+independent, currently closed capability gates. Composition never
 executes arithmetic, measurements or an LLM. A declaration is not runtime support.
 
 `RunTaskComposition.evaluation` is `ResolvedEvaluation | None`. Its `spec` is the
@@ -28,8 +30,18 @@ Unknown plugin capability names fail closed through the same table.
 All declarations are frozen, strict Pydantic models with `extra="forbid"`.
 YAML lists become tuples only at declared sequence fields. Numbers are finite,
 not strings or booleans; means, ranges and units are never inferred from names.
+Author prose is bounded: component `meaning` and rubric-balance `guidance` have
+at most 1000 characters, matching the existing rubric criterion-description cap;
+metric `units` has at most 128 characters, enough for compound unit labels rather
+than another narrative field. An evaluation has at most 32 components and 64
+constraints: a bounded decision inventory with room for two bounds per component.
+These are declaration API limits, not scientific thresholds or a total token
+budget for plugin-rendered content. Composition errors retain the field name,
+and invalid declarations are refused before component loaders run.
 New fields must have defaults, and default values must be omitted from canonical
 identity (`exclude_defaults=True`). Explicit default and omitted default are equal.
+The size bounds add validation metadata only: no field, default, or serialization
+value changes. Existing valid declarations retain their evaluation identities.
 
 `EvaluationSpec` fields:
 
@@ -123,7 +135,10 @@ declaration; it cannot remove core fields. Absolute host paths in contributor
 values/keys refuse. File references pin captured contents and existing code_package
 member identity, with paths resolved relative to the manifest. Declare helpers in
 code_package; a registry hit alone is not content proof. `render(component,
-ComponentRenderContext)` is a pure hook for #1293, unused by prompts in E1.
+ComponentRenderContext)` is the pure full-string hook used by the shared
+evaluation prompt renderer. It must disclose meaning and applicable metadata.
+The context supplies MetricOrder direction words and, for builtin rubric
+components, the resolved RubricSpec. Plugins own their extra units/ranges/limits.
 Registry `required_capabilities` join selection/constraint capabilities and the
 mandatory rendering capability; only framework runtime owners enable table entries.
 
@@ -157,8 +172,11 @@ adaptors must refuse launch under formula selection unless re-declared against
 effective utility or a named raw component. Never silently compare those existing
 thresholds to utility. Feasibility thresholds name raw components.
 
-#1293 wires one `evaluation.spec` renderer; historical exp profiles require an
-explicit empty override and offline qualification. #1295 owns feasibility at all
+The `evaluation.spec` renderer is gated outside its decorated boundary on
+absence: historical profiles on absent-evaluation tasks never meet the new
+boundary and need no override. Present evaluation requires an explicit override
+or native declaration in an active profile. Changed assembly hashes still require
+normal offline qualification. #1295 owns feasibility at all
 selection sites; #1296 supplies measurement schema/execution; #1297 owns candidate
 result projection and versioned replayable judge calls. Existing metric-scored
 adaptor restrictions remain until deliberately amended by their owner.
@@ -175,6 +193,77 @@ inspection, plugin identity/isolation/relocation, defaulted schema extension and
 rubric digest resolution. Full affected package suites and the separately recorded
 baseline comparison establish integration evidence; declarations alone do not
 establish runtime evaluation support.
+
+## Evaluation prompt rendering
+
+`agent/evaluation_context.py` constructs typed, copyable declaration snapshots
+from the composed evaluation, source primary MetricSpec and judge declarations.
+`bind_run_task_composition` binds them through its existing ExitStack; nested,
+exceptional and concurrent scopes restore their own context. The composition
+verification guard rejects a missing or mismatched evaluation binding. No manifest
+reload, model execution, measurement or judgment occurs during rendering.
+
+`agent/prompt_templates/evaluation.py:render_evaluation_spec` is the sole
+`evaluation.spec` boundary. It dispatches components through the composition's
+registry hooks. It emits `[TASK EVALUATION]`, interpretation rules, Components,
+Selection, Constraints, then any inspection warnings, in declaration order,
+and closes with `[END TASK EVALUATION]`. Builtin authored text normalizes CR,
+CRLF and Unicode line/paragraph separators to LF before continuation indentation;
+authored lines cannot acquire the unindented layout of framework section labels.
+Plugin hooks own their field formatting and can reuse `indent_text`. These text
+delimiters distinguish declaration prose from surrounding framework text; they
+do not make instruction-like author content trusted executable policy.
+Metric descriptions include meanings, units, MetricOrder direction words and
+optional descriptive ranges. Rubrics include resolved identity, integer scale
+and weighted criteria; they never receive a quantitative direction or unit.
+Formula descriptions include weights, exact relative weights, explicit term
+bounds, refuse/clip policy, symbolic utility and the existing inspection owner's
+signed marginal rates. Rubric balancing always includes deterministic_ranking.
+No result is scored or constraint enforced by this text.
+
+For example, weights 3 and 1 on a higher-preferring accuracy term bounded [0,1]
+and a lower-preferring error term bounded [0,10] produce the declared utility
+`(3*u_accuracy + 1*u_error)/4`. Marginal rates within bounds are 3/4 per accuracy
+unit and -1/40 per error unit. A component's descriptive [0,100] error range does
+not change the term's bounds. Clipping has zero marginal rate outside bounds;
+refusal yields no utility there. Constraints retain raw values and exact authored
+operators. Metric constraint lines repeat declared units (or say units are not
+declared); custom-kind constraint lines refer to the component declaration, whose
+hook owns unit semantics. No unit is inferred from arbitrary plugin attributes.
+
+`append_constraint_disclosure` appends evaluation through one shared path after
+execution constraints. It invokes no new boundary for an absent evaluation and
+adds no bytes. A present spec invokes the boundary even if a profile suppresses
+execution-constraint disclosure. Existing consumers include proposer legacy and
+pipeline stages/retries, interpreter primary/dedup/analysis brief, tuner planner
+and reflector, implementor model/loss/repair, validator review, literature search
+and synthesis, and data-analysis structured output/repair. Proposer metric context
+points to the shared user-message block rather than duplicating it and applies
+prediction direction rules to the named prediction metric. Under active evaluation
+the interpreter labels its legacy score field as a recorded score; serialized keys
+remain unchanged. Literature extraction preserves published source facts and
+receives no task-evaluation block. Existing judge versions remain unchanged;
+#1297 must explicitly use this renderer in new versions.
+
+A historical profile selected for an evaluation-bearing task must declare this
+boundary native or provide a renderer accepting `context`. An empty override
+suppresses presentation only; it cannot admit formula, constraint, measurement or
+rubric execution. Providers receive deep-copied plain containers instead of the
+composed registry's MappingProxyType containers. No global kind registry is added.
+
+The rendering assembly includes context, builtin hooks, registry, evaluation
+schema/inspection and MetricOrder dependencies. Adding the composer binding also
+moves estimation assembly and full composition fingerprints. Absent-spec semantic
+payload and native prompt-byte parity are distinct from assembly identity parity;
+no archived identities or qualification receipts are rewritten.
+
+Regression coverage: `tests/unit/agent/test_evaluation_rendering.py` exercises
+formats, bounds/rates, plugin hooks, profile admission/copying, scope isolation,
+and a paper-style profile on a real absent-evaluation composition;
+`test_evaluation_prompt_paths.py` checks final offline provider arguments.
+`tests/unit/workflows/test_evaluation_composition.py` covers primary launch,
+missing-capability refusal and lost-binding detection. No real hardware or LLM
+qualification is implied by these tests.
 
 ## Deterministic selection runtime
 
@@ -237,7 +326,7 @@ scoring-child execution is supported. ANCHOR_NORMALIZED and
 CandidateEvaluationExecutor combinations refuse; their child handoffs are #1336.
 Referenced custom quantitative kinds without runtime values refuse by component
 name and kind (#1338). Constraints and rubric capabilities remain independently
-gated; enabling formula aggregation does not enable them or evaluation rendering.
+gated; enabling formula aggregation does not enable them.
 
 Under formula selection, existing primary-unit thresholds refuse. Use the generated
 effective metric id for loop `metric_threshold`, route `MetricAtLeast`, and

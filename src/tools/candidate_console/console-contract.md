@@ -1646,8 +1646,9 @@ Canvas view state (zoom, scroll, expanded optional rows) is owned by
 viewing sends no request and cannot change saved bytes. The canvas is a CSS
 `transform: scale()` of the world, with positions kept in document pixels
 (drags divide screen deltas by the zoom). On opening a graph it fits once
-(`editorCircuitGeometry.fitScale`: never above 100 %, never below 40 %, then the
-canvas scrolls); the toolbar offers Fit to view, zoom out/in, Actual size, Check
+(`editorCircuitGeometry.fitScale` with the canvas's 75% floor; manual zoom reaches
+40%); oversized graphs scroll with selected/first-module framing as specified below.
+The toolbar offers Fit to view, zoom out/in, Actual size, Check
 the loop and Tidy up (the one layout tool; the former display-only Arrange view was
 removed because a drag in it saved the arranged layout, red-team A-1). The canvas
 grows with its zoomed content up to `clamp(420px, 100vh - 200px, 860px)`, shows edge
@@ -1683,9 +1684,9 @@ stay local in the loop draft state (`loopDrafts`, separate from training drafts)
 and block Review and circuit edits exactly as an invalid limit does. Cross-field
 rules (one per kind, `completed_bodies < final_iteration`) are the declaration's:
 a refused loop review reads "Review refused the research loop: …" with the
-diagnostic `field_path`. Loop edits preserve bytes only for an already-canonical
-source; Review re-renders the whole declaration, so hand-formatted or commented
-sources are rewritten (visible in the diff). The panel
+diagnostic `field_path`. Loop edits patch exact source values; untouched literals
+retain their original bytes, including in hand-formatted sources (see the authoring
+contract). The panel
 does not draw a back-edge or annotate cards, and it shares the source-dirty,
 conflict and saving fences of the unified draft. Capture review (`ReusableCaptureReview.loop`)
 reports the executed request's authored loop, refusing a request loop that differs
@@ -2369,7 +2370,8 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   flex column with `overflow: clip` (never scrolled, not even by `scrollIntoView`) whose
   `#editor-graph` (`flex: 1 1 0`) grid gives `.circuit-viewport` exactly the remaining
   height; the viewport scrolls and zooms inside it. Fit frames the union of every card's
-  box plus a 40 px margin (`FIT_PAD`), scrolled to that box's origin, within the visible viewport.
+  box plus a 40 px margin (`FIT_PAD`), scrolled to that box's origin when it fits.
+  At the 75% floor, an oversized graph uses selected/first-module framing (see below).
   Open disclosures in the panel (port-type legend, canvas help and connection
   mappings 120 px) scroll internally. Invariant (witnessed by `layout_onboarding.mjs`
   and `first_use_journey.mjs`): viewport inside the canvas panel, viewport height ≤
@@ -2435,8 +2437,14 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   controls get a one-line tooltip from `data-tip-label`.
 - Cards fold every optional input that is not fed by a wire (not connected, or fed by an
   external input) into one `+N optional` row. Fit to view never zooms below 75% (the legibility floor, `FIT_MIN`);
-  a larger graph scrolls inside the viewport and the view note says "Scroll the canvas". Manual
-  zoom out still reaches 40%.
+  a larger graph scrolls inside the viewport. The visible live view note counts partly
+  off-screen modules, explains the 75% Fit floor, and directs users to scroll. When the
+  padded graph exceeds the viewport at the fitted scale, Fit centres the selected module
+  (first module if none selected). For a module larger than the viewport, it aligns its
+  leading edge/heading instead. This is view-only: no saved positions, dirty state or
+  mutation requests change. Manual zoom out still reaches 40%.
+  `tests/browser/editor_fit_overflow.mjs` covers tall/wide/offset overflow, desktop and
+  narrow viewports, selected/first framing, scroll reachability and source-byte preservation.
 - Canvas controls are one secondary icon cluster bottom-right (zoom out, zoom %, zoom
   in, Actual size, Fit, Check the workflow, Tidy up); the connector legend is a bottom-left
   chip whose content opens as a two-column popover above it.
@@ -2486,7 +2494,7 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   no module is left, and Review/Save refuse (`draft_incomplete`) until no problem
   remains, so the saved file is never invalid. A deletion nobody reads, with no other
   edits, is a targeted byte-preserving removal; otherwise the combined document is
-  rendered canonically. Deleting every module shows the §7.2 empty state.
+  patched while preserving untouched literals. Deleting every module shows the §7.2 empty state.
 - Disabled Save shows `#editor-save-reason` inline ("Fix N problems to save",
   "Checking…", "Saving…"); disabled Next: Run shows `#workflow-next-reason` ("Save a
   version to run" or "Not set up for runs").
@@ -2592,6 +2600,29 @@ isolation, connection races/401 and pending-draft/reload behavior. Existing edit
 console and theme browser harnesses exercise the shared shell and disclosures.
 These are local browser witnesses; they do not qualify native execution, complete
 circuit editing, results, resume or production deployment.
+
+Remembered Monitor input is scoped by `session.js` to
+`siderius.operation_id.v1/<operations_store_id>`. Its `rememberOperation` and
+`rememberedOperation` methods are the sole persistence owner for Monitor and the
+legacy preparation, candidate and native-chain launch controls. The old global
+`siderius.operation_id` is ignored, never migrated: it has no attributable store.
+Connect clears the previous session's store identity. Without an explicit Monitor
+UUID, the convenience input is cleared during reconnection and restored only after
+validated choices identify the current store; malformed stored UUIDs are ignored.
+Disconnect, 401 and Connect retain the last Monitor observation (facts, logs and
+tokens), including observations opened by legacy Prepare/Launch without a route UUID.
+The page retains the last identified store separately from session connection state.
+Across connection changes, a different identified store resets that observation;
+same-store reconnect preserves it. An explicit route UUID is then selected again
+against the new store.
+Restoration only fills the input; it never submits a read or launch. Explicit UUID
+routes win and retain independent operation-only authentication. Until choices
+identify the store, reads/writes of remembered selection are no-ops; storage failures
+also leave explicit monitoring available. No credential or request payload is stored.
+`tests/browser/operation_selection.mjs` covers shared-origin store switching, reload,
+legacy isolation, 401-after-Prepare observation retention, same-store reconnect,
+changed-store observation reset, explicit route precedence, native launch persistence
+and unavailable localStorage using synthetic observations, without native execution.
 
 
 ## Reusable capture consumption
@@ -2716,7 +2747,13 @@ could not train. An unreadable profile is `stale_review`. Training admission
 (`candidate_worker.training_admission.refuse_untrainable_launch`, after
 `run_launch_self_test`) and tuner startup (`validate_training_mode_startup`, composed
 runs only) ask the same owner again. Templates declare `is_trial: true`,
-`healthgate_mode: blocking` and `result_authority: scientific` (`templates.DECLARED_LAUNCH_POLICY`).
+`healthgate_mode: blocking`, `result_authority: scientific`, `formal_portion: 1.0`
+and `max_rounds: 2` (`templates.DECLARED_LAUNCH_POLICY`). They explicitly allow
+Trial before forced Formal and use the full declared training scope; native
+launch defaults remain .1 and 10. The editor projects descriptions for
+`is_trial`, `max_rounds` and `formal_portion` from `WorkflowLaunchConfig` through
+`training.control_help`, including the per-iteration last-round rule and the
+Default reset behavior. No browser-side execution/default authority is added.
 Prepare reuses the same review, so the refusal there carries
 `admission_not_attempted`. The browser keeps the version name
 as `source_version` beside, not inside, the retained intent payload. Both use the
@@ -3142,3 +3179,67 @@ extracting a cause from the private operation traceback. Explicit log access
 remains available to task authors. The shared category owner classifies live
 exceptions by hierarchy and legacy text by recognized built-in/standard class
 identities (including `JSONDecodeError`); unknown custom names remain generic.
+
+
+### Safe Task, GPU and setup failure projection
+
+`setup_review.summary_errors.error_category` is the single classifier for live
+exceptions and serialized standard exception names. `TaskSummaries._run` logs the
+serialized stage/type/message server-side, then projects only
+`summary_error_message(failure.exception_type)`. Task-defined class names and raw
+messages never enter `SummaryFailure.message`. `SandboxUnavailable` keeps the
+existing unavailable hint. Unexpected console observation failures retain their
+traceback in the server logger while returning fixed summary category text.
+Composition diagnostic artifacts are unchanged; this is a console projection boundary.
+
+`error_messages.console_error_message` logs the live exception/traceback and maps
+the shared category to fixed console text. GPU import/allocation/profile/startup
+failures and setup validation/registry/route failures use it. Existing status codes,
+setup-relative leftover-folder guidance and the GPU success result remain unchanged.
+The CLI GPU probe uses Python logging on stderr (including inside its child), so
+operators retain diagnostic output; that output is not a browser view model.
+Server/CLI diagnostic logs can contain private causes and must be handled accordingly.
+
+Regression owners: `test_error_projection.py`, `test_setups.py`, and the AST sweep
+`test_error_projection_guard.py`. The sweep rejects direct str/repr conversions,
+exception interpolation, and serialized message forwarding outside logging. It is
+not whole-program taint analysis. Precisely enumerated pre-existing statements in
+`error_projection_followups.json` are retained for the separate settings/import/
+authoring audit #1328; no Task-summary or GPU leak is exempted. SetupRefused's
+already projected `message` remains the route carrier. New statements are not
+allowed by this baseline. The deadline regression models 332 GiB using patched
+stat sizes over empty files, without allocating large sparse files.
+
+Browser evidence: `tests/browser/console_error_projection.mjs` injects a synthetic
+private cause in the real HTTP fixture (`setups_fixture --error-projections`) and
+checks Task and setup-dialog text, response bodies and server logging. The ordinary
+Task and experiment-setup witnesses continue to cover the surrounding navigation.
+
+
+Editor `/review` and `AuthoringError.proposal` responses apply `safe_review` at the
+console adapter. It copies `task_reference_update.observation` and
+`current_observation`, logs each native failure privately, and replaces only the
+failure's `message` and `exception_type` with fixed summary text and the shared
+category identifier. Native authoring objects and diagnostic artifacts remain
+unchanged. Ordinary reviews and successful observations retain their existing
+representation. Both observations are sanitized before the browser's JSON details
+renderer receives them; client-side hiding is not the protection boundary.
+
+Registry stale errors retain exactly the two `_REGISTRY_ERRORS` literals owned by
+`setups._read`: private-file mode guidance and invalid-registry-schema guidance.
+`_registry_problem` compares the complete exception args tuple to these constants,
+returns the constant on a match, and otherwise uses fixed generic category text.
+It never trusts arbitrary SettingsInvalid text. Raw causes remain in logging;
+joined stale messages do not contain `. ;`/`.;` punctuation.
+
+The AST guard additionally checks format calls/percent formatting, exception args,
+and chained `x.result.failure.message` access, and counts duplicate statement
+occurrences (multiple raw expressions in one statement count once). Named safe
+projection calls are boundaries for the syntactic scan. Explicit reviewed baseline
+entries retain fixed guidance and typed legacy carriers for #1328. Alias, dynamic
+attribute, whole-model serialization, safe-owner shadowing and JavaScript gaps are
+listed in #1339; behavioral HTTP/browser sentinel tests cover the editor model
+projection independently of this syntactic guard. The editor browser witness
+renders real sanitized HTTP observations through the production JSON details
+component, using synthetic visibility gates only; it does not qualify saving or
+scientific compatibility.

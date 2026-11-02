@@ -19,6 +19,7 @@ from tools.workspace_sandbox.gpu import declares_gpu, passthrough
 from tools.workspace_sandbox.profile import SandboxProfile
 from tools.workspace_sandbox.runner import run
 
+from .error_messages import console_error_message
 from .models import ConsoleConfig, TaskChoice
 
 #: Wall-clock cap for one probe (PyTorch import plus CUDA initialization).
@@ -37,7 +38,10 @@ def probe() -> tuple[bool, str]:
     try:
         import torch
     except ImportError as error:
-        return False, f"PyTorch is not importable in the run environment ({error})"
+        return (
+            False,
+            f"PyTorch is not importable in the run environment ({console_error_message(error)})",
+        )
     if not torch.cuda.is_available():
         from core.gpu_requirement import real_launch_gpu_refusal
 
@@ -46,7 +50,7 @@ def probe() -> tuple[bool, str]:
         torch.zeros(1, device="cuda")
         torch.cuda.synchronize()
     except RuntimeError as error:
-        return False, f"CUDA started but could not use the GPU ({str(error).splitlines()[0]})"
+        return False, f"CUDA started but could not use the GPU ({console_error_message(error)})"
     count = torch.cuda.device_count()
     return True, f"{count} CUDA device(s), first: {torch.cuda.get_device_name(0)}"
 
@@ -73,7 +77,10 @@ def _check_task(task: TaskChoice) -> tuple[bool, str]:
         try:
             profile = task_profile(task, workspace)
         except ValueError as error:
-            return False, f"the run sandbox refuses this task's settings ({error})"
+            return (
+                False,
+                f"the run sandbox refuses this task's settings ({console_error_message(error)})",
+            )
         extra_read_only, extra_devices = passthrough(profile.devices)
         passed = ", ".join(str(p) for p in (*profile.devices, *extra_devices))
         print(
@@ -86,7 +93,7 @@ def _check_task(task: TaskChoice) -> tuple[bool, str]:
         try:
             outcome = run(profile, command)
         except SandboxUnavailable as error:
-            return False, f"the run sandbox cannot start ({error})"
+            return False, f"the run sandbox cannot start ({console_error_message(error)})"
         result = workspace / RESULT_FILE
         if outcome.status == "timed_out":
             return False, f"the probe did not finish within {PROBE_TIMEOUT_SECONDS:g} s"

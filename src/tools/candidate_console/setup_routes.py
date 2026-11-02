@@ -8,6 +8,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
+from .error_messages import console_error_message
 from .service import CandidateConsole
 from .settings_file import SettingsInvalid
 from .setups import SetupCreate, SetupList, SetupRefused, SetupView
@@ -49,7 +50,8 @@ def setups_router(console: CandidateConsole) -> APIRouter:
                 return _refusal(error)
             except SettingsInvalid as error:
                 return JSONResponse(
-                    status_code=409, content={"error": {"code": "invalid", "message": str(error)}}
+                    status_code=409,
+                    content={"error": {"code": "invalid", "message": console_error_message(error)}},
                 )
 
         return await run_in_threadpool(created)

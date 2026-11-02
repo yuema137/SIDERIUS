@@ -630,6 +630,19 @@ Selection is conservative:
   readers, plus any test with a literal contract-file edge;
 - Python changes select direct tests, tests of explicit transitive callers,
   declared dynamic readers and the changed area's owning suite;
+- every path under `examples/`, `configs/task_composition/`, or
+  `tests/fixtures/step10_p1/` triggers the full
+  unit suite, including Markdown, declared assets, nested task templates and
+  console bundles. Composition follows manifest references and fingerprints
+  package directories; the selector's Python import graph and literal test
+  references cannot prove all consumers of those inputs. The fixture root covers
+  the davis, pets, tidmad and fourth_task composition packs, including their
+  local plugins and declared assets. Current tracked composition manifests under
+  `tests/` reside in this root; their file-based plugins live here or under
+  `examples/`. New manifest/plugin locations outside these roots require an explicit
+  dependency audit and selection coverage before narrowing is safe. This trades
+  selection speed for complete composition/identity coverage without a test-name
+  allowlist. The trigger takes precedence over document and area ownership;
 - shared hubs, CI/selector infrastructure, dependencies, missing/deleted paths,
   unmapped importable files, inventory/parse errors and malformed transport run
   the full suite with a reason;

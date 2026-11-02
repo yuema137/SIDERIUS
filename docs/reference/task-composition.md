@@ -34,7 +34,7 @@ There is **no `version` field**. (Recorded as a known gap — see
 | `metric` | ✅ | the primary metric: declaration + implementation | **run refused** |
 | `task_config` | ✅ | `task_description` + `forward_contract` | **run refused** |
 | `task_health` | ✅ *(as a statement)* | the health family, or an explicit `none: true` | **run refused** — see below |
-| `evaluation` | — | structured candidate selection, constraints and component meanings; composition/inspection only until runtime capabilities land | no evaluation identity key or added prompt bytes |
+| `evaluation` | — | structured candidate selection, constraints and component meanings; shared agent rendering; advanced execution remains capability-gated | no evaluation identity key or added prompt bytes |
 | `secondary_metrics` | — | a list of observational metrics | the run has none: no record keys, no rendered bytes |
 | `proposal_blocks` | — | task science for the proposer's prompts | the proposer gets **no** task science |
 | `implementor_blocks` | — | task science for the implementor's prompts | the implementor renders nothing |
@@ -540,7 +540,22 @@ Notes:
   remains supported. Loss rule targets are checked the same way against the
   fields of the execution `LossConfig`; a misspelled field such as
   `loss_config.gammmma` is refused instead of being dropped when the loss is
-  built. Custom-loss plugin hyperparameters are not transported through
+  built. Loss-field rules constrain values only while their fields are active;
+  they do not constrain the planner's choice of `loss_type`. If rules fix the
+  type (`exact` or singleton `allowed`) to a route that nullifies a constrained
+  field, declaration/combined ownership validation refuses that **dead rule**.
+  Otherwise a planner-selected inactive field is accepted: its rule is neither
+  applied nor evaluated, even when its value is omitted. For example, a beta
+  lock is inactive for focal loss but applies to a later smooth_l1 attempt.
+  The shared resolver logs each inactive rule; effective plans and persisted
+  `ExperimentRecord.inactive_parameter_rules` carry typed receipts with path,
+  owner, selected loss type, rule and `inactive_for_selected_loss` reason.
+  Planner history preserves these receipts in both full and condensed records.
+  All rule kinds follow this policy, including exact null/false. A strict plan
+  with no type uses the `LossConfig` default; a proposal with no type defers
+  activity until a type is selected. Receipts are recomputed on resolution,
+  never inherited as authority from planner-supplied metadata.
+  Custom-loss plugin hyperparameters are not transported through
   `loss_config` (the plugin executes its `PLUGIN_LOSS_CONFIG_CLASS`
   defaults), so a rule naming one, such as `loss_config.snr_threshold`, is
   refused. `model_config` targets are checked against the configuration
@@ -993,10 +1008,16 @@ setup failures retain their separate typed transport.
 
 ## Structured evaluation declarations (composition and inspection)
 
+Keep evaluation declarations concise: at most 32 components and 64 constraints.
+Each component meaning and rubric-balance guidance allows 1000 characters;
+metric units allow 128 characters. These limits bound authored declarations,
+not the scientific values being measured. Invalid fields are named in composition
+errors. Agent prompts delimit the declaration block and indent multiline prose.
+
 The optional `evaluation` section declares candidate selection separately from
-training `objective`. It currently composes and validates, but launch refuses until
-its required runtime capabilities land; even `selection: {kind: primary}` requires
-`evaluation rendering`. An absent section adds no semantic payload key or prompt
+training `objective`. It composes, validates and renders for agents. Primary-only metric selection
+and weighted-sum formula selection on the native task-owned scoring route can launch;
+feasibility, measurement and rubric runtime capabilities remain independently guarded. An absent section adds no semantic payload key or prompt
 bytes. Full fingerprints can still change with the release's estimation assembly.
 
 ```yaml

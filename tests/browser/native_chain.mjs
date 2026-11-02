@@ -7,7 +7,7 @@ import {createRequire} from 'node:module';
 import {mkdir, readFile, writeFile, unlink, readdir} from 'node:fs/promises';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 import {showAllConsoleSections} from './console_view_flags.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const key of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE', 'CONSOLE_EVIDENCE_DIR']) assert.ok(process.env[key], `Set ${key}`);
@@ -21,12 +21,7 @@ let server, browser, stderr = '';
 async function startServer(monitor = false) {
   server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.native_chain_fixture', fixture, ...(monitor ? ['--monitor'] : [])], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
   server.stderr.on('data', chunk => {stderr += chunk;});
-  const lines = createInterface({input: server.stdout});
-  const metadata = await new Promise((accept, reject) => {
-    const timer = setTimeout(() => reject(new Error('Fixture startup timed out: ' + stderr)), 150000);
-    lines.once('line', line => {clearTimeout(timer); accept(JSON.parse(line));});
-    server.once('exit', code => {clearTimeout(timer); reject(new Error(`Fixture exit ${code}: ${stderr}`));});
-  });
+  const metadata = await waitForMetadata(server, {timeoutMs: 150000});
   await until(async () => {
     try {return (await fetch(metadata.origin)).ok;} catch {return false;}
   });

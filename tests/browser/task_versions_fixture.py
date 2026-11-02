@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 import uvicorn
 
+from tests.browser.fixture_metadata import emit_metadata
 from tests.integration.tools.test_setup_composition_check import _external_hook_request
 from tests.unit.tools.candidate_console.conftest import console_config
 from tests.unit.tools.candidate_prepare.conftest import selection
@@ -93,17 +94,14 @@ def main() -> None:
             }
         )
         app = create_app(config)
-        print(
-            json.dumps(
-                {
-                    "origin": origin,
-                    "token": Path(config.auth_token_file).read_text(),
-                    "source": str(source),
-                    "other": str(other),
-                    "binding": pin.model_dump(mode="json"),
-                }
-            ),
-            flush=True,
+        emit_metadata(
+            {
+                "origin": origin,
+                "token": Path(config.auth_token_file).read_text(),
+                "source": str(source),
+                "other": str(other),
+                "binding": pin.model_dump(mode="json"),
+            }
         )
         uvicorn.run(
             app,

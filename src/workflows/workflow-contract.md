@@ -399,6 +399,13 @@ registry and the explicit source-metric Health / effective-scalar selection boun
 composed-task artifact-naming and registration-captured source identity checks.
 The composer delegates these prerequisites without changing their refusal behavior.
 
+`bind_run_task_composition` also delegates evaluation prompt-context construction
+and token-reset binding to `agent.evaluation_context`. Verification checks that
+context's evaluation identity against the composition. No node reloads the task
+manifest to render evaluation. Absence binds None, which the shared append path
+checks before entering the new prompt boundary. See the evaluation contract's
+[rendering section](../execute_tools/evaluation-contract.md#evaluation-prompt-rendering).
+
 ## Effective metric binding
 
 Formula selection binds ranking consumers to `RunTaskComposition.selection_metric_spec`,

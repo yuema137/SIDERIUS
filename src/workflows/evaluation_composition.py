@@ -200,18 +200,22 @@ def require_evaluation_runtime(evaluation: ResolvedEvaluation | None) -> None:
     if evaluation is None:
         return
     from workflows.evaluation_admission import require_component_runtime
+    from workflows.task_composition import TaskCompositionError
 
-    require_component_runtime(evaluation)
     missing = sorted(
         name
         for name in evaluation.required_capabilities
         if not IMPLEMENTED_CAPABILITIES.get(name, False)
     )
     if missing:
-        from workflows.task_composition import TaskCompositionError
-
         raise TaskCompositionError(
             "Evaluation composition succeeded, but launch requires unimplemented capabilities: "
             + ", ".join(missing)
             + ". Their runtime owners must land before this task can run."
         )
+    # Named capability gates first: a referenced custom kind usually also needs
+    # an unlanded capability, and that name is the more actionable refusal.
+    try:
+        require_component_runtime(evaluation)
+    except ValueError as exc:
+        raise TaskCompositionError(str(exc)) from exc

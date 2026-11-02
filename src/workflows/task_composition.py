@@ -3165,6 +3165,7 @@ def bind_run_task_composition(
             "a task composition is required; the framework does not select a scientific task"
         )
 
+    from agent.evaluation_context import bind_evaluation_prompt_context
     from execute_tools.data_paths import bind_physical_data_root
     from execute_tools.dataset_config import bind_dataset_profile
     from execute_tools.evaluation_metric import bind_run_metric, bind_run_secondary_metrics
@@ -3233,6 +3234,11 @@ def bind_run_task_composition(
         stack.enter_context(bind_run_secondary_metrics(composition.secondary_metrics))
         stack.enter_context(bind_task_config(composition.task_config_values()))
         stack.enter_context(
+            bind_evaluation_prompt_context(
+                composition.evaluation, composition.metric.spec, composition.judge_task
+            )
+        )
+        stack.enter_context(
             bind_prompt_profile(
                 composition.prompt_renderer, expected=composition.prompt_renderer_identity
             )
@@ -3264,6 +3270,7 @@ def verify_composition_is_bound(composition: RunTaskComposition | None) -> None:
     if composition is None:
         return
 
+    from agent.evaluation_context import active_evaluation_prompt_context
     from execute_tools.data_paths import active_physical_data_root
     from execute_tools.dataset_config import (
         DatasetProfileBindingError,
@@ -3277,6 +3284,10 @@ def verify_composition_is_bound(composition: RunTaskComposition | None) -> None:
     from workflows.task_config import resolve_bound_task_config
 
     unbound: list[str] = []
+    evaluation_context = active_evaluation_prompt_context()
+    expected_evaluation = composition.evaluation.sha256 if composition.evaluation else None
+    if (evaluation_context.identity if evaluation_context else None) != expected_evaluation:
+        unbound.append("evaluation")
     if active_inference_preflight_policy() != composition.inference_preflight:
         unbound.append("inference_preflight")
     if active_preflight_identity() != composition.preflight_estimator_identity:

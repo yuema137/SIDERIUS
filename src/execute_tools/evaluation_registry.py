@@ -15,7 +15,12 @@ from typing import Annotated, Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
 
-from agent.schemas.judge_task import JudgeTaskDeclarations, resolve_rubric_ref, rubric_ref
+from agent.schemas.judge_task import (
+    JudgeTaskDeclarations,
+    RubricSpec,
+    resolve_rubric_ref,
+    rubric_ref,
+)
 from execute_tools.evaluation_metric import MetricDirection, MetricSpec
 from execute_tools.evaluation_spec import (
     ComponentSpec,
@@ -28,7 +33,7 @@ from execute_tools.evaluation_spec import (
 # Each runtime owner enables its capability only after wiring every consumer.
 IMPLEMENTED_CAPABILITIES: Mapping[str, bool] = MappingProxyType(
     {
-        "evaluation rendering": False,
+        "evaluation rendering": True,
         "formula aggregation": True,
         "feasibility constraints": False,
         "measurements": False,
@@ -59,6 +64,7 @@ class ComponentRenderContext:
     """#1293 supplies directional words from MetricOrder, never from prose."""
 
     direction_words: Mapping[str, str] = field(default_factory=dict)
+    rubric: RubricSpec | None = None
 
 
 @dataclass(frozen=True)
@@ -161,15 +167,21 @@ def _identity(component: ComponentSpec, resolved: ResolvedComponent) -> Mapping[
     return resolved.identity
 
 
-def _render(component: ComponentSpec, ctx: ComponentRenderContext) -> str:
-    """Pure hook for the future shared renderer; no prompts call it in E1."""
-    return component.meaning
-
-
 def builtin_registry() -> dict[str, ComponentKindRegistration]:
+    from execute_tools.evaluation_component_rendering import (
+        render_metric_component,
+        render_rubric_component,
+    )
+
     return {
         "metric": ComponentKindRegistration(
-            "metric", "1", MetricComponent, _metric, _identity, _render, "quantitative"
+            "metric",
+            "1",
+            MetricComponent,
+            _metric,
+            _identity,
+            render_metric_component,
+            "quantitative",
         ),
         "rubric": ComponentKindRegistration(
             "rubric",
@@ -177,7 +189,7 @@ def builtin_registry() -> dict[str, ComponentKindRegistration]:
             RubricComponent,
             _rubric,
             _identity,
-            _render,
+            render_rubric_component,
             "rubric",
             frozenset({"rubric components"}),
         ),
