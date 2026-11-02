@@ -56,7 +56,7 @@ def render_deterministic_selection(
         words = MetricOrder(context.primary).direction_words
         return [
             "- kind: primary",
-            f"- Deterministic ranking: {context.primary.id}; "
+            f"- Deterministic ranking: {indent_text(context.primary.id)}; "
             f"{words['verb']} ({words['comparative']} is better).",
         ]
     terms = selection.formula.params.terms

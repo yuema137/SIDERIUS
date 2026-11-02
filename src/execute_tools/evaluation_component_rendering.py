@@ -33,7 +33,7 @@ def render_metric_component(component: MetricComponent, context: ComponentRender
     )
     return "\n".join(
         (
-            f"- {component.id} (metric: {component.metric})",
+            f"- {component.id} (metric: {indent_text(component.metric)})",
             f"  Meaning: {indent_text(component.meaning)}",
             f"  Units: {indent_text(component.units or 'not declared')}",
             f"  Preference: {words['verb']} ({words['comparative']} is better)",
