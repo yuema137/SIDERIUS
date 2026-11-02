@@ -26,8 +26,7 @@ class PseudoAdmission(BaseModel):
 def resolve_pseudo_admission(*, environ: Mapping[str, str] | None = None) -> PseudoAdmission:
     """Validate optional declarations through the sole ceiling parser, without discovery."""
     return PseudoAdmission(
-        **{
-            role: resolve_role_ceiling(role, environ=environ)
-            for role in ("training", "inference", "scoring")
-        }
+        training=resolve_role_ceiling("training", environ=environ),
+        inference=resolve_role_ceiling("inference", environ=environ),
+        scoring=resolve_role_ceiling("scoring", environ=environ),
     )
