@@ -2401,3 +2401,7 @@ budgets does not change the resolved Formal workload.
 resolver owns pseudo admission. GPU visibility never selects this route, and
 `--is_pseudo_llm` alone does not change resource admission. Subsequent task checks,
 training/inference/scoring stubs and Health policy retain their existing behavior.
+
+`runtime._handle_prephase_gpu_measurement` also excludes `StubSandbox` before
+device/topology inspection: a real GPU identity retained for provenance must not
+activate the legacy formal prephase fallback. Real sandbox applicability is unchanged.
