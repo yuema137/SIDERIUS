@@ -1793,10 +1793,14 @@ gets `.has-required-unbound` and a small `.circuit-problem-badge` count; the sof
 ring is on the unconnected socket itself.
 For a refused one-tuning-round review, `editorNodeParameters.reviewHint` appends
 the native `max_rounds` help description and names **Tuning rounds per iteration**
-in **Training settings**. It is a settings reminder, not a diagnosis or a browser
-admission rule: it applies only to explicit `max_rounds=1` with HTTP 422 request
-validation, or source diagnostics containing a `validation` code. Conflict,
-authentication and source syntax errors do not earn this reminder. Loop reviews
+in **Training settings**. It applies only when HTTP 422 carries the native
+`trial_override_schedule` error code, directly or in a source diagnostic. The
+native `validate_trial_override_schedule` validator owns this refusal identity;
+`workflows.definition.source.validation_code` allowlists it for both boundaries.
+All other validation types map to `validation`; messages remain fixed and no
+input/context or arbitrary error type is forwarded. The browser does not inspect
+`max_rounds` to infer the cause. Conflict, authentication, unrelated invalid
+settings and source syntax errors do not earn this reminder. Loop reviews
 retain their existing loop-specific guidance. Native error redaction is unchanged.
 `tests/browser/editor_max_rounds_help.mjs` exercises schema help/minimum projection,
 the refused one-round edit and successful correction to two with a preserved Trial
