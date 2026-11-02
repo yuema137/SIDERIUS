@@ -194,3 +194,18 @@ Data Analysis and judge consumers. Its
 specifies strict non-finite records, `FrozenModel` decoding, legacy verification
 and the finite-byte compatibility boundary. The non-finite codec remains owned
 by `core.record_encoding`; schemas do not define another encoder.
+
+## Attempt resolution receipts
+
+`ExperimentRecord.resolution_events` is a tuple of the existing
+`ResolutionEvent` (`field_path`, `proposed`, `executed`, `authority`) copied
+from the final `ExecutionProvenance.events` of the attempt (issue #1322). It
+defaults to empty and is excluded from dumps when empty, so a record whose plan
+survived resolution, and every record written before the field, keeps its
+shape. Empty therefore means "no recorded divergence", not proof of agreement
+for archived records. The intermediate `plan_resolution_events` comparison is
+not persisted. Like inactive-rule receipts it is transported through
+`record_params` and promoted at the tuner's common emission boundary, so the
+persisted `params` stay a pure configuration. Planner history retains it in
+recent and condensed records; see the
+[tuner contract](../../nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md#condensed-planner-history-resolution-receipts-issue-1322).
