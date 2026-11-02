@@ -161,16 +161,20 @@ These small-task settings use `formal_portion=1.0` and `max_rounds=2`; see [Tria
 
 A Trial round trains on a small share of `train.csv`, so on a small file it may
 have fewer rows than one batch. Unless your workflow sets them, the planner
-chooses the Trial portions, and its defaults are `trial_portion=0.02` (2% of
+(the LLM agent that proposes each training configuration) chooses the Trial
+portions, and its defaults are `trial_portion=0.02` (2% of
 the rows form the Trial training scope) and `train_portion=0.1` (10% of that
 scope is used each epoch). The package always keeps at least one row. With 120
 training rows and the defaults, a Trial round trains on 1 row.
 
-A batch larger than the available rows would train zero steps, so the run
-lowers the batch size to the row count for that attempt. That is why the rule
+A batch larger than the available rows would train zero steps (training
+drops the incomplete last batch, `drop_last=True`), so the run lowers the
+batch size to the row count for that attempt. That is why the rule
 is a range starting at 1: with `exact: 32` the run may not lower it, every
 Trial attempt is refused with `TrainingBatchPlanError ... prevents clamping`,
 no model is ever recorded and the run ends with manifest `status=no_records`.
+The range is shown to the planner; a proposal above 32 is refused for that
+attempt.
 
 How to recognise it worked: the iteration ends with `ITERATION 1 COMPLETE`
 and its `manifest.json` has `status` `completed`. When the planner asked for a
@@ -180,8 +184,10 @@ The Formal round still trains on every row of `train.csv`
 (`formal_portion=1.0`).
 
 A Trial score from one or a few rows says little about a model; treat it as a
-check that the model runs, not as evidence. For a more informative Trial round,
-use more training rows, or set larger `trial_portion` and `train_portion`
+check that the model runs, not as evidence. With the default Trial share
+(`trial_portion` 0.02 × `train_portion` 0.1, about 0.2% of the training rows),
+a full batch of 32 needs about 16,000 training rows. For a more informative
+Trial round with less data, set larger `trial_portion` and `train_portion`
 values (between 0.01 and 1.0) in the `training_settings` launch block of
 `workflow.py` (in the console: **Train & tune → Training settings**). Larger
 portions make each Trial round take longer.
