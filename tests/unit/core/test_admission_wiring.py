@@ -21,6 +21,7 @@ from core.runtime_control.gpu_accounting import DeviceIdentity, GpuAccountingSna
 from tests.helpers.tuner_source import tuner_node_source
 
 EXECUTOR = Path(__file__).resolve().parents[3] / "src/core" / "sandbox_executor.py"
+STUB = Path(__file__).resolve().parents[3] / "src/core" / "stub_sandbox.py"
 DEV = DeviceIdentity(uuid="GPU-aaaa-0000", physical_index=0)
 
 REFUSED = AdmissionDecision(
@@ -235,7 +236,7 @@ class TestStubSandboxUnaffected:
     override to bypass the gate by accident."""
 
     def test_the_stub_overrides_both_methods(self):
-        tree = ast.parse(EXECUTOR.read_text())
+        tree = ast.parse(STUB.read_text())
         stub = next(
             n for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and n.name == "StubSandbox"
         )
@@ -243,7 +244,7 @@ class TestStubSandboxUnaffected:
         assert {"execute_training", "execute_inference"} <= overridden
 
     def test_the_stub_never_calls_the_gate(self):
-        tree = ast.parse(EXECUTOR.read_text())
+        tree = ast.parse(STUB.read_text())
         stub = next(
             n for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and n.name == "StubSandbox"
         )

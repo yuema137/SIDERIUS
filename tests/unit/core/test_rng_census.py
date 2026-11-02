@@ -44,14 +44,14 @@ ALLOWLIST: dict[Site, str] = {
         "agent/skills/model_io_probe_skill.py", "build_model_input", "torch.randint"
     ): _SEEDED_SCOPE,
     Site("agent/skills/model_io_probe_skill.py", "build_model_input", "torch.randn"): _SEEDED_SCOPE,
-    Site("core/sandbox_executor.py", "StubSandbox.__init__", "random.Random"): (
-        "test stub with a string seed; no scientific output"
-    ),
-    Site("core/sandbox_executor.py", "StubSandbox.set_run_context", "random.Random"): (
-        "test stub with a string seed; no scientific output"
-    ),
     Site("core/seeding.py", "generate_run_seed", "secrets.randbelow"): (
         "the single run-seed generator, called only at entry boundaries"
+    ),
+    Site("core/stub_sandbox.py", "StubSandbox.__init__", "random.Random"): (
+        "test stub with a string seed; no scientific output"
+    ),
+    Site("core/stub_sandbox.py", "StubSandbox.set_run_context", "random.Random"): (
+        "test stub with a string seed; no scientific output"
     ),
     Site("execute_tools/process_seeding.py", "apply_process_seeds", "np.random.seed"): "seed owner",
     Site("execute_tools/process_seeding.py", "apply_process_seeds", "random.seed"): "seed owner",

@@ -31,7 +31,8 @@ from agent.skills.evaluate_vram_skill.probe_budgets import InconclusivePreflight
 from core.record_role import observed_attempt_role
 from core.runtime_control.records import AdmissionRecord
 from core.runtime_control.session import RuntimeControlPolicy, WatchdogConfig
-from core.sandbox_executor import StubSandbox, TidmadSandbox
+from core.sandbox_executor import TidmadSandbox
+from core.stub_sandbox import StubSandbox
 from nodes.ml_hyperparameter_tune_agent.policy import (
     _latest_trial_inference_marginal,
     resolve_round_trial_mode,

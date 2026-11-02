@@ -13,7 +13,7 @@ import pytest
 
 from agent.skills.denoising_score_skill.wrapper import run_skill as score
 from agent.skills.inference_skill.wrapper import run_skill as infer
-from core.sandbox_executor import StubSandbox
+from core.stub_sandbox import StubSandbox
 from execute_tools.scope_artifact import EVAL_SCOPE_STEM, TRAINING_SCOPE_STEM, scope_artifact_path
 from execute_tools.task_data_path import EvaluationReadRequest, ScopeBuildRequest
 from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings

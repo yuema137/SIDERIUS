@@ -1480,7 +1480,7 @@ def _run_bound_iteration(
     if args.is_pseudo_training:
         from core.execution_calibration import MalformedCeilingOverride
         from core.pseudo_admission import resolve_pseudo_admission
-        from core.sandbox_executor import StubSandbox
+        from core.stub_sandbox import StubSandbox
 
         try:
             resolve_pseudo_admission()

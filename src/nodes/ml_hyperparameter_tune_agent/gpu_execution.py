@@ -35,7 +35,7 @@ from nodes.ml_hyperparameter_tune_agent.probe_data import build_attempt_task_pro
 def begin_attempt(sandbox, agent_input, exp_id: str) -> None:
     """Selection is explicit; CPU/pseudo never allocate a measurement state."""
     sandbox.gpu_execution = None
-    from core.sandbox_executor import StubSandbox
+    from core.stub_sandbox import StubSandbox
 
     policy = agent_input.gpu_execution_policy
     if policy is None or isinstance(sandbox, StubSandbox) or sandbox.device_available is False:

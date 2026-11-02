@@ -49,7 +49,8 @@ from agent.schemas.model_io_contract import (
     TensorAxis,
     TensorContract,
 )
-from core.sandbox_executor import StubSandbox, TidmadSandbox
+from core.sandbox_executor import TidmadSandbox
+from core.stub_sandbox import StubSandbox
 from core.training_execution_bindings import TrainingExecutionBindings
 from core.training_seeds import SeedContext
 from execute_tools.dataset_config import DataScope, bind_dataset_profile
