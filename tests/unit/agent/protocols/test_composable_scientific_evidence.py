@@ -1,6 +1,7 @@
 """Typed, independently composable Literature Review / Data Analysis edges."""
 
 import ast
+import json
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,7 @@ from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.literature_review import LiteratureReviewOutput
 from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import AgentCard, ExpertContextItem, ProposalInput
+from agent.schemas.proposer_data_analysis_evidence import ProposerDataAnalysisEvidence
 from agent.schemas.proposer_evidence import build_proposer_evidence
 from agent.schemas.protocols.data_analysis_to_ml_literature_review import (
     local_typed_evidence as analysis_to_literature,
@@ -392,3 +394,84 @@ def test_order_is_canonical_resume_identity(tmp_path) -> None:
     changed = base.model_copy(update={"scientific_evidence_order": "literature_then_analysis"})
     with pytest.raises(RunInvariantsViolation, match="scientific_evidence_order"):
         validate_run_invariants(str(tmp_path), changed)
+
+
+def _projected_analysis_evidence() -> dict:
+    proposal = analysis_to_proposer(
+        _report(),
+        report_ref=CertifiedArtifactRef(
+            logical_ref="data_analysis/report.json",
+            sha256="9" * 64,
+            media_type="application/json",
+        ),
+        proposal_input=ProposalInput(interpretation_evidence=build_proposer_evidence({})),
+    )
+    assert proposal.data_analysis_evidence is not None
+    return proposal.data_analysis_evidence.model_dump(mode="json")
+
+
+def test_data_analysis_evidence_ordinary_labels_keep_exact_bytes() -> None:
+    """Catches the #1497 encoding changing an ordinary identifier's rendered bytes."""
+
+    raw = _projected_analysis_evidence()
+    raw["findings"][0]["method_generated_program_ids"] = ["successive-difference"]
+    evidence = ProposerDataAnalysisEvidence.model_validate(raw)
+    assert render_data_analysis_evidence(evidence) == (
+        "## Data Analysis Evidence\n"
+        f"Report: data_analysis/report.json (sha256={'9' * 64})\n"
+        "Executive summary: A narrowband residual remains near 12 Hz.\n"
+        "- Question q1 [addressed]: Residual structure measured.\n"
+        "- Finding finding-1 [high confidence]: Residual power peaks near 12 Hz.\n"
+        "  Modeling relevance: Motivates checking frequency-aware methods.\n"
+        "  Methods: skill:residual_spectrum, generated_program:successive-difference\n"
+        "  Measurement peak_hz: 12.0 Hz (Dominant residual frequency.)\n"
+        "Use these measurements as evidence. Do not treat analysis-level relevance as an "
+        "architecture or preprocessing decision."
+    )
+
+
+def _set_analysis_label(raw: dict, field: str, label: str) -> None:
+    finding = raw["findings"][0]
+    if field == "report_ref":
+        raw["report_ref"]["logical_ref"] = label
+    elif field == "question_id":
+        raw["question_outcomes"][0]["question_id"] = label
+    elif field == "finding_id":
+        finding["finding_id"] = label
+        raw["question_outcomes"][0]["finding_ids"] = [label]
+    elif field == "method_skill_id":
+        finding["method_skill_ids"] = [label]
+    elif field == "generated_program_id":
+        finding["method_generated_program_ids"] = [label]
+    else:
+        finding["quantitative_evidence"][0][field] = label
+
+
+@pytest.mark.parametrize(
+    "separator",
+    ["\n", "\r\n", "\r", "\x85", "\u2028", "\u2029", "\x0b"],
+    ids=["LF", "CRLF", "CR", "NEL", "LS", "PS", "VT"],
+)
+@pytest.mark.parametrize(
+    "field",
+    [
+        "report_ref",
+        "question_id",
+        "finding_id",
+        "method_skill_id",
+        "generated_program_id",
+        "result_key",
+        "unit",
+    ],
+)
+def test_data_analysis_identifier_cannot_forge_prompt_lines(field: str, separator: str) -> None:
+    """Catches #1497: a raw identifier with a line separator opening a forged heading."""
+
+    label = f"original{separator}### forged"
+    raw = _projected_analysis_evidence()
+    _set_analysis_label(raw, field, label)
+    evidence = ProposerDataAnalysisEvidence.model_validate(raw)
+    rendered = render_data_analysis_evidence(evidence)
+    assert not [line for line in rendered.splitlines() if line.startswith("### forged")]
+    assert json.dumps(label, ensure_ascii=True) in rendered
+    assert len(rendered.splitlines()) == 9
