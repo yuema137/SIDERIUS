@@ -799,3 +799,31 @@ def test_filesystem_failures_say_what_was_attempted(editor_config, monkeypatch):
         read = client.get("/api/editor/example", headers=headers).json()["error"]
         assert read["code"] == "filesystem" and "unsaved" not in read["message"].lower()
         assert "not saved" not in read["message"].lower()
+
+
+@pytest.mark.parametrize("anchor", [True, False])
+def test_float_edit_overflow_is_http_validation_refusal(editor_config, anchor):
+    """Out-of-range JSON integers must not escape review as an HTTP 500."""
+    from tests.unit.tools.test_workflow_literal_preservation import browser_document, literal_source
+
+    source = literal_source()
+    path = editor_config.editor_projects[0].source_file
+    path.write_text(source)
+    document = browser_document(source)
+    document["training_settings"]["launch"]["trial_time_budget_minutes"] = 10**310
+    proposal = {"kind": "document", "document": document}
+    if anchor:
+        proposal["source"] = source
+    headers = {
+        "Authorization": "Bearer " + Path(editor_config.auth_token_file).read_text(),
+        "Origin": editor_config.browser_origin,
+    }
+    with TestClient(create_app(editor_config), base_url=editor_config.browser_origin) as client:
+        base = client.get("/api/editor/example", headers=headers).json()
+        response = client.post(
+            "/api/editor/example/review",
+            headers=headers,
+            json={"expected_sha256": base["sha256"], "proposal": proposal},
+        )
+    assert response.status_code == 422, response.text
+    assert path.read_text() == source

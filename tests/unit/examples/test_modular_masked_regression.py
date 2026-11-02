@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -246,6 +247,51 @@ def test_public_package_relocation_preserves_identity_and_helper_edit_refuses_re
             )
     finally:
         helper.write_bytes(original)
+
+
+_NAMES = """\
+import json, sys
+from execute_tools.task_registration_scope import run_registration_scope
+from workflows.task_composition import compose_run_task_bindings
+with run_registration_scope():
+    composition = compose_run_task_bindings(sys.argv[1])
+print("NAMES=" + json.dumps({
+    "fingerprint": composition.semantic_fingerprint,
+    "task_data_path": type(composition.task_data_path).__module__,
+    "metric": type(composition.metric).__module__,
+}))
+"""
+
+
+def test_fresh_processes_name_relocated_package_modules_identically(tmp_path):
+    """Checkout location must not enter runtime module names (issue #1405).
+
+    Each copy composes in its own interpreter, as two hosts or checkouts do.
+    The previous namespace hashed the absolute package root, so the metric and
+    task-data-path ``__module__`` differed while the fingerprint agreed.
+    """
+    script = tmp_path / "names.py"
+    script.write_text(_NAMES)
+    env = {
+        key: value for key, value in os.environ.items() if not key.startswith("SIDERIUS_TASK_CODE_")
+    }
+    names = []
+    for directory in (tmp_path / "first", tmp_path / "unrelated/second"):
+        shutil.copytree(PACK, directory)
+        result = subprocess.run(
+            [sys.executable, str(script), str(directory / "modular/composition.yaml")],
+            env=env,
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        line = next(line for line in result.stdout.splitlines() if line.startswith("NAMES="))
+        names.append(json.loads(line[6:]))
+    first, second = names
+    assert first["metric"].startswith("_siderius_task_")
+    assert first == second
 
 
 _CHILD = """\
