@@ -6,6 +6,8 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
+from core.record_encoding import model_record_value
+
 from .action_identity import AnalysisExecutionOrigin
 from .assets import AnalysisScopeDescriptor
 from .common import CertifiedArtifactRef, FrozenModel, NonEmptyStr, Sha256, canonical_json_bytes
@@ -167,9 +169,7 @@ class DataAnalysisReport(FrozenModel):
         if len(self.skill_result_summaries) > MAX_REPORT_RESULT_SUMMARIES:
             raise ValueError(f"report exceeds {MAX_REPORT_RESULT_SUMMARIES} skill result summaries")
         summary_bytes = len(
-            canonical_json_bytes(
-                [item.model_dump(mode="json") for item in self.skill_result_summaries]
-            )
+            canonical_json_bytes([model_record_value(item) for item in self.skill_result_summaries])
         )
         if summary_bytes > MAX_REPORT_SUMMARY_BYTES:
             raise ValueError(

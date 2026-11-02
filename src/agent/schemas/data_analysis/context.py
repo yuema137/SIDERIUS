@@ -9,6 +9,7 @@ from pydantic import Field, StrictBool, model_validator
 from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.storage import StorageConfig
 from agent.schemas.task_config import ForwardContract
+from core.record_encoding import model_record_value
 from execute_tools.evaluation_metric import MetricIdentityKey
 
 from .access import AnalysisAccessPolicy
@@ -284,7 +285,7 @@ class DataAnalysisInput(FrozenModel):
     def canonical_scientific_identity(self) -> dict[str, object]:
         """Host-independent caller-controlled identity for resume comparison."""
 
-        payload = self.model_dump(mode="json", exclude={"storage", "caller"})
+        payload = model_record_value(self, exclude={"storage", "caller"})
         payload["allowed_skill_packs"] = [
             {
                 "pack_id": pack.pack_id,

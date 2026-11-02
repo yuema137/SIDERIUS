@@ -177,3 +177,12 @@ Both fields default to empty and are excluded from dumps when empty, preserving
 legacy no-receipt record shapes. Planner history retains the record field even
 when condensed. Unknown proposal types defer activity; omitted strict-plan types
 use the LossConfig default. Ordinary LossConfig normalization is unchanged.
+
+### Data Analysis canonical identities
+
+`data_analysis.common` owns the UTF-8 canonical identity convention used by
+Data Analysis and judge consumers. Its
+[canonical identity contract](data_analysis/canonical-identity-contract.md)
+specifies strict non-finite records, `FrozenModel` decoding, legacy verification
+and the finite-byte compatibility boundary. The non-finite codec remains owned
+by `core.record_encoding`; schemas do not define another encoder.
