@@ -147,7 +147,6 @@ def test_composes_but_launch_names_every_missing_capability(task, tmp_path):
             pytest.fail("unimplemented evaluation launched")
     for name in (
         "composition succeeded",
-        "formula aggregation",
         "feasibility constraints",
     ):
         assert name in str(error.value)
@@ -326,8 +325,10 @@ def test_scoring_child_cannot_bypass_launch_capability_guard(task):
 
     compose(task, declaration(task))
     assert compose_metric_from_manifest(str(task / "composition.yaml")).spec.id
-    compose(task, formula(declaration(task)))
-    with pytest.raises(TaskCompositionError, match="formula aggregation"):
+    spec = formula(declaration(task))
+    spec["constraints"] = [{"component": "quality", "op": ">=", "threshold": 1.0}]
+    compose(task, spec)
+    with pytest.raises(TaskCompositionError, match="feasibility constraints"):
         compose_metric_from_manifest(str(task / "composition.yaml"))
 
 

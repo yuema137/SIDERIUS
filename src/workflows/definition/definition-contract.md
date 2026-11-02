@@ -171,6 +171,16 @@ precedence, the input anchor and readback belong to the candidate-worker contrac
 ("Deterministic stop conditions", "Judge stop condition" and "Condition input
 pause").
 
+### Formula threshold admission
+
+When evaluation selection is a formula, `metric_threshold`, `MetricAtLeast` and
+metric `threshold/v1` declarations name the generated effective metric id.
+Worker admission checks every declaration before dispatch, including unvisited
+branches. A source metric id is not an implicit unit conversion; raw component
+targets are unsupported. See the
+[evaluation contract](../../execute_tools/evaluation-contract.md#deterministic-selection-runtime)
+for the owning rule and effective id inspection.
+
 ## Route declarations
 
 `WorkflowDefinition.routes` and `ReusableWorkflowDefinition.routes` optionally carry

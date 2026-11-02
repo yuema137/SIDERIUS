@@ -40,6 +40,7 @@ from core.planner_strategy_identity import PlannerStrategyIdentity
 from core.runtime_control.admission import AdmissionDecision
 from execute_tools.evaluation_execution import CandidateEvaluationResult
 from execute_tools.evaluation_metric import MetricResult, NotScoreableResult
+from execute_tools.evaluation_results import SelectionBinding
 
 #: Names that must NEVER become ``RunBindings`` fields. Each is rebound or
 #: mutated inside the round/attempt loops, so storing it on a "stable bindings"
@@ -240,6 +241,9 @@ class RunBindings:
 
     planner_strategy_identity: PlannerStrategyIdentity | None = None
     """The resolved provider identity pinned before the first planner call."""
+
+    selection_binding: SelectionBinding | None = None
+    """Resolved effective/source metric identities; absent preserves source ranking."""
 
     def __post_init__(self) -> None:
         offending = sorted(FORBIDDEN_BINDING_FIELDS & {f.name for f in fields(self)})

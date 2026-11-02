@@ -16,3 +16,11 @@ executor/scoring integration belongs under
 Use a sandbox stub for pseudo-mode call-shape tests, not scientific evidence.
 
 Detailed agent-facing contract: [denoising_score_skill.md](denoising_score_skill.md).
+
+A task can also declare a weighted evaluation formula. The scoring child evaluates
+the source metrics, combines the referenced values into utility between 0 and 1,
+and records each component's contribution. Higher utility wins candidate ranking;
+Health checks still read the original scientific values. This requires the declared
+evaluation capabilities to be available at launch. See the
+[evaluation contract](../../../execute_tools/evaluation-contract.md#deterministic-selection-runtime)
+for supported routes and explicit threshold units.

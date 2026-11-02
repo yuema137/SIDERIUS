@@ -24,6 +24,7 @@ from core.durable_io import publish_bytes_write_once
 from ml_models.model_descriptions import DescriptionSourcePolicy
 from workflows.definition import ExternalSource, ProtocolRequest
 from workflows.definition.fanout import InterpretationEdge
+from workflows.evaluation_selection import selection_metric
 from workflows.llm_config import WorkflowLLMConfig
 from workflows.proposal_pipeline import get_reasoning_pipeline
 from workflows.research_history import (
@@ -173,7 +174,9 @@ def prepare_interpretation(
         raise ValueError("interpretation input task disagrees with composed task")
     if value.description_source_policy != DescriptionSourcePolicy.COMPOSED:
         raise ValueError("interpretation requires composed description policy")
-    if value.metric_spec is not None and value.metric_spec != composition.metric.spec:
+    if value.metric_spec is not None and value.metric_spec != selection_metric(
+        composition, composition.metric.spec
+    ):
         raise ValueError("interpretation metric disagrees with composed task")
     if arguments.task_composition_ref != build_task_composition_ref(composition):
         raise ValueError("interpretation protocol task identity disagrees with composed task")

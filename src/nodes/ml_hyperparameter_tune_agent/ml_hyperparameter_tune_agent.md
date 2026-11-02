@@ -1315,6 +1315,17 @@ Design: `docs/design/generic_framework_upgrade/
 step_05a_tuner_data_selection.md`.
 
 
+## Effective evaluation selection
+
+The executable `run_metric` remains the source metric. The composition's
+`SelectionBinding` supplies the effective spec for `run_order`, planner/reflector
+metric labels and final output stamps. `scoring_transport.py` validates child
+results and builds Health invocation context; `round_health.py` projects source
+values before Health evaluation. Formula records retain typed `evaluation_result`
+evidence and have no fabricated effective per-file vector. See the
+[evaluation runtime contract](../../execute_tools/evaluation-contract.md#deterministic-selection-runtime)
+for supported routes, required evidence, refusal records and `score_units_metric`.
+
 ## Evaluation metric handle (Step 06, 2026-08)
 
 Production scoring invokes the frozen TIDMAD scorer **through a generic
