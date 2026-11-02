@@ -174,6 +174,11 @@ LocalJsonDataSource summary loading and exploration-route summary/run-output
 loading call `core.record_encoding.decode_record` before filtering, ranking
 or response projection. The decoder owns both legacy and versioned formats;
 data-source callers receive native float/None values without encoding metadata.
-HTTP response models retain their existing non-finite JSON presentation.
+HTTP response models retain their existing non-finite JSON presentation:
+typed float fields serialize NaN/±inf as JSON `null`, never a bare token.
+Ranking uses `execute_tools.metric_order.finite_score` (#1316): the model
+overview's `best_agent_score` and the leaderboard skip a record whose
+`denoising_score` is null, NaN or ±inf, so a trial `failed_mode_collapse`
+record (whose non-finite score is kept as evidence) is never best or ranked.
 Regression coverage includes LocalRecorder-written scores 0.5, -inf and 0.4,
 plus +inf/NaN and the actual HTTP run-record endpoint.

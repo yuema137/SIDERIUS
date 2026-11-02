@@ -45,7 +45,7 @@ from execute_tools.health_checks.schemas import (
     GateAction,
     GateResult,
 )
-from execute_tools.metric_order import MetricOrder
+from execute_tools.metric_order import MetricOrder, finite_score
 
 
 class RoundDecision(StrEnum):
@@ -441,16 +441,6 @@ def _fmt_reference(value: float | None) -> str:
     """
 
     return "none" if value is None else f"{value:.4f}"
-
-
-def finite_score(value: object) -> bool:
-    """A usable golden-metric scalar: a real finite number.
-
-    ``None`` (missing, or a legacy null projection), NaN and ±inf are all
-    "no usable score". Live decisions test this rather than ``is not None``
-    because current scorer transport keeps non-finite floats (#1316).
-    """
-    return isinstance(value, int | float) and not isinstance(value, bool) and math.isfinite(value)
 
 
 def _identity(value: float) -> float:

@@ -71,7 +71,7 @@ from execute_tools.health_checks.config import (
     load_composed_health_config,
     load_health_gates_config,
 )
-from execute_tools.metric_order import MetricOrder
+from execute_tools.metric_order import MetricOrder, finite_score
 from execute_tools.sample_set_builder import build_sample_set
 from execute_tools.scoring_helpers import build_score_table
 from execute_tools.task_data_path import (
@@ -162,7 +162,6 @@ from nodes.ml_hyperparameter_tune_agent.policy import (
     _strategy_independent,
     _validate_data_config,
     _validate_penalty_for_direction,
-    finite_score,
 )
 from nodes.ml_hyperparameter_tune_agent.records import (
     _PHASE_FAILURE_TEXT,

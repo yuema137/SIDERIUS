@@ -312,11 +312,18 @@ A finite payload carries no metadata and keeps its historical bytes. A
 non-finite primary scalar, `file_vector` element, `metric_result.scalar` or
 secondary scalar now reaches the tuner as the float it was, instead of `null`;
 an actually missing element and the not-scoreable `denoising_score: null`
-remain `None`. Live tuner decisions that previously tested `is not None`
-on the round score now test `policy.finite_score` (a real finite number):
+remain `None`. Live decisions that previously tested `is not None`
+on a score now test `execute_tools.metric_order.finite_score` (a real finite
+number; the neutral owner both the tuner and the dashboard import):
 checkpoint retention (`scored`), the per-file score table, and the reflection
 context's rank / new-best / efficiency fields. A non-finite round is therefore
-decided exactly as the null round it used to be. Selections over persisted
+decided exactly as the null round it used to be. Persisted-record rankers
+outside the tuner apply the same predicate: the dashboard model overview best
+and leaderboard (`dashboard/data_sources/local_json.py`) and
+`persisted_ranking.best_by_declared_metric` never rank or call best a NaN/±inf
+record (a trial `failed_mode_collapse` record keeps its non-finite score);
+typed dashboard responses serialize any remaining non-finite float field as
+JSON `null`. Selections over persisted
 records were already finite-aware or status-gated: best tracks
 (`math.isfinite`), the validity merge (`_merge_score_validity_failure` makes a
 non-finite round `failed_mode_collapse`), candidate eligibility, and
@@ -324,6 +331,15 @@ interpretation/reflection filters on `status == "success"`. Persisted records,
 planner history and reflector-visible results now carry the non-finite value
 on the task-owned subprocess route, as the in-process anchor route already did. The file is
 transient (removed after the read), so no archive of it exists.
+Identity impact: `estimation_assembly_digest` binds
+`ml_hyperparameter_tune_agent.py` and `execution.py`, and enters every
+composition's `semantic_fingerprint` through the preflight estimator identity.
+Every task composition fingerprint therefore moves with this revision, and
+because `task_composition_fingerprint` is a compared run invariant
+(`run_invariants.py`), a run started before it is refused on resume
+(fail-closed). Experiment-owned fingerprint and assembly qualification lists
+must be requalified at freeze; historical runs resume only under their pinned
+framework revision.
 `scoring_utils.coerce_nonfinite_to_none` no longer runs on any new write; it
 remains for comparisons with legacy null-projected storage images.
 Evidence: `tests/unit/execute_tools/test_scoring_output_nonfinite.py`.

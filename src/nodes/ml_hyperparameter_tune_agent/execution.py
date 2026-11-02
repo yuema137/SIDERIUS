@@ -57,6 +57,7 @@ from execute_tools.evaluation_metric import (
 from execute_tools.health_checks.schemas import (
     PerSampleEvidence,
 )
+from execute_tools.metric_order import finite_score
 from execute_tools.scoring_helpers import (
     build_score_table,
     file_vector_to_log_space,
@@ -83,7 +84,6 @@ from nodes.ml_hyperparameter_tune_agent.policy import (
     _gate_results_to_score_meta,
     _merge_score_validity_failure,
     _should_bypass_formal_time_budget,
-    finite_score,
     resolve_measured_time_budget,
     resolve_scoring_route,
 )
