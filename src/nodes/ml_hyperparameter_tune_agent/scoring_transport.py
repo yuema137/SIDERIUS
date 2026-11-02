@@ -25,9 +25,31 @@ class ChildScoreFacts:
 def adopt_child_score(
     bindings: RunBindings, score: dict[str, Any], require_success: Callable
 ) -> ChildScoreFacts:
+    """Adopt one scoring-child envelope after checking its status and evidence.
+
+    Status comes first: a crashed or OOM-killed scorer (empty JSON) must keep
+    its infrastructure status and stderr through ``require_success`` instead of
+    surfacing as malformed evaluation evidence. The one non-success envelope
+    inspected before that is a structured formula refusal (status ``error``
+    with ``evaluation_result``), which ``validate_child_evaluation`` raises as
+    a typed not-scoreable refusal carrying its component evidence.
+    """
     results = score.get("results", {}) or {}
-    validate_child_evaluation(results, getattr(bindings.agent_input, "task_composition_ref", None))
+    carrier = getattr(bindings.agent_input, "task_composition_ref", None)
+    status = score.get("status")
+    if status == "success" or (status == "error" and "evaluation_result" in results):
+        validate_child_evaluation(results, carrier)
     require_success(score)
+    # F2 — carry the same three round facts the anchor route produces
+    # in-process, so the round-boundary gate evaluation is genuinely
+    # route-independent rather than an anchor branch with a second entrance.
+    #
+    # `per_sample_evidence` is TRANSPORTED, never inferred. The child sets
+    # `file_vector` from `MetricResult.per_sample`, which is `None` exactly
+    # when the metric declares no per-sample concept — so D18's mapping
+    # applies verbatim. A payload that omits the key entirely has stated
+    # NOTHING, and absence must not be read as `scalar_only`: that is the
+    # distinction `PerSampleEvidence.UNDECLARED` exists to keep.
     return ChildScoreFacts(
         scalar=results.get("denoising_score"),
         file_vector=list(results.get("file_vector") or []),

@@ -22,7 +22,11 @@ def carrier():
     )
     return SimpleNamespace(
         selection_binding=SelectionBinding(
-            evaluation_sha256="a" * 64, source_metric=spec, effective_metric=spec, components={}
+            evaluation_sha256="a" * 64,
+            source_metric=spec,
+            effective_metric=spec,
+            components={},
+            terms=(),
         )
     )
 

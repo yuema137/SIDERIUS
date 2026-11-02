@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from execute_tools.evaluation_metric import (
+    MetricDirection,
     MetricResult,
     MetricSpecField,
     NotScoreableResult,
@@ -15,6 +16,15 @@ from execute_tools.evaluation_metric import (
     ScoreabilityFailure,
     ScoreabilityVerdict,
 )
+from execute_tools.evaluation_spec import WeightedTerm
+
+
+class EvaluationTransportError(ValueError):
+    """Child/parent evaluation evidence is malformed, ambiguous or inconsistent.
+
+    Distinct from a scientific refusal: transport errors never become a
+    scoreable or not-scoreable verdict; the attempt fails as a scoring error.
+    """
 
 
 class EvaluationInputsScoreability(ScoreabilityContract):
@@ -66,8 +76,22 @@ class EvaluationEvidence(BaseModel):
     failures: tuple[ScoreabilityFailure, ...] = Field(default=(), strict=False)
 
 
+class SelectionTerm(BaseModel):
+    """One declared term plus the source identity its raw value must come from."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    term: WeightedTerm
+    source_metric_id: str | None
+    direction: MetricDirection | None
+
+
 class SelectionBinding(BaseModel):
-    """Composition projection transported to the tuner without executable plugins."""
+    """Composition projection transported to the tuner without executable plugins.
+
+    ``terms`` lets the parent recompute component arithmetic from raw values
+    and the declaration instead of trusting the child's derived numbers.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -75,6 +99,7 @@ class SelectionBinding(BaseModel):
     source_metric: MetricSpecField
     effective_metric: MetricSpecField
     components: dict[str, dict[str, JsonValue]]
+    terms: tuple[SelectionTerm, ...] = Field(strict=False)
 
 
 def _validate_refusal_evidence(

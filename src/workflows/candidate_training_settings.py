@@ -73,6 +73,9 @@ SUPPORTED_LAUNCH_FIELDS = frozenset(
         "runtime_watchdog_enabled",
         "runtime_watchdog_floor_seconds",
         "runtime_watchdog_safety_factor",
+        # #1294: effective-unit acknowledgement for degenerate_penalty_score under
+        # formula selection; admitted by the same rule as the direct workflow.
+        "score_units_metric",
         "train_portion",
         "train_validation_align",
         "training_validation_portion",
@@ -102,7 +105,6 @@ INACTIVE_LAUNCH_FIELDS = frozenset(
         "enable_chain_incumbent_formal_gates",
         # #1012: consumed only by the chain-incumbent gates, inactive above.
         "skip_formal_min_delta",
-        "score_units_metric",
         "bypass_formal_time_budget_min_delta",
         "exploration_mode",
         "human_advice_analysis",

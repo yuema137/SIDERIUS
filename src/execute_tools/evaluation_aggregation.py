@@ -1,12 +1,20 @@
-"""Framework-owned weighted utility arithmetic; executed only by the scoring child."""
+"""Framework-owned weighted utility arithmetic.
+
+The scoring child computes it; the parent re-derives each term from raw values
+and the declaration to verify transported evidence (``evaluation_child``).
+"""
 
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from fractions import Fraction
 from typing import TYPE_CHECKING
 
+from pydantic import JsonValue
+
 from execute_tools.evaluation_metric import (
+    MetricDirection,
     MetricIdentityKey,
     MetricResult,
     MetricSpec,
@@ -17,6 +25,7 @@ from execute_tools.evaluation_results import (
     ComponentEvaluation,
     EvaluationEvidence,
     EvaluationInputsScoreability,
+    EvaluationTransportError,
 )
 from execute_tools.evaluation_spec import MetricComponent, WeightedTerm
 from execute_tools.evaluation_validation import formula_terms
@@ -25,6 +34,18 @@ from workflows.evaluation_selection import effective_metric_spec
 
 if TYPE_CHECKING:
     from workflows.evaluation_composition import ResolvedEvaluation
+
+
+def index_source_results(results: Iterable[MetricResult]) -> dict[str, MetricResult]:
+    """Map source results by metric id; an ambiguous duplicate fails transport."""
+    indexed: dict[str, MetricResult] = {}
+    for result in results:
+        if result.metric_id in indexed:
+            raise EvaluationTransportError(
+                f"duplicate source metric result {result.metric_id!r} in evaluation evidence"
+            )
+        indexed[result.metric_id] = result
+    return indexed
 
 
 def _component_value(
@@ -43,22 +64,29 @@ def _component_value(
     return result.scalar
 
 
-def _term_evidence(
-    term: WeightedTerm, raw: float, total: Fraction, evaluation: ResolvedEvaluation
+def weight_total(terms: Iterable[WeightedTerm]) -> Fraction:
+    return sum((Fraction(str(t.weight)) for t in terms), Fraction())
+
+
+def term_evaluation(
+    term: WeightedTerm,
+    raw: float,
+    total: Fraction,
+    direction: MetricDirection,
+    identity: dict[str, JsonValue],
 ) -> tuple[ComponentEvaluation, Fraction]:
+    """The single term arithmetic, shared by the child and the parent verifier."""
     value, lower, upper = (Fraction(str(v)) for v in (raw, term.lower, term.upper))
     clipped = not lower <= value <= upper
     if clipped and term.out_of_range == "refuse":
         raise ValueError(f"raw value {raw} is outside [{term.lower}, {term.upper}]")
     normalized = (min(upper, max(lower, value)) - lower) / (upper - lower)
-    resolved = evaluation.components[term.component]
-    assert resolved.direction is not None
-    order = MetricOrder(MetricIdentityKey(term.component, resolved.direction))
+    order = MetricOrder(MetricIdentityKey(term.component, direction))
     utility = order.normalized_utility(normalized)
     contribution = Fraction(str(term.weight)) / total * utility
     return ComponentEvaluation(
         component_id=term.component,
-        identity=resolved.identity,
+        identity=identity,
         raw=raw,
         normalized=float(normalized),
         utility=float(utility),
@@ -104,12 +132,10 @@ def aggregate_evaluation(
     contract = effective.scoreability
     assert isinstance(contract, EvaluationInputsScoreability)
     source, failures = _source_evidence(source_spec, primary)
-    results = {r.metric_id: r for r in secondaries}
-    if source is not None:
-        results[source.metric_id] = source
+    results = index_source_results([*secondaries, *([source] if source is not None else [])])
     components = {c.id: c for c in evaluation.spec.components}
     terms = formula_terms(evaluation.spec)
-    total = sum((Fraction(str(t.weight)) for t in terms), Fraction())
+    total = weight_total(terms)
     evidence: list[ComponentEvaluation] = []
     contributions: list[Fraction] = []
     for term in terms:
@@ -118,7 +144,11 @@ def aggregate_evaluation(
             if type(component) is not MetricComponent:
                 raise ValueError("component kind has no runtime value support")
             raw = _component_value(component, results, evaluation)
-            item, contribution = _term_evidence(term, raw, total, evaluation)
+            resolved = evaluation.components[term.component]
+            assert resolved.direction is not None
+            item, contribution = term_evaluation(
+                term, raw, total, resolved.direction, resolved.identity
+            )
             evidence.append(item)
             contributions.append(contribution)
         except ValueError as error:

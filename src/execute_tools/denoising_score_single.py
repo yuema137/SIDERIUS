@@ -443,21 +443,20 @@ def main(argv: list[str] | None = None) -> None:
 
     declared_naming = compose_deliverable_naming_from_manifest(args.task_manifest)
 
-    # There is deliberately NO fallback: `compose_metric_from_manifest` raises
+    # There is deliberately NO fallback: `compose_scoring_child_bindings` raises
     # `TaskCompositionError` and this child lets it terminate the scoring
     # subprocess. A composed run must never silently score with an unrelated
     # metric; such a fallback would be indistinguishable from success.
-    from workflows.task_composition import compose_metric_from_manifest
+    # The full composition exists only when the manifest declares evaluation;
+    # an absent-evaluation child composes the metric section alone (#1294).
+    from workflows.task_composition import compose_scoring_child_bindings
 
-    metric = compose_metric_from_manifest(args.task_manifest)
+    metric, composition = compose_scoring_child_bindings(args.task_manifest)
 
     # Step 12 / PR-12d D4b — the TASK-OWNED scoring route.
     #
     # The framework hands the metric only the task-owned payload, transported
     # scope, and physical data root that the generic scoring contract owns.
-    from workflows.task_composition import compose_run_task_bindings
-
-    composition = compose_run_task_bindings(args.task_manifest)
     _emit_task_owned_score(
         args, dataset_profile, metric, declared_naming=declared_naming, composition=composition
     )

@@ -5,7 +5,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 from execute_tools.evaluation_metric import MetricSpec
-from execute_tools.evaluation_results import EvaluationInputsScoreability, SelectionBinding
+from execute_tools.evaluation_results import (
+    EvaluationInputsScoreability,
+    SelectionBinding,
+    SelectionTerm,
+)
+from execute_tools.evaluation_spec import MetricComponent, WeightedTerm
 from execute_tools.evaluation_validation import formula_terms
 from execute_tools.metric_order import MetricOrder
 
@@ -45,6 +50,16 @@ def selection_binding(composition: RunTaskComposition) -> SelectionBinding | Non
             term.component: evaluation.components[term.component].identity
             for term in formula_terms(evaluation.spec)
         },
+        terms=tuple(_selection_term(evaluation, term) for term in formula_terms(evaluation.spec)),
+    )
+
+
+def _selection_term(evaluation: ResolvedEvaluation, term: WeightedTerm) -> SelectionTerm:
+    component = next(c for c in evaluation.spec.components if c.id == term.component)
+    return SelectionTerm(
+        term=term,
+        source_metric_id=component.metric if isinstance(component, MetricComponent) else None,
+        direction=evaluation.components[term.component].direction,
     )
 
 

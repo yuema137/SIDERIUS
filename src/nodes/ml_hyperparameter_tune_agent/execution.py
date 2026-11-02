@@ -1294,7 +1294,14 @@ def _run_local_evaluation_phase(
     secondary_results: list[MetricResult] = []
     secondary_refusals: list[NotScoreableResult] = []
     secondary_errors: dict[str, str] = {}
-    # Persist scoring failures without claiming that Health ran.
+    # V8 hardening Domain 2a — wrap the entire scoring block.
+    # Pre-V8, an exception in score_vector / denoising_score_skill
+    # bubbled past the loop without writing a record, so the
+    # tuner's iteration silently lost evidence (training
+    # checkpoint preserved on disk but no entry in
+    # memory_history). Now we catch, write an error_scoring
+    # record (matches the error_training/inference pattern
+    # above), and continue. See docs/V8_Gap_Report.md Domain 2a.
     _scoring_route = resolve_scoring_route(anchor_map_data, prepared.task_scopes)
 
     # F2 — these two resolvers are properties of the ROUND (its model, its
@@ -1371,7 +1378,16 @@ def _run_local_evaluation_phase(
                 metric_result.scalar,
             )
             per_sample_evidence = PerSampleEvidence.for_per_sample(per_sample)
-            # Keep the scalar identity; file_vector owns per-sample transport.
+            # Step 06 C4 — the record-facing payload. Kept
+            # OUT of `score_res["results"]` on purpose: that
+            # dict is json-dumped verbatim into the reflector
+            # prompt (agent/prompts.py:1343) and Step 06
+            # changes no prompt (design §8, §13). The planner's
+            # history serialization likewise drops it
+            # (`agent/prompts.py::_PLANNER_HIDDEN_RECORD_KEYS`)
+            # — persisted for Steps 07a/09, not agent-facing.
+            # Per-sample evidence is a POINTER — `file_vector`
+            # on the same record — not a second copy (§5).
             metric_payload = metric_result.model_dump(mode="json", exclude={"per_sample"})
 
             # Step 10 / P2b — the DECLARED observational secondaries,
@@ -1405,6 +1421,22 @@ def _run_local_evaluation_phase(
                 },
             }
         else:
+            # The scoring SUBPROCESS, serving two routes that differ only
+            # in what the child is handed:
+            #
+            # * `TASK_OWNED` — a composed task's own deliverable, scored
+            #   through its own metric against the evaluation scope
+            #   transported alongside it. Every composed contrast run
+            #   takes this route, because no contrast implementation
+            #   declares trial anchoring.
+            # * `SUBPROCESS_LEGACY` — TIDMAD without anchor normalization.
+            #   NOT "legacy single-file mode": `anchor_map_data` is only
+            #   ATTEMPTED for a trial round, so this branch is also where
+            #   every un-composed FORMAL round has always gone. The old
+            #   comment named a condition the code never tested.
+            #
+            # Status, formula evidence and per-sample transport are adopted
+            # by `scoring_transport.adopt_child_score`.
             score_res = _runtime._run_skill("denoising_score_skill", sandbox, **active_params)
             child = adopt_child_score(bindings, score_res, _require_successful_scoring_result)
             final_scalar, file_vector = child.scalar, child.file_vector
@@ -1460,7 +1492,20 @@ def _run_local_evaluation_phase(
         scope="tuner",
     )
 
-    # Every successful scoring route reaches the same source-value Health boundary.
+    # F2 — HealthGates fire at the ROUND boundary, on every scoring route.
+    #
+    # Placed after the scoring try/except on purpose: reaching this line
+    # means scoring SUCCEEDED for whichever route ran, so both routes
+    # arrive carrying the same round facts. A scoring failure still takes
+    # the `error_scoring` path above and never reaches a gate — a gate that
+    # could not be evaluated is not a gate that passed.
+    #
+    # Evaluate, merge score-validity and stamp the verdict are one
+    # responsibility and therefore one call; the boundary owns them, this
+    # function keeps sequencing. Full rationale, and the deliberately
+    # unpersisted `evaluated` residual, in `round_health`. Under formula
+    # selection, `round_health` hands task checks the SOURCE values
+    # (`evaluation_child.source_health_inputs`), never the utility.
     apply_round_health(
         score_res,
         merge_score_validity=_merge_score_validity_failure,

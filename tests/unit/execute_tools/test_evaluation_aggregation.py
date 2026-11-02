@@ -142,6 +142,7 @@ def test_child_identity_and_health_projection_are_distinct():
         "denoising_score": outcome.scalar,
         "metric_result": outcome.model_dump(mode="json"),
         "file_vector": None,
+        "secondary_metric_results": [result("error", "lower", 0.0).model_dump(mode="json")],
     }
     assert validate_child_evaluation(payload, carrier) == evidence
     health = source_health_inputs(
