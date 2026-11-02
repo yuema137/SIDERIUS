@@ -450,7 +450,11 @@ diagnostics. These are converter limits, not document-schema limits. Parsing
 runs in process and does not provide hostile-input memory/time isolation.
 
 `WorkflowSourceError` carries a nonempty tuple of frozen `SourceDiagnostic`
-models. Codes are `syntax`, `unsupported`, `limit` or `validation`. Optional
+models. Codes are `syntax`, `unsupported`, `limit`, `validation` or
+`trial_override_schedule`. The last code preserves the native typed refusal for
+Trial overrides discarded by a forced-Formal single tuning round; the
+`validation_code` allowlist maps all other native error types to `validation`.
+The console uses the same allowlist for direct request validation. Optional
 `line`/`end_line` are one-based; `column`/`end_column` are zero-based UTF-8 byte
 offsets, with exclusive end positions. Missing whole-input spans are `None`.
 Validation points to the enclosing failing constructor and, where available,

@@ -426,6 +426,7 @@ def test_training_inspector_save_preserves_advanced_rules_and_presence(tmp_path)
     assert controls["trial_max_epochs"].state == "unset"
     assert controls["max_rounds"].effective == 10
     assert controls["max_rounds"].state == "unset"
+    assert controls["max_rounds"].help.minimum == 1
     assert view.document.training_settings == supplied
     document = view.document.model_copy(deep=True)
     document.training_settings["launch"]["trial_max_epochs"] = 3
