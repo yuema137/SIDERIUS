@@ -96,8 +96,9 @@ unchanged.
 
 Device admission (walkthrough N2): `package_mounts.device_problem` calls the run
 sandbox's own `SandboxProfile.device_paths` for one path (canonical, existing, under
-`/dev`, a character device) and returns its refusal reason; there is no second device
-rule. `add-task`, where the paths are typed, refuses (exit 2, console.json unchanged)
+`/dev`, a character device) and returns its audited refusal text: fixed framework
+guidance plus the operator-declared path, without nested causes or tracebacks.
+There is no second device rule. `add-task`, where the paths are typed, refuses (exit 2, console.json unchanged)
 with `task <id> candidate_devices names <path>, which the run sandbox refuses
 (<reason>); list only device nodes present on this machine (for example ls -l
 /dev/nvidia*)`. `check` and `serve` (and every console construction or global-settings
@@ -116,7 +117,9 @@ already in `task_read_only` is mounted once. `package_mounts.device_warnings(dev
 reports only device paths the sandbox would refuse; `check`/`serve` prefix each with
 `Task <id>: `, and Run review shows the same list for the reviewed request.
 `SandboxProfile.device_paths` refuses a missing `/dev/nvidia<N>` with `GPU device
-<path> is not present on this machine, ...` (the admission cause).
+<path> is not present on this machine, ...`; the console retains its recovery
+instructions to list the available nodes (`ls /dev/nvidia*`) or use the machine
+that has the declared GPU.
 
 `check --gpu [--task <id>]` (`gpu_check.check_gpu`) runs, for each task whose
 `candidate_devices` lists a `/dev/nvidia<N>` node, `python -m
@@ -3321,13 +3324,90 @@ The AST guard additionally checks format calls/percent formatting, exception arg
 and chained `x.result.failure.message` access, and counts duplicate statement
 occurrences (multiple raw expressions in one statement count once). Named safe
 projection calls are boundaries for the syntactic scan. Explicit reviewed baseline
-entries retain fixed guidance and typed legacy carriers for #1328. Alias, dynamic
+entries retain audited fixed guidance and typed carriers. Alias, dynamic
 attribute, whole-model serialization, safe-owner shadowing and JavaScript gaps are
 listed in #1339; behavioral HTTP/browser sentinel tests cover the editor model
 projection independently of this syntactic guard. The editor browser witness
 renders real sanitized HTTP observations through the production JSON details
 component, using synthetic visibility gates only; it does not qualify saving or
 scientific compatibility.
+
+### Bounded alias and whole-model projection evidence (#1339)
+
+`test_error_projection_guard._forwarding` scans lexical scopes independently.
+Handler-bound exceptions and conventionally named, annotated exception carriers
+seed a conservative fixed point over local assignments. Direct assignment,
+chained aliases, literal tuple/list unpacking and container literals propagate
+exception/message provenance; assigning `str`, `repr` or `format` also preserves
+the formatting-call check. Safe projection calls and private logger calls retain
+their existing boundaries. Fixed conditional result strings do not become raw
+messages merely because the condition examines an exception.
+
+The guard checks aliased returns, message/detail/error/content keywords,
+JSONResponse/dict/json serialization and whole-carrier model_dump/model_dump_json
+calls. Four newly visible existing statements are individually reviewed in the
+exact baseline: SetupRefused finding serialization and response alias, the
+SourceDiagnostic response, and the code-filtered admission-not-attempted response.
+Their owners supply framework guidance; there are no whole-file exemptions.
+Existing #1328 repairs remove their own legacy entries independently.
+
+Arbitrary models are not proven safe by syntax. `test_error_model_inventory`
+inventories every typed CheckFailure path below the existing ReviewView boundary.
+Each inventoried path must be populated with a private sentinel, safely projected,
+and leave the native model unchanged. The real HTTP witnesses in
+`test_editor_errors` exercise both ordinary review and AuthoringError.proposal
+serialization. Adding a typed failure path requires a projection and witness
+update even when the adapter never directly accesses `.failure.message`.
+
+Limits remain explicit: unknown helper returns, closure capture, mutation of
+containers after assignment, dynamically selected attributes, arbitrary
+formatting APIs, aliases/shadowing of logger or safe-projection owners, unannotated
+exception parameters without a handler binding, unrelated model types and
+JavaScript transformations still require source-aware review and boundary tests.
+The analysis is control-insensitive and does not kill aliases after reassignment;
+its findings are review obligations, not proof of a runtime leak. This bounded
+tripwire is not an interprocedural taint analyzer or a general serialization
+security proof. No runtime behavior, scientific default or identity changes.
+
+### Settings, import and authoring error projections (#1328)
+
+`error_messages.console_error_message` remains the console projection owner and
+uses `setup_review.summary_errors.error_category`; raw causes and custom exception
+class names are diagnostic-log data, not response messages. Settings profile
+upload/export, external-manifest inspection, package-copy OSError, add-task folder
+creation and entry validation, and host-ledger intake use that
+owner. Existing refusal codes and no-write/partial-copy recovery hints remain.
+Device warnings retain the audited `SandboxProfile.device_paths` / `_canonical_path`
+refusal text, including the configured path and specific missing-GPU recovery.
+These sources construct only fixed framework text plus the declared path; nested
+causes and tracebacks are not forwarded.
+
+`advice_error_message` adds the advice owner's recognised key inventory and
+nonempty text/list requirements to the safe category. Library upload, inline
+export and settings advice loading share it. Unknown uploaded keys, parser text
+and nested causes are not forwarded. This changes console diagnostics only;
+`workflows.advice` still owns parsing and consumability and its runtime behavior
+is unchanged.
+
+Typed-carrier provenance audit:
+
+| Carrier | Reviewed sources and projection rule |
+| --- | --- |
+| `SettingsInvalid` | `settings_file`, `package_mounts`, `workspace`, `config`: fixed field/path/permission recovery guidance; nested advice causes use `advice_error_message`. |
+| `AdviceArtifactError` | `workflows.advice` can contain unknown keys and nested parser/file errors; console adapters categorise rather than trust the carrier text. |
+| `AuthoringError` | `service`, task publication, node edits, source edits and version records: retain fixed policy/conflict/recovery guidance and explicit authored identifiers. Native `definition.draft.inspect_draft` now projects validator messages rather than `str(ValidationError)` input snapshots, also protecting draft and node-draft views. |
+| `TemplateRefusal` | `templates.import_template`: fixed unsupported-source guidance. |
+| `WorkspaceRefused` | `workspace.ensure_owned_directory` and init: fixed ownership/permission recovery with explicit paths and stat fields; package-copy forwarding is restricted to this typed carrier, while OSError is categorised. |
+| `AddTaskRefused` | `add_task`, `example_bundle`: fixed planning/recovery text; generic inspection/copy/entry errors are categorised; custom exception names are not shown. |
+| `MissingConfigFile` | `config_errors`: configured resource field and path; existing name/path recovery guidance remains. |
+| launch policy / judge route | `validate_declared_policy` and `loop_judge.admit_judge_route`: fixed framework policy/budget/route guidance; no nested arbitrary cause is interpolated. |
+
+The exact AST baseline removes repaired raw projections and documents the narrow
+WorkspaceRefused forwarding statement; it is not an exemption for arbitrary typed
+errors. HTTP/CLI sentinel tests live in `test_remaining_error_projections.py`.
+Authoring validation retains the validator's field/contract guidance, but omits
+Pydantic's input snapshot. No scientific defaults, prompt bytes, protected digest
+algorithms or experiment-owned settings change.
 
 ### Execution profile browser binding
 

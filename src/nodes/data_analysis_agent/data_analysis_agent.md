@@ -251,6 +251,27 @@ allocation. Enforcement is cooperative request/worker timeout propagation, not
 a process-killing watchdog; a non-cooperative blocking capability may return late
 and its result is then rejected. Whole-process deadlines remain caller-owned.
 
+Skill workers (`agent.data_analysis.executor._run_worker`: interface
+resolution, parameter validation and execution) bind the allocation's absolute
+expiry when the `analysis.worker` boundary admits them. Parent-side
+request publication (fsync) is charged to the allocation; the per-skill
+timeout still starts at process launch, and the worker stops at the earlier of
+the two. Enforcement latency after that stop instant (or after the end of a
+request publication that itself crosses expiry, because one fsync cannot be
+interrupted) is one 0.02 s poll plus one `/proc` RSS sample, then
+`terminate_observed_group`: SIGTERM, reaping the leader while waiting, so a
+group that exits on SIGTERM costs only its exit time; a group still present
+after the 1.0 s grace receives SIGKILL and the leader is awaited for at most
+1.0 s more before a second SIGKILL. A process in uninterruptible kernel sleep
+(D state) cannot be bounded by any signal. The disposition remains `timed_out`.
+Unchecked parent work between two named boundaries (store publication,
+materialization) is not interrupted; a `budget_receipt.json` overrun therefore
+belongs to the interval ending at `last_boundary`. Measured for #1425 under
+host I/O load with a 1.0 s allocation and a sleeping child: overrun before
+this binding up to 3.8 s (5.8 s for a SIGTERM-ignoring child); after it, at
+most 0.021 s beyond an uninterruptible publication (1.03 s when SIGTERM is
+ignored).
+
 ### Generated artifact paths
 
 The generated function receives `output_directory`, the artifact certification

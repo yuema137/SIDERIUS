@@ -22,6 +22,7 @@ from pydantic import Field
 
 from tools.workflow_preview.models import PreviewModel
 
+from .error_messages import advice_error_message, console_error_message
 from .files import config_bytes, open_directory, write_once
 from .settings_models import Id
 
@@ -80,7 +81,11 @@ def inline_advice(document: object) -> bytes | None:
     try:
         parse_advice_bytes(payload, label="exported advice")
     except AdviceArtifactError as error:
-        raise ExportRefused(422, "invalid_advice", str(error)) from None
+        raise ExportRefused(
+            422,
+            "invalid_advice",
+            advice_error_message(error),
+        ) from None
     return payload
 
 
@@ -136,7 +141,7 @@ def export(setups: SetupRegistry, workspace: Path, request: ExportRequest) -> Ex
         raise ExportRefused(
             422,
             "invalid_profile",
-            f"the task's LLM profile is not usable with --llm_config: {error}",
+            f"the task's LLM profile is not usable with --llm_config: {console_error_message(error)}",
         ) from None
     files: dict[ExportFile, bytes] = {"workflow.py": source, "llm.json": profile}
     advice = inline_advice(view.document)

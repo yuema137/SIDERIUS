@@ -662,7 +662,9 @@ UTF-8 spans/import insertion with `source_edits` and literal rendering with
 matched by declaration identity where available, otherwise by position. Changed
 containers can change surrounding formatting, but retained values are recursive.
 `browser_numbers=True` preserves source numbers whose binary64 projections are
-equal, avoiding JSON float/int, signed-zero and large-integer losses. Exact source
+equal, avoiding JSON float/int, signed-zero and large-integer losses. Changed
+integer inputs preserve an existing float type (`2.0` to `3` saves `3.0`) via
+`_browser_scalar`, shared with pre-admission restoration. Exact source
 proposals are required for distinctions the browser cannot represent. Canonical
 rendering remains the owner for new documents and declaration identity.
 `restore_browser_values(source, value)` performs the same numeric comparison over
@@ -671,3 +673,9 @@ from null as well as rounded integers and floats. Authoring models own invoking
 it with bounded source and revalidating its result through the native schema.
 Already-canonical inputs remain canonical after patching, using retained source
 values and the existing renderer; new generation and identity rules are unchanged.
+
+Draft inspection validation diagnostics retain native validator messages and
+located `DraftProblem` guidance, without Pydantic input snapshots (`input_value`
+or `input_type`). `draft.inspect_draft` owns this projection, shared by the editor
+draft, review and combined-node draft routes. Validation and declaration identity
+are unchanged.
