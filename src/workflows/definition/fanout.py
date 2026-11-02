@@ -17,6 +17,9 @@ from .candidate import check_tuning_edge, refuse_declaration_only
 from .llm_strategies import LLM_STRATEGY_TYPES
 from .models import (
     NATIVE_INTERPRETATION_PROFILE,
+    NATIVE_LITERATURE_PROFILE,
+    NATIVE_PROPOSAL_FAMILIES_PROFILE,
+    NATIVE_PROPOSAL_FANOUT_PROFILE,
     AdaptorInstance,
     AdaptorSource,
     ExternalRequest,
@@ -232,11 +235,11 @@ def execution_families(
         return routed_candidate(definition)
     if profile == NATIVE_INTERPRETATION_PROFILE:
         return interpretation_candidate(definition)
-    if profile == "native-literature-candidate/v1":
+    if profile == NATIVE_LITERATURE_PROFILE:
         return literature_candidate(definition)
-    if profile == "native-proposal-families/v1":
+    if profile == NATIVE_PROPOSAL_FAMILIES_PROFILE:
         return proposal_families(definition)
-    if profile == "native-proposal-fanout/v1":
+    if profile == NATIVE_PROPOSAL_FANOUT_PROFILE:
         family = proposal_fanout(definition)
         return ProposalFamilies((family,), family.predecessors)
     raise ValueError("unsupported native graph profile")

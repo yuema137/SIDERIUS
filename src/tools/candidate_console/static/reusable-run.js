@@ -6,8 +6,8 @@
   const session = window.consoleSession, coordinator = window.reusableIntents;
   const stopControl = window.operationStop.mount('capture-stop');
   const profileDescriptions = {
-    'native-proposal-families/v1': ' Independent proposal instances executed serially.',
-    'native-literature-candidate/v1': ' Native literature review feeds one proposal, implementation and validation.',
+    [window.executionProfiles.nativeProposalFamilies]: ' Independent proposal instances executed serially.',
+    [window.executionProfiles.nativeLiterature]: ' Native literature review feeds one proposal, implementation and validation.',
     [window.executionProfiles.nativeInterpretation]: ' Native interpretation feeds one proposal, implementation, validation and tuning.',
   };
   // The reviewed request's authored loop bound decides how many bodies a launch may run.
