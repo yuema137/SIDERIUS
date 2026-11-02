@@ -43,13 +43,14 @@ from agent.schemas.ordering import (
     resolve_ordering,
     validate_ordering_shape,
 )
-from agent.schemas.parameter_rules import ParameterRules
+from agent.schemas.parameter_rules import InactiveParameterRule, ParameterRules
 from agent.schemas.preflight import StaticPreflightEvidence
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.training_diagnosis import TrainingDiagnosis
 from core.checkpoint_selection import SelectedCheckpoint
 from core.planner_strategy_identity import PlannerStrategyIdentity
+from core.record_encoding import RecordModel
 from core.record_role import AttemptRole, RecordRoleError, is_formal_role
 from core.retired_seed_pins import RetiredSeedPins, split_retired_seed_pins
 
@@ -414,7 +415,12 @@ class ExperimentMemory(BaseModel):
     )
 
 
-class ExperimentRecord(BaseModel):
+class ExperimentRecord(RecordModel):
+    inactive_parameter_rules: tuple[InactiveParameterRule, ...] = Field(
+        default=(),
+        exclude_if=lambda value: not value,
+        description="Rules inactive for this attempt's selected loss; not applied constraints.",
+    )
     record_type: Literal["experiment", "attempt_failure"] = "experiment"
     exp_id: str
     status: Literal[
@@ -1251,6 +1257,12 @@ class ExperimentPlan(BaseModel):
     """
 
     model_config = ConfigDict(populate_by_name=True)
+
+    inactive_parameter_rules: tuple[InactiveParameterRule, ...] = Field(
+        default=(),
+        exclude_if=lambda value: not value,
+        description="Rules inactive for this attempt's selected loss; not applied constraints.",
+    )
 
     # --- Hyperparameter decisions ---
     model_type: str = Field(
@@ -3653,7 +3665,7 @@ class PhysicalRejection(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class HyperparamTuningOutput(BaseModel):
+class HyperparamTuningOutput(RecordModel):
     """
     Full report produced by a completed tune_ml_hyperparam_agent run.
 

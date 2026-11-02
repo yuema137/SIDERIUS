@@ -247,3 +247,26 @@ class TestLeaderboard:
     def test_model_not_found(self, client):
         r = client.get("/api/models/transformer/leaderboard")
         assert r.status_code == 404
+
+
+def test_api_reads_versioned_scores_without_exposing_storage_tags(client, data_dir):
+    from core.record_encoding import METADATA, encoded_record
+
+    path = os.path.join(data_dir, "punet", "v1", "agent", "summary_v1_agent.json")
+    rows = [
+        _make_record(f"trial_{i}", score=score) for i, score in enumerate((0.5, float("-inf"), 0.4))
+    ]
+    for row in rows:
+        row["metric_result"] = {
+            "metric_id": "fixture_score",
+            "direction": "higher",
+            "scalar": row["denoising_score"],
+        }
+    _write_json(path, [encoded_record(row) for row in rows])
+    overview = client.get("/api/models/punet")
+    assert overview.status_code == 200
+    assert overview.json()["best_agent_score"] == 0.5
+    response = client.get("/api/models/punet/runs/v1")
+    assert response.status_code == 200
+    assert METADATA not in response.text
+    assert '"-Infinity"' not in response.text

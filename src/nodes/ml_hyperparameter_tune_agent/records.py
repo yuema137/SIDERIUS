@@ -31,6 +31,7 @@ from agent.skills.evaluate_time_skill.wrapper import _aggregate_inference_file_t
 from agent.skills.evaluate_vram_skill.evidence import preflight_memory_fields
 from core.checkpoint_selection import CheckpointSelection
 from core.durable_io import publish_json_atomically
+from core.record_encoding import encoded_record, model_record_value
 from core.record_role import AttemptRole
 from core.run_invariants import (
     RunInvariants,
@@ -48,7 +49,6 @@ from execute_tools.evaluation_metric import (
     NotScoreableError,
 )
 from execute_tools.health_checks.candidate_eligibility import formal_validity_of
-from execute_tools.scoring_utils import coerce_nonfinite_to_none
 from execute_tools.trained_model_artifact import (
     TrainedModelEmissionContext,
     TrainingArtifactCandidate,
@@ -79,6 +79,9 @@ from nodes.ml_hyperparameter_tune_agent.feedback import (
     _build_gate_exhaustion,
     _build_trial_validity_feedback,
     _render_gate_exhaustion_log_line,
+)
+from nodes.ml_hyperparameter_tune_agent.parameter_rule_receipts import (
+    attach_inactive_parameter_rules,
 )
 from nodes.ml_hyperparameter_tune_agent.policy import (
     _compute_termination_state,
@@ -775,6 +778,7 @@ def _emit_record(
     # emit a record its own labelled run refuses at the next resume.
     if experiment_arm is not None:
         record["experiment_arm"] = experiment_arm
+    attach_inactive_parameter_rules(record)
     ExperimentRecord.model_validate(record)
     sandbox.save_record(record)
 
@@ -1080,15 +1084,14 @@ def _resume_progress(
 def publish_run_output(output_path: str, agent_output: HyperparamTuningOutput) -> None:
     """Persist ``run_output`` through the storage owner.
 
-    Coerce float('-inf') no-signal sentinels (and NaN) to JSON null at the
-    storage boundary: ``model_dump_json`` would otherwise emit non-standard
-    ``-Infinity`` tokens that break the dashboard's ``JSON.parse``.
+    Preserve non-finite evidence through the shared versioned strict JSON
+    owner. Typed float paths distinguish it from missing values and strings.
     S2 / U5: serialise-first + atomic replace. ``run_output`` is the artifact
     the iteration manifest hashes, so a crash mid-write must leave either the
     previous file or the complete new one, never a truncated one that the next
     iteration's replay check then reports as a tamper.
     """
-    safe_output = coerce_nonfinite_to_none(agent_output.model_dump())
+    safe_output = encoded_record(model_record_value(agent_output))
     publish_json_atomically(output_path, safe_output, indent=4)
 
 

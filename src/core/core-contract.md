@@ -184,3 +184,98 @@ training scope retain the legacy pseudo API without an `exp_id` path check.
 runtime assembly identity. Historical runtime profiles can therefore refuse a
 new build until separately qualified. Synthetic parity does not establish
 historical campaign, paper, or resume compatibility.
+
+## Versioned non-finite record JSON (issue #1111)
+
+`record_encoding.py` is the single encoding-version owner. `record_json` writes
+native typed outputs; `encoded_record` serves the untyped `LocalRecorder` detail,
+log and summary writers. New native records retain their ordinary field layout
+and add `$siderius_encoding = {"version": "siderius.nonfinite/v1", "floats": [...]}`.
+Each path is an ordered list of string object keys/non-negative integer array
+indices pointing to a string `Infinity`, `-Infinity` or `NaN`. Only paths named
+in this metadata decode to floats: an ordinary string with the same spelling
+remains a string, including inside `Any` and union fields. Real null remains null.
+The reserved metadata member cannot be supplied as ordinary record data.
+Canonical scalar/list roots use `wrapped=true` in the same metadata, distinguishing
+them from object roots with a field named `value`. Metadata is validated by
+`EncodingMetadata` before path dereferencing.
+
+`model_record_value` preserves the model's JSON aliases/serializers and restores
+non-finite float leaves from its Python dump before encoding. This is necessary
+because JSON-mode dumps already replace non-finite values in `Any` with null.
+`RecordModel` decodes at `model_validate`/`model_validate_json` entry, before native
+validation. JSON input is re-entered through Pydantic's JSON validator so strict
+tuple/date handling is retained. In-memory dumps and model JSON schemas acquire
+no metadata fields. `LocalRecorder.get_summary` returns decoded records.
+
+Old unversioned documents remain readable. Legacy null is never guessed back
+into a float: its original sign/value is irretrievably absent. Files already
+invalid under their native required-float schema remain invalid; capture can
+compare their legacy storage projection against a supplied in-memory output
+without rewriting them. `capture_record` uses versioned structural comparison
+for new documents, making NaN stable while retaining sign and missingness.
+
+`canonical_json_bytes` keeps sorted keys, compact separators and ASCII escaping.
+Finite canonical values retain their bytes. Non-finite canonical values use the
+same metadata/typed-path owner, with `allow_nan=False` guarding publication.
+Adaptor records declare `encoding_version`; output/parameter digests and emitted
+output bytes use that version. An absent version denotes the historical encoding.
+Only readback calls `replay_json_bytes(..., version=None)`, reproducing historical
+bare tokens and output digests byte for byte. Writers always select the current
+version. Unknown versions and malformed metadata refuse; verification never
+tries several encodings until one matches.
+
+Identity impact: new native file digests change because of encoding metadata,
+and new adaptor record digests change because of `encoding_version`. Non-finite
+canonical output digests change; finite canonical values, declarations and
+custom-adaptor manifests retain their existing bytes. Archived files, receipts
+and digest anchors are never rewritten. New records preserve values that old
+null projection discarded, so downstream handling of non-finite evidence may
+change; this is not a scientific threshold/direction change. Exact reproduction
+of historical writer bytes requires the experiment's historical framework pin
+in `siderius-exp/pyproject.toml` and its resolved `uv.lock`.
+No new-write legacy switch is supplied by the framework.
+
+Evidence: `tests/unit/core/test_record_encoding.py`, the reachable-model census
+in `tests/unit/agent/schemas/test_record_encoding_census.py`, and native/capture
+and legacy/new adaptor replay tests in `tests/unit/tools/candidate_worker/`.
+
+The source-bound `estimation_assembly_digest` changes because its closure includes
+`agent/schemas/hyperparam_tuning.py`; `rendering_assembly_digest` changes because
+its closure includes output schemas and native writer modules. Runtime verifier
+and GPU protection closures are untouched, including `process_visibility.py`.
+Template text and output field schemas are unchanged, but a non-finite value
+previously erased to null can now affect downstream prompt data. Experiment-owned
+qualified-assembly lists need separate qualification before adopting the new
+revision; retain the experiment dependency pin to reproduce historical behavior.
+
+### Raw consumer boundary and prompt rendering
+
+`decode_record` also accepts a summary list and decodes each record before
+returning it. Dashboard local-data access, exploration summary/native-output
+routes, persisted metric ranking, funnel assembly and workflow validation
+delegate to this owner. Raw log bootstrap/summary equality and native capture
+intentionally retain storage bytes for durability or comparison; these are not
+scientific consumer APIs. Typed native readers use `RecordModel` validation.
+
+Planner `get_planner_user_prompt` decodes incoming memory before truncation,
+JSON history rendering and training-dynamics rendering. Reflector
+`get_reflector_user_prompt` decodes the actual-results record before rendering.
+This also covers external callers passing raw persisted dictionaries. No
+storage metadata or quoted numeric sentinel is model-facing. The existing
+JSON-in-prose renderer represents decoded non-finite floats as unquoted
+`Infinity`, `-Infinity` and `NaN`; it is prompt text, not a persisted strict
+JSON document. Actual string values remain strings. Finite/null histories
+retain field order and identical rendered bytes. For newly persisted
+non-finite histories, the planner now sees the original numeric evidence where
+historical null-projected records render `null`; old archives still render
+their historical null. Typed interpreter/proposer/literature/implementor
+consumers receive decoded values before their existing projections and numeric
+formatters, never storage tags. No prompt template is changed.
+
+The encoding version is a dispatch label, not authentication. Replay still
+requires the recorded digest anchors and recomputed artifact bytes. Removing a
+version does not authorize arbitrary replacement values under an unchanged
+trusted digest; if both anchors and artifacts are attacker-controlled, this
+format alone supplies no authenticity. Additional consumed-input identity and
+downgrade/path-check hardening is tracked in #1326.

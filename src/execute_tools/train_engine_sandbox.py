@@ -92,6 +92,7 @@ from execute_tools.trained_model_artifact import (
 from execute_tools.training_batches import completed_epoch_loss
 from execute_tools.training_budget_execution import (
     TrainingAllocationRejected,
+    complete_planned_optimizer_work,
     complete_training_workload,
     enforce_training_allocation,
     return_on_allocation_rejection,
@@ -1334,7 +1335,8 @@ def run_experiment_streaming(
     exp_id: str,
     train_portion: float | None = None,
     freeze_subsample: bool = False,
-    seed_plan: TrainingSeedPlan | None = None,
+    *,
+    seed_plan: TrainingSeedPlan,
     runtime_session: RuntimeVerificationSession | None = None,
     order_strategy: str = "shuffle",
     file_order: list[int] | None = None,
@@ -1374,9 +1376,10 @@ def run_experiment_streaming(
                            When None or 1.0, all segments in the scope are used.
         freeze_subsample:  When True, every epoch uses the epoch-0 subsample seed.
                            When False (default), each epoch draws a different subsample.
-        seed_plan:         Required ``TrainingSeedPlan``: process seeds (applied
+        seed_plan:         Required keyword-only ``TrainingSeedPlan``: process seeds (applied
                            before model construction) and the per-epoch
-                           subsample / order / shuffle seeds. ``None`` raises
+                           subsample / order / shuffle seeds. Omission raises
+                           ``TypeError``; an explicit ``None`` raises
                            ``MissingRunSeed`` (docs/agent-reference/mechanisms/seeding.md).
         runtime_session:   Optional in-subprocess runtime-verification session
                            (RT2-B, design §2.1). When provided, the epoch-0
@@ -1967,6 +1970,20 @@ def run_experiment_streaming(
         if learning_rates is not None and epoch_rates is not None:
             learning_rates.append(epoch_rates)
         print(f"Epoch {ep} | Avg Loss: {avg_loss:.6f}")
+
+        if completing_workload:
+            assert runtime_session is not None and t_train_start is not None
+            complete_planned_optimizer_work(
+                runtime_session,
+                verifier=verifier,
+                optimizer_steps=completed_optimizer_steps,
+                completed_epochs=ep + 1,
+                training_seconds=max(
+                    time.perf_counter() - t_train_start - validation_seconds_total, 1e-9
+                ),
+                epoch0_dataset_seconds=epoch0_dataset_seconds,
+            )
+            verifier = None
 
         # Step 07a — R3 for THIS completed epoch (one observation per R2
         # entry, so the two curves always agree in length). Sequencing call

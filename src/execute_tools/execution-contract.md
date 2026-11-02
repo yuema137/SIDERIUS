@@ -69,7 +69,8 @@ records (`metric_result` / `metric_refusal`), typed training results.
 - **Seeded training**: `train_engine_sandbox.run_experiment_streaming`
   and the legacy Python callable `run_experiment` (implemented in
   `legacy_training.py`, re-exported by the engine) require a `TrainingSeedPlan`
-  (`None` raises `MissingRunSeed`) and seed the process RNGs before model
+  as a required keyword-only `seed_plan` argument (omission raises `TypeError`;
+  explicit `None` raises `MissingRunSeed`) and seed the process RNGs before model
   construction (`process_seeding.seed_process`). The streaming path gives every
   `DataLoader` an explicit generator and
   `worker_init_fn`. Direct legacy callers own their supplied loader and its
