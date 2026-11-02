@@ -2015,6 +2015,9 @@ Worker graph and loop admission use the composed effective selection metric.
 Every formula metric threshold, including thresholds in unvisited branches and
 adaptors, must explicitly name that metric before dispatch. Captured interpretation
 and tuning evidence must reconcile to the same effective spec. Raw component
-threshold targets are refused; source metric values remain Health inputs. The
+threshold targets are refused; source metric values remain Health inputs.
+`score_units_metric` is a supported launch field: under formula selection a fresh
+training document with `degenerate_penalty_score` must set it to the effective id
+(the same `admit_evaluation_settings` rule as the direct workflow). The
 [evaluation contract](../../execute_tools/evaluation-contract.md#deterministic-selection-runtime)
 owns the schema, generated id and refusal rules.

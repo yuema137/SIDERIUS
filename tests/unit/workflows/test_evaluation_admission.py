@@ -76,14 +76,98 @@ def test_external_executor_refuses_before_dispatch(monkeypatch):
     admit_evaluation_settings(None, SimpleNamespace())
 
 
-@pytest.mark.parametrize("kind", ["metric_threshold", "metric_at_least", "threshold/v1"])
-def test_nested_authored_threshold_requires_effective_identity(kind):
-    """Even a threshold in an unvisited branch must refuse before execution."""
+def _loop_with_threshold(metric_id):
+    from tests.unit.workflows.test_workflow_source import loop_document
+    from workflows.definition import MetricThresholdStop, NoImprovementStop
+
+    # Behind an earlier condition: admission must not stop at the first stop condition.
+    return loop_document(
+        NoImprovementStop(completed_bodies=2),
+        MetricThresholdStop(metric_id=metric_id, threshold=0.5),
+    ).definition
+
+
+def _route_with_threshold(metric_id):
+    import json
+
+    from tests.unit.workflows.test_workflow_routes import routed
+    from workflows.definition import WorkflowDefinition
+
+    # A second route nested in any_of, behind a case that may match first.
+    payload = routed().model_dump(mode="json")
+    payload["nodes"] += [
+        {"id": name, "capability": "proposal", "request": {"kind": "external", "binding": "seed"}}
+        for name in ("spare", "other")
+    ]
+    payload["routes"].append(
+        {
+            "id": "score",
+            "source": {"kind": "result", "node": "tune"},
+            "cases": [
+                {
+                    "when": {
+                        "kind": "enum_in",
+                        "observable": "tuning.status",
+                        "values": ["failed"],
+                    },
+                    "targets": ["spare"],
+                },
+                {
+                    "when": {
+                        "kind": "any_of",
+                        "terms": [
+                            {"kind": "is_missing", "observable": "tuning.valid_formal"},
+                            {
+                                "kind": "metric_at_least",
+                                "observable": "tuning.valid_formal",
+                                "metric_id": metric_id,
+                                "threshold": 0.5,
+                            },
+                        ],
+                    },
+                    "targets": ["other"],
+                },
+            ],
+        }
+    )
+    return WorkflowDefinition.model_validate_json(json.dumps(payload))
+
+
+def _adaptor_with_threshold(metric_id):
+    import json
+
+    from tests.unit.workflows.test_adaptor_declarations import best_run
+    from workflows.definition import WorkflowDefinition
+
+    payload = best_run().model_dump(mode="json")
+    payload["adaptors"][0]["select"] = {
+        "kind": "threshold/v1",
+        "basis": "metric",
+        "metric_id": metric_id,
+        "at_least": 0.5,
+    }
+    payload["adaptors"][0]["distribute"] = {"kind": "per-item/v1", "count": 2, "on_short": "skip"}
+    return WorkflowDefinition.model_validate_json(json.dumps(payload))
+
+
+@pytest.mark.parametrize(
+    "build",
+    [_loop_with_threshold, _route_with_threshold, _adaptor_with_threshold],
+    ids=["metric_threshold", "metric_at_least", "threshold/v1"],
+)
+def test_nested_authored_threshold_requires_effective_identity(build):
+    """Defect: a source-unit threshold anywhere in a real declaration (a later loop stop,
+    a nested route leaf in an unvisited case, a metric adaptor) reaches formula execution.
+
+    Real ``WorkflowDefinition`` values: fails if the walk misses a declaration shape
+    the schema actually serializes, or if an effective-unit threshold is refused.
+    """
     from workflows.evaluation_admission import admit_formula_definition
 
-    threshold = {"kind": kind, "basis": "metric", "metric_id": "source"}
-    definition = SimpleNamespace(model_dump=lambda **_: {"branches": [{"stop": threshold}]})
-    with pytest.raises(ValueError, match="effective metric"):
-        admit_formula_definition(carrier(), definition)
-    threshold["metric_id"] = "effective"
-    admit_formula_definition(carrier(), definition)
+    for refused in ("source", "component:quality"):
+        definition = build(refused)
+        with pytest.raises(ValueError, match="effective metric 'effective'"):
+            admit_formula_definition(carrier(), definition)
+    admit_formula_definition(carrier(), build("effective"))
+    # Primary selection (no binding) leaves every declaration untouched.
+    admit_formula_definition(SimpleNamespace(selection_binding=None), build("source"))

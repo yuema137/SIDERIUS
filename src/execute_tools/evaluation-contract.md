@@ -303,8 +303,15 @@ aggregate. Effective `file_vector` and `per_sample` are absent/null: a scalar
 combination does not imply a per-file decomposition. The source vector remains in
 `evaluation_result.source_metric_result.per_sample`.
 
-The parent validates the child identity, required component roster and scalar
-agreement before adopting results. Structured refusal evidence survives child exit
+The parent checks the child status first (a crashed or OOM-killed scorer keeps
+`ScoringSkillExecutionError` with its status and stderr), then validates the child
+identity, required component roster and scalar agreement, and re-derives every
+component and the aggregate from raw values and the declared terms
+(`SelectionBinding.terms`) before adopting results. Raw values must equal the
+transported source results; duplicate source metric ids, missing evidence or any
+disagreement raise `EvaluationTransportError`. The scoring child composes full task
+bindings only when its manifest declares `evaluation`; absent-evaluation children
+compose the metric section alone. Structured refusal evidence survives child exit
 1 into `error_scoring` / `failure_type=not_scoreable` and `metric_refusal`.
 Scope and package-integrity exceptions retain their existing terminal handling.
 The record field is omitted when evaluation is absent. Historical records are not
@@ -314,10 +321,18 @@ formula identities and mixed source/effective ranking histories.
 Health receives the original source scalar and vector through
 `evaluation_child.source_health_inputs`; `round_health` independently checks the
 selection scalar's validity. Formula utility never replaces a task Health input.
-Existing Health validity filtering still precedes MetricOrder ranking. Effective
-identity travels through tuner best tracks, chain history, resume, interpretation,
-proposal evidence, adaptors, reports and dashboard ranking. Source per-file values
-must not be labelled as utility evidence.
+Existing Health validity filtering still precedes MetricOrder ranking. Consumers
+bound to the effective spec and exercised offline under formula selection: tuner
+run order and planner request, tuner run-output `metric_spec` stamps, attempt-record
+evidence, workflow seed/interpretation reconciliation (`_declared_metric_spec`), the
+native completed-history chain incumbent, the resume record fold, worker loop stop
+admission, worker interpretation seeds and prepared candidate payloads. The
+effective `MetricSpec` round-trips through JSON (`evaluation_inputs/v1` is a
+framework scoreability contract), so persisted stamps compare equal on readback.
+Proposal evidence, metric-rank adaptors, run reports and dashboard ranking read
+the persisted stamp through their existing MetricOrder paths; that is established
+by source review only, without a formula-specific test (no worker profile admits a
+metric-rank adaptor). Source per-file values must not be labelled as utility evidence.
 
 ### Admission and threshold units
 

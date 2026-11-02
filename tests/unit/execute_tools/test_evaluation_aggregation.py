@@ -265,3 +265,138 @@ def test_record_readback_rejects_a_tampered_aggregate():
     payload["evaluation_result"]["aggregate"] = 0.9
     with pytest.raises(ValueError, match="Evaluation evidence disagrees"):
         ExperimentRecord.model_validate(payload)
+
+
+def test_duplicate_source_result_ids_fail_transport_instead_of_keeping_the_last():
+    """Review N2: a dict build silently kept the later of two `error` results."""
+    from execute_tools.evaluation_results import EvaluationTransportError
+
+    spec, evaluation = composed()
+    with pytest.raises(EvaluationTransportError, match="duplicate source metric result 'error'"):
+        aggregate_evaluation(
+            evaluation,
+            spec,
+            result("accuracy", "higher", 0.8),
+            [result("error", "lower", 10.0), result("error", "lower", 2.0)],
+        )
+
+
+def test_source_primary_refusal_blocks_a_formula_that_does_not_reference_it():
+    """The source primary is required evidence even when no term names it.
+
+    Health and scientific scoring read it; dropping the rule would publish a
+    utility for a candidate whose task metric refused.
+    """
+    spec, evaluation = composed()
+    selection = evaluation.spec.selection
+    formula = selection.formula.model_copy(
+        update={
+            "params": selection.formula.params.model_copy(
+                update={"terms": selection.formula.params.terms[1:]}
+            )
+        }
+    )
+    evaluation = replace(
+        evaluation,
+        spec=evaluation.spec.model_copy(
+            update={"selection": selection.model_copy(update={"formula": formula})}
+        ),
+    )
+    refused = NotScoreableResult(
+        metric_id="accuracy",
+        direction="higher",
+        verdict=PresenceScoreabilityContract().check({}),
+    )
+    outcome, evidence = aggregate_evaluation(
+        evaluation, spec, refused, [result("error", "lower", 2.0)]
+    )
+    assert isinstance(outcome, NotScoreableResult)
+    assert [f.requirement for f in outcome.verdict.failures] == ["source_primary"]
+    assert evidence.aggregate is None and evidence.source_metric_result is None
+
+
+def test_persisted_effective_spec_round_trips_to_an_equal_spec():
+    """Worker/tuner `!=` checks compare a composed effective spec with its JSON readback.
+
+    Without the framework contract registration the readback was a data-only
+    PersistedScoreabilityContract and every formula candidate was refused.
+    """
+    import json
+
+    from execute_tools.evaluation_metric import metric_spec_from_persisted_record
+
+    spec, evaluation = composed()
+    effective = effective_metric_spec(spec, evaluation)
+    readback = metric_spec_from_persisted_record(json.loads(effective.model_dump_json()))
+    assert readback == effective
+
+
+@pytest.mark.parametrize("declares_evaluation", [False, True])
+def test_scoring_child_composes_full_bindings_only_for_declared_evaluation(
+    monkeypatch, tmp_path, declares_evaluation
+):
+    """Review B3: every absent-evaluation scoring child paid a full plugin/code load.
+
+    Drives the production child entry `main`; the full composer must not run
+    without an `evaluation` section and must run exactly once with one.
+    """
+    from execute_tools import denoising_score_single as scoring
+    from execute_tools.task_registration_scope import run_registration_scope
+    from tests.helpers.composed_manifest import write_complete_manifest
+    from workflows import task_composition
+
+    evaluation = {
+        "components": [
+            {"kind": "metric", "id": "quality", "metric": "accuracy", "meaning": "Accuracy"}
+        ],
+        "selection": {
+            "kind": "formula",
+            "formula": {
+                "family": "weighted_sum",
+                "params": {
+                    "terms": [
+                        {
+                            "component": "quality",
+                            "weight": 1.0,
+                            "lower": 0.0,
+                            "upper": 1.0,
+                            "out_of_range": "refuse",
+                        }
+                    ]
+                },
+            },
+        },
+    }
+    manifest = write_complete_manifest(
+        tmp_path, **({"evaluation": evaluation} if declares_evaluation else {})
+    )
+    composed_calls = []
+    real_compose = task_composition.compose_run_task_bindings
+
+    def spy(path):
+        composed_calls.append(path)
+        return real_compose(path)
+
+    emitted = {}
+    monkeypatch.setattr(task_composition, "compose_run_task_bindings", spy)
+    monkeypatch.setattr(
+        scoring,
+        "_emit_task_owned_score",
+        lambda args, profile, metric, **kw: emitted.update(metric=metric, **kw),
+    )
+    data = tmp_path / "data"
+    data.mkdir()
+    argv = ["--task_manifest", str(manifest), "--task_data_path_id", "quickstart_tabular"]
+    profile = tmp_path / "examples/quickstart/declared/dataset_profile.json"
+    argv += ["--dataset_profile_json", str(profile), "--task_eval_scope_ref", "scope.json"]
+    argv += ["--task_eval_scope_digest", "0" * 64, "--data_dir", str(data)]
+    argv += ["--raw_data_dir", str(data)]
+    with run_registration_scope():
+        scoring.main(argv)
+    assert emitted["metric"].spec.id == "accuracy"
+    if declares_evaluation:
+        assert composed_calls == [str(manifest)]
+        assert emitted["composition"].selection_binding is not None
+    else:
+        assert composed_calls == []
+        assert emitted["composition"] is None
