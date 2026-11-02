@@ -203,6 +203,24 @@ runtime assembly identity. Historical runtime profiles can therefore refuse a
 new build until separately qualified. Synthetic parity does not establish
 historical campaign, paper, or resume compatibility.
 
+When the bound manifest (`active_task_manifest_path`) declares a formula
+`evaluation` selection, `StubSandbox.execute_scoring` returns formula evidence
+from `core.pseudo_scoring.synthetic_formula_scoring`. It composes that manifest
+through `compose_scoring_child_bindings`, as the scoring child does, draws one
+synthetic scalar per primary/secondary source metric, and passes them through
+`execute_tools.evaluation_child.aggregate_child_outcome`; it implements no
+aggregation arithmetic. A formula-referenced metric draws inside the
+intersection of its terms' `[lower, upper]` (the earlier interval when terms
+are disjoint), so `refuse` terms accept it; an unreferenced primary keeps the
+legacy synthetic scalar. Success adds `evaluation_result`, `metric_result` and
+the secondary result lists; `denoising_score` is the effective aggregate and
+`file_vector` is null, as from the real child. A non-scoreable aggregation
+returns status `error` with `not_scoreable` and `evaluation_result`. The
+parent's `validate_child_evaluation` checks this payload unchanged. Runs without
+a bound manifest or formula terms keep the legacy payload and random stream.
+Values are synthetic wiring evidence, not measurements. Regression:
+`tests/unit/core/test_stub_formula_scoring.py`.
+
 ## Versioned non-finite record JSON (issue #1111)
 
 `record_encoding.py` is the single encoding-version owner. `record_json` writes

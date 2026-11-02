@@ -2218,6 +2218,10 @@ class StubSandbox(TidmadSandbox):
         appear alongside the synthetic ``denoising_score`` etc.).
         Composed scopes use the same transport owner as production, without
         launching the scorer or interpreting any scientific scope semantics.
+        A composed formula ``evaluation`` additionally receives synthetic
+        component evidence from ``core.pseudo_scoring`` (the child's
+        aggregation owner, synthetic source values); other runs keep the
+        legacy payload and random stream.
         """
         validate_generated_artifact_name(run_name, field="run_name")
         if getattr(task_scopes, "training", None) is not None:
@@ -2229,6 +2233,17 @@ class StubSandbox(TidmadSandbox):
         results["file_vector"] = [self._rng.uniform(-3.0, -2.0) for _ in range(9)]
         results["is_degenerate"] = False
         results["failure_reason"] = None
+        from core.pseudo_scoring import synthetic_formula_scoring
+
+        formula = synthetic_formula_scoring(
+            self._rng, results["denoising_score"], results["file_vector"]
+        )
+        if formula is None:
+            return {"status": "success", "results": results}
+        results.update(formula)
+        if "not_scoreable" in formula:
+            message = "Synthetic formula evaluation evidence is not scoreable"
+            return {"status": "error", "message": message, "results": results}
         return {"status": "success", "results": results}
 
     def evaluate_metric(
