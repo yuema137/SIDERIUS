@@ -146,6 +146,24 @@ class StopEvaluationOutput(StopModel):
         return self
 
 
+MAX_TRIED_BODIES = 20
+
+
+class TriedBody(StopModel):
+    """Bounded projection of verified proposal, receipt and tuning facts."""
+
+    iteration: int = Field(gt=0)
+    model_name: str = Field(max_length=128)
+    validation_passed: bool | None
+    best_valid_score: float | None = Field(allow_inf_nan=False)
+    metric_id: str
+    direction: MetricDirection
+    stop_reason: (
+        Literal["aborted_fail_rounds", "aborted_by_gate", "scope_violation", "infrastructure_abort"]
+        | None
+    ) = None
+
+
 class InputRequestSummary(StopModel):
     """Bounded deterministic facts shown when a condition pauses the loop for input."""
 
@@ -158,6 +176,9 @@ class InputRequestSummary(StopModel):
     non_improving_bodies: int = Field(ge=0)
     input_anchor: int = Field(ge=0)  # previous input pause boundary; 0 = none
     bodies_since_input: int = Field(gt=0)
+    what_was_tried: tuple[TriedBody, ...] = Field(
+        default=(), max_length=MAX_TRIED_BODIES, exclude_if=lambda value: not value
+    )
 
     @model_validator(mode="after")
     def coherent(self) -> Self:
@@ -476,13 +497,15 @@ def project_body_score(
     from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
     from workflows.definition.fanout import execution_families
 
+    from .graph_evidence import read_traced_record
+
     tuning = execution_families(
         request.preview.document.definition, request.preview.execution_profile
     ).tuning
     assert tuning is not None and body.graph_trace is not None and body.status == "completed"
-    path = next(item for item in body.graph_trace.nodes if item.node_id == tuning).record_path
-    assert path is not None
-    output = HyperparamTuningOutput.model_validate_json(Path(path).read_bytes())
+    entry = next(item for item in body.graph_trace.nodes if item.node_id == tuning)
+    # Re-hashed against the trace: the score feeds stop decisions (#1477).
+    output = HyperparamTuningOutput.model_validate_json(read_traced_record(entry, bounded=False))
     return BodyScore(
         iteration=iteration,
         valid_formal=output.best_valid_formal_denoising_score,

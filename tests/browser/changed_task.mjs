@@ -9,7 +9,7 @@ import {readFile, writeFile, mkdir} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 import {showAllConsoleSections} from './console_view_flags.mjs';
 import {chooseFirstConfiguredTask} from './console_task_choice.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -18,17 +18,12 @@ await mkdir(process.env.CONSOLE_EVIDENCE_DIR, {recursive: false});
 const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.changed_task_fixture'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
 let errors = '', browser;
 server.stderr.on('data', chunk => {errors += chunk;});
-const lines = createInterface({input: server.stdout});
 const waitUntil = async predicate => {
   const deadline = Date.now() + 30000;
   while (!(await predicate())) {if (Date.now() > deadline) throw new Error('Condition timed out'); await new Promise(resolve => setTimeout(resolve, 50));}
 };
 try {
-  const metadata = await new Promise((accept, reject) => {
-    const timer = setTimeout(() => reject(new Error('Fixture startup timeout: ' + errors)), 45000);
-    lines.once('line', line => {clearTimeout(timer); accept(JSON.parse(line));});
-    server.once('exit', code => {clearTimeout(timer); reject(new Error(`Fixture exit ${code}: ${errors}`));});
-  });
+  const metadata = await waitForMetadata(server, {timeoutMs: 45000});
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
   showAllConsoleSections(browser);

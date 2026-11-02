@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 
 from tools.candidate_prepare import preflight_reusable_candidate
 from tools.candidate_prepare.reusable_models import ReusablePreparationObservations
-from tools.candidate_worker.loop_models import LoopStop
+from tools.candidate_worker.loop_models import LoopAdmissionRefusal, LoopStop
 from tools.candidate_worker.preflight import fresh_preview, require_credentials
 from tools.workflow_preview.models import FileObservation
 
@@ -28,7 +28,7 @@ from .models import (
     ReusablePreparationExpectation,
     SpawnFailure,
 )
-from .native_chain import review_native_chain_operation
+from .native_chain import NATIVE_CHAIN_ADMISSION_REFUSAL, review_native_chain_operation
 from .native_chain_models import NativeChainAdmission
 from .native_resume import review_native_chain_resume
 from .native_resume_models import NativeResumeAdmission
@@ -94,7 +94,9 @@ def _admitted_inputs(
         plan = preflight_reusable_candidate(submission.request)
     except (OSError, ValueError) as error:
         raise OperationFailure(
-            "reusable_preflight", "reusable inputs changed or are unavailable; review again"
+            "reusable_preflight",
+            "reusable preparation preflight failed; check the task manifest, data root, "
+            "LLM configuration and selected paths, then review again",
         ) from error
     state = canonical(config.state_root)
     if any(
@@ -169,17 +171,12 @@ def _admit_new(
         preparation_run_seed = None if verified is None else verified.receipt.run_seed
         try:
             observed = fresh_preview(submission.request)
+        except LoopAdmissionRefusal as error:
+            raise OperationFailure("candidate_preflight", str(error)) from error
         except (OSError, ValueError) as error:
-            message = "candidate inputs or routes changed; review again"
-            if (
-                isinstance(error, ValueError)
-                and submission.request.preview.document.definition.loop is not None
-                and submission.request.preview.execution_profile
-                != "native-interpretation-candidate/v1"
-            ):
-                # Use validated fields, never exception text that may contain raw inputs.
-                message = "research loops require the native-interpretation-candidate profile"
-            raise OperationFailure("candidate_preflight", message) from error
+            raise OperationFailure(
+                "candidate_preflight", "candidate inputs or routes changed; review again"
+            ) from error
         try:
             require_credentials(
                 observed.selected_constructor_routes,
@@ -219,7 +216,8 @@ def _admit_new(
             )
         except (OSError, ValueError, subprocess.SubprocessError) as error:
             raise OperationFailure(
-                "native_chain_admission", "native chain capture or launch binding refused"
+                "native_chain_admission",
+                NATIVE_CHAIN_ADMISSION_REFUSAL,
             ) from error
     names = (
         submission.request.environment_names
@@ -293,6 +291,8 @@ def _claim_and_spawn(
     except BaseException as error:
         if not isinstance(error, OSError):
             # Interrupted before any child was bound: leave no ledger entry behind.
+            # A child already forked (Ctrl-C inside Popen) finds its entry gone when
+            # it confirms it under the ledger lock, and ends without running (#1108).
             slot.spawn_failed(submission.request_id)
             raise
         slot.spawn_failed(submission.request_id)
@@ -330,7 +330,7 @@ def request_loop_stop(config: OperationStoreConfig, operation_id: UUID) -> LoopS
     config = validate_config(config)
     with locked_store(config, create=False):
         record = load_record(config, operation_id)
-        from .loop_resume import review_locked, root_inputs
+        from .loop_resume import review_end_locked, root_inputs
 
         try:
             root_record, _, initial = root_inputs(record)
@@ -350,7 +350,7 @@ def request_loop_stop(config: OperationStoreConfig, operation_id: UUID) -> LoopS
         if snapshot.receipt is not None and snapshot.receipt.status == "paused":
             # A reserved successor may have died without a receipt. Ending is
             # safe only once its sessions ended; Resume still cannot reuse it.
-            review_locked(config, operation_id, ending=True)
+            review_end_locked(config, operation_id)
         elif snapshot.receipt_available or snapshot.process.status != "alive":
             raise OperationFailure("not_running", "candidate is terminal or not confirmed running")
         with directory(control) as descriptor:

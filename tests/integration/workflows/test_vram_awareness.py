@@ -177,7 +177,7 @@ def test_physical_rejection_and_hardware_context_reach_next_proposal(tmp_path):
     assert len(rejection_lines) == 1
     assert "wide_fixture" in rejection_lines[0]
     assert "encoder.block" in rejection_lines[0]
-    assert "29.10 GB" in rejection_lines[0]
+    assert "Recorded estimate: 29.1 GiB" in rejection_lines[0]
     assert second_input.hardware_context is not None
     assert second_input.hardware_context.device_name == "synthetic-device"
     assert second_input.vram_budget_gb == BUDGET_GIB

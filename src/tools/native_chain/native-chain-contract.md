@@ -4,7 +4,9 @@
 start 1, no `--seed_paths` history import, no fixed candidate plan. The shell remains the only scheduler
 and argument/default owner. `models.py` owns typed external inputs; `review.py`
 uses shell FD export, then existing sandbox `check_task` and
-`inspect_environment(bind_launch=True)`. No semantic review receipt is produced.
+`inspect_environment(bind_launch=True)`. No semantic review receipt is produced. `review()` imports environment inspection
+only when invoked, so operation waiters importing capture models/readers do not
+load PyTorch through hardware inspection.
 
 Review requires checkout cwd, canonical dedicated paths, absent native workspace
 and output, existing parents, and separate output/source/data/run locations.

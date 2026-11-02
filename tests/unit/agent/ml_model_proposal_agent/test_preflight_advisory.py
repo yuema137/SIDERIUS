@@ -30,6 +30,7 @@ import importlib
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 
 from agent.schemas.parameter_rules import ParameterRules
 from agent.schemas.proposal import (
@@ -420,6 +421,47 @@ class TestLegacyAdvisoryPath:
 
 
 class TestSkipPaths:
+    @pytest.mark.parametrize("pipeline", [True, False])
+    def test_missing_temporal_dimension_returns_draft(self, tmp_path, pipeline):
+        """Reverting the typed skip raises instead of returning the draft."""
+        draft = _proposing_output(num_params=18_400_000)
+        del draft["baseline_config"]["model_config"]["segmentation_size"]
+        bridge = MagicMock()
+        bridge.generate_text.return_value = "reasoning text"
+        bridge.generate.side_effect = (
+            [FAKE_COMPARISON_OUTPUT, FAKE_REASONING_OUTPUT, draft] if pipeline else [draft]
+        )
+        inp = (_pipeline_input if pipeline else _legacy_input)(tmp_path)
+        out = _agent(bridge).run(inp)
+
+        assert out.model_name == draft["model_name"]
+        assert bridge.generate.call_count == (3 if pipeline else 1)
+        assert out.preflight_factor is None
+        assert out.preflight_estimated_minutes is None
+        assert any(
+            note.startswith("PREFLIGHT_SKIPPED: SegmentationDimensionUnavailableError:")
+            and "requires a declared temporal segmentation_size" in note
+            for note in out.memo_consistency_notes
+        )
+
+    @pytest.mark.parametrize("error_type", [ValueError, RuntimeError])
+    def test_unexpected_estimator_error_propagates(self, tmp_path, error_type):
+        """A broad exception handler would hide estimator defects."""
+        bridge = MagicMock()
+        bridge.generate.side_effect = [
+            FAKE_COMPARISON_OUTPUT,
+            FAKE_REASONING_OUTPUT,
+            FAKE_GOOD_DRAFT,
+        ]
+        with (
+            patch(
+                "nodes.ml_model_proposal_agent.ml_model_proposal_agent.estimate_proposal_time",
+                side_effect=error_type("unexpected estimator failure"),
+            ),
+            pytest.raises(error_type, match="unexpected estimator failure"),
+        ):
+            _agent(bridge).run(_pipeline_input(tmp_path))
+
     def test_trial_budget_none_skips_advisory(self, tmp_path):
         bridge = MagicMock()
         bridge.generate.side_effect = [
@@ -535,6 +577,48 @@ class TestAdvisoryNoteBlock:
 
 
 class TestStructuralRetriesUnchanged:
+    @pytest.mark.parametrize("seg", [0, -1, True])
+    def test_invalid_temporal_size_is_repaired_before_advisory(self, tmp_path, seg):
+        """Removing the schema gate leaks invalid sizes into the advisory instead of repair."""
+        bridge = MagicMock()
+        bridge.generate.side_effect = [
+            FAKE_COMPARISON_OUTPUT,
+            FAKE_REASONING_OUTPUT,
+            _proposing_output(seg=seg),
+            FAKE_GOOD_DRAFT,
+        ]
+        with patch(
+            "nodes.ml_model_proposal_agent.ml_model_proposal_agent.estimate_proposal_time",
+            wraps=importlib.import_module("agent.utils.proposer_preflight").estimate_proposal_time,
+        ) as estimate:
+            out = _agent(bridge).run(_pipeline_input(tmp_path))
+
+        assert bridge.generate.call_count == 4
+        repair_prompt = bridge.generate.call_args_list[3].args[1]
+        assert "segmentation_size" in repair_prompt
+        assert f"positive int, got {seg!r}" in repair_prompt
+        estimate.assert_called_once()
+        assert estimate.call_args.kwargs["model_config"]["segmentation_size"] == 40_000
+        assert out.baseline_config["model_config"]["segmentation_size"] == 40_000
+        assert out.preflight_estimated_minutes is not None
+
+    @pytest.mark.parametrize("seg", [0, -1, True])
+    def test_legacy_invalid_temporal_size_refuses_before_advisory(self, tmp_path, seg):
+        """Legacy has no inner repair loop, but must refuse at the same schema boundary."""
+        bridge = MagicMock()
+        bridge.generate_text.return_value = "reasoning text"
+        bridge.generate.return_value = _proposing_output(seg=seg)
+        with (
+            patch(
+                "nodes.ml_model_proposal_agent.ml_model_proposal_agent.estimate_proposal_time",
+                side_effect=AssertionError("Invalid draft reached the advisory estimator"),
+            ) as estimate,
+            pytest.raises(ValidationError, match=r"segmentation_size.*positive int"),
+        ):
+            _agent(bridge).run(_legacy_input(tmp_path))
+        estimate.assert_not_called()
+        assert bridge.generate.call_count == 1
+
     def test_schema_retry_still_happens(self, tmp_path):
         """A structurally invalid draft (duplicate model name) still burns a
         structural-retry slot and the corrected draft is emitted — C1

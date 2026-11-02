@@ -14,6 +14,7 @@ from core.durable_io import publish_bytes_write_once
 from ml_models.model_descriptions import DescriptionSourcePolicy
 from nodes.result_interpretation_agent import build_cold_start_interpretation
 from tools.workflow_preview.config import parse_config
+from workflows.evaluation_selection import selection_metric
 from workflows.proposal_pipeline import get_reasoning_pipeline
 from workflows.task_composition import (
     bind_run_task_composition,
@@ -105,7 +106,7 @@ def prepare_payloads(
             analysis_brief_requested=False,
             task_description=composition.task_description,
             task_blocks=composition.interpretation_blocks,
-            metric_spec=composition.metric.spec,
+            metric_spec=selection_metric(composition, composition.metric.spec),
             description_source_policy=DescriptionSourcePolicy.COMPOSED,
         )
         interpretation = build_cold_start_interpretation(interpretation_input)

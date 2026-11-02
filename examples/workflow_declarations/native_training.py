@@ -50,7 +50,8 @@ def write_example(project: Path, data: Path, workspace: Path) -> Path:
             healthgate_mode="observe_only",
             result_authority="diagnostic",
             require_probe_runner=True,
-            max_rounds=2,
+            max_rounds=2,  # Allow Trial before the forced Formal tuning round.
+            formal_portion=1.0,  # Use all small-example training data.
             trial_max_epochs=1,
             formal_max_epochs=2,
             trial_time_budget_minutes=2.0,

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import signal
 import subprocess
 import sys
 import time
@@ -23,13 +22,14 @@ from agent.schemas.data_analysis.skills import (
     SkillResult,
 )
 from core.durable_io import publish_bytes_write_once
-from core.execution_deadline import bounded_timeout
-from core.runtime_control.process_group import process_group_alive, signal_group, tree_rss_bytes
+from core.execution_deadline import remaining_seconds
+from core.runtime_control.process_group import process_group_alive, tree_rss_bytes
 from core.subprocess_env import subprocess_env
 
 from .discovery import DiscoveredSkill
 from .execution_origin import trusted_skill_execution_origin
 from .persistence import AnalysisPersistenceError, AnalysisRunStore
+from .process_termination import SUPERVISION_POLL_S, terminate_process_group
 from .worker_protocol import SkillWorkerRequest, SkillWorkerResponse, ValidatedParameters
 
 
@@ -42,6 +42,9 @@ class WorkerObservation:
     worker_pid: int
     started_at: str
     finished_at: str
+    #: Process-group members were still observable after the leader was reaped.
+    #: Recorded independently of ``disposition``, which it never overrides.
+    orphaned_process_tree: bool = False
 
 
 class SkillExecutorError(RuntimeError):
@@ -102,19 +105,18 @@ def certify_analysis_coverage(
     )
 
 
-def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
-    pgid = process.pid
-    signal_group(pgid, signal.SIGTERM)
-    deadline = time.monotonic() + 1.0
-    while process_group_alive(pgid) and time.monotonic() < deadline:
-        time.sleep(0.02)
-    if process_group_alive(pgid):
-        signal_group(pgid, signal.SIGKILL)
-    try:
-        process.wait(timeout=1.0)
-    except subprocess.TimeoutExpired:
-        signal_group(pgid, signal.SIGKILL)
-        process.wait()
+def _worker_command(request_path: Path, response_path: Path) -> list[str]:
+    """The skill-worker command line (also the test seam for a controlled child)."""
+
+    return [
+        sys.executable,
+        "-m",
+        "agent.data_analysis.worker_main",
+        "--request",
+        str(request_path),
+        "--response",
+        str(response_path),
+    ]
 
 
 def _run_worker(
@@ -124,7 +126,12 @@ def _run_worker(
     timeout_s: float,
     max_host_memory_gb: float | None,
 ) -> WorkerObservation:
-    timeout_s = bounded_timeout(timeout_s, "analysis.worker")
+    # Capture the continuing allocation's absolute expiry at admission, so
+    # parent-side request publication (an fsync that can stall for seconds
+    # under I/O load) is charged to the allocation rather than added after it
+    # (#1425). The per-skill timeout still starts at process launch.
+    remaining = remaining_seconds("analysis.worker")
+    allocation_expires_at = None if remaining is None else time.monotonic() + remaining
     control_directory.mkdir(parents=True, exist_ok=False)
     request_path = control_directory / "request.json"
     response_path = control_directory / "response.json"
@@ -133,18 +140,13 @@ def _run_worker(
     publish_bytes_write_once(str(request_path), canonical_json_bytes(request))
     started_at = utc_now()
     started = time.monotonic()
+    stop_at = started + timeout_s
+    if allocation_expires_at is not None:
+        stop_at = min(stop_at, allocation_expires_at)
     memory_ceiling = None if max_host_memory_gb is None else int(max_host_memory_gb * 1024**3)
     with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
         process = subprocess.Popen(
-            [
-                sys.executable,
-                "-m",
-                "agent.data_analysis.worker_main",
-                "--request",
-                str(request_path),
-                "--response",
-                str(response_path),
-            ],
+            _worker_command(request_path, response_path),
             stdin=subprocess.DEVNULL,
             stdout=stdout,
             stderr=stderr,
@@ -158,19 +160,27 @@ def _run_worker(
             peak_rss = max(peak_rss, tree_rss_bytes(process.pid))
             if memory_ceiling is not None and peak_rss > memory_ceiling:
                 disposition = "memory_limit_exceeded"
-                _terminate_process_group(process)
+                terminate_process_group(process)
                 break
-            if time.monotonic() - started >= timeout_s:
+            if time.monotonic() >= stop_at:
                 disposition = "timed_out"
-                _terminate_process_group(process)
+                terminate_process_group(process)
                 break
-            time.sleep(0.02)
+            time.sleep(SUPERVISION_POLL_S)
         peak_rss = max(peak_rss, tree_rss_bytes(process.pid))
+        orphaned_process_tree = False
         if process.poll() is None:
-            _terminate_process_group(process)
+            terminate_process_group(process)
         elif process_group_alive(process.pid):
-            disposition = "orphaned_process_tree"
-            _terminate_process_group(process)
+            # Precedence (#1448): a disposition the supervisor already decided
+            # (timed_out, memory_limit_exceeded) stands. After its termination
+            # a killed descendant can still be observable until its new parent
+            # reaps it; that fact is recorded separately. Only a worker that
+            # exited on its own is classified as orphaned_process_tree.
+            orphaned_process_tree = True
+            if disposition == "exited":
+                disposition = "orphaned_process_tree"
+            terminate_process_group(process)
         returncode = process.wait()
 
     response: SkillWorkerResponse | None = None
@@ -189,6 +199,7 @@ def _run_worker(
         worker_pid=process.pid,
         started_at=started_at,
         finished_at=utc_now(),
+        orphaned_process_tree=orphaned_process_tree,
     )
 
 
@@ -350,7 +361,10 @@ def execute_skill(
         started_at=observed.started_at,
         finished_at=observed.finished_at,
         worker_pid=observed.worker_pid,
-        host_details={"supervisor_disposition": observed.disposition},
+        host_details={
+            "supervisor_disposition": observed.disposition,
+            **({"orphaned_process_tree": True} if observed.orphaned_process_tree else {}),
+        },
     )
     if observed.disposition == "timed_out":
         return SkillResult(

@@ -324,7 +324,7 @@
     const id = project, sha = base.sha256, key = bindingKey(); inspecting = key;
     const live = () => project === id && base?.sha256 === sha && bindingKey() === key;
     try {
-      const value = await api(`${encodeURIComponent(id)}/draft`, {expected_sha256: sha, draft: {base_document: clone(graph), bindings: clone(bindings)}});
+      const value = await api(`${encodeURIComponent(id)}/draft`, {expected_sha256: sha, source: anchor.source, draft: {base_document: clone(graph), bindings: clone(bindings)}});
       if (!live()) return;
       inspection = {key, status: value.inspection.status, diagnostics: value.inspection.diagnostics,
         problems: value.inspection.problems || value.inspection.diagnostics.map(message => ({code: value.inspection.status, message}))};
@@ -713,7 +713,8 @@
       }
       $('pending').textContent = pendingText(); render();
       diagnostic(error.value?.diagnostics);
-      status(proposal.kind === 'loop' ? `Review refused the research loop: ${error.message}.${proposal.loop?.stop_conditions?.length && loopDeclarationRefusal(error) ? ' ' + window.editorLoopControls.refusalHint : ''}` : error.message);
+      const trainingHint = window.editorNodeParameters.reviewHint(training, graph?.training_settings?.launch, error);
+      status(proposal.kind === 'loop' ? `Review refused the research loop: ${error.message}.${proposal.loop?.stop_conditions?.length && loopDeclarationRefusal(error) ? ' ' + window.editorLoopControls.refusalHint : ''}` : `${error.message}${trainingHint ? '. ' + trainingHint : ''}`);
     }
   }
   $('review').addEventListener('click', () => { if (graph) void reviewProposal(sourceDirty ? {kind: 'source', source: $('source').value} : Draft.proposal(draftState())); });

@@ -170,6 +170,8 @@ def _make_input(tmp_path) -> HyperparamTuningInput:
     """1 round, 1 attempt, 1 fail-budget — the moment our single
     inference-side failure lands a record, the outer loop aborts."""
     return HyperparamTuningInput(
+        # This fixture exercises legacy single-file attempts, not trial scheduling.
+        is_trial=False,
         run_seed=TEST_RUN_SEED,
         planner_strategy="native-timing-v1",
         model_type="punet",

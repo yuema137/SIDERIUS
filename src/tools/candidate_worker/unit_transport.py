@@ -22,6 +22,7 @@ from pydantic import BaseModel
 from pydantic_core import to_json
 
 from core.control_json import JSON_LIMIT, ControlOverflow
+from core.record_encoding import model_record_value
 
 
 def _set_tree(value: Any) -> Any:
@@ -85,7 +86,7 @@ def constants_json(value: BaseModel, *, indent: int | None = None, **dump: Any) 
     ``model_validate_json``, which parses these constants back exactly.
     Finite documents are byte-identical to ``model_dump_json``.
     """
-    return to_json(value.model_dump(mode="json", **dump), indent=indent, inf_nan_mode="constants")
+    return to_json(model_record_value(value, **dump), indent=indent, inf_nan_mode="constants")
 
 
 def _encoded(value: BaseModel) -> bytes:

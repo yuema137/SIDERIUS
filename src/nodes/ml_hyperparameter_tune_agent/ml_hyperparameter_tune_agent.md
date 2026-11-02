@@ -1,12 +1,22 @@
 # HyperparamTuningAgent
 
+
+## Structured evaluation prompt context
+
+Planner and reflector receive the shared block through their existing constraint append calls. deterministic_ranking is visible when declared; this renderer does not implement formula or rubric execution.
+
+The run-scoped composition supplies this context through the shared append path.
+Absence adds no bytes and never enters the new boundary under historical profiles.
+The [evaluation contract](../../execute_tools/evaluation-contract.md#evaluation-prompt-rendering)
+owns formatting, profile admission and runtime capability distinctions.
+
 ## Live output names
 
 After native input validation, `run()` checks `storage.local.run_name` whenever
 local storage exists, before watchdog/resource setup or sandbox work. Unsafe names raise `ValueError` through the shared filesystem-component rule;
 valid names are preserved unchanged. Archived schemas remain readable.
 
-> Optimizes hyperparameters for a given model architecture over N rounds. Each round runs **plan (LLM) → resource check → train → infer → score → reflect (LLM)** in a sandbox subprocess. Supports two modes (trial = sparse sampling for fast exploration, formal = full data for canonical scoring) and uses two LLM sub-calls per round — a planner (proposes hyperparameters) and a reflector (analyses results, drives the next plan). Returns the best run + a full audit trail of every successful, OOM-skipped, and gate-rejected attempt.
+> Optimizes hyperparameters for a given model architecture over N rounds. Each round runs **plan (LLM) → resource check → train → infer → score → reflect (LLM)** in a sandbox subprocess. Supports two modes (trial = sparse sampling for fast exploration, formal = configured training scope with a separate comparable evaluation scope) and uses two LLM sub-calls per round — a planner (proposes hyperparameters) and a reflector (analyses results, drives the next plan). Returns the best run + a full audit trail of every successful, OOM-skipped, and gate-rejected attempt.
 
 ## Position in the pipeline
 
@@ -59,7 +69,7 @@ their own artifact path.
 | `reflect_provider` | `Literal["gemini", "openai", "deepseek"] \| None` | No | `None` | Optional separate provider for the reflector sub-call. When `None`, the reflector uses `llm_provider`. Enables planner/reflector split (e.g. cheap planner + smarter reflector). |
 | `reflect_model_id` | `str \| None` | No | `None` | Optional separate model ID for the reflector. When `None`, falls back to `llm_model_id`. |
 | `max_retries` | `int \| None` | No | `None` | Maximum retry attempts for transient API errors (429, 5xx). `None` = retry indefinitely; the process owner (Slurm wall time / operator interrupt) is expected to terminate stalled runs. |
-| `plan_overrides` | `dict[str, Any]` | No | `{}` | Hard overrides applied to every `ExperimentPlan` after the LLM produces it. Keys must be valid `ExperimentPlan` field names. Used to force-pin specific hyperparameters that the LLM is incorrectly drifting on. Since Lane F2 this lock is ALSO how a chain launch freezes campaign portions: typed `--trial_portion` / `--train_portion` / `--eval_portion` merge in via `frozen_portion_overrides` (typed = EXPERIMENT_FIXED, omitted = AGENT_CONTROLLED; a conflicting explicit JSON entry for the same key refuses). **Trial-scoped keys (`is_trial` / `trial_portion` / `eval_portion` — the `--is_trial` CLI bundle) constrain TRIAL rounds only**: a formal round's workload always comes from the `formal_*` knobs (`_resolve_sample_set_cfg`), and the resolved-formal round prints a per-round `[plan_overrides] NOTE:` naming any discarded trial-scoped keys (Lane F / F14). The combination `max_rounds=1` + `force_formal_round=True` (its default) + trial-scoped overrides is **refused at input construction** — the override would apply to zero rounds. Remedies, in reachability order (F-316: a remedy must be reachable from the surface that names it): raise `max_rounds`, or drop the trial-scoped request; `--no-force_formal_round` exists on the CHAIN launcher only — this node's CLI has no force-formal flag. Note the two surfaces' same-named `--is_trial` flags differ: this node's CLI is `store_true` (default False; typing it is what auto-bundles the trial clamp into `plan_overrides`), while the chain launcher's is BooleanOptionalAction default True and never auto-bundles — so a chain-shaped `max_rounds=1` run with no explicit overrides is immune (test-pinned). With `is_trial=False` (single-file mode) there is NO refusal at any `max_rounds`: the single_file branch READS the overridden `trial_portion`/`train_portion`, so the override applies (review B1). The guarded key set is `TRIAL_SCOPED_OVERRIDE_KEYS` (schema-exported, six keys) — the resolver's FULL formal-branch replacement set, a superset of this CLI's three-key bundle (review C4). **Record-key truth (review B2)**: the top-level record key `trial_portion` is written ONLY on trial rounds (`absence == formal`, the `BestTracks` authority); a formal round's resolved workload appears at `validation_workload_ceiling.resolved.trial_portion`, in the reflector's `actual_results`, and in the planning printout — never at the top-level key. Single-file rounds disclose too: the single_file branch forces `trial_strategy`/`eval_strategy` to `snapshot` and `eval_portion` to 1.0, so overrides on those three keys are named per round while `trial_portion`/`train_portion` apply. |
+| `plan_overrides` | `dict[str, Any]` | No | `{}` | Hard overrides applied to every `ExperimentPlan` after the LLM produces it. Keys must be valid `ExperimentPlan` field names. Used to force-pin specific hyperparameters that the LLM is incorrectly drifting on. Since Lane F2 this lock is ALSO how a chain launch freezes campaign portions: typed `--trial_portion` / `--train_portion` / `--eval_portion` merge in via `frozen_portion_overrides` (typed = EXPERIMENT_FIXED, omitted = AGENT_CONTROLLED; a conflicting explicit JSON entry for the same key refuses). **Trial-scoped keys (`is_trial` / `trial_portion` / `eval_portion` — the `--is_trial` CLI bundle) constrain TRIAL rounds only**: a formal round's workload always comes from the `formal_*` knobs (`_resolve_sample_set_cfg`), and the resolved-formal round prints a per-round `[plan_overrides] NOTE:` naming any discarded trial-scoped keys (Lane F / F14). The combination `max_rounds=1` + `force_formal_round=True` (its default) + trial-scoped overrides is **refused at input construction** — the override would apply to zero rounds. Remedies, in reachability order (F-316: a remedy must be reachable from the surface that names it): raise `max_rounds`, or drop the trial-scoped request; `--no-force_formal_round` exists on the CHAIN launcher only — this node's CLI has no force-formal flag. Note the two surfaces' same-named `--is_trial` flags differ: both resolve omission through `agent.schemas.hyperparam_tuning.DEFAULT_IS_TRIAL` (True). This node keeps an omitted-flag sentinel so only explicit `--is_trial` auto-bundles the trial clamp into `plan_overrides`; `--no-is_trial` selects legacy single-file mode. The chain launcher never auto-bundles — so a chain-shaped `max_rounds=1` run with no explicit overrides is immune (test-pinned). With `is_trial=False` (single-file mode) there is NO refusal at any `max_rounds`: the single_file branch READS the overridden `trial_portion`/`train_portion`, so the override applies (review B1). The guarded key set is `TRIAL_SCOPED_OVERRIDE_KEYS` (schema-exported, six keys) — the resolver's FULL formal-branch replacement set, a superset of this CLI's three-key bundle (review C4). **Record-key truth (review B2)**: the top-level record key `trial_portion` is written ONLY on trial rounds (`absence == formal`, the `BestTracks` authority); a formal round's resolved workload appears at `validation_workload_ceiling.resolved.trial_portion`, in the reflector's `actual_results`, and in the planning printout — never at the top-level key. Single-file rounds disclose too: the single_file branch forces `trial_strategy`/`eval_strategy` to `snapshot` and `eval_portion` to 1.0, so overrides on those three keys are named per round while `trial_portion`/`train_portion` apply. |
 
 ### Round / attempt budgets
 
@@ -76,20 +86,20 @@ them. Dataset row counts are separate from physical-segment counts.
 |---|---|---|---|---|
 | `max_rounds` | `int` | No | `50` | Maximum number of **completed** experiment rounds (OOM-skipped attempts do not count). |
 | `attempts_per_round` | `int` | No | `3` | Per-round attempt budget for trial rounds. Each round retries up to this many times after a gate-skip or error before the round is recorded as a failure. |
-| `attempts_per_formal_round` | `int` | No | `5` | Per-round attempt budget for the formal-promotion round. Higher than trial (5 vs 3) because the formal round runs on the full dataset and a single retry is much more expensive. |
+| `attempts_per_formal_round` | `int` | No | `5` | Per-round attempt budget for the formal-promotion round. Higher than trial (5 vs 3) because a Formal retry may use a larger configured workload. |
 | `max_fail_rounds` | `int` | No | `3` | Consecutive-failed-round abort trigger. When this many rounds in a row exhaust their attempt budget without a success, the tuner exits with `termination_reason="aborted_fail_rounds"`. |
 | `max_epochs` | `int \| None` | No | `None` | Hard cap on epochs per round. When set, the tuner clamps the LLM's planned epochs to `min(planned_epochs, max_epochs)`. Mode-agnostic fallback: `trial_max_epochs` / `formal_max_epochs` take precedence for their round role when provided (D-BUD-6). |
 | `trial_max_epochs` | `int \| None` | No | `None` | TRIAL-role epoch ceiling (campaign decision D-BUD-6; frozen campaign posture trial 2 / formal 1). Precedence for a trial round: this value → `max_epochs` → no clamp; formal rounds never read it. `ge=1` — zero/negative refuse at validation. Resolution happens only in `HyperparamTuningInput.resolve_epoch_cap(is_trial=...)`, keyed on `plan.is_trial` **after** the mode-override chain — the same authority that stamps `record.is_trial` (see "Candidate role identity"). |
 | `formal_max_epochs` | `int \| None` | No | `None` | FORMAL-role epoch ceiling (D-BUD-6). Precedence for a formal round: this value → `max_epochs` → no clamp; trial rounds never read it. `ge=1`. |
-| `force_formal_round` | `bool` | No | `True` | When `True` (default), the **last** round of every iteration forces `plan.is_trial = False` so it always runs in formal mode (full dataset) regardless of what the planner picked. |
-| `formal_round_strategy` | `Literal["full_clone", "hybrid_params", "independent", "inherit_best_train_plus_formal_eval"]` | No | `"full_clone"` | Orchestration policy for the forced formal round: `full_clone` re-runs the best trial verbatim on full data; `hybrid_params` carries trial-winner hyperparams + formal sampling; `independent` lets the planner propose a fresh formal config. |
+| `force_formal_round` | `bool` | No | `True` | When `True` (default), the **last** round of every iteration forces `plan.is_trial = False` so it always runs in Formal mode (configured Formal training and evaluation scopes) regardless of what the planner picked. |
+| `formal_round_strategy` | `Literal["full_clone", "hybrid_params", "independent", "inherit_best_trial", "llm_propose"]` | No | `"full_clone"` | Orchestration policy for the forced formal round: `full_clone` inherits the best trial configuration and uses the configured Formal scopes; `hybrid_params` carries trial-winner hyperparams + formal sampling; `independent` lets the planner propose a fresh formal config. |
 | `degenerate_penalty_score` | `float \| None` | No | `None` | Operator policy for the agent's reaction when scoring flags a degenerate output on a formal round (e.g. all-zeros prediction). When set (finite; inf/NaN are refused at launch, issue #1045), the degenerate run gets this penalty score and the tuner continues; when `None`, the run is recorded as-is. |
 
 ### Trial mode sampling
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `is_trial` | `bool` | No | `False` | `True` allows trial and formal rounds (the planner chooses; task-owned scopes for composed tasks). `False` makes every round `single_file` (`planning.py` mode resolution): no task-owned scopes, and the training child loads one TIDMAD training file by `file_index`. A composed run whose dataset profile declares no TIDMAD topology is therefore refused at startup (`runtime.validate_training_mode_startup`, after the `storage.local` check and `resolve_dataset_profile`, before any model call) with `execute_tools.dataset_config.single_file_mode_refusal`'s message. Un-composed and TIDMAD-topology runs are unchanged. |
+| `is_trial` | `bool` | No | `DEFAULT_IS_TRIAL` (`True`) | `True` allows trial and formal rounds (the planner chooses; task-owned scopes for composed tasks). `False` makes every round `single_file` (`planning.py` mode resolution): no task-owned scopes, and the training child loads one TIDMAD training file by `file_index`. A composed run whose dataset profile declares no TIDMAD topology is therefore refused at startup (`runtime.validate_training_mode_startup`, after the `storage.local` check and `resolve_dataset_profile`, before any model call) with `execute_tools.dataset_config.single_file_mode_refusal`'s message. Explicit values retain their execution semantics for un-composed and TIDMAD-topology runs. |
 | `trial_strategy` | `Literal["snapshot", "anchors", "target"]` | No | `"snapshot"` | Sampling strategy: `snapshot` (all 20 files), `anchors` (files 0/10/19), `target` (specific files via `target_files`). |
 | `trial_portion` | `float \| None` | No | `None` (schema); CLI flag default `0.1` | Fraction of segments per file for the training scope. **TRANSIT ONLY (Lane F2)**: the tuner's executed trial workload never reads this input field — it reads the (possibly overridden) plan; the operator lock for portions is `plan_overrides` (this node's CLI bundles it under `--is_trial`; the chain's typed `--trial_portion` merges via `frozen_portion_overrides`). Its one real consumer chain is the proposer's resource-estimation preflight. The old `0.1` default shown here was doc drift — the schema default was always `None`. |
 | `target_files` | `list[int]` | No | `[]` | File indices to sample from. Required when `trial_strategy="target"`. |
@@ -393,7 +403,7 @@ executes, without distorting what the planner is allowed to decide. See
 | `best_config` | `dict[str, Any] \| None` | `model_config` + `train_config` + `loss_config` that produced `best_denoising_score`. |
 | `best_file_vector` | `list[float \| None] \| None` | Length-20 score vector from the best experiment. `None` for files not included. |
 | `best_score_table` | `ScoreComparisonTable \| None` | Score comparison table from the best experiment. Enriches `best_file_vector` with raw_baseline + ground_truth columns. |
-| `formal_score_table` | `ScoreComparisonTable \| None` | Score comparison table from the most recent successful formal (full 20-file) round. Distinct from `best_score_table` because the best run might be a trial, not the formal canonical. |
+| `formal_score_table` | `ScoreComparisonTable \| None` | Score comparison table from the most recent successful Formal tuning round over the configured evaluation scope. Distinct from `best_score_table` because the best run might be a trial, not the formal canonical. |
 | `all_records` | `list[ExperimentRecord]` | Complete experiment history including successful, failed, OOM-skipped, and (V20 PR B) admission-refused rounds — the last are phases that never started, so they carry no score and are not candidate failures. Each record contains params, results, timing, and any error message. **The dominant payload by size.** |
 | `gate_exhaustion` | `GateExhaustionInfo \| None` | Populated when **either** trigger fires. **Trigger A**: no attempt reached `status == "success"` AND ≥1 attempt was rejected by the pre-flight resource gate. **Trigger B**: the outer loop aborted on the consecutive-failure brake after `completed_rounds > 0` — so under Trigger B earlier rounds **did** succeed. Used by the downstream proposer's `recent_gate_exhaustions` field to learn from prior tuner-side gate failures. C12-P: the rendered `summary_message` and log line now state how many attempts **reached training**, because Trigger A's predicate ("no *successful* outcome") was being rendered as "never trained" — false for an attempt that trained and then failed HealthGate, and false unconditionally under Trigger B. |
 | `trial_validity_feedback` | `TrialValidityFeedback \| None` | **V20 PR D (D-C6)** — populated only when the iteration ran trial rounds but produced NO HealthGate-valid winner. Reaches the next proposer via `ProposalInput.recent_trial_validity`. Deliberately SEPARATE from `gate_exhaustion`, which reports BUDGET exhaustion: these trials ran and succeeded and then failed their scientific gates, so `gate_exhaustion`'s triggers never fire for them, and the two call for opposite responses (propose lighter vs propose something that does not collapse). `None` whenever any trial is valid. |
@@ -402,7 +412,7 @@ executes, without distorting what the planner is allowed to decide. See
 | `scientific_authority` (per record) | `dict \| None` | **V20 PR D (D-C2b/D-C4)** — on FORMAL records only, the authority verdict with its three facts beside its conclusions, so it is recomputable and therefore tamper-EVIDENT. Consumers must re-derive via `resolve_record_authority()` rather than trusting the stored conclusions. |
 | `metric_result` (per record) | `MetricResult \| None` | **Step 06 (2026-08)** — the evaluation metric's own result for the attempt, written by the metric handle on the live scoring route: `metric_id` (`tidmad_denoising_score`), `direction` (`higher`), `scalar` (== `denoising_score` on a `success` record — validated), `references_used`; `per_sample` is a POINTER to `file_vector` on the same record (not stored twice). `None` on records written before Step 06, on attempts that never reached scoring, and on the legacy single-file skill route. On a `failed_mode_collapse` record it is the metric's RAW value while `denoising_score` carries the gate policy's penalty. |
 | `metric_refusal` (per record) | `NotScoreableResult \| None` | **Step 06** — the structured not-scoreable result when the produced deliverable failed the metric's scoreability contract BEFORE any scorer arithmetic ran (record `status='error_scoring'`, `failure_stage='scoring'`, `failure_type='not_scoreable'`): contract id, every violated requirement (`completeness` / `required_channels` / `required_attrs` / `required_dtype`), input identity, detail. Never set together with `metric_result`. |
-| `training_history` (per record) | `TrainingHistory \| None` | **Step 07a (2026-08)** — the trainer's typed per-epoch observation payload (`execute_tools/training_history.py`): `objective_kind` (= `loss_config.loss_type`, a family label) + `objective_config_fingerprint` (SHA-256 of the canonical resolved `LossConfig` — configuration surface, not plugin code) + `objective_reduction`; `epoch_statistic` (R2 and R3 share ONE estimator: the sample-count-weighted mean of the criterion's batch scalar); `comparability` (`established` only for the audited built-in mean-reduced kinds `focal` / `focal_cw` / `ce` / `smooth_l1`; `sum` → `reduction=sum`, custom → `custom_objective_undeclared`); `epochs_planned` / `epochs_completed`; `train_objective` (R2 == `loss_history`, `final_loss` == last entry, validated); `validation_objective` (R3 — the SAME objective on the run-bound eval SampleSet, VALIDATION file family, no backprop; `None` ONLY when no validation was expected, i.e. legacy single-file); `validation_requested_samples == validation_samples > 0` (the declared scope materialized EXACTLY); `validation_seconds` (per epoch; excluded from the training ACTUAL); `observations` (**`R-OBS-1` (2026-08)** — the run's DECLARED DYNAMIC observables, one value per completed epoch, keyed by the name the task's manifest declared under `dynamic_observables:`. Produced by the trainer on the SAME per-epoch validation pass that yields R3, so a declaration costs no extra forward pass. Every series is guaranteed `epochs_completed` long — an observable that failed in some epochs only yields a short series, which is dropped WHOLE rather than padded. `{}` for every run that declares none, which is every run before this family). `None` on failure / skip records and on pre-07a records. **The objective series are `list[float \| None]`** — an ELEMENT is `None` where that epoch's objective was non-finite and the record has crossed the storage boundary, because `coerce_nonfinite_to_none` (`LocalRecorder.save_record`) writes JSON `null` for `NaN`/`±inf`; the same is true of the record's own `loss_history`. Positions are preserved, so the epoch-count and R2/R3 length invariants are unaffected, and `_all_finite` judges a `None` element exactly as the non-finite value it stands for (F-12e-G2: a strict element type previously made a diverged run's record fail re-validation and discarded the whole scored attempt). **Expected validation ≠ optional validation**: an attempt that BUILT an eval SampleSet whose results carry no R3 is recorded as `error_training` (`error_type='training_results_contract'`), never as a success with `validation_state='absent'`. |
+| `training_history` (per record) | `TrainingHistory \| None` | **Step 07a (2026-08)** — the trainer's typed per-epoch observation payload (`execute_tools/training_history.py`): `objective_kind` (= `loss_config.loss_type`, a family label) + `objective_config_fingerprint` (SHA-256 of the canonical resolved `LossConfig` — configuration surface, not plugin code) + `objective_reduction`; `epoch_statistic` (R2 and R3 share ONE estimator: the sample-count-weighted mean of the criterion's batch scalar); `comparability` (`established` only for the audited built-in mean-reduced kinds `focal` / `focal_cw` / `ce` / `smooth_l1`; `sum` → `reduction=sum`, custom → `custom_objective_undeclared`); `epochs_planned` / `epochs_completed`; `train_objective` (R2 == `loss_history`, `final_loss` == last entry, validated); `validation_objective` (R3 — the SAME objective on the run-bound eval SampleSet, VALIDATION file family, no backprop; `None` ONLY when no validation was expected, i.e. legacy single-file); `validation_requested_samples == validation_samples > 0` (the declared scope materialized EXACTLY); `validation_seconds` (per epoch; excluded from the training ACTUAL); `observations` (**`R-OBS-1` (2026-08)** — the run's DECLARED DYNAMIC observables, one value per completed epoch, keyed by the name the task's manifest declared under `dynamic_observables:`. Produced by the trainer on the SAME per-epoch validation pass that yields R3, so a declaration costs no extra forward pass. Every series is guaranteed `epochs_completed` long — an observable that failed in some epochs only yields a short series, which is dropped WHOLE rather than padded. `{}` for every run that declares none, which is every run before this family). `None` on failure / skip records and on pre-07a records. **The objective series are `list[float \| None]`** — legacy records may contain `None` where an epoch's non-finite objective was projected to JSON `null`. New `LocalRecorder` writes preserve `NaN`/±inf through the versioned typed-path encoding in `core.record_encoding`; the same is true of the record's own `loss_history`. Positions are preserved, so the epoch-count and R2/R3 length invariants are unaffected, and `_all_finite` judges a `None` element exactly as the non-finite value it stands for (F-12e-G2: a strict element type previously made a diverged run's record fail re-validation and discarded the whole scored attempt). **Expected validation ≠ optional validation**: an attempt that BUILT an eval SampleSet whose results carry no R3 is recorded as `error_training` (`error_type='training_results_contract'`), never as a success with `validation_state='absent'`. |
 | `training_diagnosis` (per record) | `TrainingDiagnosis \| None` | **Step 07a** — derived ONCE from `training_history` at the tuner boundary (`agent/schemas/training_diagnosis.py::derive_training_diagnosis`, pure / deterministic / no I/O): `state` (`ok` / `absent` = no payload / `invalid` = empty or non-finite R2/R3 — raw values stay on the history), `validation_state`, `comparability`, epoch counts + `truncated`, train / validation first / last / min + `train_min_epoch` / `best_validation_epoch` (argmin R3), `validation_degradation_verdict` (**F-SCANE-2**, operator ruling 2026-08-26 — `observed` / `insufficient_history` / `not_applicable`), `final_vs_best_validation_degradation` (+ `_rel`), `validation_degraded_after_best` (**all three are `None` unless the verdict is `observed`**: at `epochs_completed == 1` the validation series has ONE entry, so `r3[-1] − r3[best]` is `x − x` and the old `0.0` / `False` read as measured evidence of no degradation on the record and in the operator report. The campaign freezes `formal_max_epochs = 1`, so this is EVERY formal round. `validation_trend` is NOT gated — `single_point` already says it honestly), `train_validation_gap_final` (+ `_rel`; `None` unless `comparability == established`), `train_trend` / `validation_trend` (`decreasing` / `increasing` / `flat` / `single_point` with the symmetric scale-free deadband `r(a,b)=|b−a|/max(|a|,|b|) ≤ flat_rel_tol`, `flat_rel_tol=0.01` recorded). NO overfitting / underfitting / converged / plateau labels (07b renders selected facts; Step 09 may derive calibrated labels). `state='absent'` beside a `None` history on legacy producers. **Both fields are persisted evidence and HIDDEN from both LLM-facing renders in 07a** — the planner's history serialization drops them (`agent/prompts.py::_PLANNER_HIDDEN_RECORD_KEYS`) and the reflector's `actual_results` receives the legacy payload only (`final_loss` / `loss_history` / `model_params`), so PB-1/PB-2/WF-1/WF-2 are byte-identical to pre-07a. |
 | `physical_rejections` | `list[PhysicalRejection]` | One entry per resource-preflight refusal captured in this run. Optional typed static evidence distinguishes structural and compute-intensity refusals from measured GPU failures; the historical name does not establish a physical measurement. Empty when no infeasible attempts are captured. |
 | `attempts_per_round` | `int` | Echo of the input value used for this run. |
@@ -414,7 +424,7 @@ executes, without distorting what the planner is allowed to decide. See
 | `secondary_metric_errors` (per record) | `dict[str, str]` | **Step 10 / P2b** — diagnostic PROVENANCE for a declared secondary whose evaluation CRASHED: metric id → a concise one-line diagnostic, also printed. Deliberately NOT a scientific state — a crash produced no contract verdict, so recording a `NotScoreableResult` would fabricate a measurement. The interpreter projects such a secondary as `unavailable`. A `ScopeViolationError` is NEVER recorded here: it is re-raised so the existing outer handler terminates the run, because "observational" bounds ordinary secondary outcomes, not framework-integrity failures. |
 | `per_sample_evidence` (HealthGate context) | `PerSampleEvidence` | **Step 08b C6 / D18 (2026-08-18)** — whether the round's metric produces per-sample evidence at all, carried into `HealthCheckContext` beside `file_vector` rather than collapsed into it. Derived once, by `PerSampleEvidence.for_per_sample(metric_result.per_sample)`: `None` → `scalar_only`, a list (even an empty one) → `available`, and the default `undeclared` for every pre-scoring gate. Before this, a scalar-only metric presented per-file checks with `[]`, which reads as "no files" and PASSES — inapplicability recorded as health. Health consumes this CAPABILITY only and never the metric scalar. Two of the three executable tracks (Pets accuracy, DAVIS global MSE) are scalar-only; TIDMAD is not, so TIDMAD behaviour is unchanged. |
 | `consecutive_fail_rounds_at_exit` | `int` | Terminal value of the loop's consecutive-failure counter. `0` on a healthy completion; equals `max_fail_rounds` when the loop aborted on the trigger. |
-| `termination_reason` | `Literal["completed", "aborted_fail_rounds", "aborted_by_gate", "scope_violation", "infrastructure_abort"]` | Why the loop exited. `"aborted_by_gate"` is HISTORICAL (pre-F-SCANC-1 records only; the SKIP_ITER producer was retired 2026-08-26 and the member stays so old records deserialize). `"infrastructure_abort"` (C9c, 2026-07-30) means the runtime EVIDENCE CHANNEL failed or training admission could not establish environment evidence — registry, persistence, schema/protocol, probe executor, telemetry, communication, or a policy invariant. It outranks every other reason and halts the CHAIN: `run_one_iteration.py` writes the `.chain_halted` sentinel with `reason="infrastructure_abort"` and exits 3, so neither the foreground loop nor a queued SDSC `afterany` job runs another candidate on the same broken environment. A candidate-class rejection stays attempt-local. |
+| `termination_reason` | `Literal["completed", "aborted_fail_rounds", "aborted_by_gate", "scope_violation", "infrastructure_abort"]` | Why the loop exited. `"aborted_by_gate"` is HISTORICAL (pre-F-SCANC-1 records only; the SKIP_ITER producer was retired 2026-08-26 and the member stays so old records deserialize). `"infrastructure_abort"` (C9c, 2026-07-30) means the runtime EVIDENCE CHANNEL failed or training/inference admission could not establish environment evidence — registry, persistence, schema/protocol, probe executor, telemetry, communication, or a policy invariant. It outranks every other reason and halts the CHAIN: `run_one_iteration.py` writes the `.chain_halted` sentinel with `reason="infrastructure_abort"` and exits 3, so neither the foreground loop nor a queued SDSC `afterany` job runs another candidate on the same broken environment. A candidate-class rejection stays attempt-local. |
 | `started_at` | `str` | ISO-8601 UTC timestamp at `agent.run(inp)` entry. |
 | `finished_at` | `str` | ISO-8601 UTC timestamp at `agent.run(inp)` exit. |
 
@@ -464,7 +474,7 @@ repository. Result lands at `{workspace}/run_output_{run_name}.json`.
 | `--run_name` | `str` | `"test_run"` | Run name. |
 | `--workspace` | `str` | `./siderius_workspace` | Workspace root. |
 | `--run_seed` | `int` (`[0, 2**53 - 1]`) | `None` | Entry boundary (R2): the workspace lock's seed wins, then this flag, then generation; printed as `[seed] run_seed=N source=…` and locked before round 1. A different value than the locked seed is refused. |
-| `--is_trial` | flag | `False` | Enable trial-explore mode. |
+| `--is_trial` / `--no-is_trial` | flag | shared `DEFAULT_IS_TRIAL` (`True`) | Trial/formal mode; explicit positive flag also pins trial portions. Negative flag selects legacy single-file mode. |
 | `--trial_strategy` / `--trial_portion` / `--train_portion` / `--target_files` / ... | various | various | Mirror the schema fields above. |
 | `--file_index` | `int` | `6` | Validation file index (formal mode). Ignored under `--is_trial` per `feedback_no_file_index_in_trial`. |
 | `--order_strategy_override` | `str` (`shuffle` \| `sequential`) | `None` | Force the training sample visitation order for every round, overriding any agent proposal. Omit = the agent decides, falling back to `shuffle`. |
@@ -667,13 +677,46 @@ half, which lives in the attempt loop's control flow and is unchanged here.
 **Accounting.** A refusal consumes the current attempt slot (planning,
 pre-flight and admission really ran, and not consuming it risks refusing
 forever while the device stays busy) but is **not** a candidate failure:
-no score, no negative planner evidence, no incumbent update, no retry.
-Training admission refuses with `environment_headroom_unproven`,
+no score, no negative planner evidence, no incumbent update. Only transient
+sampling failures receive bounded same-phase retries, as described below.
+Training and inference admission refuse with `environment_headroom_unproven`,
 `measurement_unavailable`, or `policy_unavailable` when execution evidence or
-policy cannot establish a runnable environment. `execution.run_training`
-persists the refusal record, then returns its typed `AdmissionDecision` in
-`TrainingOutcome.environment_admission_refusal`. The loop ends immediately:
+policy cannot establish a runnable environment. The shared owner
+`phase_admission.run_admitted_skill` normalizes the decision and uses core
+`AdmissionDecision.refusal_kind`: `resource`, `transient_sampling`, or `environment`.
+Only typed `detail="sampler_error"` is transient (`measurement_unavailable` for
+ordinary admission, `environment_headroom_unproven` for isolated admission);
+message text never selects recovery. It retries the same refused phase, with
+unchanged parameters and no new plan, up to the remaining attempt slots including
+the current slot (`attempts_per_round` or `attempts_per_formal_round` minus
+`attempt_in_round` plus one, minimum one). These are admission sampling tries
+inside the current scientific attempt, not new completed/failed tuning rounds.
+Retries wait 0.25, 0.5, then at most 1 second each; at most `remaining - 1`
+waits occur, with no wait after a terminal result. `run_admitted_skill(sleep=...)`
+accepts an injected sleeper for tests; production uses `time.sleep`. There is
+no new configuration knob. The accounting owner distinguishes `TimeoutExpired`
+and `CalledProcessError` as typed `GpuQueryFailure` values carried in
+`GpuAccountingSnapshot.query_failure`; neither is collapsed into persistent
+missing telemetry. Missing executables, missing GPU rows and malformed telemetry
+remain persistent evidence gaps. Isolated admission retains unconditional
+phase refusal during retries, including `observe_only`. Invalid visibility
+still wins over a transient query failure.
+Protected native execution uses this same owner and classification. Its transient
+refusals persist separate sampling receipts; this owner finalizes the last receipt
+on exhaustion. A persistence failure returns infrastructure failure without further
+retry. Measured phase identity, checkpoint and remaining preparation allowance survive
+re-entry; see [protected execution](../../core/runtime_control/native-gpu-execution.md).
+Inference retries do not repeat successful training. Exhaustion or a persistent
+environment refusal emits one final refusal record and returns the decision in
+`TrainingOutcome.environment_admission_refusal` or
+`AttemptExecution.environment_admission_refusal`. The loop ends immediately:
 one attempted plan, no replans, no further attempts or failed-round increments.
+The protected native `gpu_execution_policy` path still returns
+`aborted_infrastructure` for non-resource refusals, bypassing this recovery;
+[issue #1280](https://github.com/Galileo-Sandbox/SIDERIUS/issues/1280) tracks
+unifying it while preserving phase/checkpoint/observer lifecycle and deadlines.
+Successful recovery continues the same attempt; intermediate sampling failures
+are printed, not persisted as candidate failure records.
 The existing `infrastructure_abort` termination is used, including its existing
 chain-halt behavior. `HyperparamTuningOutput.environment_admission_refusal`
 retains the original `reason_code`, plain `reason`, and evidence in both normal
@@ -681,9 +724,8 @@ and degraded persistence, so a consumer can explain the absent score. This
 optional additive field defaults to `None` for historical outputs and other exits.
 Earlier successful records, if any, remain available; the refusal adds no score.
 
-Training classifies the normalized decision against the core authority
-`admission.RESOURCE_REJECTIONS`; it does not maintain another stopping-code set.
-`runtime.normalize_training_admission_refusal` defaults a missing/empty reason
+Both phases use the same core recovery classification and shared normalizer.
+`phase_admission.normalize_phase_admission_refusal` defaults a missing/empty reason
 code to `policy_unavailable` before recording or deciding whether to stop. If
 full admission validation fails, it emits a valid refusal with
 the original message and raw payload under `evidence.invalid_admission`. A
@@ -1111,9 +1153,21 @@ for the full design rationale.
 - **Two LLM sub-calls per round** (planner + reflector). When `reflect_provider` / `reflect_model_id` are set, the two go through separate `LLMBridge` instances — enables splits like "cheap planner + smarter reflector" or "small planner + large reflector" without changing prompts.
 - **Attempt vs round distinction.** A *round* is a slot in the optimization history that produces a final record. An *attempt* is one LLM-plan + downstream-execution attempt. Each round can consume up to `attempts_per_round` (or `attempts_per_formal_round` for the forced-formal round) attempts before being marked failed. Attempts that fail at the pre-flight gate cost LLM tokens but no GPU time; attempts that reach training but fail (OOM, training error) cost both.
 - **`max_fail_rounds` termination trigger.** When this many *consecutive* rounds exhaust their attempt budget without producing a successful record, the tuner exits with `termination_reason="aborted_fail_rounds"`. The downstream interpreter reads `consecutive_fail_rounds_at_exit` to recognize this exit.
-- **Force-formal-round mechanic.** When `force_formal_round=True` (default), the **last** round in the loop has `plan.is_trial` forcibly set to `False` so it runs on the full dataset. The `formal_round_strategy` controls how that round's config is built: `full_clone` (re-run best trial verbatim), `hybrid_params` (best-trial hyperparams + formal sampling), `independent` (planner proposes fresh), or `inherit_best_train_plus_formal_eval` (best train + formal eval scope).
+- **Force-formal-round mechanic.** When `force_formal_round=True` (default), the **last tuning round of each iteration** has `plan.is_trial` forcibly set to `False` so it uses the configured Formal training and evaluation scopes. The `formal_round_strategy` controls how that round's config is built: `full_clone` (inherit selected model/loss/training fields from the best trial), `hybrid_params` (inherit loss and learning rate), or `independent` (planner proposes fresh). Legacy `inherit_best_trial` and `llm_propose` canonicalize to `full_clone` and `independent`; none of these strategies implies full-data training.
 - **Wall-time admission has one authority per role.** Trial and Formal independently select ``forecast`` or ``measured``. The default ``measured`` posture skips advance time admission and enforces the budget from executing-device verification. ``forecast`` invokes `evaluate_time_skill` and leaves in-process verification record-only. An unavailable selected authority refuses; the system never falls back to the other authority.
   - ``runtime_verification_max_wall_seconds`` optionally extends the adaptive verifier's observation window for workloads with slow individual optimizer steps. It does not change Trial or Formal budgets, and the observed verification steps are the first production training steps rather than a duplicate probe. Omit it to preserve the verifier's default window.
+  - `runtime_verification_pathological_min_unit_ms` optionally sets the finite,
+    nonnegative slowdown floor in observation wall-time milliseconds. The standard
+    workflow and standalone tuner CLIs accept the same name prefixed with `--`;
+    `WorkflowLaunchConfig` and the validator-to-tuner protocol forward it unchanged.
+    `None` omits the override and preserves existing runtime-policy evidence;
+    `0` restores relative-only streak and distribution slowdown checks. Explicit
+    values are recorded under `runtime_policy.verification.pathological_min_unit_ms`
+    alongside any `max_wall_ms` override. The verifier default remains 100 ms.
+    This changes neither budgets nor independent wall/absolute-unit caps.
+    Historical experiment pins belong in the consumer configuration; see
+    [slowdown policy](../../../docs/reference/training-budget-diagnostics.md#late-stability-and-runtime-refusal-feedback).
+
   - **C8c (2026-07-30) — standalone time evaluation still classifies evidence through the shared `RuntimeDecisionPolicy`.** When a workflow explicitly selects `forecast` admission, that workflow-level selection accepts the skill's already-computed `over_effective_budget` comparison as authoritative and does not resolve `REQUEST_PROBE`; otherwise measurement would become an undeclared second authority. Under `measured`, the advance skill is not called and RT2 verification owns admission. An uninterpretable selected channel is an execution-system failure, never a candidate-level "infeasible". `evaluate_vram_skill` remains independent and uses architectural pattern tagging (`TIME_FACTOR_THRESHOLD`, `VRAM_FACTOR_THRESHOLD`) and a per-pattern memory budget.
   - **V21 PR G (2026-08-10) — the time gate prices inference at the batch that will actually run.** The feasible VRAM-gate return's probe-derived `inference_batch` is captured into `active_params` (`:4696`) before the time gate fires, and `_run_time_preflight` forwards it (the `**active_params` splat) into `evaluate_time_skill`, which uses the SAME value for the hint→ms/step conversion and the inference estimator. This is a two-sided correction on the `training_warmup_x2.7_fallback` forecast branch: a plan is no longer falsely `skipped_time_risk` when the probed batch > 25, and no longer falsely admitted when it is < 25. No-hint callers (baselines, legacy scripts) keep registry-table pricing unchanged. `active_params` is rebuilt per attempt, so a stale hint cannot leak between attempts (0.R.4).
 - **Sandbox subprocess for skill execution.** Each skill runs in a fresh subprocess via `TidmadSandbox` for memory isolation (PyTorch's CUDA context doesn't reliably release VRAM in-process). The sandbox communicates via JSON files in a temp dir and reports back through `get_summary()`. Pseudo-mode tests replace the sandbox with a `RecordingSandbox` that returns canned results without subprocess overhead.
@@ -1261,6 +1315,17 @@ Design: `docs/design/generic_framework_upgrade/
 step_05a_tuner_data_selection.md`.
 
 
+## Effective evaluation selection
+
+The executable `run_metric` remains the source metric. The composition's
+`SelectionBinding` supplies the effective spec for `run_order`, planner/reflector
+metric labels and final output stamps. `scoring_transport.py` validates child
+results and builds Health invocation context; `round_health.py` projects source
+values before Health evaluation. Formula records retain typed `evaluation_result`
+evidence and have no fabricated effective per-file vector. See the
+[evaluation runtime contract](../../execute_tools/evaluation-contract.md#deterministic-selection-runtime)
+for supported routes, required evidence, refusal records and `score_units_metric`.
+
 ## Evaluation metric handle (Step 06, 2026-08)
 
 Production scoring invokes the frozen TIDMAD scorer **through a generic
@@ -1271,7 +1336,7 @@ contract have exactly one source for the whole run.
 |---|---|---|
 | binding | `run()`, run scope, after the composition binding | `run_metric = resolve_run_metric()` — the zero-argument resolver is the single acquisition site. A composed run uses its declared metric; missing required declaration is refused (`NoRunMetricError`) rather than falling through to an unbound legacy derivation. Exactly ONE acquisition site is pinned by the workflow census, so composed runs cannot execute a different metric path first |
 | live route (`ANCHOR_NORMALIZED`) | an uncomposed compatibility run with an anchor map and legacy `SampleSet` | `metric_result = sandbox.evaluate_metric(run_metric, sample_set=eval_sample_set, anchor_map=…, s_max=…, denoised_filename_fn=_denoised_fn)`; `file_vector, final_scalar = metric_result.per_sample, metric_result.scalar` — `score_res`, reflector and record unchanged. **HealthGates are no longer part of this branch** (F2, below): they fire once per round for every route |
-| task-owned route (`TASK_OWNED`, **Step 12 / PR-12d**) | scoring subprocess — every composed run with an opaque evaluation scope, including a task that also declares an anchor artifact | the child scores its OWN deliverable through the SAME composed metric and reports `metric_result` (plus declared secondaries) in its JSON output; the tuner ADOPTS them (`_adopt_child_metric_result`, `_adopt_child_secondaries` in `execution.py`) because only the child holds the deliverable and the evaluation scope. A multi-artifact task may return `TaskEvaluationPayload` so scoreability checks every artifact before arithmetic. |
+| task-owned route (`TASK_OWNED`, **Step 12 / PR-12d**) | scoring subprocess — every composed run with an opaque evaluation scope, including a task that also declares an anchor artifact | the child scores its OWN deliverable through the SAME composed metric and reports `metric_result` (plus declared secondaries) in its JSON output; the tuner ADOPTS them (`_adopt_child_metric_result`, `_adopt_child_secondaries` in `execution.py`) because only the child holds the deliverable and the evaluation scope. A multi-artifact task may return `TaskEvaluationPayload` so scoreability checks every artifact before arithmetic. The JSON output is written with `core.record_encoding` and read through `evaluation_child.read_scoring_output`, so a non-finite scalar, `file_vector` element or secondary reaches the tuner as the float it was, exactly as on the anchor route, not as `null` (#1316; [core contract](../../core/core-contract.md#scoring-child-output-issue-1316)). |
 | order inside the seam | `TidmadSandbox.evaluate_metric` | DataScope `validate_sample_set` (unchanged, first) → `TidmadScoreabilityContract.check({file_index: path})` → `scoring_utils.score_vector(**the same kwargs as before)` |
 | refusal | `NotScoreableError` from the seam → the scoring `except` → `_build_scoring_failure_record` | `status='error_scoring'`, `failure_stage='scoring'`, `failure_type='not_scoreable'`, `metric_refusal=<NotScoreableResult>`, memory prose naming contract + requirement (never "crashed"); round outcome unchanged (next attempt) |
 | record | success record | `metric_result` (identity / direction / scalar / references; `per_sample` = pointer to `file_vector`) |
@@ -1403,7 +1468,37 @@ The planner and reflector prompts render, from landed authorities:
   trends, best validation epoch, drift after it, and the train–validation gap
   when the two were comparable. **No calibrated label** — no "overfitting",
   "converged" or "plateau" — because 07a deliberately derived none, and a
-  renderer that supplied one would silently pick a threshold nobody declared.
+  renderer that supplied one would silently pick a threshold nobody declared;
+* **data-volume owner (issue #1472)** — the reflector's Data Volume Context
+  states `round_mode` and labels the executed training/evaluation portions
+  (reflection-context keys `trial_portion` / `eval_portion`, unchanged) with the
+  knob that set them. `feedback.py::executed_round_workload` selects, from the
+  retained `prepared.timing_context`, the `RoleTimingContext` whose `mode`
+  equals `trial_config.mode`; its `WorkloadSource` bindings come from
+  `policy.py::_sample_set_sources`, the same selection execution uses, and
+  `agent/prompt_templates/tuner/rendering.py::render_reflector_data_volume_portions`
+  renders them. A Formal round with `formal_training_scope_source='operator'`
+  shows `formal_portion` / `formal_eval_portion` as operator-set and advises
+  against recommending `trial_portion`, which cannot change Formal training; with
+  `'agent'` the training portion is `plan.trial_portion` and the advice names that
+  source; Trial and single_file rounds keep "Recommend increasing trial_portion".
+  With no matching role (`round_workload=None`) the block names both owners
+  instead of choosing one;
+* **validation ceiling disclosure (issue #1496)** — when
+  `validation_max_portion` reduced an executed portion below its source value,
+  the Data Volume Context says so, in every round mode, one line per capped
+  field: `⚠ validation_max_portion capped <field> at <executed>, below its
+  source value <source> (<owner>)`. `feedback.py::executed_validation_clamps`
+  reads planning's own before/after pair (`PreparedAttempt._planned_portions`
+  versus `cfg_trial_portion` / `cfg_train_portion` / `cfg_eval_portion`, the
+  pair also recorded as `validation_workload_ceiling`) and never repeats the
+  ceiling arithmetic; the typed `planner_timing.ValidationPortionClamp` records
+  carry `field`, `source_value` and `executed_value`. When `trial_portion` or
+  `train_portion` was capped, the advice attributes a data-volume shortfall to
+  `validation_max_portion` instead of `plan.trial_portion` or `formal_portion`,
+  because raising the source cannot raise the executed value. A configured
+  ceiling that capped nothing renders no clamp text, and the #1472 wording is
+  unchanged.
 
 What they do NOT see: the raw `training_history`, `training_diagnosis`, `static_observations`,
 `metric_result` and `metric_refusal` record keys — and, since Step 10 / P2b,
@@ -1426,7 +1521,9 @@ history JSON. The reflector receives the `TrainingDiagnosis` only — never the
 brain.plan(...,  task_render=<TunerTaskRender>,   # built once at run scope
                  metric_spec=run_metric.spec)
 brain.reflect(..., metric_spec=run_metric.spec,
-                   training_diagnosis=<the attempt's 07a diagnosis>)
+                   training_diagnosis=<the attempt's 07a diagnosis>,
+                   round_workload=<executed RoleTimingContext | None>,  # #1472
+                   validation_clamps=<tuple[ValidationPortionClamp, ...]>)  # #1496
 ```
 
 All four are REQUIRED at a real render; the bridge raises `ValueError` rather
@@ -1703,7 +1800,197 @@ to `composition-declared parameter rules` in execution provenance. A rule may no
 target `loss_config` when the task declares an objective, because the objective
 is the sole authority for loss semantics.
 
+### Training batch fit before resource probing
+
+`training_batch_plan.resolve_training_batch_plan` runs once in `prepare_attempt`
+after role-specific task scope acquisition, parameter-rule enforcement and the
+composed Health coverage check (`validate_attempt_health_coverage`), before
+resource probing and construction of execution/record parameters. For a composed
+training scope it calls `workload_resolvers.resolve_task_training_rows`, the
+single dataset row-count owner. `probe_data.epoch_zero_training_sampling` builds
+the shared `EpochSamplingParams` from the resolved data root, first-epoch
+subsample seed, `TrialConfig.train_portion`, and `validation_max_train_samples`.
+Both structural preflight and GPU measurement use that same sampling helper.
+Dataset construction may eagerly read samples, including TIDMAD HDF5 data;
+counting is not a metadata-only operation. The parent constructs this dataset
+once during planning, retains only its count as
+`PreparedAttempt.resolved_training_rows`, and releases the dataset. Admission
+guardrails pass that count to `resolve_task_scope_training_workload` without
+constructing a second dataset. The count is attempt-local and already reflects
+task-owned portion/ceiling selection; it is never reused across attempts or
+subsampled again. Legacy standalone workload callers without a resolved count
+still construct through the same owner with their existing row-count seed.
+
+With `drop_last=True`, a nonempty scope smaller than the planned batch resolves
+an unlocked `train_config.batch_size` to its materialized row count: 12 rows and
+batch 32 become batch 12 for both probing and formal/trial execution. This is
+the largest batch that produces at least one full optimizer step. The same
+`optimizer_steps_for_rows` authority used by workload resolution determines
+whether the original batch produces zero steps. The same
+resolved config enters `PreparedAttempt.plan`, `active_params`, `record_params`,
+and downstream measurement identities. No reduced-batch measurement or memory
+extrapolation is introduced; existing admission and zero-step guards remain.
+
+Exact task or workflow parameter rules and an explicit operator
+`plan_overrides.train_config.batch_size` are locks. An oversized locked batch
+raises `TrainingBatchPlanError` (a `TrainingScopeError`) before probing, naming
+the lock, row count, role and batch size. Empty datasets always raise the same
+typed refusal; unsized datasets or a missing data root also refuse. Non-exact
+range/allowed/predicate rules are revalidated after clamping and retain their
+existing `ParameterRuleError` refusal if the adjusted value is disallowed.
+
+A clamp prints one `[training_batch]` line and records the authored/effective
+batch through execution provenance authority `training_scope_batch_fit`. For
+this field only, that final authority supersedes an earlier inheritance claim;
+other provenance remains unchanged. Fitting scopes (including large TIDMAD
+scopes) omit the optional `ExecutionProvenance.training_batch_fit` receipt.
+Clamped attempts retain that receipt's role, requested batch, resolved batch,
+and available sample count even if fitting restores the authored batch after
+inheritance, leaving no authored/effective disagreement event. The receipt is
+also persisted as `params.training_batch_fit` on attempt records; it is omitted
+when no adjustment occurred. Fitting scopes,
+nonempty `drop_last=False` scopes, and legacy uncomposed attempts keep
+their plan bytes unchanged and add no clamp event or log line. This resolution
+checks first-epoch geometry; the trainer still owns actual per-epoch zero-step
+refusal if a task later changes its materialized cardinality.
+
+A successful trial's persisted `params.train_config.batch_size` is its clamped
+value. Under `formal_round_strategy="full_clone"`, the existing winner
+inheritance copies that value into the formal plan. The formal role then checks
+its own scope: it retains the inherited batch if it fits, or applies this same
+lock-preserving resolution if it does not. No original oversized proposal is
+restored by inheritance.
+
+Regression evidence lives in `test_training_batch_plan.py`: real planning,
+full probe loading and a CPU optimizer step; task/workflow/operator locks;
+empty scope; sampling ceiling; tail policy; non-exact constraints; and
+byte-identical large-scope plans/measurement identities against the pre-fit path.
+The planning-to-admission regression counts dataset constructions and checks
+both probe routes' sampling against the request observed by the row-count owner.
+
 ## The reflector is told what RESOLVED, not what was proposed (Lane D / F15)
+
+### Console action boundary
+
+`plan_logging.py::render_effective_plan` owns the console presentation of the
+effective request and retained proposal. `planning.py::prepare_attempt` calls it
+after `ResolutionTracker.finish_with_model` projects the persisted `TrialConfig`.
+It consumes the same `execution_provenance` returned on `PreparedAttempt`, prints
+each final event's proposed/effective values and existing authority description,
+and labels hypothesis and reasoning as authored proposal text. With disagreements,
+that proposal is explicitly superseded; without disagreements, it remains a
+proposal rather than an observed result. The renderer neither mutates plans nor
+recomputes policy. The existing policy receipt supplies the selected inheritance
+strategy and named winning trial; the action block supplies final differences,
+including changes after inheritance. Both describe preparation, not completed
+training. Persisted hypothesis fields and reflector prompt bytes are unchanged.
+
+Regression coverage: `tests/unit/nodes/ml_hyperparameter_tune_agent/test_plan_logging.py`
+drives real preparation for `full_clone` and operator overrides, compares displayed
+values with the effective training request, and covers unchanged proposals.
+The rendering assembly identity changes when `planning.py` changes because it is
+part of that identity's source closure; this console change does not bypass that
+binding or rewrite archived evidence.
+
+### Condensed planner history resolution receipts (issue #1322)
+
+Problem closed: `agent/prompts.py::_truncate_memory_history` keeps
+`memory.hypothesis` for records older than `PLANNER_FULL_WINDOW` (3) but drops
+`params`, so an overridden attempt's authored prose reached the next planner
+with neither the effective values nor any sign that it had been superseded.
+
+Producer: `planning.py::prepare_attempt` adds
+`parameter_rule_receipts.resolution_event_record(execution_provenance)` to
+`record_params`. It writes `resolution_events` (the final
+`ExecutionProvenance.events`, `mode="json"`) only when `diverged`; the
+plan-only `plan_resolution_events` comparison is never persisted. The key is
+record-only (never an executor argument). `records._emit_record` calls
+`attach_attempt_receipts`, which promotes it with `inactive_parameter_rules`
+to the typed top-level `ExperimentRecord.resolution_events` before validation,
+so every builder that receives `prepared.record_params` (success, VRAM/time
+skips, admission refusals, training/inference/scoring failures and the outer
+attempt-failure handler) persists it without its own branch, and the persisted
+`params` remain the reflector's best-configuration input. Attempts refused
+before `finish_with_model` (plan schema violations) and archived records carry
+no receipt. The outer handler's `proposed_config` and its `discovery` text
+render `record_params` before promotion and therefore include the receipt.
+
+Consumer: `prompts.py` adds `resolution_events` to `_CONDENSED_KEYS` and
+`_label_superseded_proposal` inserts `memory.hypothesis_provenance =
+SUPERSEDED_PROPOSAL_LABEL` immediately after `hypothesis` in both the verbatim
+window (`_planner_visible`) and condensed entries. The authored hypothesis is
+kept verbatim; status (not the label) says whether the effective request ran.
+The projection reads the persisted receipt only — it never re-derives
+resolution — and returns the original record/memory object when there is no
+receipt, so records without divergence and all archived histories render
+byte-identically. Persisted records are never mutated.
+
+**Per-value summary only; no per-entry budget.** Event values are `repr` text, and list-valued fields
+(`target_files`, file orders) grow with the task's file count, so copying them
+into every condensed entry would grow the prompt as records x files. Condensed
+entries therefore pass `resolution_events` through
+`_condensed_resolution_events`: each `proposed`/`executed` string longer than
+`CONDENSED_EVENT_VALUE_CHARS` (120) becomes its first 60 and last 20 characters
+around the marker `… (<N> chars; full value in the persisted record) …`
+(80 source characters plus the marker and decimal length). The 120-character
+constant is the summarization threshold, not the final rendered length.
+Shorter values, `field_path` and `authority` are unchanged; no event is omitted
+or reordered. The projection does not cap event count, field-path length or
+total serialized entry size. A wide LLM-authored `model_cfg` therefore produces
+a larger condensed entry even when each value is summarized. This preserves
+the complete list of changed fields; it does not promise a total history/token
+budget. The summary is deterministic. The verbatim window and persisted record
+keep the full text. `test_condensed_history_width.py` exercises 1 and 256 events
+with long model field names and values through the real planner projection,
+checking complete paths, summarized values and unchanged persisted history.
+
+Divergence follows the existing tracker: formal-round `is_trial` lockout and
+`resolved_round_workload` portions are events, so most formal attempts in
+native runs (including TIDMAD paper-shaped runs) carry a receipt and the label,
+exactly as the console action block and the reflector already show them.
+
+Identity impact: native planner content/assembly identities and the rendering
+assembly identity change (pins updated in `test_planner_strategy.py` and
+`test_native_tuner_preparation.py`); archived workspaces keep their recorded
+identities, and paper prompt-compat profiles requalify at freeze. Regression:
+`tests/unit/agent/tune_ml_hyperparam_agent/test_condensed_resolution_history.py`
+drives the real tuner loop for success, OOM skip and training failure with an
+operator `lr` lock beyond the verbatim window, plus an un-overridden control,
+and bounds a 2,000-file `target_files` event in condensed history.
+
+### Dictionary-valued plan overrides
+
+`policy._apply_plan_overrides` replaces named top-level `ExperimentPlan` fields
+in the alias-form dump, then revalidates the effective plan. It does not merge
+nested dictionaries. This applies uniformly to `train_config`, `model_config`
+and `loss_config` (and their normalized Python field aliases). For example,
+`plan_overrides={"train_config": {"lr": 0.002}}` replaces an authored
+`{"lr": 0.0001, "epochs": 5}` with `{"lr": 0.002}`: `epochs` is no longer
+supplied by the plan. To retain it, include it in the replacement dictionary.
+Task/workflow `parameter_rules` are a separate per-field resolution mechanism;
+subsequent resolution and trainer/plugin defaults still apply. The provenance
+must not infer a downstream default for an omitted request key.
+
+`ResolutionTracker.record` compares both added/present and removed paths.
+A removed key receives the first diverging step's authority, like a changed
+value. Final events for keys omitted by `operator_plan_overrides` say
+`not supplied in the resolved configuration; plan_overrides uses whole-dictionary replacement`; other missing
+resolved keys say `not supplied in the resolved configuration`. A later step
+restoring the authored value removes the event. The internal absent sentinel
+still distinguishes missing keys from explicit `None`; neither is a numeric
+execution default. Persisted receipts, console output, reflector provenance and
+planner history share this explanation rather than independently interpreting
+missing keys. Execution and override precedence are unchanged.
+
+The outer attempt-failure handler intentionally retains attempt receipts in
+`proposed_config` and discovery text as preparation/audit context. They are not
+executor kwargs or proof that training ran; the failure stage and status own
+that distinction. Promotion keeps top-level persisted `params` a configuration.
+Regression: `test_mapping_override_provenance.py` exercises the real tuner loop
+for successful, skipped and failed training attempts and sweeps all three
+configuration mappings.
+
+### Reflection provenance
 
 `plan.hypothesis` is free prose the planner authors **before** the framework
 resolves the plan. Seven steps then overrule parts of it — operator
@@ -2128,3 +2415,65 @@ disabling does not weaken enforcement or synthesize replacement context.
 See the [disclosure contract](../../../docs/agent-reference/mechanisms/constraint-disclosure.md)
 for call coverage, planner/reflector timing snapshots, resume identity and
 experiment-owned historical rendering requirements.
+
+### Native output record encoding
+
+The native output writer delegates to `core.record_encoding` for versioned
+strict JSON, preserving typed non-finite floats. Load with the output schema's
+`model_validate_json`; legacy unversioned records remain supported. The
+[core contract](../../core/core-contract.md#versioned-non-finite-record-json-issue-1111)
+owns metadata, legacy projection and digest impact. Legacy records may contain null where a float was non-finite. New native output
+and `LocalRecorder` writes preserve that float through the versioned encoding.
+
+### Conditional loss rule receipts
+
+Parameter rules on loss fields apply only while active for the effective loss
+route. Fixed-rule dead combinations are author errors; a planner-selected
+inactive field does not refuse the plan. Shared rule resolution logs each
+inactive constraint and fills typed `ExperimentPlan.inactive_parameter_rules`.
+`parameter_rule_receipts.inactive_parameter_rule_record` transports nonempty
+receipts through `record_params` only (never executor arguments); `_emit_record`
+uses `attach_attempt_receipts` to promote them onto the validated
+`ExperimentRecord` before saving, for success and refusal/failure paths alike.
+The receipt records path, task/workflow owner, selected loss type, declared rule
+and `inactive_for_selected_loss`. Planner history exposes it in recent and
+condensed records; empty fields are omitted to preserve unaffected bytes.
+Receipts are recomputed for each effective plan, so changing to an active loss
+re-enables enforcement. Tests: `test_inactive_loss_parameter_rules.py` and
+`test_inactive_rule_receipts.py` cover declaration, resolution, live tuner
+persistence and planner disclosure with stubbed execution.
+
+## Formal role and training population
+
+`is_trial=True` enables Trial selection, not a mandatory Trial schedule.
+With `force_formal_round=True`, the last tuning round of each iteration resolves
+to Formal. `max_rounds=1` therefore has no Trial opportunity, independently of
+outer `final_iteration`; `max_rounds>=2` allows earlier Trial choices. Explicit
+`force_formal_round=False` retains planner choice on the last tuning round.
+
+Formal training uses `formal_portion=0.1` and `formal_train_portion=1.0` by
+native default when `formal_training_scope_source="operator"`. These are
+training fractions, not mode labels or evaluation fractions. Evaluation uses
+`formal_eval_portion=1.0` by default. A CSV scope of 1,077 rows at portion .1
+has about 108 rows and 3 complete batches of size 32; retaining the partial
+batch adds a step. Actual step count also depends on per-epoch fraction,
+ceilings and batching policy. `formal_training_scope_source="agent"` instead
+uses validated planner training portions; evaluation remains operator-owned.
+
+Console templates and small executable examples explicitly choose
+`formal_portion=1.0`, `max_rounds=2`; native defaults and scientific campaign
+settings remain unchanged. `WorkflowLaunchConfig` owns editor help metadata,
+not a second execution policy. Changing the final iteration count or Trial
+budgets does not change the resolved Formal workload.
+
+### Pseudo resource admission selection
+
+`execution.run_admission_preflight` passes `pseudo_training=True` only for a
+`StubSandbox` instance (including subclasses). The core's no-execution-envelope
+decision owns pseudo admission; optional ceilings are validated and recorded. GPU visibility never selects this route, and
+`--is_pseudo_llm` alone does not change resource admission. Subsequent task checks,
+training/inference/scoring stubs and Health policy retain their existing behavior.
+
+`runtime._handle_prephase_gpu_measurement` also excludes `StubSandbox` before
+device/topology inspection: a real GPU identity retained for provenance must not
+activate the legacy formal prephase fallback. Real sandbox applicability is unchanged.

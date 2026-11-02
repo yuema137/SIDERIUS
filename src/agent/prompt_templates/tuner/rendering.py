@@ -43,6 +43,7 @@ inventing a task-config field to make a prompt look complete.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -51,6 +52,11 @@ from agent.prompt_rendering import prompt_boundary
 from agent.prompt_templates.numeric import format_evidence_float
 from agent.prompt_templates.tuner.loss_context import PlannerLossContext
 from agent.schemas.execution_provenance import AUTHORITY_DESCRIPTIONS
+from agent.schemas.planner_timing import (
+    RoleTimingContext,
+    ValidationPortionClamp,
+    WorkloadSource,
+)
 from ml_models.models_format_sandbox import LossConfig
 
 #: The efficiency-equivalence band, as a fraction of a run's observed score
@@ -719,3 +725,126 @@ def render_execution_provenance_block(provenance: Any) -> str:
         "differ, the executed configuration is the fact.",
     ]
     return "\n".join(lines)
+
+
+def _describe_portion_source(binding: WorkloadSource) -> str:
+    """Who set one executed portion: the plan, the operator or the execution contract."""
+    if binding.owner == "resolved_plan":
+        return f"planner-set plan.{binding.source}"
+    if binding.owner == "run":
+        return f"operator-set {binding.source}"
+    return binding.source
+
+
+_TRAINING_PORTIONS = ("trial_portion", "train_portion")
+
+
+def _render_validation_clamps(
+    clamps: tuple[ValidationPortionClamp, ...], sources: Mapping[str, WorkloadSource]
+) -> str:
+    """One line per portion that ``validation_max_portion`` capped (issue #1496)."""
+    lines = []
+    for clamp in clamps:
+        binding = sources.get(clamp.field)
+        origin = _describe_portion_source(binding) if binding is not None else clamp.field
+        lines.append(
+            f"  ⚠ validation_max_portion capped {clamp.field} at {clamp.executed_value},\n"
+            f"     below its source value {clamp.source_value} ({origin}).\n"
+        )
+    return "".join(lines)
+
+
+def render_reflector_data_volume_portions(
+    context: Mapping[str, Any],
+    round_workload: RoleTimingContext | None,
+    validation_clamps: tuple[ValidationPortionClamp, ...] = (),
+) -> str:
+    """The portion lines and data-volume advice of the reflector's Data Volume Context.
+
+    Issue #1472. The reflection context carries the EXECUTED training and
+    evaluation portions under their record names ``trial_portion`` /
+    ``eval_portion`` in every round mode. On a Formal round the training
+    portion is usually the operator's ``formal_portion`` (and its per-epoch
+    ``formal_train_portion``), which the planner's ``trial_portion`` cannot
+    change; only ``formal_training_scope_source='agent'`` makes the plan's
+    portions govern Formal training. Evaluation on a Formal round always reads
+    ``formal_eval_portion``.
+
+    ``round_workload`` is the round's ``RoleTimingContext``: the mode and the
+    workload sources that ``_sample_set_sources`` selected for execution, so
+    the labels and the advice come from the same authority that chose the
+    values. ``None`` (no retained timing facts) names both owners rather than
+    guessing one.
+
+    Issue #1496. ``validation_clamps`` are the portions planning's
+    ``validation_max_portion`` ceiling reduced below their source value, in
+    any round mode. Each is disclosed; when a training portion was capped the
+    advice names ``validation_max_portion`` as the binding knob, because
+    raising the source (the plan's or the operator's) cannot raise it. Empty
+    clamps render the #1472 bytes unchanged.
+    """
+    training = context.get("trial_portion", "N/A")
+    evaluation = context.get("eval_portion", "N/A")
+    insufficient = (
+        "  ⚠ If training_psd_segments << baseline_psd_segments, poor scores may be from\n"
+        "     insufficient data, NOT bad hyperparameters."
+    )
+    clamp_advice = (
+        f"{insufficient} validation_max_portion capped\n"
+        "     this round's training portion, so raising its source cannot increase it.\n"
+        "     Attribute a data-volume shortfall to validation_max_portion."
+    )
+    training_clamped = any(clamp.field in _TRAINING_PORTIONS for clamp in validation_clamps)
+    if round_workload is None:
+        advice = (
+            clamp_advice
+            if training_clamped
+            else (
+                f"{insufficient} The training portion is set by\n"
+                "     plan.trial_portion on Trial rounds and by the operator's formal_portion /\n"
+                "     formal_train_portion on Formal rounds (the plan's portions only when\n"
+                "     formal_training_scope_source='agent'); recommend the knob for this "
+                "round's mode."
+            )
+        )
+        return (
+            "  round_mode            : N/A\n"
+            f"  trial_portion         : {training}  (executed training portion)\n"
+            f"  eval_portion          : {evaluation}  (executed evaluation portion)\n"
+            f"{_render_validation_clamps(validation_clamps, {})}"
+            f"{advice}"
+        )
+    sources = {binding.field: binding for binding in round_workload.workload}
+    train_source = sources["trial_portion"]
+    eval_source = sources["eval_portion"]
+    # An operator-set portion is labelled by its operator knob; otherwise the
+    # record name stays the label.
+    train_label = train_source.source if train_source.owner == "run" else "trial_portion"
+    eval_label = eval_source.source if eval_source.owner == "run" else "eval_portion"
+    if training_clamped:
+        advice = clamp_advice
+    elif train_source.owner == "run":
+        advice = (
+            f"{insufficient} This Formal round's\n"
+            f"     training scope is operator-set ({train_source.source} / formal_train_portion);\n"
+            "     the plan's trial_portion cannot change it, so do not recommend increasing\n"
+            "     trial_portion for it. Attribute a data-volume shortfall to the operator's\n"
+            f"     {train_source.source}."
+        )
+    elif round_workload.mode == "formal":
+        advice = (
+            f"{insufficient} Recommend increasing\n"
+            "     trial_portion: this run sets formal_training_scope_source='agent', so the\n"
+            "     plan's portions also set this Formal round's training scope."
+        )
+    else:
+        advice = f"{insufficient} Recommend increasing trial_portion."
+    return (
+        f"  round_mode            : {round_workload.mode}\n"
+        f"  {train_label:<22}: {training}  "
+        f"(training portion; {_describe_portion_source(train_source)})\n"
+        f"  {eval_label:<22}: {evaluation}  "
+        f"(evaluation portion; {_describe_portion_source(eval_source)})\n"
+        f"{_render_validation_clamps(validation_clamps, sources)}"
+        f"{advice}"
+    )

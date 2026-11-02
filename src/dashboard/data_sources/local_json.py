@@ -14,11 +14,13 @@ import glob
 import json
 import os
 
+from core.record_encoding import decode_record
 from dashboard.data_sources.base import DataSource
 from execute_tools.evaluation_metric import (
     METRIC_IDENTITY_UNAVAILABLE,
     metric_identity_from_record,
 )
+from execute_tools.metric_order import finite_score
 from execute_tools.persisted_ranking import corpus_order as _corpus_order
 
 
@@ -73,7 +75,7 @@ class LocalJsonDataSource(DataSource):
         """Read a summary JSON file. Returns [] on any error."""
         try:
             with open(path, encoding="utf-8") as f:
-                data = json.load(f)
+                data = decode_record(json.load(f))
             return data if isinstance(data, list) else []
         except (OSError, json.JSONDecodeError):
             return []
@@ -202,7 +204,9 @@ class LocalJsonDataSource(DataSource):
                     continue
                 status = rec.get("status", "unknown")
                 status_counts[status] = status_counts.get(status, 0) + 1
-                if rec.get("denoising_score") is None:
+                # None, NaN and ±inf are never ranked or best (#1316): trial
+                # collapse records keep their non-finite score as evidence.
+                if not finite_score(rec.get("denoising_score")):
                     continue
                 if metric_identity_from_record(rec) is None:
                     # §4.2 case B/C: inspectable, raw value still shown
@@ -257,7 +261,7 @@ class LocalJsonDataSource(DataSource):
                 if status_filter and rec.get("status") != status_filter:
                     continue
                 score = rec.get("denoising_score")
-                if score is None:
+                if not finite_score(score):
                     continue
                 entry = {
                     "exp_id": rec.get("exp_id"),

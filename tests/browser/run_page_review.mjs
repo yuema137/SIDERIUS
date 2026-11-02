@@ -9,7 +9,7 @@ import {createServer} from 'node:net';
 import {tmpdir} from 'node:os';
 import {dirname, resolve, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 import {showAllConsoleSections} from './console_view_flags.mjs';
 const checkout = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[name], `Set ${name}`);
@@ -31,8 +31,7 @@ const origin = `http://127.0.0.1:${probe.address().port}`; await new Promise(res
 let browser, server, provider, metadata;
 try {
   provider = start('provider', root);
-  const lines = createInterface({input: provider.stdout});
-  const endpoint = await new Promise(resolve => lines.once('line', line => resolve(JSON.parse(line).endpoint))); lines.close();
+  const {endpoint} = await waitForMetadata(provider);
   metadata = JSON.parse((await completed(start('setup', root, '--origin', origin, '--endpoint', endpoint, '--captures-count', '1', '--training'))).trim().split('\n').at(-1));
   server = start('serve', root);
   async function ready() { await until(async () => { try {return (await fetch(origin + '/')).ok;} catch {return false;} }); }
@@ -77,7 +76,7 @@ try {
   });
   for (bodies of [1, 2]) {
     await page.locator('#capture-review').click();
-    const phrase = bodies === 1 ? '1 completed body passes without improvement' : '2 completed bodies pass without improvement';
+    const phrase = bodies === 1 ? '1 completed iteration passes without improvement' : '2 completed iterations pass without improvement';
     await page.locator('#capture-loop').filter({hasText: phrase}).waitFor();
     const text = await page.locator('#capture-summary').textContent();
     assert.ok(text.includes('Health mode: Block on failure'));

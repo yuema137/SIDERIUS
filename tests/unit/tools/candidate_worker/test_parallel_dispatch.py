@@ -232,6 +232,36 @@ def test_a_failure_drains_running_units_and_dispatches_nothing_new(
         verify_graph_trace(request, launched, receipt)
 
 
+def test_a_later_declared_failure_drains_an_earlier_declared_running_unit(
+    prepared, native_runner, monkeypatch
+):
+    """#1386: `build1` fails while `build0`, declared before it, still runs.
+
+    Serially `check0` (fed by `build0` alone) runs before `build1`; under the drain
+    it was never dispatched and closed `blocked`. A replay in declaration order
+    refuses that trace, so the body ended `failed` with no graph trace.
+    """
+    starter = _Starter(3, failing=frozenset({"build1"}), hold={"build0": 8, "build1": 0})
+    monkeypatch.setattr(parallel_dispatch, "start_unit", starter)
+    request = _parallel(prepared, _budget(units=2))
+    receipt = launch_candidate(request)
+    assert receipt.status == "failed", receipt.error
+    assert receipt.graph_trace is not None, receipt.error
+    states = {item.node_id: item.state for item in receipt.graph_trace.nodes}
+    assert states == {
+        "propose": "succeeded",
+        "build0": "succeeded",  # running when build1 failed: it drains with its outcome
+        "check0": "blocked",
+        "build1": "failed",
+        "check1": "blocked",
+    }
+    assert "check0" not in starter.envs
+    launched = CandidateRunReceipt.model_validate_json(
+        (Path(receipt.workspace) / "candidate_run" / "launch.json").read_bytes()
+    )
+    verify_graph_trace(request, launched, receipt)
+
+
 def test_sigterm_kills_every_running_unit_process_group(prepared, native_runner, monkeypatch):
     """A unit outliving its worker would keep its GPU and budget after the run is gone."""
     started: list[subprocess.Popen] = []
@@ -510,3 +540,88 @@ def test_a_held_sigterm_is_delivered_only_after_the_critical_section():
     assert finished == ["registered"]
     with pytest.raises(UnitTerminated):
         gate._handler(15, None)  # outside a held block: immediate
+
+
+def test_a_unit_that_cannot_start_fails_alone_while_running_units_drain(
+    prepared, native_runner, monkeypatch
+):
+    """A spawn failure (Popen OSError, code-package refusal) escaped the loop, killed the
+    running sibling and left no receipt or trace (#1108); the serial path fails only
+    that node. ``check0`` cannot start while ``build1`` still runs."""
+    starter = _Starter(3, hold={"build0": 1, "build1": 8})
+
+    def refuse_check0(path, env):
+        if path.parent.name == "check0":
+            raise OSError("cannot start unit")
+        return starter(path, env)
+
+    monkeypatch.setattr(parallel_dispatch, "start_unit", refuse_check0)
+    request = _parallel(prepared, _budget(units=2))
+    receipt = launch_candidate(request)
+    assert receipt.status == "failed", receipt.error
+    assert receipt.graph_trace is not None, receipt.error
+    states = {item.node_id: item.state for item in receipt.graph_trace.nodes}
+    assert states == {
+        "propose": "succeeded",
+        "build0": "succeeded",
+        "check0": "failed",
+        "build1": "succeeded",  # running when check0 failed: it drains with its outcome
+        "check1": "blocked",
+    }
+    control = Path(receipt.workspace) / "candidate_run" / "units"
+    failed = UnitReceipt.model_validate_json((control / "check0" / "placement.json").read_bytes())
+    assert failed.exit == "raised" and failed.placement is not None
+    launched = CandidateRunReceipt.model_validate_json(
+        (Path(receipt.workspace) / "candidate_run" / "launch.json").read_bytes()
+    )
+    verify_graph_trace(request, launched, receipt)
+
+
+def test_a_held_sigterm_survives_a_block_that_exits_by_exception():
+    """A failing cleanup used to drop the held signal: the worker then reported the
+    cleanup error instead of the operator's termination (#1108)."""
+    from tools.candidate_worker.unit_processes import TermGate, UnitTerminated
+
+    gate = TermGate()
+    with pytest.raises(UnitTerminated) as terminated:
+        with gate.held():
+            gate._handler(15, None)
+            raise OSError("terminate failed")
+    assert isinstance(terminated.value.__cause__, OSError)
+    assert not gate.pending
+    with pytest.raises(OSError):  # without a held signal the error itself propagates
+        with gate.held():
+            raise OSError("terminate failed")
+
+
+def test_one_failing_termination_never_leaves_other_units_running(monkeypatch):
+    """The cleanup stopped at the first ``terminate`` that raised, orphaning the rest."""
+    from types import SimpleNamespace
+
+    from tools.candidate_worker.unit_processes import TermGate
+
+    terminated: list[str] = []
+
+    def terminate(process):
+        terminated.append(process)
+        if process == "first":
+            raise OSError("cannot signal group")
+
+    monkeypatch.setattr(parallel_dispatch, "terminate", terminate)
+    running = {
+        name: SimpleNamespace(
+            node_id=name,
+            process=name,
+            placement=None,
+            queued_event=None,
+            started_event=1,
+            started_at="t",
+        )
+        for name in ("first", "second")
+    }
+    with pytest.raises(OSError, match="cannot signal group"):
+        with parallel_dispatch._terminating(
+            SimpleNamespace(), running, parallel_dispatch._Clock(), TermGate()
+        ):
+            pass
+    assert terminated == ["first", "second"] and running == {}

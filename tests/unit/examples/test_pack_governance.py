@@ -56,8 +56,10 @@ CONSOLE_BUNDLE_SOURCES = frozenset({"examples/console_bundle/fetch_data.py"})
 TASK_TEMPLATES_DIR = "task_templates"
 WORKFLOW_DECLARATION_SOURCES = frozenset(
     {
+        "examples/workflow_declarations/literature_debate_judged.py",
         "examples/workflow_declarations/managed_reusable_candidate.py",
         "examples/workflow_declarations/native_training.py",
+        "examples/workflow_declarations/research_loop_request_input.py",
         "examples/workflow_declarations/reusable_candidate.py",
         "examples/workflow_declarations/reusable_training.py",
     }
@@ -260,18 +262,21 @@ def test_negative_an_UNBOUND_pack_task_config_is_still_an_offender() -> None:
 
 def _is_sanctioned_plugin_source(rel_posix: str) -> bool:
     """D14 re-scope: reference plugin SOURCE lives at exactly
-    ``examples/<pack>/plugins/*.py``. The four explicit workflow declaration
+    ``examples/<pack>/plugins/*.py``. The explicitly registered workflow declaration
     examples and the example bundle's ``fetch_data.py`` are also sanctioned;
     these exact-path exceptions do not permit other Python files in those
     framework-owned namespaces. A task template's plugin source lives at
-    exactly ``examples/task_templates/<template>/plugins/*.py``."""
+    exactly ``examples/task_templates/<template>/plugins/*.py``. #1200 also
+    registers the inert CSV workflow declaration at its exact path."""
     parts = rel_posix.split("/")
     if len(parts) >= 2 and parts[:2] == ["examples", WORKFLOW_DECLARATIONS_DIR]:
         return rel_posix in WORKFLOW_DECLARATION_SOURCES
     if len(parts) >= 2 and parts[:2] == ["examples", CONSOLE_BUNDLE_DIR]:
         return rel_posix in CONSOLE_BUNDLE_SOURCES
     if len(parts) >= 2 and parts[:2] == ["examples", TASK_TEMPLATES_DIR]:
-        return len(parts) == 5 and parts[3] == "plugins"
+        return rel_posix == "examples/task_templates/csv_classification/workflow.py" or (
+            len(parts) == 5 and parts[3] == "plugins"
+        )
     return len(parts) == 4 and parts[0] == "examples" and parts[2] == "plugins"
 
 
@@ -320,7 +325,7 @@ def test_python_under_examples_only_as_pack_plugin_source_d14_rescope() -> None:
 
 
 def test_negative_python_under_examples_mirror_is_detected(tmp_path: Path) -> None:
-    """Proves only plugin sources and the four declared scripts are sanctioned."""
+    """Proves only plugin sources and the registered declaration scripts are sanctioned."""
     mirror = tmp_path / "examples" / "some_pack"
     (mirror / "plugins").mkdir(parents=True)
     (mirror / "plugins" / "model.py").write_text("PLUGIN_MODEL_TYPE = 'x'\n")
@@ -335,16 +340,27 @@ def test_negative_python_under_examples_mirror_is_detected(tmp_path: Path) -> No
     (template / "plugins").mkdir(parents=True)
     (template / "plugins" / "_task.py").write_text("pass\n")
     (template / "helper.py").write_text("pass\n")
+    (template / "workflow.py").write_text("pass\n")
+    csv_template = template.parent / "csv_classification"
+    csv_template.mkdir()
+    (csv_template / "workflow.py").write_text("pass\n")
+    bundle = tmp_path / "examples" / CONSOLE_BUNDLE_DIR
+    bundle.mkdir()
+    (bundle / "fetch_data.py").write_text("pass\n")
+    (bundle / "unexpected.py").write_text("pass\n")
     found = _python_files_under(tmp_path / "examples")
     rels = [p.relative_to(tmp_path).as_posix() for p in found]
     offenders = [r for r in rels if not _is_sanctioned_plugin_source(r)]
     assert offenders == [
+        "examples/console_bundle/unexpected.py",
         "examples/some_pack/loader.py",
         "examples/task_templates/some_template/helper.py",
+        "examples/task_templates/some_template/workflow.py",
         "examples/workflow_declarations/plugins/intrusion.py",
         "examples/workflow_declarations/unexpected.py",
     ]
     assert "examples/some_pack/plugins/model.py" in rels  # detected, sanctioned
+    assert "examples/task_templates/csv_classification/workflow.py" in rels
     assert "examples/task_templates/some_template/plugins/_task.py" in rels
     assert "examples/workflow_declarations/native_training.py" in rels
 

@@ -13,10 +13,11 @@ it re-derives, from the write-once receipts and the published body budget:
 - (a) start and end events form one permutation of the body's events;
 - (f) every placement fits the budget beside the placements running when it
   started, on the slot it recorded (``plan_dispatch`` re-run);
+- causality: every entry starts after all its sources have settled;
 - drain (decision B3-Q2): nothing started after the first failure ended.
 
-It returns the dispatched entries, which ``replay_readiness`` may accept where
-the serial replay would close them as blocked. Contract:
+It returns the receipts' timing (``DrainWindow``), with which ``replay_readiness``
+replays the trace under the drain instead of the serial failure stop. Contract:
 candidate-worker-contract.md, "Concurrent dispatch (B3-4b)".
 """
 
@@ -25,8 +26,8 @@ from pathlib import Path
 
 from core.runtime_control.scheduling import HostBudget, plan_dispatch
 
-from .graph_evidence import read_graph_control
-from .graph_models import GraphNodeEvidence, GraphTrace
+from .graph_evidence import DrainWindow, read_graph_control, settled_sources_end
+from .graph_models import DISPATCHED_STATES, GraphNodeEvidence, GraphTrace
 from .layout import candidate_control_dir
 from .loop_models import LoopContinuation
 from .models import CandidateRunReceipt, CandidateRunRequest
@@ -34,7 +35,6 @@ from .parallel_envelope import declared_units
 from .parallel_models import GRANT_CONTROL_FILE, HostGrant, UnitExit, UnitReceipt
 from .unit_models import unit_paths
 
-_DISPATCHED = frozenset(("succeeded", "rejected", "failed"))
 _RECEIPT_FILE = "placement.json"
 
 
@@ -44,12 +44,12 @@ def drained_entries(
     trace: GraphTrace,
     *,
     iteration: int,
-) -> frozenset[str]:
-    """The dispatched entries of a parallel trace; empty for a serial one."""
+) -> DrainWindow | None:
+    """The receipt timing of a parallel trace's dispatched entries; None for a serial one."""
     if (trace.scheduling == "parallel-v1") != (request.parallel is not None):
         raise ValueError("graph trace scheduling disagrees with the request")
     if trace.scheduling == "serial":
-        return frozenset()
+        return None
     from .parallel_dispatch import BUDGET_FILE
 
     control = candidate_control_dir(Path(initial.workspace), iteration=iteration)
@@ -58,15 +58,18 @@ def drained_entries(
         raise ValueError("parallel body budget differs from the run's admitted budget")
     entries = {item.node_id: item for item in (*trace.nodes, *trace.adaptors)}
     adaptors = frozenset(item.node_id for item in trace.adaptors)
-    receipts = _receipts(initial, entries, adaptors, iteration)
+    receipts = _receipts(initial, entries, iteration)
     declared = frozenset(declared_units(request))
     for node_id, receipt in receipts.items():
         _check_receipt(entries[node_id], receipt, node_id in declared, node_id in adaptors, budget)
     _check_events(receipts)
     _check_alone(receipts, declared, adaptors)
     _check_fit(receipts, budget)
-    _check_drain(receipts, entries)
-    return frozenset(receipts)
+    failure_end = _check_drain(receipts, entries)
+    ended = {node_id: receipt.ended_event for node_id, receipt in receipts.items()}
+    window = DrainWindow(ended=ended, failure_end=failure_end)
+    _check_causality(receipts, entries, window)
+    return window
 
 
 def admitted_budget(
@@ -86,22 +89,28 @@ def admitted_budget(
     return grant.run_budget()
 
 
-def _dispatched(item: GraphNodeEvidence, adaptor: bool) -> bool:
-    """Readiness closes an adaptor only as blocked; a unit is dispatched iff it has an outcome."""
-    return item.state != "blocked" if adaptor else item.state in _DISPATCHED
+def _dispatched(item: GraphNodeEvidence) -> bool:
+    """An entry, unit or adaptor, is dispatched iff it has an outcome (``DISPATCHED_STATES``).
+
+    One definition with the readiness replay (#1454): an executed adaptor closes
+    with its ``AdaptorOutcome.status`` (succeeded, rejected or failed) or fails on
+    an exception, and readiness closes an undispatched adaptor only as
+    ``blocked``. So no valid trace holds a ``skipped`` adaptor; one that does is
+    refused here if it has a receipt, else by the replay.
+    """
+    return item.state in DISPATCHED_STATES
 
 
 def _receipts(
     initial: CandidateRunReceipt,
     entries: Mapping[str, GraphNodeEvidence],
-    adaptors: frozenset[str],
     iteration: int,
 ) -> dict[str, UnitReceipt]:
     """(d) a receipt exists exactly for every dispatched entry, and names it."""
     receipts: dict[str, UnitReceipt] = {}
     for node_id, item in entries.items():
         path = unit_paths(initial, node_id, iteration=iteration)[0].with_name(_RECEIPT_FILE)
-        dispatched = _dispatched(item, node_id in adaptors)
+        dispatched = _dispatched(item)
         if path.exists() != dispatched:
             raise ValueError(f"parallel trace entry {node_id!r} receipt contradicts its state")
         if dispatched:
@@ -192,11 +201,24 @@ def _check_fit(receipts: Mapping[str, UnitReceipt], budget: HostBudget) -> None:
 
 def _check_drain(
     receipts: Mapping[str, UnitReceipt], entries: Mapping[str, GraphNodeEvidence]
-) -> None:
-    """Decision B3-Q2: nothing starts after the first failed entry ended."""
+) -> int | None:
+    """Decision B3-Q2: nothing starts after the first failed entry ended; returns that end."""
     failures = [r.ended_event for key, r in receipts.items() if entries[key].state == "failed"]
-    if failures:
-        first = min(failures)
-        late = sorted(key for key, r in receipts.items() if r.started_event > first)
-        if late:
-            raise ValueError(f"parallel trace dispatched after a failure: {late}")
+    if not failures:
+        return None
+    first = min(failures)
+    late = sorted(key for key, r in receipts.items() if r.started_event > first)
+    if late:
+        raise ValueError(f"parallel trace dispatched after a failure: {late}")
+    return first
+
+
+def _check_causality(
+    receipts: Mapping[str, UnitReceipt],
+    entries: Mapping[str, GraphNodeEvidence],
+    window: DrainWindow,
+) -> None:
+    """Sources, including route control edges and undispatched closures, settle first."""
+    for node_id, receipt in receipts.items():
+        if receipt.started_event <= settled_sources_end(node_id, entries, window):
+            raise ValueError(f"parallel receipt {node_id!r} started before its sources ended")

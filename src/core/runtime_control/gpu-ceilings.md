@@ -76,6 +76,17 @@ not evidence that the model or batch should shrink. Unattributed bytes do not
 establish clean visibility. Sampling immediately before phase admission is the
 only freshness guarantee; there is no additional staleness guard.
 
+`admission.AdmissionExecutionConditions` owns the recorded
+`effective_execution_conditions` shape, distinct from the launch declaration in
+`process_visibility.py`. Its `refusal_enforcement` is `all_phase_modes` for
+isolated headroom checks and `phase_policy` for the delegated ordinary route;
+the latter is constructed through the record model before serialization.
+`stops_phase` validates supplied conditions and reads typed fields. Invalid
+conditions raise `ValidationError` rather than selecting enforcement from raw
+keys. Absent conditions preserve ordinary enforcement; an
+`environment_headroom_unproven` reason always stops without needing conditions.
+The launch declaration and GPU protection mechanism identity remain unchanged.
+
 ## Scope and historical compatibility
 
 This changes omitted configuration on larger devices and explicit ceilings
@@ -90,3 +101,33 @@ a run had no environment override. Estimator source qualification changes with
 this owner; never relax historical identity validation or rewrite frozen records
 to hide it. Focused CPU tests cover resolution, finite arithmetic, both admission
 paths and CLI refusals; they do not constitute physical GPU qualification.
+
+
+## Query failure and tuner recovery
+
+`gpu_accounting._run_query` distinguishes `GpuQueryFailure.TIMEOUT` (subprocess
+`TimeoutExpired`) and `NONZERO_EXIT` (`CalledProcessError`) from unavailable
+telemetry (`None`). Both `sample` and `sample_device_baseline` preserve the typed
+failure in their snapshot `query_failure` field, with no fabricated occupancy.
+The optional field is omitted from serialized snapshots when absent.
+
+Ordinary formal admission maps these failures to `measurement_unavailable` with
+`detail="sampler_error"`; ordinary trial behavior is unchanged. Isolated admission
+first validates process visibility, then maps typed query failure to
+`environment_headroom_unproven` with the same detail. This retains unconditional
+refusal under all enforcement modes while identifying retryable sampling.
+`AdmissionDecision.refusal_kind` owns the recovery classification. The tuner
+phase owner consumes it using the bounded existing attempt allowance and short
+backoff documented in the tuner contract. Missing executable/UUID/telemetry and
+invalid visibility are not transient query failures. `process_visibility.py`
+is unchanged. Exceptions reported through `sampling_error` receive the same
+validated isolated refusal detail as typed query failures. Protected native
+execution sets the internal `require_evidence=True` evaluator argument, disabling
+trial evidence-gap permission while retaining the recorded mode, and uses the same
+tuner recovery owner. See [protected lifecycle](native-gpu-execution.md#failure-and-persistence)
+for sampling/terminal receipts and retained preparation allowance.
+
+Focused evidence: `test_gpu_accounting.py` exercises timeout and nonzero exit in
+both query stages, ordinary/isolated admission, baseline transport and persistent
+missing-executable behavior. Tuner integration covers recovery, exhaustion and
+no replanning; its injected-sleeper regression checks the backoff cap.

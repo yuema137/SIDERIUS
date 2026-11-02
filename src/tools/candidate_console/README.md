@@ -42,6 +42,19 @@ file against the bundle's `SHA256SUMS`, copies the package to
 creates the setup `quickstart-research-loop` from a workflow template. It never
 overwrites an existing `tasks/` folder.
 
+Run `fetch_data.py` before `add-task`: import finishes with `check`, which needs
+`data/quickstart/` to exist. If you imported first and only that check failed,
+write the data, then run:
+
+```bash
+.venv/bin/python -m tools.candidate_console check \
+  --config /absolute/project/siderius_workspace/settings/console.json
+```
+
+Do not import the same task again. If you choose `--task-id NAME` when importing,
+pass the same `--task-id NAME` to `fetch_data.py` so it writes `data/NAME/`.
+A successful data command ends with `Data ready in .../data/NAME`.
+
 ## Set up and open the console
 
 1. Create the console workspace inside a directory you own, for example your
@@ -91,8 +104,9 @@ overwrites an existing `tasks/` folder.
 
    `init` refuses the file unless it is a regular file you own with mode `600`,
    and never prints its contents. It writes the path into a new
-   `console.json`; the closing check then reads the file only to confirm it is
-   JSON or dotenv text, so an empty file passes and you can add the key later.
+   `console.json`; its closing check also checks metadata only, so you can add
+   the key later. Explicit `check` and `serve` commands read the file to validate
+   its JSON or dotenv format without printing values.
    If `console.json` already exists, `init` does not change it: it creates any
    missing folders, prints the exact `"credential_file": ...` line to add or
    substitute and the `check` command to run next, and exits with status 2.
@@ -135,8 +149,10 @@ overwrites an existing `tasks/` folder.
    instead; a folder that is `/`, your home folder or one holding the console's
    settings, token or credentials is refused, so move such files into
    `tasks/<name>/`. A task ID that already exists is refused. If someone else changes
-   `console.json` while `add-task` runs, it writes nothing and asks you to run it
-   again.
+   `console.json` before `add-task` checks it, it writes nothing and asks you to
+   run it again. Concurrent `add-task` commands take turns checking and saving,
+   so one cannot overwrite the other’s update. Stop those commands before editing
+   `console.json` by hand; text editors do not use the same lock.
 
    After writing, `add-task` creates the task's output folders and runs the same
    check as step 3. It ends with `Restart the console to load the new task.`: a
@@ -166,6 +182,8 @@ overwrites an existing `tasks/` folder.
    `/dev/nvidia<N>` node it prints what the sandbox passes, then
    `Task <id>: GPU PASS: 1 CUDA device(s), first: <GPU name>` or
    `Task <id>: GPU FAIL: <cause>`; it exits 0 only when every probed task passes.
+   Exceptions appear as a fixed error category in this verdict. The diagnostic
+   log on stderr retains the underlying cause for the task author.
    The probe imports PyTorch and allocates one value on the GPU inside the same
    sandbox a candidate run gets, without network or model calls, and stops after
    120 seconds.
@@ -286,8 +304,8 @@ overwrites an existing `tasks/` folder.
    the password field clears immediately and the token stays only in this
    document's memory. Home offers three starting points: **Quick start** (choose a
    task, then create an experiment setup from the ready-made research loop or open an
-   existing one; it opens in Workflow, where you set rounds, stop conditions and
-   training settings; the first round starts cold, so no earlier results are needed),
+   existing one; it opens in Workflow, where you set iterations, stop conditions and
+   training settings; the first iteration starts cold, so no earlier results are needed),
    **Open a workflow** and
    **Monitor runs**. Before Workflow and Run open, choose a task on **Task**
    (see [Choose a task](#choose-a-task)). On **Run**, a stepper shows where you are: check the inputs and
@@ -314,30 +332,59 @@ overwrites an existing `tasks/` folder.
    enter its complete operation UUID (Settings › Show advanced tools). You can also open a link such as
    `http://127.0.0.1:8740/#monitor/22222222-2222-4222-8222-222222222222`
    (replace the example UUID), then Connect. No task or editor project selection
-   is needed. The optional remembered ID is labelled **Last opened on this browser**;
-   it is separate from the Recent operations list. Expand Operation facts, Reported
+   is needed. After connecting, the optional remembered ID is labelled **Last opened
+   on this browser for this operations store**. Switching to another operations store
+   restores that store's remembered ID, if any. An explicit UUID link takes precedence;
+   the remembered ID is separate from the Recent operations list. Expand Operation facts, Reported
    token table, or Activity and logs when needed. When a workflow run has
    finished, **Workflow training results** shows the tuner report of each
    verified iteration separately; it never combines or ranks iterations.
    **Train & tune node execution** only says the node ran; **Train & tune outcome**
-   says what training achieved, for example "No training round completed: 0
-   completed rounds in 9 attempts …" when every attempt was refused or failed.
+   says what training achieved, for example "No tuning round completed: 0
+   completed tuning rounds in 9 attempts …" when every attempt was refused or failed.
+   If the environment refused training, the outcome also shows its recorded reason.
+   Failed runs name the failing phase when it was recorded. Loop progress counts
+   completed iterations; an iteration that failed during proposal does not count.
    A running authored research loop shows **Stop at next boundary**: the current
    iteration finishes, and status says stopped only once the native receipt does.
    **Pause at next boundary** works the same way; a paused loop can be reviewed and
    resumed, optionally with your advice, as a new segment of the same run, which
-   shows its own results.
+   shows its own results. To finish at that pause, choose **End loop here** and
+   confirm. Completed results are kept. End can still be available when Resume
+   is refused; it requires the paused worker to have finished cleanly and no
+   active or uncertain successor. If End is refused, its message explains the
+   check that failed.
    A loop ended early by a declared stop condition says why, in plain words.
    A condition set to **Pause and ask me** pauses the loop instead and reads
    "Waiting for your input", followed by what was met, for example "No improvement
-   for 3 bodies (best 0.81 at body 4, higher is better). Paused after body 7 of 12."
+   for 3 iterations (best 0.81 at iteration 4, higher is better). Paused after iteration 7 of 12."
    Check the per-iteration results, then choose **Review resume** and **Resume loop**
-   to continue with the next body. After **Review resume** you can type advice for
-   the next bodies (up to 4000 characters). Their proposal step receives it, and it
+   to continue with the next iteration. After **Review resume** you can type advice for
+   the next iterations (up to 4000 characters). Their proposal step receives it, and it
    replaces any advice an earlier resume gave. The box starts with this segment's
-   advice. It locks once you select **Resume loop**, so a retry sends the same text.
+   advice. Leading and trailing whitespace is removed; joiners used in multilingual
+   words and emoji are supported. The box locks once you select **Resume loop**, so
+   a retry sends the same text. A definite refusal before the run is accepted unlocks
+   it; review again, then edit and retry. If an earlier saved request has different
+   advice, the console shows that advice and asks you to select **Resume loop** again
+   before retrying it.
    The resumed segment then shows "Resumed with your advice: …". If you pressed Stop while it was waiting, the run
    cannot continue and no Resume is offered.
+   **Resume under a shared host ledger.** A host ledger (the `host_ledger` entry in
+   `console.json`, see [Credentials](#credentials)) makes every run reserve host
+   resources (GPU, GPU memory, host memory, CPU slots) before it starts. A loop
+   whose first run declared no host resources needs a reservation for the resumed
+   segment (the new part of the run that Resume starts):
+   1. Choose **Review resume**. It is refused with "the loop's first run declared no
+      host resources", and **Declare host resources for the resumed segment** appears.
+   2. Tick it and enter what the segment needs, with the same fields as on **Run**.
+   3. Choose **Review resume** again. Success: the summary ends with "Host resources:
+      Reserves …" listing what you entered, and **Resume loop** appears. A value
+      that is missing or invalid shows "Resume review not sent: …" and nothing is
+      sent. Changing a value after the review shows "Host resources changed. Review
+      again before resuming." and hides **Resume loop** until you review again.
+   A loop whose first run declared host resources reuses them: the review asks for
+   nothing, and the fields never appear.
    A loop with a judge stop condition lists each judge decision under it, with
    the judge's own reason when the call decided.
    To stop a running candidate now, press **Stop run** and confirm. The run
@@ -382,13 +429,17 @@ overwrites an existing `tasks/` folder.
    **View** shows what changed, and **Restore this version as a draft** loads an older
    version as unsaved changes that you save like any other edit.
    The **Research loop** panel adds or removes the loop, its iteration limit and its stop conditions.
-   A **Judge** stop condition takes what the judge should look for, the first body it
+   An **iteration** is one pass through the research loop: Interpret results → Propose model →
+   Implement → Validate → Train & tune. A **tuning round** plans and runs one training
+   configuration inside Train & tune; **Tuning rounds per iteration** sets its limit
+   independently of **Final iteration**. A tuning round can need several attempts.
+   A **Judge** stop condition takes what the judge should look for, the first iteration it
    judges after, and what a failed judge call does; the judge model and its call limit
    come from the console operator's model settings.
    Each stop condition has **When met**: **Stop** (the default) ends the loop early;
    **Pause and ask me** pauses it and waits for you on Monitor. After you resume, the
    same condition asks again only after a new stretch counted from that pause (a
-   no-improvement condition needs its full number of bodies again; a metric threshold
+   no-improvement condition needs its full number of iterations again; a metric threshold
    asks once). Conditions set to Stop are checked first.
    For reusable task packages, [bind a task version](#bind-a-task-version) first.
    Until the canvas has a module, it says what to do next and offers **Start from a
@@ -432,7 +483,9 @@ workspace library, so the browser never types a server path.
    `console.json` sets `data_root` shows "Set in console.json" instead.
 5. Select **Save settings**. Success reads "Saved; active after server
    restart". Restart the `serve` command to use the new values; until then the
-   page lists what is saved but not yet active. **Values in effect** shows each
+   page lists what is saved but not yet active. If another console saves first,
+   your stale save is refused; reload the settings and apply your changes again.
+   **Values in effect** shows each
    value the running console uses, where it comes from and its server path.
 
 Saving and importing need `"global_settings": {"browser_writable": true}` in
@@ -482,7 +535,10 @@ not included.
 An export name that is already used is refused with a free name to try; exports
 are never overwritten. The export is also refused when the saved workflow
 changed on disk while you exported, when it does not parse, or when the task's
-model profile would be refused by `--llm_config`; the message says which.
+model profile would be refused by `--llm_config`; the message identifies the failed
+step. Profile and advice parsing failures show a safe error category. Check the
+console server diagnostic log for details; advice errors also list the supported
+keys and required value format.
 Exporting needs the same `browser_writable` setting as saving.
 
 When you review a new run on the **Run** page, the details also say where the
@@ -500,9 +556,14 @@ external inputs such as storage. Only existing inputs can be rewired here.
 
 A large workflow opens zoomed out (never below 75%, so text stays readable; scroll the
 canvas for the rest). The controls at the bottom right of the canvas (zoom, **Actual
-size**, **Fit to view**) change only the view. Optional inputs that no wire feeds are
-folded into a "+N optional" row on each card; expand it to connect one. If saved cards overlap, the canvas says so;
-**Tidy up** arranges them (one edit you can undo).
+size**, **Fit to view**) change only the view. If the whole graph cannot fit at 75%,
+**Fit to view** brings the selected module into view, or the first module if none is
+selected. The note below the canvas explains the limit; scroll inside the canvas
+to reach the remaining modules. Optional inputs that no wire feeds are
+folded into a "+N optional" row on each card; expand it to connect one. Cards without
+saved positions adjust their spacing when you expand details or return to the
+Workflow tab. This changes only the view. Saved positions stay where you put them;
+if those cards overlap, **Tidy up** arranges them (one edit you can undo).
 
 **Check the workflow** (bottom right) sends a small dot along every connection in the
 order the modules run, then along the research loop's dashed feedback wire (when there is a loop). If
@@ -573,7 +634,10 @@ coding agent, then press **Refresh**.
    | Run policy | Time limits, network access, the devices passed into the run sandbox (with a warning when no GPU is passed), and the names of the credentials a run receives. Credential values never appear. |
 
    If the panel says the package **could not be read**, it names the stage and the
-   error: fix the package with your coding agent and press **Refresh**. If it says
+   error category. Ask the task author to inspect the console server log for the
+   underlying cause, fix the package, and press **Refresh**. Raw exception text
+   stays out of the panel because it can contain private paths or credentials. The same
+   protection applies to task-check details in Workflow reviews. If it says
    the summary is **not available** (for example, the sandbox or the data folder is
    missing), follow the hint shown and press **Refresh**.
 4. Open **Workflow**. Until a task is selected, Workflow and Run are greyed out
@@ -590,6 +654,9 @@ example a research loop and a single step); every run belongs to one setup.
 2. Select **New setup…**. Choose how it starts: a template (the research loop with your
    own advice is preselected) or **Blank**. Enter a label and select **Create setup**.
    The console writes `siderius_workspace/projects/<setup id>/workflow.py` and opens it.
+   If another console has updated the setup list, creation is refused instead of
+   overwriting that update. Restart this console and try again. If a folder was
+   already created, the refusal names it; its files are kept for recovery.
    If the dialog says creating setups is turned off, the console operator adds
    `"experiment_setups": {"browser_creatable": true}` to
    `siderius_workspace/settings/console.json` and restarts the console.
@@ -683,14 +750,14 @@ If a step does not succeed, the line under the Run steps says so in plain words,
 example "The preparation failed. The cause and its log are named below; start over to
 try again." or "The run failed. The cause is shown below; open it in Monitor for the
 full log." A time limit, an interruption, a stop on request and a worker that never
-started each get their own sentence. Below it, the step's status line names the cause:
-the last error line of the log, such as "Cause (from the log): TaskCompositionError:
-plugin file … does not exist". A failed preparation also names its log file,
-`inputs/preparation/worker.log` in the run's folder; Monitor shows the same log under
-**Activity and logs** with log source **Native**. Fix the cause, then select **Start
-over** and prepare again. A paused research loop is not reported as finished either:
-the line says whether it is waiting for your input or was paused by you, and to open
-it in Monitor to resume.
+started each get their own sentence. Below it, the step's status line shows a safe
+preparation error category or, for other failures, the last error line from the log.
+Monitor provides the full logs under **Activity and logs**. Preparation workers write
+`inputs/preparation/worker.log` in the run's folder (log source **Native**); errors
+in the process that starts or checks preparation go to the operation log (log source
+**Operation**). Fix the cause, then select **Start over** and prepare again.
+A paused research loop says whether it is waiting for your input or was paused by
+you, and directs you to Monitor to resume.
 
 The browser retains preparation and candidate intents separately before sending
 either effect. Storage failure prevents dispatch. After a lost response or reload,
@@ -699,6 +766,18 @@ blocks new effects; changing or saving source never removes it. Wait until the p
 the console offers dismissal or another effect. An initial request explicitly refused before
 admission can be discarded and reviewed again; restored or ambiguous requests retain
 their UUID. No automatic retries or replacement IDs are created.
+
+If Prepare reports another operation is blocking it, the page keeps the response
+code and reason visible. Select the blocking operation's Monitor link to inspect it.
+For example, a `409, busy` response still names that operation when a status check
+finds no preparation record. The outcome stays unconfirmed unless the server can
+verify it. If the server becomes unreachable, the page shows that new problem.
+If a worker died, new work becomes available only after the console confirms that its remaining processes also stopped.
+
+When preparation fails in its parent process, Run and Monitor show a safe cause
+category, such as invalid input or a changed source. Task authors can inspect the
+full traceback in the server log (the operation log for a detached preparation).
+Fix the cause, then select **Start over** and prepare again.
 
 While the server is live, an admitted preparation can be recovered even if its
 original source or credential file disappears. Restart still validates configured
@@ -779,8 +858,11 @@ Then, on **Run**, open **Host resources and parallel nodes** before you review:
 3. Click **Review prepared run**. The review lists what you entered; changing it
    afterwards asks you to review again.
 
-When the host is busy, the run shows **queued** and starts by itself when earlier
-runs finish. Stopping a queued run removes it before it starts ("Cancelled before
+To allow waiting runs, set `max_queued_operations` in the shared host budget
+file to a positive limit. When the host is busy and the queue has room, the run
+shows **queued** and starts by itself when earlier runs finish. Otherwise the
+submission is refused with `host_queue_full`; retry when capacity is
+available. Stopping a queued run removes it before it starts ("Cancelled before
 start"). Native chains always run one step at a time, outside the ledger.
 
 For example, if your saved `llm.json` uses OpenAI routes, set
@@ -819,9 +901,10 @@ anything else is read as dotenv
 declared names are passed to the candidate; other entries are ignored.
 
 Use only the keys required by your selected providers, plus any other explicitly
-declared runtime variables. The current credential variable names are
-`OPENAI_API_KEY`, `GEMINI_API_KEY` and `DEEPSEEK_API_KEY`. Match the names in the private file
-and `candidate_environment_names` to your reviewed profile. Do not put values in
+declared runtime variables. Find each provider's key name and model-selection
+requirements in the [provider key table](../../../docs/getting-started/installation.md#api-keys).
+Match the names in the private file and `candidate_environment_names` to your
+reviewed profile. Do not put values in
 `console.json`, commands, browser fields or version control. A placeholder is not
 a working key; presence does not prove authentication, quota or network access.
 
@@ -886,6 +969,37 @@ review/save flow. Saving changes the source available to a subsequent New run;
 it never changes an existing captured run.
 Existing console configurations need no editor project to monitor operations.
 
+## Trial and Formal training
+
+A Trial tuning round lets the planner explore; a Formal tuning round uses the
+configured training scope and a separate evaluation scope. With
+`force_formal_round=True` (the default), the last tuning round of **each
+iteration** is forced Formal. With `max_rounds=1` there is no Trial round;
+with `max_rounds=2` the first may be Trial and the second is Formal. Increasing
+**Final iteration** repeats the loop; it does not add tuning rounds inside it.
+
+If a one-tuning-round edit is refused because your Trial settings would never apply,
+select **Train & tune**, open **Training settings**, and set **Tuning rounds per iteration**
+to at least 2, or remove the Trial overrides if you intend to run only Formal.
+The field's help explains the policy and shows its minimum of 1. When the server
+refuses Trial overrides that cannot run, the review reminder says to check
+**Tuning rounds per iteration** in **Training settings**. An unrelated invalid
+setting does not trigger this reminder.
+
+The framework's `formal_portion=0.1` uses 10% of the training scope. For example,
+1,077 CSV training rows × 0.1 gives about 108 rows: **3 steps/epoch** with batch
+size 32 and the incomplete batch dropped. Keeping that batch adds a step.
+Formal does not mean full-data training. `formal_train_portion` can further
+reduce the rows used each epoch; `formal_eval_portion` separately controls the
+evaluation scope and defaults to 1.0.
+
+New console templates declare `formal_portion=1.0` and `max_rounds=2` so small
+user datasets are not silently reduced to 10% and Trial has an opportunity to
+run. Review portions and budgets for larger datasets. In **Train & tune →
+Training settings**, **Default** removes the template's explicit value:
+Formal portion then returns to 0.1. Trial budgets and epoch ceilings only apply
+to tuning rounds that actually run as Trial.
+
 ## Edit reusable training settings
 
 Start from the [four-stage source example](../../../examples/workflow_declarations/reusable_training.py)
@@ -897,10 +1011,10 @@ budgets and diagnostic settings are demonstration choices, not scientific defaul
 Select **fit / tuning** in Workflow. The small inspector edits **Trial/formal mode**
 (`is_trial`), trial/formal budget minutes, epoch ceilings, portions and retention
 flags. Keep **Trial/formal mode** on, as the templates and the command line do: with
-it off, every round uses single-file mode, which only a task with TIDMAD topology can
+it off, every tuning round uses single-file mode, which only a task with TIDMAD topology can
 train in, so Run review refuses such a run for any other task before it calls a model.
 Templates start with **Health checks** set to Block on failure and **Result
-standing** set to Scientific: the task's blocking checks can invalidate a round, and
+standing** set to Scientific: the task's blocking checks can invalidate a tuning round, and
 Health-valid results count toward the run's best score. With Diagnostic, every
 result is excluded from that score, which suits exploring only. Open **Training
 settings** (collapsed, with the number of changed fields). **Default** removes the

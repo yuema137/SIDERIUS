@@ -28,15 +28,14 @@ from core.runtime_control.training_measurement_assessment import assess_training
 from core.runtime_control.training_measurement_binding import bind_training_measurement
 from core.sandbox_layout import training_checkpoint_path
 from core.subprocess_env import subprocess_env
-from core.training_seeds import TrainingSeedPlan
 from execute_tools.evaluation_execution import candidate_evaluation_executor
-from nodes.ml_hyperparameter_tune_agent.probe_data import build_task_probe_data
+from nodes.ml_hyperparameter_tune_agent.probe_data import build_attempt_task_probe_data
 
 
 def begin_attempt(sandbox, agent_input, exp_id: str) -> None:
     """Selection is explicit; CPU/pseudo never allocate a measurement state."""
     sandbox.gpu_execution = None
-    from core.sandbox_executor import StubSandbox
+    from core.stub_sandbox import StubSandbox
 
     policy = agent_input.gpu_execution_policy
     if policy is None or isinstance(sandbox, StubSandbox) or sandbox.device_available is False:
@@ -78,12 +77,11 @@ def _spec(
 ) -> GpuMeasurementSpec:
     sandbox = bindings.sandbox
     active = prepared.active_params
-    probe = build_task_probe_data(
+    probe = build_attempt_task_probe_data(
         task_composition_ref=bindings.agent_input.task_composition_ref,
         task_scopes=prepared.task_scopes,
         data_dir=bindings.time_data_dir,
-        epoch_seed=TrainingSeedPlan(prepared.trial_config.seed_context).epoch(0).subsample,
-        train_portion=prepared.trial_config.train_portion,
+        trial_config=prepared.trial_config,
         max_samples=bindings.agent_input.validation_max_train_samples,
     )
     if probe is None or probe.evaluation_scope_payload is None:

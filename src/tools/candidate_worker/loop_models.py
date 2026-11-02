@@ -1,10 +1,12 @@
 """Bounded finite-loop receipt and operation-bound graceful Stop marker."""
 
 import unicodedata
-from typing import TYPE_CHECKING, Annotated, Self
+from typing import TYPE_CHECKING, Annotated, Literal, Self
 from uuid import UUID
 
 from pydantic import AfterValidator, Field, model_validator
+
+from workflows.definition.models import NATIVE_INTERPRETATION_PROFILE
 
 if TYPE_CHECKING:
     from .models import CandidateRunRequest
@@ -59,7 +61,11 @@ def _operator_advice(value: str) -> str:
     if not 1 <= len(text) <= MAX_OPERATOR_ADVICE_CHARS:
         raise ValueError(f"operator advice must be 1 to {MAX_OPERATOR_ADVICE_CHARS} characters")
     # Cc covers C0, DEL and C1 (e.g. CSI \x9b); Cf covers bidi overrides and the BOM.
-    if any(unicodedata.category(char) in ("Cc", "Cf") and char not in "\n\t" for char in text):
+    # Joiners are meaningful in multilingual words and emoji; they do not reorder text.
+    if any(
+        unicodedata.category(char) in ("Cc", "Cf") and char not in "\n\t\u200c\u200d"
+        for char in text
+    ):
         raise ValueError("operator advice may not contain control or format characters")
     return text
 
@@ -105,18 +111,46 @@ class LoopContinuation(LoopStop):
         return ResumeAdvice(after_body=self.completed_iterations, text=self.operator_advice)
 
 
-def admit_loop(request: "CandidateRunRequest") -> None:
+class LoopAdmissionRefusal(ValueError):
+    """Safe, typed admission reason; no input paths or exception payloads."""
+
+    def __init__(self, reason: Literal["profile", "shape", "feedback"]) -> None:
+        self.reason = reason
+        super().__init__(
+            "research loops require the native-interpretation-candidate profile"
+            if reason == "profile"
+            else "research loops require a native interpretation-to-tuning iteration; "
+            "review the workflow nodes and connections"
+            if reason == "shape"
+            else "research loop feedback must connect native tuning to interpretation; "
+            "review the workflow connections"
+        )
+
+
+def admit_loop(request: "CandidateRunRequest") -> LoopAdmissionRefusal | None:
     from workflows.definition.fanout import execution_families
 
     definition = request.preview.document.definition
     loop = definition.loop
     assert loop is not None
-    shape = execution_families(definition, request.preview.execution_profile)
+    if request.preview.execution_profile != NATIVE_INTERPRETATION_PROFILE:
+        return LoopAdmissionRefusal("profile")
+    try:
+        shape = execution_families(definition, request.preview.execution_profile)
+    except ValueError:
+        return LoopAdmissionRefusal("shape")
+    if shape.interpretation is None or shape.tuning is None:
+        return LoopAdmissionRefusal("shape")
     if (
-        request.preview.execution_profile != "native-interpretation-candidate/v1"
-        or shape.interpretation is None
-        or shape.tuning is None
-        or loop.feedback.source.node != shape.tuning
+        loop.feedback.source.node != shape.tuning
         or loop.feedback.target != shape.interpretation.interpretation
     ):
-        raise ValueError("finite loop requires the declared native interpretation-to-tuning body")
+        return LoopAdmissionRefusal("feedback")
+    return None
+
+
+def require_loop(request: "CandidateRunRequest") -> None:
+    """Raise the owner's refusal at execution and evidence boundaries."""
+    refusal = admit_loop(request)
+    if refusal is not None:
+        raise refusal

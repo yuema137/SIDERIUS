@@ -442,26 +442,35 @@ def init_workspace(
         os.umask(previous)
 
 
+def _require_private_parent(directory: int, base: Path) -> None:
+    """Refuse unsafe init parents with a recovery that preserves shared access."""
+    metadata = os.fstat(directory)
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise WorkspaceRefused(f"workspace parent {base} is not a directory")
+    private = shlex.quote(str(base / "siderius"))
+    recovery = (
+        "keep a shared parent unchanged and create a private folder "
+        "where you have write access: "
+        f"mkdir -m 700 {private}; then use --workspace {private}"
+    )
+    if metadata.st_uid != os.getuid():
+        raise WorkspaceRefused(
+            f"workspace parent {base} is owned by uid {metadata.st_uid}, not you; "
+            f"{recovery}; otherwise choose a folder you own"
+        )
+    if stat.S_IMODE(metadata.st_mode) & 0o022:
+        raise WorkspaceRefused(
+            f"workspace parent {base} must not be writable by group or others; "
+            f"for a private parent, use: chmod 700 {shlex.quote(str(base))}; "
+            f"or {recovery}"
+        )
+
+
 def _init(base: Path, workspace: Path, port: int, credential_file: str | None) -> Path:
     import hashlib
 
     with _open_directory(base) as directory:
-        metadata = os.fstat(directory)
-        if not stat.S_ISDIR(metadata.st_mode):
-            raise WorkspaceRefused(f"workspace parent {base} is not a directory")
-        if metadata.st_uid != os.getuid():
-            raise WorkspaceRefused(
-                f"workspace parent {base} is owned by uid {metadata.st_uid}, not you; "
-                "choose a folder you own"
-            )
-        if stat.S_IMODE(metadata.st_mode) & 0o022:
-            raise WorkspaceRefused(
-                f"workspace parent {base} must not be writable by group or others; "
-                f"for a private parent, use: chmod 700 {shlex.quote(str(base))}; "
-                "or keep a shared parent unchanged and create a private folder: "
-                f"mkdir -m 700 {shlex.quote(str(base / 'siderius'))}; "
-                f"then use --workspace {shlex.quote(str(base / 'siderius'))}"
-            )
+        _require_private_parent(directory, base)
         root = ensure_owned_directory(
             directory, WORKSPACE_DIRECTORY, str(workspace), remedy=workspace
         )

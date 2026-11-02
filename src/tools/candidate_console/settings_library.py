@@ -19,6 +19,7 @@ from tools.candidate_operations.models import OperationFailure
 from tools.setup_review.route_models import LLMRoute
 from tools.workflow_preview.models import PreviewModel
 
+from .error_messages import advice_error_message, console_error_message
 from .files import canonical, config_bytes
 from .settings_file import SettingsInvalid, advice_bytes, library_directory
 from .settings_models import FileRef, LibraryRef
@@ -121,9 +122,15 @@ def validate_upload(upload: LibraryUpload) -> bytes:
         else:
             parse_advice_bytes(payload, label="upload")
     except AdviceArtifactError as error:
-        raise LibraryRefused(422, "invalid_file", str(error)) from None
+        raise LibraryRefused(
+            422,
+            "invalid_file",
+            advice_error_message(error),
+        ) from None
     except ValueError as error:
-        raise LibraryRefused(422, "invalid_file", f"Not an LLM profile: {error}") from None
+        raise LibraryRefused(
+            422, "invalid_file", f"Not an LLM profile: {console_error_message(error)}"
+        ) from None
     return payload
 
 

@@ -8,7 +8,7 @@ import pytest
 
 from tests.helpers.candidate_fanout import UNROUTED_TRACE_SHA256, fanout_request, trace_projection
 from tools.candidate_worker import launch_candidate, readiness
-from tools.candidate_worker.graph_evidence import replay_readiness, verify_graph_trace
+from tools.candidate_worker.graph_evidence import DrainWindow, replay_readiness, verify_graph_trace
 from tools.candidate_worker.graph_models import GraphNodeEvidence
 from tools.candidate_worker.readiness import (
     MergeCandidate,
@@ -392,6 +392,85 @@ def test_replay_accepts_the_skip_readiness_produces():
     # Without the decision the same skips are unexplained and refused.
     with pytest.raises(ValueError, match="no recorded decision"):
         replay_readiness(trace, routing=ROUTED)
+
+
+FAILED = "native_failure"
+# Fan-out declaration order; `build1` fails while `build0` still runs (#1386):
+# propose 1-2, build0 3-6, build1 4-5. `check0` became ready only after the failure.
+FANOUT = (
+    evidence("propose", (), "succeeded"),
+    evidence("build0", ("propose",), "succeeded"),
+    evidence("check0", ("build0",), "blocked", BLOCKED),
+    evidence("build1", ("propose",), "failed", FAILED),
+    evidence("check1", ("build1",), "blocked", BLOCKED),
+)
+FANOUT_DRAIN = DrainWindow(ended={"propose": 2, "build1": 5, "build0": 6}, failure_end=5)
+
+
+def test_parallel_replay_accepts_a_drain_whose_failure_is_declared_later():
+    """Fails if the parallel replay keeps the declaration-order failure stop.
+
+    Serially `check0` runs before `build1` fails, so the serial replay refuses the
+    trace; under the drain every undispatched entry is blocked.
+    """
+    with pytest.raises(ValueError, match="serial readiness"):
+        replay_readiness(FANOUT)
+    replay_readiness(FANOUT, drained=FANOUT_DRAIN)
+
+
+def _routed_drain(a, src_end):
+    """`f` fails at event 5; `src` ends at ``src_end``; route arm `a` is not selected."""
+    trace = (
+        evidence("f", (), "failed", FAILED),
+        evidence("src", (), "succeeded"),
+        evidence("a", ("src",), *a),
+        evidence("b", ("src",), "blocked", BLOCKED),
+    )
+    return trace, DrainWindow(ended={"f": 5, "src": src_end}, failure_end=5)
+
+
+def test_parallel_replay_accepts_a_skip_closed_before_the_failure_ended():
+    """Fails if the replay blocks every entry declared after the failed one.
+
+    `src` ended (event 2) before `f` failed, so readiness skipped `a` then.
+    """
+    trace, window = _routed_drain(("skipped", SKIP), src_end=2)
+    replay_readiness(trace, decisions=ROUTE_B, routing=ROUTED, drained=window)
+
+
+@pytest.mark.parametrize(
+    ("trace", "window", "routing"),
+    [
+        # No failure: nothing drains, so a ready entry recorded blocked is refused.
+        (
+            (evidence("src", (), "succeeded"), evidence("use", ("src",), "blocked", BLOCKED)),
+            DrainWindow(ended={"src": 2}, failure_end=None),
+            None,
+        ),
+        # A dispatched entry whose own source failed (the drain never permits it).
+        (
+            (evidence("f", (), "failed", FAILED), evidence("use", ("f",), "succeeded")),
+            DrainWindow(ended={"f": 2, "use": 4}, failure_end=2),
+            None,
+        ),
+        # The selected arm recorded skipped: only the drain closure is admissible.
+        (
+            (
+                evidence("f", (), "failed", FAILED),
+                evidence("src", (), "succeeded"),
+                evidence("a", ("src",), "skipped", SKIP),
+                evidence("b", ("src",), "skipped", SKIP),
+            ),
+            DrainWindow(ended={"f": 5, "src": 2}, failure_end=5),
+            ROUTED,
+        ),
+        # A skip whose source ended after the failure: readiness then was aborted.
+        (*_routed_drain(("skipped", SKIP), src_end=6), ROUTED),
+    ],
+)
+def test_parallel_replay_refuses_a_closure_the_drain_cannot_produce(trace, window, routing):
+    with pytest.raises(ValueError, match="serial readiness"):
+        replay_readiness(trace, decisions=ROUTE_B, routing=routing, drained=window)
 
 
 @pytest.mark.parametrize("outcome", sorted(UNROUTED_TRACE_SHA256))

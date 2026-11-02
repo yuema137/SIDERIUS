@@ -5,6 +5,7 @@ import os
 from collections.abc import Callable, Mapping
 from contextlib import suppress
 from pathlib import Path
+from typing import Literal
 from uuid import UUID
 
 from core.control_json import encode_control
@@ -45,18 +46,25 @@ from .store import (
 )
 
 
-def root_record(record: OperationRecord) -> OperationRecord:
-    selected = record
+def loop_chain(record: OperationRecord) -> tuple[OperationRecord, ...]:
+    """``record`` and each predecessor record up to its authored-loop root, newest first."""
+    chain = [record]
     seen = set()
-    while selected.submission.kind == "candidate_loop_resume":
+    while (selected := chain[-1]).submission.kind == "candidate_loop_resume":
         identity = selected.submission.request_id
         if identity in seen:
             raise OperationFailure("integrity", "loop operation cycle")
         seen.add(identity)
-        selected = load_record(record.config, selected.submission.request.predecessor_operation_id)
-    if not is_authored_loop(selected):
+        chain.append(
+            load_record(record.config, selected.submission.request.predecessor_operation_id)
+        )
+    if not is_authored_loop(chain[-1]):
         raise OperationFailure("kind", "operation is not an authored loop")
-    return selected
+    return tuple(chain)
+
+
+def root_record(record: OperationRecord) -> OperationRecord:
+    return loop_chain(record)[-1]
 
 
 def loop_root_operation(
@@ -215,19 +223,13 @@ def successor_id(record: OperationRecord) -> UUID | None:
     return binding.operation_id
 
 
-def review_locked(
-    config: OperationStoreConfig, operation_id: UUID, *, ending: bool = False
-) -> OperationSnapshot:
-    from tools.candidate_worker.loop import stop_requested
-    from tools.candidate_worker.loop_evidence import require_unused_next
-
+def _paused_boundary(
+    record: OperationRecord, *, code: Literal["loop_end", "loop_resume"]
+) -> tuple[CandidateRunRequest, CandidateRunReceipt, OperationSnapshot]:
+    """Shared evidence and process checks, independent of future execution."""
     from .read import bound, optional, read_operation
 
-    record = load_record(config, operation_id)
-    # Issue #983 — before any native read: a segment continues the root's seed,
-    # and an S3b-era root records none (its lock does), so Review refuses it
-    # rather than offering a Resume that could adopt or re-mint a seed.
-    require_root_seed(root_record(record))
+    config, operation_id = record.config, record.submission.request_id
     _, request, initial = claimed_inputs(record)
     snapshot = read_operation(config, operation_id)
     receipt = snapshot.receipt
@@ -238,34 +240,61 @@ def review_locked(
         or receipt.loop_trace is None
         or not snapshot.receipt_digest
     ):
-        raise OperationFailure("loop_resume", "resume requires an exited, verified paused segment")
+        raise OperationFailure(
+            code,
+            "resume requires an exited, verified paused segment"
+            if code == "loop_resume"
+            else "an exited, verified paused segment is required",
+        )
     completion = optional(operation_path(config, operation_id) / "completion.json", Completion)
     if completion is None:
-        raise OperationFailure("loop_resume", "paused operation has no bound completion")
+        raise OperationFailure(code, "paused operation has no bound completion")
     bound(record, completion)
     if completion.outcome != "native" or completion.receipt_digest != snapshot.receipt_digest:
-        raise OperationFailure("loop_resume", "paused completion identity disagrees")
+        raise OperationFailure(code, "paused completion identity disagrees")
     try:
         require_clean(selected_control(record))
     except (OSError, ValueError) as error:
-        # Missing, unknown or unclean supervision is never resume authorization.
-        raise OperationFailure("loop_resume", "paused segment lacks clean supervision") from error
-    successor = successor_id(record)
-    if successor is not None:
-        from .loop_recovery import failed_successor
+        raise OperationFailure(code, "paused segment lacks clean supervision") from error
+    return request, initial, snapshot
 
-        if not ending or failed_successor(record) != successor:
-            raise OperationFailure("loop_resume", "paused segment already has a successor")
+
+def review_end_locked(config: OperationStoreConfig, operation_id: UUID) -> OperationSnapshot:
+    """End completed work without requiring that another iteration can execute."""
+    from .loop_recovery import failed_successor
+
+    record = load_record(config, operation_id)
+    _, _, snapshot = _paused_boundary(record, code="loop_end")
+    successor = successor_id(record)
+    if successor is not None and failed_successor(record) != successor:
+        raise OperationFailure(
+            "loop_end",
+            "this segment has a successor; open the successor to Stop it, "
+            "or use End loop there if it is paused",
+        )
+    return snapshot
+
+
+def review_locked(config: OperationStoreConfig, operation_id: UUID) -> OperationSnapshot:
+    from tools.candidate_worker.loop import stop_requested
+    from tools.candidate_worker.loop_evidence import require_unused_next
+
+    # Resume must never adopt or re-mint an unrecorded historical seed.
+    record = load_record(config, operation_id)
+    require_root_seed(root_record(record))
+    request, initial, snapshot = _paused_boundary(record, code="loop_resume")
+    receipt = snapshot.receipt
+    assert isinstance(receipt, CandidateRunReceipt) and receipt.loop_trace is not None
+    if successor_id(record) is not None:
+        raise OperationFailure("loop_resume", "paused segment already has a successor")
     loop = request.preview.document.definition.loop
     assert loop is not None
     if receipt.loop_trace.attempted_iterations >= loop.final_iteration or stop_requested(initial):
         raise OperationFailure("loop_resume", "loop is terminal")
-    # Deliberately redundant with the paused readback above: defense in depth.
-    if successor is None:
-        try:
-            require_unused_next(request, initial, receipt.loop_trace.attempted_iterations)
-        except ValueError as error:
-            raise OperationFailure("loop_resume", "next body slot is not unused") from error
+    try:
+        require_unused_next(request, initial, receipt.loop_trace.attempted_iterations)
+    except ValueError as error:
+        raise OperationFailure("loop_resume", "next iteration slot is not unused") from error
     return snapshot
 
 

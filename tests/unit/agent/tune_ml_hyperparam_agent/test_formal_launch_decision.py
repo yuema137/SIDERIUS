@@ -551,7 +551,11 @@ class TestTheWinnerIsResolvedOnce:
         # right winner and still read the right threshold, and would still
         # decide by the TIDMAD convention under a lower-is-better metric.
         assert src.count("order=run_order,") >= 3
-        assert "run_order = MetricOrder(run_metric.spec)" in src
+        assert "run_order = MetricOrder(run_selection_spec)" in src
+        assert (
+            "run_selection_spec = selection_metric(agent_input.task_composition_ref, run_metric.spec)"
+            in src
+        )
 
 
 class TestPersistenceIsJsonSafe:

@@ -18,6 +18,7 @@ from core.runtime_control.scheduling import HostBudget
 from execute_tools.evaluation_metric import MetricSpec
 from workflows.adaptors import AdaptorOutcome
 from workflows.definition.fanout import ProposalFamilies, execution_families
+from workflows.evaluation_selection import selection_metric
 from workflows.llm_config import WorkflowLLMConfig
 from workflows.task_composition import RunTaskComposition
 from workflows.termination import infrastructure_abort_reason
@@ -140,9 +141,14 @@ class GraphBody:
         operator_advice: ResumeAdvice | None = None,
     ) -> "GraphBody":
         definition = request.preview.document.definition
+        from workflows.evaluation_admission import admit_formula_definition
+
+        admit_formula_definition(composition, request.preview.document.definition)
         shape = execution_families(definition, request.preview.execution_profile)
         # Before any effect: a route metric mismatch orphans no native record.
-        metric = route_phase.admit_route_metric(definition, composition.metric.spec)
+        metric = route_phase.admit_route_metric(
+            definition, selection_metric(composition, composition.metric.spec)
+        )
         routing = route_phase.node_routing(definition)
         admitted = (
             admit_training(

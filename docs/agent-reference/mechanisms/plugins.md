@@ -171,7 +171,8 @@ collisions between unrelated plugin files:
 With the optional [package declaration](../../reference/task-composition.md),
 selected file consumers share a finite namespace across families. Relative
 imports execute only declared captured members, so helper-defined classes have
-one identity within a package. Directory-roster rules remain unchanged; this
+one identity within a package. The namespace name is derived from the package
+content digest, not its checkout path. Directory-roster rules remain unchanged; this
 does not add recursive model/loss discovery. See the
 [loading/transport owner](../../../src/core/local_code/README.md).
 
@@ -277,3 +278,16 @@ including when it re-exports a class from another module. This is an observation
 of native selection, not permission to read the path in a privileged caller.
 Deployment code must match it against its own captured source set. Both explicit
 file loading and name lookup provide it; selection precedence is unchanged.
+
+## Evaluation component kinds
+
+`evaluation.component_kinds` maps a kind to a file-backed `ComponentKindRegistration`
+export (`file`, `symbol`). The existing `_load_symbol` content/package identity
+rules apply; `module:` is refused for this v1 extension. Each composition builds a
+fresh registry and validates schema variant, loader, fingerprint contributor, renderer
+hook and runtime capability requirements. Plugin schemas cannot exclude fields or
+use custom serializers, including nested types, because every validated field must
+remain visible to the resume identity. Contributor output cannot contain absolute
+host paths. Builtins currently comprise metric and rubric; measurements land through
+this extension in #1296. No global registry or runtime execution is introduced.
+See the [evaluation contract](../../../src/execute_tools/evaluation-contract.md).

@@ -21,6 +21,7 @@ from core.runtime_control.gpu_accounting import DeviceIdentity, GpuAccountingSna
 from tests.helpers.tuner_source import tuner_node_source
 
 EXECUTOR = Path(__file__).resolve().parents[3] / "src/core" / "sandbox_executor.py"
+STUB = Path(__file__).resolve().parents[3] / "src/core" / "stub_sandbox.py"
 DEV = DeviceIdentity(uuid="GPU-aaaa-0000", physical_index=0)
 
 REFUSED = AdmissionDecision(
@@ -235,7 +236,7 @@ class TestStubSandboxUnaffected:
     override to bypass the gate by accident."""
 
     def test_the_stub_overrides_both_methods(self):
-        tree = ast.parse(EXECUTOR.read_text())
+        tree = ast.parse(STUB.read_text())
         stub = next(
             n for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and n.name == "StubSandbox"
         )
@@ -243,7 +244,7 @@ class TestStubSandboxUnaffected:
         assert {"execute_training", "execute_inference"} <= overridden
 
     def test_the_stub_never_calls_the_gate(self):
-        tree = ast.parse(EXECUTOR.read_text())
+        tree = ast.parse(STUB.read_text())
         stub = next(
             n for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and n.name == "StubSandbox"
         )
@@ -311,3 +312,40 @@ class TestProduceAndConsumeStaySeparate:
         )
 
         assert RESOURCE_ADMISSION_STATUS in EXECUTOR.read_text()
+
+
+def test_shared_phase_owner_is_reached_and_consumes_refusals():
+    """Moving consumption must retain both production edges and the one emitter."""
+    from tests.helpers.tuner_source import TUNER_PACKAGE, tuner_node_files
+
+    owner = TUNER_PACKAGE / "phase_admission.py"
+    assert owner in tuner_node_files()
+    tree = ast.parse((TUNER_PACKAGE / "execution.py").read_text())
+    for function, phase in [
+        ("run_training", "training"),
+        ("_run_local_evaluation_phase", "inference"),
+    ]:
+        fn = next(
+            n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == function
+        )
+        calls = [
+            n
+            for n in ast.walk(fn)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Name)
+            and n.func.id == "run_admitted_skill"
+        ]
+        assert len(calls) == 1
+        assert any(
+            k.arg == "phase" and isinstance(k.value, ast.Constant) and k.value.value == phase
+            for k in calls[0].keywords
+        )
+        assert "environment_admission_refusal=admission_refusal" in ast.unparse(fn)
+    calls = [
+        n
+        for n in ast.walk(ast.parse(owner.read_text()))
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Attribute)
+        and n.func.attr == "_handle_admission_refusal"
+    ]
+    assert len(calls) == 1

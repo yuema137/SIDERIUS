@@ -1,5 +1,6 @@
 """One operation process: publish identity, invoke native owner, record references."""
 
+import logging
 import os
 import sys
 from collections.abc import Callable
@@ -16,11 +17,12 @@ from tools.candidate_worker.parallel_models import HostGrant
 from .cancel import cancel_probe
 from .files import canonical, publish, read_model
 from .host_liveness import GRANT_FILE, PLACEMENT_FILE, SANDBOX_FILE, published_identity
-from .host_queue import is_queued, wait_for_placement
+from .host_queue import confirm_reservation, is_queued, wait_for_placement
 from .models import (
     SEEDED_SUBMISSIONS,
     Completion,
     HostPlacementEvidence,
+    OperationFailure,
     OperationRecord,
 )
 from .native_chain import execute_native_chain
@@ -51,6 +53,10 @@ def execute(path: Path) -> int:
             if wait_for_placement(path, record.submission.request_id, cancel) is None:
                 pre_dispatch_reason = "cancelled_while_queued"
                 raise _LeftQueue
+        elif os.path.lexists(path / PLACEMENT_FILE):
+            # An interrupted spawn or a dead submitter may have removed the entry.
+            pre_dispatch_reason = "host_reservation_unconfirmed"
+            confirm_reservation(path, record)
         if (
             record.submission.kind == "candidate"
             and record.submission.reusable_preparation is not None
@@ -110,7 +116,15 @@ def execute(path: Path) -> int:
             receipt_digest=native[1],
             reason="native_terminal",
         )
-    except (Exception, KeyboardInterrupt):
+    except (Exception, KeyboardInterrupt) as error:
+        if (
+            pre_dispatch_reason == "host_reservation_unconfirmed"
+            and isinstance(error, OperationFailure)
+            and error.detail.code == "ledger_busy"
+        ):
+            pre_dispatch_reason = "host_reservation_busy"
+        if record.submission.kind in {"prepare", "prepare_reusable"}:
+            logging.getLogger(__name__).exception("Preparation operation failed")
         # Do not serialize exception messages: arbitrary plugins can include credentials.
         completion = Completion(
             operation_id=record.submission.request_id,

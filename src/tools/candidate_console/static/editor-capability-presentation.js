@@ -10,6 +10,7 @@
     proposal: {label: 'Propose model', role: 'proposal', icon: 'lightbulb'},
     implementation: {label: 'Implement', role: 'implementation', icon: 'code-xml'},
     validation: {label: 'Validate', role: 'validation', icon: 'shield-check'},
+    adaptor: {label: 'Combine/select', role: 'generic', icon: 'shapes'},
     tuning: {label: 'Train & tune', role: 'tuning', icon: 'sliders-horizontal'},
   });
   const fallback = Object.freeze({label: 'Capability', role: 'generic', icon: 'shapes'});

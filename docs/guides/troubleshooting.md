@@ -37,10 +37,21 @@ Two cheap triage tools, both free of GPU and API cost:
 .venv/bin/python -m pytest tests/unit/ -q    # is the checkout itself sound?
 ```
 
-And a $0 end-to-end wiring smoke: `--is_pseudo_llm --is_pseudo_training` swap
-the LLM bridge and the sandbox for canned stubs, so the whole chain executes in
-seconds with no key and no GPU. If pseudo-mode works and a real run does not,
-the problem is in your keys, data or GPU — not the wiring.
+For a $0 wiring smoke, `--is_pseudo_llm --is_pseudo_training` replace the LLM
+bridge and training sandbox with stubs. No API key, GPU or host-ceiling override
+is required. Composed inference still reads the task's declared input data and
+writes explicitly synthetic predictions through its ordinary deliverable codec;
+normal Health checks inspect those artifacts. Pseudo training records
+`--validation_max_samples 256` unless you pass your own value; the task's
+scope builder bounds the evaluation scope to that many rows, so the smoke's
+cost does not grow with the dataset. A task whose scope builder ignores the
+ceiling is refused with `PseudoEvidenceUnsupported` before any prediction. A
+task whose bounded scope cannot cover its Health demand is refused with
+`TaskHealthCoverageError` while the attempt is planned; choose a smaller
+evaluation portion (`--formal_eval_portion`) with a larger explicit
+`--validation_max_samples` that covers it, accepting a larger smoke. Synthetic success checks wiring, not
+scientific quality or real-training correctness. If only the real run fails, inspect its actual error and execution
+resources.
 
 ## Environment and install
 

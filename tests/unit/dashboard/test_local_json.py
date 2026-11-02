@@ -313,3 +313,49 @@ class TestHealthCheck:
     def test_missing_dir_is_unhealthy(self, tmp_path):
         ds = LocalJsonDataSource(str(tmp_path / "nonexistent"))
         assert ds.health_check() is False
+
+
+@pytest.mark.parametrize("score", [float("-inf"), float("inf"), float("nan")])
+def test_versioned_summary_decodes_before_overview_and_record_access(tmp_path, score):
+    import math
+
+    from core.record_encoding import METADATA
+    from core.recorders import LocalRecorder
+
+    folder = tmp_path / "model" / "v1" / "agent"
+    recorder = LocalRecorder(str(folder / "records"), str(folder / "summary_v1_agent.json"), "v1")
+    for index, value in enumerate((0.5, score, 0.4)):
+        recorder.save_record(_make_record(f"trial_{index}", score=value))
+    source = LocalJsonDataSource(str(tmp_path))
+    overview = source.get_model_overview("model")
+    # A non-finite record is decoded evidence, never the model's best (#1316):
+    # with an ``is None`` skip, +inf is reported as best and this fails.
+    assert overview["best_agent_score"] == 0.5
+    rows, total = source.get_run_records("model", "v1")
+    assert total == 3
+    assert all(METADATA not in row for row in rows)
+    restored = rows[1]["denoising_score"]
+    assert isinstance(restored, float)
+    assert math.isnan(restored) if math.isnan(score) else restored == score
+
+
+@pytest.mark.parametrize("score", [float("-inf"), float("nan")], ids=str)
+def test_a_nonfinite_trial_collapse_is_never_ranked_under_a_minimised_metric(tmp_path, score):
+    """Defect (#1316): trial collapse records keep their non-finite score (trial
+    scores are never penalised) and scorer transport no longer nulls it. With an
+    ``is None`` skip, -inf is the overview's best and the leaderboard's rank 1
+    under a "lower" metric; both assertions on 0.4 fail."""
+    from core.recorders import LocalRecorder
+
+    folder = tmp_path / "model" / "v1" / "agent"
+    recorder = LocalRecorder(str(folder / "records"), str(folder / "summary_v1_agent.json"), "v1")
+    lower = ("mse", "lower")
+    recorder.save_record(_make_record("trial_0", score=0.5, metric_identity=lower))
+    recorder.save_record(
+        _make_record("trial_1", status="failed_mode_collapse", score=score, metric_identity=lower)
+    )
+    recorder.save_record(_make_record("trial_2", score=0.4, metric_identity=lower))
+    source = LocalJsonDataSource(str(tmp_path))
+    assert source.get_model_overview("model")["best_agent_score"] == 0.4
+    board = source.get_leaderboard("model", status_filter="")
+    assert [(row["exp_id"], row["rank"]) for row in board] == [("trial_2", 1), ("trial_0", 2)]

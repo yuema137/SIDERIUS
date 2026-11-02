@@ -26,17 +26,18 @@ def _never_run(*_args, **_kwargs):
 
 
 def test_missing_gpu_node_fails_with_the_admission_cause_before_any_sandbox(
-    console_config, monkeypatch, capsys
+    console_config, monkeypatch, capsys, caplog
 ):
     """Defect: check --gpu on a host without the declared GPU starts a sandbox (or
-    reports PASS) instead of the plain admission cause. Fails if run() is called, the
-    exit status is 0, or the line stops naming the missing GPU."""
+    reports PASS). The verdict is safe; the original missing-device cause stays in
+    diagnostics. Fails if run() is called, exit status is 0, or diagnostics are lost."""
     monkeypatch.setattr(gpu_check, "run", _never_run)
     config = _with_devices(console_config, ("/dev/nvidia97",))
     assert gpu_check.check_gpu(config) == 2
     out = capsys.readouterr().out
     assert "Task synthetic: GPU FAIL:" in out
-    assert "GPU device /dev/nvidia97 is not present on this machine" in out
+    assert "Invalid value" in out
+    assert "GPU device /dev/nvidia97 is not present on this machine" in caplog.text
 
 
 def test_task_without_gpu_node_is_not_probed(console_config, monkeypatch, capsys):

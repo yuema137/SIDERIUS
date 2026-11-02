@@ -69,6 +69,7 @@ from agent.schemas.proposal import AgentCard, ExpertContextItem
 from agent.skills.paper_resolver_skill.wrapper import run_skill
 from core.generated_artifact_name import validate_generated_artifact_name
 from core.layout import checkout_root, require_checkout
+from core.record_encoding import decode_record, record_json
 from nodes.llm_settings import literature_bridge_arguments
 
 logger = logging.getLogger(__name__)
@@ -971,7 +972,7 @@ class MLLiteratureReviewAgent:
         try:
             workspace.mkdir(parents=True, exist_ok=True)
             path = workspace / f"ml_literature_review_{inp.run_name}.json"
-            path.write_text(out.model_dump_json(indent=2))
+            path.write_text(record_json(out, indent=2).decode())
         except OSError as e:
             logger.warning("failed to write node output: %s", e)
 
@@ -1020,7 +1021,7 @@ def load_experiment_history(path: str | Path) -> InterpretationOutput:
             f"--experiment-history explicitly / check --workspace and --run_name."
         )
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw = decode_record(json.loads(path.read_text(encoding="utf-8")))
     except json.JSONDecodeError as e:
         raise ValueError(f"Experiment-history file is not valid JSON: {path} ({e})") from e
     try:

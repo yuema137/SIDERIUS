@@ -849,39 +849,23 @@ class LossConfig(BaseModel):
             )
         return self
 
+    @staticmethod
+    def inactive_parameter_values(loss_type: str) -> dict[str, float | bool | None]:
+        """Fields nullified by this loss route, shared with parameter-rule validation."""
+        if loss_type in ("focal", "focal_cw"):
+            return {"beta": None}
+        if loss_type == "smooth_l1":
+            return {"alpha": None, "gamma": None, "use_class_weights": False}
+        if loss_type in ("ce", "custom"):
+            # Custom hyperparameters belong to the plugin's own configuration.
+            return {"alpha": None, "gamma": None, "beta": None}
+        return {}
+
     @model_validator(mode="after")
     def enforce_parameter_consistency(self) -> LossConfig:
-        """
-        Ensures that only relevant parameters are active for the selected loss_type.
-        This prevents the Agent from 'hallucinating' cross-parameter optimizations.
-        """
-        if self.loss_type in ["focal", "focal_cw"]:
-            # SmoothL1 parameter is irrelevant here
-            self.beta = None
-
-        elif self.loss_type == "smooth_l1":
-            # Focal parameters are irrelevant here
-            self.alpha = None
-            self.gamma = None
-            # Regression usually doesn't use class weights in the same way
-            self.use_class_weights = False
-
-        elif self.loss_type == "ce":
-            # CrossEntropy is the baseline, no special hyperparams needed
-            self.alpha = None
-            self.gamma = None
-            self.beta = None
-
-        elif self.loss_type == "custom":
-            # LossConfig is the routing layer only for custom losses — the
-            # plugin's own PLUGIN_LOSS_CONFIG_CLASS carries the actual
-            # hyperparameters. Nullify the built-in params so the agent
-            # can't accidentally pass them through. See
-            # ``docs/design/enable_loss_inventory.md`` § "Two-config design".
-            self.alpha = None
-            self.gamma = None
-            self.beta = None
-
+        """Nullify parameters that are irrelevant to the selected loss route."""
+        for field, value in self.inactive_parameter_values(self.loss_type).items():
+            setattr(self, field, value)
         return self
 
 
@@ -912,6 +896,14 @@ class TrainConfig(BaseModel):
     target_standardization: TargetStandardization = "none"
     drop_last: bool = True
     lr_schedule: LearningRateSchedule | None = Field(default=None, exclude_if=lambda v: v is None)
+
+    @field_validator("epochs", "batch_size", mode="before")
+    @classmethod
+    def reject_boolean_integers(cls, value: Any) -> Any:
+        """Keep numeric coercion, but never turn an LLM boolean into a count."""
+        if isinstance(value, bool):
+            raise ValueError("Training integer fields must not be booleans")
+        return value
 
     @model_validator(mode="after")
     def validate_learning_rate_schedule(self) -> TrainConfig:

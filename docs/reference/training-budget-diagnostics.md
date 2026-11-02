@@ -94,6 +94,26 @@ hardware speed estimate. Hosts can override the field through the typed
 relative-only checks. `max_unit_ms` and wall caps apply independently and are
 unchanged, even when configured below the slowdown floor.
 
+The standard workflow CLI and standalone tuner CLI expose
+`--runtime_verification_pathological_min_unit_ms`; Python launchers use the
+same-named `WorkflowLaunchConfig` field, and workflow declarations set
+`training_settings.launch.runtime_verification_pathological_min_unit_ms`.
+`HyperparamTuningInput` validates an explicit value as finite and nonnegative.
+The launch default is `None`: `_build_runtime_policy` omits the override and
+preserves the default runtime-policy evidence bytes. An explicit value is passed
+without unit conversion to `RuntimeControlPolicy.verification.pathological_min_unit_ms`
+and recorded in each runtime observation's `runtime_policy.verification`.
+It coexists with `runtime_verification_max_wall_seconds`; neither setting
+changes the other, the operator budget, or the watchdog policy.
+
+For pre-#1202 relative-only slowdown decisions, experiment-owned compatibility
+configuration must explicitly set this launch field to `0`. This restores only
+the streak/distribution floor behavior, not an entire historical verifier or
+its source identity. The framework default remains 100 ms; archived evidence
+is not rewritten. Regression coverage lives in
+`tests/unit/core/test_verification_floor_launch.py` (CLI, policy serialization,
+sidecar evidence, sub-ms traces and batched observation wall time).
+
 This check establishes only the stated separation of observed blocks. Overlap
 is inconclusive, not proof of unchanged future runtime. No finite trace can
 exclude every rare-tail false alarm or predict changes after verification ends.

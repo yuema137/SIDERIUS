@@ -19,10 +19,10 @@
     return Number.isNaN(time.getTime()) ? String(value) : time.toLocaleString();
   }
   const unfinished = () => operations.some(item => !['completed', 'operation_failed'].includes(item.state));
-  function progress(loop) {
+  function progress(loop, outcome) {
     if (!loop) return '';
-    const bodies = window.operationOutcome.plural(loop.final_iteration, 'body', 'bodies');
-    return loop.attempted_iterations == null ? `loop up to ${bodies}` : `${loop.attempted_iterations} of ${bodies}`;
+    const bodies = window.operationOutcome.plural(loop.final_iteration, 'iteration', 'iterations');
+    return outcome?.completed_iterations == null ? `loop up to ${bodies}` : `${outcome.completed_iterations} of ${bodies} completed`;
   }
   function markCurrent() {
     const selected = (window.consoleNavigation?.operation || '').toLowerCase();
@@ -42,7 +42,7 @@
       // Run name plus start time tells entries apart even when names repeat.
       link.textContent = [name || KINDS[item.kind] || item.kind, when(item.admitted_at)].join(' · ');
       meta.className = 'muted operation-meta';
-      meta.textContent = [KINDS[item.kind] || item.kind, window.operationOutcome.sentence(item), progress(item.loop), item.seed].filter(Boolean).join(' · ');
+      meta.textContent = [KINDS[item.kind] || item.kind, window.operationOutcome.sentence(item), progress(item.loop, item.outcome), item.seed].filter(Boolean).join(' · ');
       link.title = `Operation UUID ${id} · admitted ${item.admitted_at}`;
       entry.append(link, meta); list.append(entry);
     }

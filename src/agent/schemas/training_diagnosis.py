@@ -85,9 +85,9 @@ def _trend(series: list[float], tol: float) -> Trend:
 def _all_finite(series: list[float | None] | None) -> bool:
     """``True`` when the series is absent or every element is a finite float.
 
-    A ``None`` ELEMENT is the STORAGE IMAGE of a non-finite objective —
-    ``scoring_utils.coerce_nonfinite_to_none`` writes JSON ``null`` for
-    ``NaN``/``±inf`` at the recorder boundary — so it is judged exactly as
+    A ``None`` ELEMENT is the legacy STORAGE IMAGE of a non-finite objective —
+    records written before #1111 passed through
+    ``scoring_utils.coerce_nonfinite_to_none`` — so it is judged exactly as
     the non-finite value it stands for, and a restored diverged history
     reaches the same ``state="invalid"`` verdict as the in-memory one.
     Without the ``is not None`` test ``math.isfinite`` raises ``TypeError``
@@ -213,8 +213,8 @@ def derive_training_diagnosis(
     if not raw_r2 or not _all_finite(raw_r2) or not _all_finite(raw_r3):
         # Divergence / non-finite criterion is EVIDENCE — the raw values stay
         # on the record's history; the diagnosis declines to summarize them.
-        # A ``None`` ELEMENT is the storage image of that same evidence
-        # (``coerce_nonfinite_to_none``) and reaches this branch identically.
+        # A ``None`` ELEMENT is the legacy storage image of that same evidence
+        # (pre-#1111 ``coerce_nonfinite_to_none``) and reaches this branch identically.
         return TrainingDiagnosis(
             state="invalid",
             validation_state=validation_state,

@@ -323,7 +323,9 @@ def apply_round_health(score_res: dict[str, Any], *, merge_score_validity: Any, 
         ``evaluated`` — the honest answer to "did gates RUN?", which
         ``health_gate_results: []`` alone cannot give.
     """
-    outcome = evaluate_round_health(**kwargs)
+    from execute_tools.evaluation_child import source_health_inputs
+
+    outcome = evaluate_round_health(**source_health_inputs(score_res.get("results", {}), kwargs))
     is_degenerate, failure_reason = merge_score_validity(
         kwargs["denoising_score"],
         is_degenerate=outcome.is_degenerate,

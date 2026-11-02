@@ -257,3 +257,13 @@ def test_importing_custom_adaptors_imports_no_native_schemas() -> None:
         [sys.executable, "-I", "-c", probe], capture_output=True, text=True, check=True
     )
     assert result.stdout.strip() == "[]"
+
+
+def test_custom_adaptor_can_emit_free_text_advice(tmp_path: Path) -> None:
+    """The dedicated advice contract must remain reachable through custom adaptors."""
+    manifest = _copy(tmp_path)
+    _rewrite(manifest, output={"contract": "optional.advice-text", "count": 1})
+    loaded = load_adaptor(manifest)
+    ports = (PortValues(name="reviews", contract="literature.output", values=[]),)
+    output = validate_output(loaded, ports, ["Check the held-out split."])
+    assert output.author == output.stamped == ["Check the held-out split."]

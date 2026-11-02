@@ -1,6 +1,7 @@
 """Detached local candidate operations; no native task imports or provider construction."""
 
 from .cancel import request_cancel
+from .host_admission import loop_resume_resources
 from .listing import list_operations
 from .logs import read_operation_log
 from .loop_resume import (
@@ -75,6 +76,7 @@ __all__ = [
     "list_operations",
     "lookup_operation_request",
     "loop_control_requests",
+    "loop_resume_resources",
     "loop_root_operation",
     "loop_segment_advice",
     "operation_admitted",

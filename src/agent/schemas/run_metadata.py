@@ -24,7 +24,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from agent.schemas.hyperparam_tuning import ExpertAdvice
+from agent.schemas.hyperparam_tuning import DEFAULT_IS_TRIAL, ExpertAdvice
 
 # ---------------------------------------------------------------------------
 # Building blocks
@@ -201,7 +201,7 @@ class TunerRunMetadata(BaseRunMetadata):
         description="Validation file index when not in trial mode; None otherwise.",
     )
     is_trial: bool = Field(
-        default=False,
+        default=DEFAULT_IS_TRIAL,
         description="Whether the tuner ran in trial-explore mode.",
     )
 

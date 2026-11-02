@@ -221,7 +221,8 @@ def test_child_rechecks_captured_bytes_before_native_calls(prepared, native_runn
 
 
 def test_actual_reuse_output_capture_keeps_missing_description_and_test(prepared, tmp_path):
-    """Native Branch B omits persistence; capture must not invent description/tests.
+    """Native Branch B omits persistence; capture must not invent description/tests,
+    and must echo the judged-branch consumed-input stamp it was given.
 
     This tests a returned native branch with an explicitly seeded index fixture.
     Fresh task-declared reuse inventory is a separate unresolved native-owner gap.
@@ -230,6 +231,7 @@ def test_actual_reuse_output_capture_keeps_missing_description_and_test(prepared
     from agent.schemas.implementor import ImplementorInput
     from core.capability_registry import CapabilityMetadata, CapabilityRegistry
     from core.local_code import LocalCodeError, bind_code_package
+    from core.record_encoding import ENCODING_VERSION
     from ml_models.plugin_binding import bind_run_model_plugins
     from nodes.ml_model_implementor.ml_model_implementor import MLModelImplementor
     from tests.helpers.local_code_model import MODEL_TYPE, make_package
@@ -263,6 +265,8 @@ def test_actual_reuse_output_capture_keeps_missing_description_and_test(prepared
             "train_config": {},
             "loss_config": {"loss_type": "ce"},
         },
+        consumed_input_sha256="a" * 64,
+        consumed_input_encoding=ENCODING_VERSION,
     )
     seed = json.loads((Path(prepared.preview.project_root) / "seed.json").read_text())
     ref = TaskCompositionRef.model_validate(seed["task_composition_ref"])
@@ -274,6 +278,11 @@ def test_actual_reuse_output_capture_keeps_missing_description_and_test(prepared
         capture_record(path, output)
         assert output.test_file_path == ""
         assert not Path(output.description_file_path).exists()
+        # Judged-branch replay reads the stamp and its encoding from this record (#1326).
+        assert (output.consumed_input_sha256, output.consumed_input_encoding) == (
+            "a" * 64,
+            ENCODING_VERSION,
+        )
         escaped = output.model_copy(update={"model_file_path": str(tmp_path / "other.py")})
         with pytest.raises(LocalCodeError, match="captured member identity"):
             verify_artifacts(escaped, attempt, (str(tmp_path),), ref)

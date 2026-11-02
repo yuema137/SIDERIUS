@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import importlib
 import pathlib
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -391,6 +391,16 @@ class TestProductionActuallyRoutesThroughTheBoundary:
         class _Prepared:
             hypothesis = STALE_PROSE
             execution_provenance = provenance
+            timing_context = None
+            # Planning's before/after portion pair; equal means no ceiling clamp.
+            _planned_portions: ClassVar[dict[str, float]] = {
+                "trial_portion": 0.5,
+                "train_portion": 1.0,
+                "eval_portion": 1.0,
+            }
+            cfg_trial_portion = 0.5
+            cfg_train_portion = 1.0
+            cfg_eval_portion = 1.0
 
         class _Brain:
             def reflect(self, exp_id, hypothesis, results, context, **kwargs):

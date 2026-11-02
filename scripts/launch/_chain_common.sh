@@ -72,6 +72,7 @@ FORMAL_MAX_EPOCHS=""
 HEALTHGATE_MODE=blocking
 RESULT_AUTHORITY=scientific
 SKIP_FORMAL_MIN_DELTA=-1.0
+SCORE_UNITS_METRIC=""
 BYPASS_FORMAL_TIME_BUDGET_MIN_DELTA=0.0
 BYPASS_FORMAL_TIME_BUDGET_MINUTES=""             # Lane F3: empty == omit == no bypass ceiling extension
 LLM_MODEL=""  # Omitted routing is resolved by the Python configuration owner.
@@ -250,10 +251,10 @@ FORCE_FRESH=0
 # set for a manual --start_iter pin or --no_auto_resume.
 AUTO_RESUME_RECOVERY=0
 # Force the LAST round of each iteration to be a FORMAL training run
-# (full dataset, no --trial_portion clamp). Default ON to preserve the
+# (formal_portion training scope, not the planner's --trial_portion). Default ON to preserve the
 # pre-existing chain behavior. Pass --no-force_formal_round in smoke /
 # gate tests where all rounds should stay in trial mode — otherwise the
-# last round uses the full training set and a 2-iter chain takes 2+
+# last round uses the Formal scopes and a 2-iter chain takes 2+
 # hours instead of ~30-60 min. CLI flag exists on run_one_iteration.py
 # (--force_formal_round / --no-force_formal_round); this wrapper-side
 # forwarding closes the same bash-wrapper gap the lit-review flags hit.
@@ -330,6 +331,7 @@ parse_chain_args() {
         --formal_max_epochs)      FORMAL_MAX_EPOCHS="$2"; shift 2 ;;
         --healthgate_mode)                    HEALTHGATE_MODE="$2"; shift 2 ;;
         --result_authority)                   RESULT_AUTHORITY="$2"; shift 2 ;;
+        --score_units_metric) SCORE_UNITS_METRIC="$2"; shift 2 ;;
         --skip_formal_min_delta)              SKIP_FORMAL_MIN_DELTA="$2"; shift 2 ;;
         --bypass_formal_time_budget_min_delta) BYPASS_FORMAL_TIME_BUDGET_MIN_DELTA="$2"; shift 2 ;;
         --bypass_formal_time_budget_minutes) BYPASS_FORMAL_TIME_BUDGET_MINUTES="$2"; shift 2 ;;
@@ -533,6 +535,7 @@ build_app_args() {
         ${FORMAL_MAX_EPOCHS:+--formal_max_epochs "$FORMAL_MAX_EPOCHS"}
         --healthgate_mode "$HEALTHGATE_MODE"
         --result_authority "$RESULT_AUTHORITY"
+        ${SCORE_UNITS_METRIC:+--score_units_metric "$SCORE_UNITS_METRIC"}
         --skip_formal_min_delta "$SKIP_FORMAL_MIN_DELTA"
         --bypass_formal_time_budget_min_delta "$BYPASS_FORMAL_TIME_BUDGET_MIN_DELTA"
         ${BYPASS_FORMAL_TIME_BUDGET_MINUTES:+--bypass_formal_time_budget_minutes "$BYPASS_FORMAL_TIME_BUDGET_MINUTES"}

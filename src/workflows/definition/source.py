@@ -6,6 +6,7 @@ imported, evaluated or opened. Admission limits are local to this converter.
 
 import ast
 import math
+from collections.abc import Iterable, Mapping
 from typing import Literal, NoReturn
 
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -203,11 +204,22 @@ _OMITTED_WHEN_DEFAULT: dict[tuple[type[BaseModel], str], object] = {
 _FIELD_NAMES = frozenset(name for model in _CONSTRUCTORS.values() for name in model.model_fields)
 
 
+ValidationCode = Literal["validation", "trial_override_schedule"]
+SourceCode = Literal["syntax", "unsupported", "limit", "validation", "trial_override_schedule"]
+
+
+def validation_code(errors: Iterable[Mapping[str, object]]) -> ValidationCode:
+    """Allow only the native schedule refusal identity; never project arbitrary types."""
+    if any(item.get("type") == "trial_override_schedule" for item in errors):
+        return "trial_override_schedule"
+    return "validation"
+
+
 class SourceDiagnostic(BaseModel):
     """Source spans use one-based lines and zero-based UTF-8 byte columns."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
-    code: Literal["syntax", "unsupported", "limit", "validation"]
+    code: SourceCode
     message: str
     line: int | None = None
     column: int | None = None
@@ -227,7 +239,7 @@ class WorkflowSourceError(ValueError):
 
 
 def _fail(
-    code: Literal["syntax", "unsupported", "limit", "validation"],
+    code: SourceCode,
     message: str,
     node: ast.AST | None = None,
     field_path: tuple[str | int, ...] | None = None,
@@ -250,12 +262,13 @@ def _fail(
 def _validation_error(error: ValidationError, node: ast.AST | None = None) -> NoReturn:
     # Native custom-validator messages can interpolate source values. Never
     # forward msg/input/ctx, including unknown JSON keys in error locations.
-    first = error.errors(include_input=False, include_context=False, include_url=False)[0]
+    details = error.errors(include_input=False, include_context=False, include_url=False)
+    first = details[0]
     path = tuple(
         part if isinstance(part, int) or part in _FIELD_NAMES else "<value>"
         for part in first["loc"]
     )
-    _fail("validation", "Declaration validation failed", node, path or None)
+    _fail(validation_code(details), "Declaration validation failed", node, path or None)
 
 
 def _check_resources(module: ast.Module) -> None:

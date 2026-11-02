@@ -25,6 +25,7 @@ from tools.candidate_prepare.reusable_selection import (
 from tools.candidate_worker.models import CandidateRunRequest
 from tools.workflow_authoring.versions import recorded_name
 from workflows.definition import AuthoredLoop
+from workflows.definition.models import NATIVE_LITERATURE_PROFILE
 
 from .capture_facts import capture_facts
 from .files import credentials
@@ -166,7 +167,7 @@ class ReusableCandidate:
         if loop is not None:
             admit_captured_judge_route(loop, request)
         literature_settings = {}
-        if profile == "native-literature-candidate/v1":
+        if profile == NATIVE_LITERATURE_PROFILE:
             from tools.candidate_prepare.reusable_literature import review_settings
             from workflows.definition import ManagedCandidateBinding
 

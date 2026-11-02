@@ -148,7 +148,7 @@ without `hash()`.
 `tests/unit/execute_tools/test_trainer_seeding.py`: two in-process CPU runs
 with one `SeedContext`, started from different process RNG states, give
 identical initial weights and loss histories, and a different run seed gives
-different initial weights; a missing plan raises `MissingRunSeed` before model
+different initial weights; an explicit `None` plan raises `MissingRunSeed` before model
 construction; `main()` records generated and supplied seeds; freezing pins
 only the subsample stream; the `[seed]` line is printed before training
 starts; children get `PYTHONHASHSEED=0` unless the operator set a value.
@@ -184,8 +184,13 @@ trainer's epoch-0 subsample seed without loading torch.
 
 `train_engine_sandbox.run_experiment_streaming(..., seed_plan=...)`:
 
-1. `seed_plan=None` raises `MissingRunSeed` before the model is built. There is
-   no label- or `hash()`-based fallback.
+1. `seed_plan: TrainingSeedPlan` is a required keyword-only argument. Omitting
+   it raises Python's `TypeError` during argument binding. An untyped caller's
+   explicit `seed_plan=None` still raises `MissingRunSeed` through
+   `core.training_seeds.require_seed_plan` before the model is built. There is
+   no label- or `hash()`-based fallback. Streaming options after `seed_plan`
+   are also keyword-only; the positional prefix through `freeze_subsample`
+   is unchanged. Callers must pass the plan as `seed_plan=plan`.
 2. `seed_process(seed_plan)` runs before model construction, so weight
    initialization and dropout draw from seeded generators.
 3. Target standardization's pool uses `seed_plan.epoch(0).subsample`.
@@ -198,8 +203,27 @@ trainer's epoch-0 subsample seed without loading torch.
 5. The R3 validation pass keeps its `fork_rng` isolation, so it consumes no
    training RNG state.
 
+The direct legacy Python callable
+`train_engine_sandbox.run_experiment(..., seed_plan=...)` requires the same
+plan. Its implementation in `execute_tools.legacy_training` applies
+`seed_process` before delegating to the engine's private training body; the
+engine re-exports the public callable for existing callers.
+Its `seed_plan: TrainingSeedPlan` argument is likewise required and keyword-only:
+omission raises `TypeError`, and explicit `None` raises `MissingRunSeed` before
+construction or checkpoint writes.
+The caller owns the supplied dataset and loader's sampling generators; this
+entry does not regenerate their already-materialized data or replace their RNGs.
+
 The legacy single-file branch of `main()` calls `seed_process` before building
-its dataset and gives its loader the epoch-0 shuffle generator.
+its dataset and gives its loader the epoch-0 shuffle generator. It then calls
+the same private training body without reseeding: the dataset's NumPy offset
+draw must remain ahead of any NumPy draws in a model constructor. The CLI's
+existing RNG sequence and the streaming path are unchanged.
+
+These guarantees cover process-global constructor/forward RNGs, not random
+state created while importing plugins before seeding. Plugin import lifecycle
+policy is tracked in issue #1306; independent unseeded generators and plugins
+that reseed themselves are also outside this guarantee.
 
 ### Trainer CLI entry boundary
 
@@ -394,7 +418,8 @@ from `run_seed`.
 ## RNG census guard
 
 `tests/unit/core/test_rng_census.py` (census in `tests/unit/core/rng_census.py`)
-walks every `src/**/*.py` with the AST, resolving import aliases, and flags:
+walks every `src/**/*.py` and `examples/**/*.py` (including
+`examples/task_templates/`) with the AST, resolving import aliases, and flags:
 `random.<draw|seed|Random>`, `np.random.<legacy draw|seed|default_rng|state>`,
 `torch.<rand*|manual_seed|Generator|…>` and `torch.cuda.manual_seed[_all]`,
 any `secrets.*`, `hash(` in `execute_tools/` or `nodes/`, and a
@@ -402,9 +427,21 @@ any `secrets.*`, `hash(` in `execute_tools/` or `nodes/`, and a
 `*_main.py`, a top-level `main()` or a `__main__` guard) that reaches torch,
 directly or through any chain of `src` imports, must call `seed_process`,
 `apply_process_seeds` or `seeded_scope`, or be enumerated with a reason. Every remaining site is listed in
-`ALLOWLIST` / `ENTRY_ALLOWLIST`, keyed by `(module, function, call)` with a
+`ALLOWLIST` / `ENTRY_ALLOWLIST` for source and `EXAMPLE_ALLOWLIST` for examples, keyed by `(module, function, call)` with a
 reason; an unlisted site and a stale entry both fail. The exp-side census
 (task data paths) is E3.
+
+Quickstart and synthetic masked regression consume `ScopeBuildRequest.seed`
+for scope sampling and `EpochSamplingParams.epoch_seed` for epoch sampling.
+Callers supply run-derived seeds through the existing tuner and
+`TrainingSeedPlan` owners; the plugins raise `core.seeding.MissingRunSeed`
+before a sampling draw if the required seed is absent. Full-scope selection
+and deterministic prefix ceilings do not require a seed. The CSV template
+also refuses absent seeds, including when its ceiling selects a random subset.
+Fixed `(GENERATOR_SEED, shard)` dataset streams are explicitly exempt: they
+identify the synthetic dataset, independently of run sampling.
+`tests/unit/examples/test_example_sampling_seeds.py` exercises both examples'
+training/evaluation scopes and epoch datasets through these public methods.
 
 ## Not yet provided
 

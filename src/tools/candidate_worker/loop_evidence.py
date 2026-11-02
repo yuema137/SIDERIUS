@@ -12,13 +12,20 @@ from workflows.definition.fanout import execution_families
 from workflows.research_history import advance_completed_history, history_metric, seed_history
 
 from .fanout_inputs import captured_contents
-from .graph_evidence import expected_nodes, read_graph_control, verify_graph_trace
+from .graph_evidence import (
+    expected_nodes,
+    read_graph_control,
+    read_traced_record,
+    verify_graph_trace,
+)
 from .layout import candidate_control_dir
 from .loop_stop import (
+    MAX_TRIED_BODIES,
     BodyScore,
     JudgeBoundaryVerdict,
     LoopInputRequest,
     StopReason,
+    TriedBody,
     captured_metric,
     evaluate_stop,
     input_request,
@@ -57,9 +64,7 @@ def advance_body(
     nodes = {item.node_id: item for item in body.graph_trace.nodes}
 
     def payload(node_id: str) -> bytes:
-        path = nodes[node_id].record_path
-        assert path is not None
-        return Path(path).read_bytes()
+        return read_traced_record(nodes[node_id], bounded=False)
 
     interpretation = InterpretationOutput.model_validate_json(
         payload(shape.interpretation.interpretation)
@@ -111,9 +116,9 @@ def verified_loop(
 ) -> VerifiedLoop:
     """``verify_loop`` plus the re-derived input anchor a continuation resumes from."""
     from .loop import pause_requested, stop_requested
-    from .loop_models import admit_loop
+    from .loop_models import require_loop
 
-    admit_loop(request)
+    require_loop(request)
     loop = request.preview.document.definition.loop
     assert loop is not None
     if (
@@ -146,7 +151,13 @@ def verified_loop(
     # A segment may pause only after dispatching its own body, never at its resume point.
     resumed_at, checkpoints = verify_segment(initial, receipt)
     successor = has_successor(initial, receipt)
-    if trace.attempted_iterations < loop.final_iteration and not successor:
+    # A paused receipt proves completed work, not eligibility to dispatch again.
+    # Resume admission and resume_history separately require an unused next slot.
+    if (
+        receipt.status != "paused"
+        and trace.attempted_iterations < loop.final_iteration
+        and not successor
+    ):
         require_unused_next(request, initial, trace.attempted_iterations)
     from .loop_resume import segment_advice
 
@@ -157,7 +168,13 @@ def verified_loop(
         advice=segment_advice(initial, trace.segment_id),
     )
     last = bodies[-1] if bodies else None
-    derivation = derive_stop(request, initial, bodies, scores)
+    derivation = derive_stop(
+        request,
+        initial,
+        bodies,
+        scores,
+        segment_boundaries=tuple(item.completed_iterations for item in checkpoints),
+    )
     derived, verdicts = derivation.stop_reason, derivation.verdicts
     if trace.stop_reason != derived:
         raise ValueError("loop stop reason disagrees with re-derived stop conditions")
@@ -166,7 +183,7 @@ def verified_loop(
         checkpoints,
         own=trace.attempted_iterations if trace.attempted_iterations > resumed_at else None,
     )
-    if trace.input_request != asked:
+    if not same_input_request(trace.input_request, asked):
         raise ValueError("loop input request disagrees with re-derived stop conditions")
     if trace.judge_verdicts != verdicts:
         raise ValueError("loop judge verdicts disagree with the recorded judge evidence")
@@ -223,7 +240,7 @@ def _verify_input_pauses(
         checkpoint = at.get(boundary)
         if checkpoint is None:
             raise ValueError("loop continued past a condition input request")
-        if checkpoint.input_request != requested:
+        if not same_input_request(checkpoint.input_request, requested):
             raise ValueError("predecessor input request disagrees with re-derived conditions")
     requested_at = {item.reason.iteration for item in requests}
     for checkpoint in checkpoints:
@@ -239,6 +256,8 @@ def derive_stop(
     initial: CandidateRunReceipt,
     bodies: tuple[CandidateRunReceipt, ...],
     scores: tuple[BodyScore, ...],
+    *,
+    segment_boundaries: tuple[int, ...] = (),
 ) -> LoopDerivation:
     """Re-run the stateless evaluator at every completed boundary; trust no recorded value.
 
@@ -273,9 +292,64 @@ def derive_stop(
         reason = decided.reason if decided.decision == "stop" else None
         asked = input_request(value, decided)
         if asked is not None:
+            resumed_at = max((item for item in segment_boundaries if item < count), default=0)
+            asked = summarize_tried_bodies(
+                request, completed[:count], scores[:count], asked, resumed_at=resumed_at
+            )
             requests.append(asked)
             anchor = count
     return LoopDerivation(reason, tuple(verdicts), tuple(requests), anchor)
+
+
+def same_input_request(recorded: LoopInputRequest | None, derived: LoopInputRequest | None) -> bool:
+    """Legacy requests omit the projection; populated projections must match exactly."""
+    if recorded is not None and derived is not None and not recorded.summary.what_was_tried:
+        derived = derived.model_copy(
+            update={"summary": derived.summary.model_copy(update={"what_was_tried": ()})}
+        )
+    return recorded == derived
+
+
+def summarize_tried_bodies(
+    request: CandidateRunRequest,
+    bodies: tuple[CandidateRunReceipt, ...],
+    scores: tuple[BodyScore, ...],
+    asked: LoopInputRequest,
+    *,
+    resumed_at: int,
+) -> LoopInputRequest:
+    """Project the latest bounded completed bodies of this segment, after verification."""
+    shape = execution_families(
+        request.preview.document.definition, request.preview.execution_profile
+    )
+    assert shape.interpretation is not None and shape.tuning is not None
+    tried: list[TriedBody] = []
+    start = max(resumed_at, len(scores) - MAX_TRIED_BODIES)
+    for body, score in zip(bodies[start:], scores[start:], strict=True):
+        assert body.graph_trace is not None and body.status == "completed"
+        nodes = {item.node_id: item for item in body.graph_trace.nodes}
+        proposal = ProposalOutput.model_validate_json(
+            read_traced_record(nodes[shape.interpretation.proposal], bounded=False)
+        )
+        tuning = HyperparamTuningOutput.model_validate_json(
+            read_traced_record(nodes[shape.tuning], bounded=False)
+        )
+        tried.append(
+            TriedBody(
+                iteration=score.iteration,
+                model_name=proposal.model_name[:128],
+                validation_passed=body.validation_passed,
+                best_valid_score=score.valid_formal,
+                metric_id=asked.summary.metric_id,
+                direction=asked.summary.direction,
+                stop_reason=None
+                if tuning.termination_reason == "completed"
+                else tuning.termination_reason,
+            )
+        )
+    return asked.model_copy(
+        update={"summary": asked.summary.model_copy(update={"what_was_tried": tuple(tried)})}
+    )
 
 
 def require_unused_next(

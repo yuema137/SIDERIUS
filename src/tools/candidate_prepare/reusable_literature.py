@@ -25,6 +25,7 @@ from tools.workflow_preview.config import parse_config
 from workflows.candidate_literature_policy import require_candidate_literature_policy
 from workflows.definition import ManagedCandidateBinding, ReusableWorkflowDocument
 from workflows.definition.fanout import execution_families
+from workflows.definition.models import NATIVE_LITERATURE_PROFILE
 from workflows.literature_input import build_literature_input
 from workflows.llm_config import WorkflowLLMConfig
 
@@ -50,7 +51,7 @@ class LiteratureSettings(BaseModel):
 
 
 def review_settings(document: ReusableWorkflowDocument) -> tuple[str, LiteratureSettings] | None:
-    if document.execution_profile != "native-literature-candidate/v1":
+    if document.execution_profile != NATIVE_LITERATURE_PROFILE:
         return None
     edge = execution_families(document.definition, document.execution_profile).literature
     assert edge is not None
@@ -102,7 +103,7 @@ def verify_literature(
     request: CandidatePreparationRequest,
     read_bytes: Callable[[Path], bytes],
 ) -> None:
-    if document.execution_profile != "native-literature-candidate/v1":
+    if document.execution_profile != NATIVE_LITERATURE_PROFILE:
         return
     output = Path(request.output_dir)
     expected = prepare_literature(

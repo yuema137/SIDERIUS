@@ -16,11 +16,11 @@ executes training, inference or scoring.
 
 | file | surface |
 |---|---|
-| `llm_bridge.py` | `LLMBridge` — default OpenAI-compatible transport plus optional Pydantic AI Direct API adapters. Known providers `openai` / `gemini` / `deepseek` resolve `base_url` + key env var automatically; **any OpenAI-compatible endpoint** works via explicit `base_url`/`api_key`. Also the `reflect_provider` split (route the reflector to a second provider/model) and the stub-mode bridge for $0 pseudo runs |
+| `llm_bridge.py` | `LLMBridge` — default OpenAI-compatible transport plus optional Pydantic AI Direct API adapters. Supported providers resolve `base_url` + key env var through `llm_settings.py`; the [installation table](../../docs/getting-started/installation.md#api-keys) specifies which require explicit model selection; **any OpenAI-compatible endpoint** works via explicit `base_url`/`api_key`. Also the `reflect_provider` split (route the reflector to a second provider/model) and the stub-mode bridge for $0 pseudo runs |
 | `llm_transport/` | Optional provider adapters; [transport contract](llm_transport/transport-contract.md) owns selection, protocol translation, limitations and validation |
 | `credential_environment.py` | `load_compatibility_dotenv` (python-dotenv default search, `override=False`; logs the loaded path once per process at INFO and warns when it is outside the checkout or group/other-accessible) and `warn_if_blank_credential` (warns by name for a set-but-blank key). Logs paths, modes and names only, never values |
 | `llm_settings.py` | Pure provider/model/timeout and reflector-inheritance resolution used by the bridge and offline inspection; no credentials or client construction |
-| `prompts.py` + `prompt_templates/` | per-node prompt rendering (`proposal/`, `implementor/`, `interpretation/`, `tuner/`, `literature_review/`). Task science enters ONLY as caller-supplied task-blocks values parsed by `prompt_templates/_task_blocks_loader.py` — the shared mechanics of the three adapters (proposal / implementor / interpretation) |
+| `prompts.py` + `prompt_templates/` | per-node prompt rendering (`proposal/`, `implementor/`, `interpretation/`, `tuner/`, `literature_review/`). Task science comes from validated task declarations: task-block values parsed by `prompt_templates/_task_blocks_loader.py` and the composed evaluation context rendered by `evaluation.spec`. The loader remains the shared owner for the proposal / implementor / interpretation block adapters |
 | `judge/` | LLM judge call/evidence core: one bounded `run_judge_call` through `LLMBridge`, write-once `JudgeCallEvidence`, provider-free replay; see the [judge contract](judge/judge-contract.md) |
 | `schemas/` | node input/output contracts and the typed edge protocols — see [`schemas/README.md`](schemas/README.md) |
 | `skills/` | atomic tools invoked by agents: `training_skill`, `inference_skill`, `denoising_score_skill`, `evaluate_time_skill` (+ the `~/.siderius` calibration store), `evaluate_vram_skill`, `check_config_format_skill`, `model_io_probe_skill.py`, `forbidden_pattern_skill.py`, `paper_resolver_skill` |
@@ -47,9 +47,12 @@ explicitly when selecting a different provider.
 
 ## Inputs
 
-API keys from the environment (`OPENAI_API_KEY` / `GEMINI_API_KEY` /
-`DEEPSEEK_API_KEY` / `ANTHROPIC_API_KEY` / `MOONSHOT_API_KEY` / `ZAI_API_KEY`; `LLMBridge` calls `load_compatibility_dotenv()`, so a repo-root `.env`
-works; see [compatibility `.env` loading](../../docs/getting-started/installation.md#compatibility-env-loading)); per-stage routing from `configs/llm/*.json`
+API keys from the environment; the
+[installation provider table](../../docs/getting-started/installation.md#api-keys)
+owns credential names and default-model versus explicit-model requirements.
+`LLMBridge` calls `load_compatibility_dotenv()`, so a repo-root `.env` works
+under the [compatibility loading rules](../../docs/getting-started/installation.md#compatibility-env-loading).
+Per-stage routing comes from `configs/llm/*.json`
 (`workflows/llm_config.py` loads them); task-block YAML paths supplied by the
 caller, never discovered.
 
@@ -147,3 +150,79 @@ text = bridge.generate_text(system_prompt="…", user_prompt="say ok")
 skills); prompt-surface pin tests under the node suites; dual-mode
 integration tests exercise the stub bridge by default; see the
 [workflow integration guide](../../tests/integration/workflows/README.md).
+
+## Persisted prompt history decoding
+
+Planner memory and reflector actual-results dictionaries are decoded through
+`core.record_encoding.decode_record` at the prompt entry point, including
+external raw-summary callers. Storage metadata is never prompt evidence.
+Finite/null prompt bytes remain unchanged. Non-finite values retain the
+existing numeric prompt-text rendering after decoding; historical null
+records remain null. The detailed serialization/paper-impact owner is
+[core record contract](../core/core-contract.md#raw-consumer-boundary-and-prompt-rendering).
+
+## Structured evaluation declaration boundary
+
+Task compositions may carry an opt-in `evaluation` declaration with component
+meanings, quantitative selection and constraints, or rubric references. Composition validates and fingerprints the declaration.
+The shared constraint
+append path renders it through `evaluation.spec` using a scoped, copyable context.
+The absent-spec gate is outside the boundary, preserving historical profile
+admission and message bytes. Primary-only metric evaluation can launch; other
+evaluation capabilities retain their own guards. Rubric judgment is
+never arithmetic in MetricOrder; #1297 owns any new candidate-result projector and
+versioned judge evidence. The exact schema and future Health/source-metric binding
+are in the [evaluation contract](../execute_tools/evaluation-contract.md).
+
+## Pseudo model tensor geometry
+
+`StubLLMBridge` delegates implementor code and repair snippets to
+`stub_model.stub_model_code`. For composed runs it acquires the validated
+`ModelIOContract` through `workflows.task_config.run_bound_model_io_contract`.
+The stub accepts numeric tensors without treating values as vocabulary indices.
+It expands a differentiable scalar projection to the declared output: fixed
+extents remain fixed, and shared symbolic extents are read from the corresponding
+input axes at forward time. Batch size and symbolic sequence/row lengths are
+therefore not frozen to smoke-test sizes. The projection is a plumbing witness,
+not a scientific architecture or a useful predictor.
+
+An output extent that is neither fixed nor shared with the input raises
+`UnsupportedStubShapeError`, identifying the unresolved output axis before
+plugin execution. Unbound bridge fixtures and legacy prose-only declarations
+retain the historical 256-token sequence stub.
+
+The projection is cast to the first floating dtype in the output contract's
+`admissible` order (`float16`, `bfloat16`, `float32` or `float64`) and
+materialized with `.contiguous()`, so in-place or `.view` loss steps see owned
+storage rather than an expanded alias. An output contract with no floating
+admissible dtype raises `UnsupportedStubShapeError` from `stub_model_code`,
+naming the declared dtypes, before candidate execution or the smoke/repair loop.
+The unbound legacy stub is unchanged.
+
+`stub_model.stub_proposal_semantics` derives the pseudo proposal from the same
+bound contract (`stub_model.bound_stub_contract`). `output_type` is the
+contract's `legacy_output_type`; the baseline and tuner-planner `loss_type` is
+`ce` for a categorical output and `smooth_l1` for a continuous one, so both pass
+`validate_semantic_loss_compatibility` and the candidate probe sees the declared
+geometry. The model description, mathematical definition, motivation, expert
+advice constraint, comparison/causal mechanism and proposer/implementor
+reasoning describe the emitted scalar projection, rendered input and declared
+output shape with the emitted dtype. No task name is consulted. An output with no
+floating admissible dtype raises `UnsupportedStubShapeError` already at proposal
+synthesis. Unbound fixtures keep the historical sequence narrative, `classifier`
+and `ce` unchanged.
+
+`stub_model.py` is outside the `rendering_assembly_digest` and planner strategy
+source closures: it produces pseudo plugin bytes, not prompts. Edits confined to
+it change explicit-contract pseudo plugin bytes and their downstream artifact
+identities, but not those assembly identities. Edits to `StubLLMBridge` in
+`llm_bridge.py` still change both closures. Real provider calls, prompt
+templates and task declarations are unaffected. Resume/preflight identity checks
+remain strict.
+
+`tests/unit/agent/llm_bridge/test_stub_task_shapes.py` covers negative float
+inputs, image classification, sequence classification, row classification and
+continuous tensor outputs through candidate validation and forward/backward
+execution with changing runtime extents. Passing these checks establishes model
+shape compatibility; it does not establish that downstream pseudo training or
+resource admission supports a task or host.

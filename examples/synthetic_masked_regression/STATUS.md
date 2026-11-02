@@ -26,3 +26,27 @@ The production isolated preflight is also physically qualified on an H100
 Not claimed: live LLM-agent execution or network literature retrieval by this
 example. The workflow witness uses typed deterministic substitutes; real
 training, scoring, Health, and GPU execution are covered independently.
+
+`SyntheticMaskedTaskDataPath.validate_health_coverage` proves attempt coverage
+for both manifests before composed, Health-enabled trial/formal execution.
+It accepts only scopes whose rows belong to the configured evaluation shard
+and include at least `MIN_HEALTH_VALID_ROWS` (two) valid rows. Smaller valid
+selections, foreign-shard
+rows, and `health_gate_files` overrides other than the singleton evaluation
+shard are uncovered demand and cause `TaskHealthCoverageError` at the attempt
+boundary. Full and sampled scopes follow the same rule. The positive dispersion
+floor requires at least two valid predictions because population standard
+deviation (`ddof=0`) is always zero for one sample. Coverage still does not
+guarantee a passing dispersion verdict. The proof uses
+scope metadata; disk/supervision consistency remains a materialization check.
+Regression evidence: `tests/unit/examples/test_masked_health_coverage.py`.
+
+## Sampling seed contract (#1169)
+
+Scope and epoch subsampling now raise `core.seeding.MissingRunSeed` when the
+caller omits the seed. Explicitly seeded results and fixed generated shard
+bytes are unchanged. Editing `_masked_task.py` changes its content hash and
+both shipped and modular composition fingerprints, so previous workspace
+locks cannot resume against this revision. Archived qualification receipts
+retain their original identities; this change claims no new GPU qualification.
+Regression: `tests/unit/examples/test_example_sampling_seeds.py`.

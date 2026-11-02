@@ -16,7 +16,14 @@ from pathlib import Path
 
 from tools.candidate_operations.models import OperationFailure
 
-from .files import canonical, config_bytes, open_directory, private_bytes, write_all
+from .files import (
+    canonical,
+    config_bytes,
+    open_directory,
+    private_bytes,
+    private_file_lock,
+    write_all,
+)
 from .models import ConsoleConfig
 from .settings_export import (
     ExportFile,
@@ -314,43 +321,24 @@ class ConsoleSettings:
 
     def write(self, request: SettingsWrite) -> SettingsView:
         """CAS on the file's sha256, full validation, then one atomic 0600 publish."""
-        from .config import validate_resolved
-        from .workspace import resolve_console
-
         request = SettingsWrite.model_validate_json(request.model_dump_json())
         path, console = self.context.settings_path, self.context.console_path
         if not self.writable or path is None or console is None:
             raise SettingsRefusal(403, "read_only", "global settings are read-only on this console")
         payload = (request.settings.model_dump_json(indent=2) + "\n").encode()
-        with self._lock:
-            _, current, problem = self._pending()
-            if problem is not None and current is None:
-                raise SettingsRefusal(422, "settings_unreadable", problem)
-            if current != request.expected_sha256:
-                raise SettingsRefusal(
-                    409, "stale", "settings changed since they were loaded; reload"
-                )
-            try:
-                candidate = resolve_console(config_bytes(str(console)), settings=request.settings)
-                validate_resolved(candidate)
-            except SettingsInvalid as error:
-                raise SettingsRefusal(422, "settings_invalid", str(error)) from None
-            except (OSError, ValueError):
-                raise SettingsRefusal(
-                    422, "settings_invalid", "settings fail console validation; run check"
-                ) from None
-            try:
-                durable = _publish_private(path, payload)
-            except (OSError, OperationFailure) as error:
-                leftover = any(
-                    "could not be removed" in note for note in getattr(error, "__notes__", ())
-                )
-                raise SettingsRefusal(
-                    422,
-                    "settings_invalid",
-                    "the settings folder is unavailable or contains a link; nothing was saved"
-                    + ("; a temporary file may remain in settings/" if leftover else ""),
-                ) from None
+        try:
+            with self._lock, private_file_lock(path):
+                durable = self._write_locked(request, path, console, payload)
+        except (OSError, OperationFailure) as error:
+            leftover = any(
+                "could not be removed" in note for note in getattr(error, "__notes__", ())
+            )
+            raise SettingsRefusal(
+                422,
+                "settings_invalid",
+                "the settings folder is unavailable or contains a link; nothing was saved"
+                + ("; a temporary file may remain in settings/" if leftover else ""),
+            ) from None
         view = self.view()
         if durable:
             return view
@@ -360,6 +348,29 @@ class ConsoleSettings:
                 "save again or check the disk before restarting."
             }
         )
+
+    def _write_locked(
+        self, request: SettingsWrite, path: Path, console: Path, payload: bytes
+    ) -> bool:
+        """Re-read, validate and replace while both thread and process locks are held."""
+        from .config import validate_resolved
+        from .workspace import resolve_console
+
+        _, current, problem = self._pending()
+        if problem is not None and current is None:
+            raise SettingsRefusal(422, "settings_unreadable", problem)
+        if current != request.expected_sha256:
+            raise SettingsRefusal(409, "stale", "settings changed since they were loaded; reload")
+        try:
+            candidate = resolve_console(config_bytes(str(console)), settings=request.settings)
+            validate_resolved(candidate)
+        except SettingsInvalid as error:
+            raise SettingsRefusal(422, "settings_invalid", str(error)) from None
+        except (OSError, ValueError):
+            raise SettingsRefusal(
+                422, "settings_invalid", "settings fail console validation; run check"
+            ) from None
+        return _publish_private(path, payload)
 
     def upload(self, upload: LibraryUpload) -> LibraryRef:
         """Validate, then publish once into the workspace library; never replaces a file."""

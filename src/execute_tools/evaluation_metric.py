@@ -269,9 +269,11 @@ class MetricResult(BaseModel):
     """One attempt's evaluation — the record-facing, ADDITIVE payload.
 
     ``scalar`` is the metric's mandatory result. It is typed ``float | None``
-    ONLY because the storage boundary (``coerce_nonfinite_to_none``, exactly as
-    for ``denoising_score``) writes a non-finite sentinel such as the scorer's
-    ``-inf`` as ``null``, and a persisted record must re-validate; a metric
+    ONLY because legacy storage (``coerce_nonfinite_to_none`` before #1111 for
+    records and #1316 for scoring-child output, exactly as for
+    ``denoising_score``) wrote a non-finite sentinel such as the scorer's
+    ``-inf`` as ``null``, and such a record must re-validate. Current writers
+    keep the float through ``core.record_encoding``; a metric
     handle never produces ``None`` itself — a deliverable that cannot be
     scored yields :class:`NotScoreableResult`, not a result with no scalar.
     """
@@ -552,15 +554,44 @@ class GlobalMseMetric(EvaluationMetric):
         return squared_error_sum / element_count, None, ()
 
 
+class EvaluationInputsScoreability(ScoreabilityContract):
+    """Acceptance of a generated formula selection spec (#1294).
+
+    Requires evaluated component evidence, not just existing files. Registered
+    in the framework vocabulary below so a persisted effective ``MetricSpec``
+    round-trips to an EQUAL spec; the arithmetic and evidence owners live in
+    ``evaluation_aggregation`` / ``evaluation_results``.
+    """
+
+    contract_id: str = "evaluation_inputs/v1"
+    evaluation_sha256: str
+    required_components: tuple[str, ...]
+
+    def check(self, deliverables: Mapping[int, str]) -> ScoreabilityVerdict:
+        return self.evidence_verdict(
+            (
+                ScoreabilityFailure(
+                    requirement="component_evidence",
+                    detail="Evaluate source metrics before aggregation.",
+                ),
+            )
+        )
+
+    def evidence_verdict(self, failures: tuple[ScoreabilityFailure, ...]) -> ScoreabilityVerdict:
+        return ScoreabilityVerdict(contract_id=self.contract_id, failures=failures)
+
+
 # ---------------------------------------------------------------------------
 # Declared-spec rebinding — the declaration IS the spec (D14-2 C5)
 # ---------------------------------------------------------------------------
+
 
 #: The declared-contract vocabulary: contract_id → concrete class. A
 #: DECLARATION lookup, not a plugin surface — grows only when a new contract
 #: class is added in this module.
 _SCOREABILITY_CONTRACT_TYPES: dict[str, type[ScoreabilityContract]] = {
     "deliverable_presence": PresenceScoreabilityContract,
+    "evaluation_inputs/v1": EvaluationInputsScoreability,
 }
 
 

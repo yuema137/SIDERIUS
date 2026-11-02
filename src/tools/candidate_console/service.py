@@ -1,8 +1,10 @@
 """Code-callable console policy; native operations remain the execution owner."""
 
 import hashlib
+from collections import OrderedDict
 from collections.abc import Mapping
 from pathlib import Path
+from threading import Lock
 from uuid import UUID
 
 from agent.judge.evidence import read_call_evidence
@@ -20,6 +22,7 @@ from tools.candidate_operations import (
     PrepareOperation,
     list_operations,
     loop_control_requests,
+    loop_resume_resources,
     loop_root_operation,
     loop_segment_advice,
     operation_admitted,
@@ -46,6 +49,7 @@ from tools.candidate_prepare.reusable_models import ReusablePreparationReceipt
 from tools.candidate_worker import CandidateTokenSnapshot
 from tools.candidate_worker.loop_stop import JudgeBoundaryVerdict
 from tools.candidate_worker.models import CandidateRunReceipt
+from tools.setup_review.summary_errors import error_category
 
 from .config import host_scheduling, validate_config
 from .files import credentials
@@ -65,16 +69,19 @@ from .models import (
     OperationCancelAcknowledgement,
     OperationListItemView,
     OperationListView,
+    OutcomeEvidence,
     PreparedReview,
     PreparedSelection,
     PrepareSelection,
     RecordedExampleOption,
     RecordedExampleView,
+    ReservationSelection,
     RouteView,
     RunResourcesSelection,
     StatusView,
     TaskChoice,
 )
+from .outcomes import outcome_evidence
 from .readiness import credential_readiness
 from .recorded_examples import read_recorded_example
 from .seed_labels import CHAIN_CONTRADICTED, readback_label
@@ -189,22 +196,65 @@ def with_run_resources(
 ) -> CandidateOperation:
     """Attach the operator's reservation and parallel opt-in after review (B3-4c).
 
-    Revalidated through the operation and request owners, so a ``parallel``
-    block on a non-graph request is refused here as anywhere else.
+    Only the supplied fields are set; one the reviewed operation already
+    carries is never replaced or cleared (``run_resources_conflict`` when they
+    differ). Revalidated through the operation and request owners, so a
+    ``parallel`` block on a non-graph request is refused here as anywhere else.
     """
     if selection.resources is None and selection.parallel is None:
         return operation
-    request = operation.request.model_copy(update={"parallel": selection.parallel})
+    resources = _merged(operation.resources, selection.resources, "resources")
+    parallel = _merged(operation.request.parallel, selection.parallel, "parallel")
+    request = operation.request.model_copy(update={"parallel": parallel})
     return CandidateOperation.model_validate_json(
-        operation.model_copy(
-            update={"request": request, "resources": selection.resources}
-        ).model_dump_json()
+        operation.model_copy(update={"request": request, "resources": resources}).model_dump_json()
     )
+
+
+def _merged[T](reviewed: T | None, supplied: T | None, name: str) -> T | None:
+    if reviewed is not None and supplied is not None and reviewed != supplied:
+        raise OperationFailure(
+            "run_resources_conflict",
+            f"the reviewed run already declares {name}; review again without overriding it",
+        )
+    return reviewed if supplied is None else supplied
+
+
+def preparation_error(snapshot: OperationSnapshot) -> str | None:
+    """Project legacy receipt diagnostics as fixed categories, never exception text/names."""
+    receipt = snapshot.receipt
+    if (
+        snapshot.kind in {"prepare", "prepare_reusable"}
+        and snapshot.state == "operation_failed"
+        and snapshot.reason != "cancelled_while_queued"
+    ):
+        return "Preparation failed before reporting a result. See the operation log for details."
+    if (
+        snapshot.kind in {"prepare", "prepare_reusable"}
+        and snapshot.state == "unknown"
+        and snapshot.reason == "native_outcome_unresolved"
+    ):
+        return "Preparation reported an error without a verified result. Its outcome remains unresolved; inspect the operation log."
+    if not isinstance(receipt, (CandidatePreparationReceipt, ReusablePreparationReceipt)):
+        return None
+    if receipt.status != "failed" or not receipt.error:
+        return None
+    if receipt.error.startswith("preparation child exit "):
+        return (
+            "Preparation worker failed while building its inputs. See the native log for details."
+        )
+    return {
+        "filesystem": "Filesystem error while preparing the run. See the server log for details.",
+        "invalid": "Invalid input or changed source while preparing the run. See the server log for details.",
+        "unexpected": "Preparation failed while checking or building its inputs. See the server log for details.",
+    }[error_category(receipt.error)]
 
 
 class CandidateConsole:
     def __init__(self, config: ConsoleConfig, setup_store: SetupStore | None = None):
         """``setup_store``: the workspace registry (``create_app``); absent, legacy only."""
+        self._outcome_cache: OrderedDict[tuple[UUID, str], OutcomeEvidence | None] = OrderedDict()
+        self._outcome_cache_lock = Lock()
         self.config = validate_config(config)
         self.host = host_scheduling(self.config)
         self.setup_store = SetupStore() if setup_store is None else setup_store
@@ -387,7 +437,9 @@ class CandidateConsole:
         )
         return StatusView(
             **snapshot.model_dump(exclude={"receipt", "receipt_digest"}),
+            outcome=outcome_evidence(self.config.operation_store, snapshot),
             seed=seed_readback(snapshot),
+            preparation_error=preparation_error(snapshot),
             native_status=receipt.status if receipt else None,
             graph_trace=receipt.graph_trace if isinstance(receipt, CandidateRunReceipt) else None,
             native_id=native_id,
@@ -401,6 +453,23 @@ class CandidateConsole:
         """Record cancel for a live candidate; acknowledgement is not termination."""
         request_cancel(self.config.operation_store, operation_id)
         return OperationCancelAcknowledgement(operation_id=operation_id)
+
+    def _list_outcome(self, snapshot: OperationSnapshot) -> OutcomeEvidence | None:
+        """Memoize only successful projections of verified terminal receipt identities.
+
+        The operations owner still re-verifies each snapshot on every list read.
+        Direct status reads deliberately bypass this bounded, process-local cache.
+        """
+        if snapshot.state != "completed" or snapshot.receipt_digest is None:
+            return outcome_evidence(self.config.operation_store, snapshot)
+        key = (snapshot.operation_id, snapshot.receipt_digest)
+        with self._outcome_cache_lock:
+            if key not in self._outcome_cache:
+                self._outcome_cache[key] = outcome_evidence(self.config.operation_store, snapshot)
+                if len(self._outcome_cache) > 200:
+                    self._outcome_cache.popitem(last=False)
+            self._outcome_cache.move_to_end(key)
+            return self._outcome_cache[key]
 
     def operations(self, limit: int = 50, project_id: str | None = None) -> OperationListView:
         """Read-only list of this store's verified records; receipts and paths stay out.
@@ -416,6 +485,12 @@ class CandidateConsole:
                 loop = loop_status(store, snapshot)
             except (OSError, ValueError):
                 loop = None
+            try:
+                outcome = self._list_outcome(snapshot)
+            except OperationFailure as error:
+                if error.detail.code != "integrity":
+                    raise
+                outcome = None
             items.append(
                 OperationListItemView(
                     operation_id=snapshot.operation_id,
@@ -426,6 +501,7 @@ class CandidateConsole:
                     state=snapshot.state,
                     native_status=snapshot.receipt.status if snapshot.receipt else None,
                     loop=loop,
+                    outcome=outcome,
                     seed=seed_readback(snapshot),
                     reason=snapshot.reason if snapshot.state == "operation_failed" else None,
                 )
@@ -447,8 +523,19 @@ class CandidateConsole:
         request_loop_pause(self.config.operation_store, operation_id)
         return LoopPauseAcknowledgement(operation_id=operation_id)
 
-    def review_loop_resume(self, operation_id: UUID) -> LoopResumeReview:
-        """Owner review of one exited paused segment, plus names-only credential facts."""
+    def review_loop_resume(
+        self, operation_id: UUID, selection: ReservationSelection | None = None
+    ) -> LoopResumeReview:
+        """Owner review of one exited paused segment, plus names-only credential facts.
+
+        ``selection.resources`` is the segment's reservation when the loop root
+        declared none (#1385). The operations owner's ``loop_resume_resources``
+        refuses here what admission would refuse, and the reviewed value is bound
+        into ``review_digest``.
+        """
+        selection = ReservationSelection.model_validate_json(
+            (selection or ReservationSelection()).model_dump_json()
+        )
         snapshot = review_loop_resume(self.config.operation_store, operation_id)
         root = loop_root_operation(self.config.operation_store, operation_id)
         receipt = snapshot.receipt
@@ -458,17 +545,30 @@ class CandidateConsole:
             raise OperationFailure("integrity", "loop resume receipt missing trace")
         if snapshot.receipt_digest is None:
             raise OperationFailure("integrity", "loop resume receipt has no digest")
+        loop_resume_resources(root, selection.resources, ledger=self.host is not None)
         return LoopResumeReview(
             predecessor_operation_id=operation_id,
             expected_receipt_digest=snapshot.receipt_digest,
             completed_iterations=receipt.loop_trace.attempted_iterations,
             final_iteration=root.request.preview.document.definition.loop.final_iteration,
             credential_readiness=credential_readiness(root.request, self.config.credential_file),
+            resources=selection.resources,
+            review_digest=None
+            if selection.resources is None
+            else selection.bound_digest(snapshot.receipt_digest),
         )
 
     def resume_loop(self, selection: LoopResumeSelection) -> OperationHandle:
         """Submit one reviewed Resume; a known request UUID replays before credential reads."""
         selection = LoopResumeSelection.model_validate_json(selection.model_dump_json())
+        if (
+            selection.resources is not None or selection.expected_review_digest is not None
+        ) and selection.expected_review_digest != selection.bound_digest(
+            selection.expected_receipt_digest
+        ):
+            raise OperationFailure(
+                "stale_review", "resume resources changed since review; review again"
+            )
         store = self.config.operation_store
         submission = CandidateLoopResumeOperation(
             request_id=selection.request_id,
@@ -476,6 +576,7 @@ class CandidateConsole:
                 predecessor_operation_id=selection.predecessor_operation_id,
                 expected_receipt_digest=selection.expected_receipt_digest,
                 operator_advice=selection.operator_advice,
+                resources=selection.resources,
             ),
         )
         environment: dict[str, str] = {}
@@ -483,7 +584,19 @@ class CandidateConsole:
             root = loop_root_operation(store, selection.predecessor_operation_id)
             if root is None:
                 raise OperationFailure("kind", "operation is not an authored loop")
-            environment = credentials(self.config.credential_file, root.request.environment_names)
+            try:
+                environment = credentials(
+                    self.config.credential_file, root.request.environment_names
+                )
+            except OperationFailure as error:
+                # Another submitter may have admitted this UUID during the credential read.
+                # Replay through the owner (which still checks the exact request binding);
+                # an unreadable record must retain its fail-closed error, not unlock advice.
+                if (
+                    error.detail.code != "credentials"
+                    or lookup_operation_request(store, selection.request_id) is None
+                ):
+                    raise
         return self.submit(submission, launch_environment=environment)
 
     def graph_results(self, operation_id: UUID) -> GraphResultsView:

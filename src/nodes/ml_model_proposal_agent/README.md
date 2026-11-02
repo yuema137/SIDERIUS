@@ -15,6 +15,15 @@ Effects: the configured provider is called and structural retries may occur;
 implementation and execution are later stages. Read the [node contract](ml_model_proposal_agent.md)
 for exact input and refusal behavior. `evidence_rendering.py` is private.
 
+The runtime preflight is advisory. If a draft omits a temporal segment size
+needed by the estimate, the node records why it skipped the estimate and returns
+the proposal. Runtime decisions use measured evidence after implementation.
+Invalid estimator inputs and unexpected errors still surface.
+If a draft explicitly sets the segment size to zero or a negative number,
+schema validation refuses it before estimation. The pipeline sends that error
+back to the proposing stage for correction; legacy mode returns the validation
+error without an inner retry.
+
 In a workflow's LLM JSON file, `propose.comparison`, `propose.reasoning` and
 `propose.proposing` select the model for each pipeline stage. Each selection
 includes `provider`, `model_id`, `reasoning_effort` and `max_retries`. A correction

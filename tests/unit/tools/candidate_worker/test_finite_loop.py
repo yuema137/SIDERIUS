@@ -163,7 +163,9 @@ def test_two_native_bodies_preserve_advice_and_verify_feedback(
     with pytest.raises(ValueError, match="capture mismatch"):
         verify_loop(request, parent, receipt)
     # The console maps a refused loop body to a typed, path-free integrity failure.
-    with pytest.raises(OperationFailure, match="verified loop bodies are unavailable") as refused:
+    with pytest.raises(
+        OperationFailure, match="verified loop iterations are unavailable"
+    ) as refused:
         graph_results.read_graph_results(SimpleNamespace(operation_store=object()), operation_id)
     assert refused.value.detail.code == "integrity"
 
@@ -607,7 +609,7 @@ def test_loop_on_unsupported_profile_is_refused_before_record_and_dispatch(
     # Exception payloads may include secrets or arbitrarily long raw input. Neither
     # the profile-specific refusal nor the generic I/O refusal may forward them.
     for error_type, message in (
-        (ValueError, "research loops require the native-interpretation-candidate profile"),
+        (ValueError, "candidate inputs or routes changed; review again"),
         (OSError, "candidate inputs or routes changed; review again"),
     ):
         with monkeypatch.context() as patch:
@@ -689,7 +691,7 @@ def test_candidate_llm_requests_are_seed_invariant(
 
 
 def test_met_input_request_pauses_with_summary_and_leaves_next_slot_unused(
-    prepared, loop_tuner, monkeypatch
+    prepared, loop_tuner, interpretation_provider, monkeypatch
 ):
     """Fails if a met ``request_input`` condition completes or continues the loop, records
     its pause as a stop reason, or summarizes facts other than the verified scores."""
@@ -715,7 +717,9 @@ def test_met_input_request_pauses_with_summary_and_leaves_next_slot_unused(
         last_improvement_iteration=1,
         incumbent=high,
     )
-    assert trace.input_request.summary == InputRequestSummary(
+    assert trace.input_request.summary.model_copy(
+        update={"what_was_tried": ()}
+    ) == InputRequestSummary(
         iteration=3,
         final_iteration=4,
         metric_id=metric.id,
@@ -810,3 +814,226 @@ def test_readback_refuses_a_segment_that_continued_past_a_condition_input_reques
     )
     with pytest.raises(ValueError, match="loop continued past a condition input request"):
         verify_loop(replayed, parent, receipt)
+
+
+@pytest.mark.parametrize(
+    ("case", "reason", "message"),
+    [
+        (
+            "profile",
+            "profile",
+            "research loops require the native-interpretation-candidate profile",
+        ),
+        (
+            "extra_node",
+            "shape",
+            "research loops require a native interpretation-to-tuning iteration; "
+            "review the workflow nodes and connections",
+        ),
+        (
+            "no_tuning",
+            "shape",
+            "research loops require a native interpretation-to-tuning iteration; "
+            "review the workflow nodes and connections",
+        ),
+        (
+            "feedback",
+            "feedback",
+            "research loop feedback must connect native tuning to interpretation; "
+            "review the workflow connections",
+        ),
+    ],
+)
+def test_loop_admission_reason_survives_submission(
+    prepared, tmp_path, monkeypatch, case, reason, message
+):
+    """#1244: structural refusals must not be misreported as changed input files."""
+    from unittest.mock import Mock
+    from uuid import uuid4
+
+    from tools.candidate_operations import (
+        CandidateOperation,
+        OperationStoreConfig,
+        submit_operation,
+    )
+    from tools.candidate_operations.models import OperationFailure
+    from tools.candidate_worker.loop_models import admit_loop
+
+    request = loop_request(prepared)
+    definition = request.preview.document.definition
+    if case == "profile":
+        preview = request.preview.model_copy(update={"execution_profile": None})
+    else:
+        if case == "extra_node":
+            interpreter = next(node for node in definition.nodes if node.id == "interpret")
+            definition = definition.model_copy(
+                update={
+                    "nodes": (*definition.nodes, interpreter.model_copy(update={"id": "other"})),
+                }
+            )
+        elif case == "no_tuning":
+            definition = definition.model_copy(
+                update={"nodes": tuple(n for n in definition.nodes if n.capability != "tuning")}
+            )
+        else:
+            definition = definition.model_copy(
+                update={
+                    "loop": definition.loop.model_copy(
+                        update={
+                            "feedback": definition.loop.feedback.model_copy(
+                                update={"target": "other"}
+                            ),
+                        }
+                    )
+                }
+            )
+        preview = request.preview.model_copy(
+            update={
+                "document": request.preview.document.model_copy(update={"definition": definition}),
+            }
+        )
+    request = request.model_copy(update={"preview": preview})
+    refusal = admit_loop(request)
+    assert refusal is not None and refusal.reason == reason
+    assert str(refusal) == message
+    if case in {"feedback", "no_tuning"}:
+        # Exercise typed refusal rendering independently of schema validation.
+        request = loop_request(prepared)
+        monkeypatch.setattr(
+            "tools.candidate_operations.submit.fresh_preview", Mock(side_effect=refusal)
+        )
+    config = OperationStoreConfig(
+        state_root=str(tmp_path / "state"),
+        preparation_roots=(str(tmp_path),),
+        candidate_roots=(str(tmp_path),),
+    )
+    spawn = Mock()
+    monkeypatch.setattr("tools.candidate_operations.submit.spawn", spawn)
+    submission = CandidateOperation(request_id=uuid4(), request=request)
+    with pytest.raises(OperationFailure) as error:
+        submit_operation(config, submission, launch_environment={})
+    assert error.value.detail.code == "candidate_preflight"
+    assert error.value.detail.message == message
+    assert not (Path(config.state_root) / "operations" / str(submission.request_id)).exists()
+    spawn.assert_not_called()
+
+
+def test_console_outcome_reads_failed_proposal_iteration(
+    prepared, loop_tuner, native_runner, interpretation_provider, monkeypatch, tmp_path
+):
+    """#1198: real loop receipts include a failed attempt, not a second completion."""
+    from tests.unit.tools.candidate_console.test_loop_stop import _snapshot
+    from tools.candidate_console import graph_results, outcomes
+    from tools.candidate_operations import OperationStoreConfig
+    from tools.candidate_operations.models import CandidateOperation
+
+    generate = native_runner.generate
+
+    def fail_second_proposal(self, *args, **kwargs):
+        if self.context["iter"] == 2:
+            raise ValueError("synthetic proposal failure")
+        return generate(self, *args, **kwargs)
+
+    monkeypatch.setattr(native_runner, "generate", fail_second_proposal)
+    request = loop_request(prepared, final_iteration=3)
+    receipt = launch_candidate(request)
+    assert receipt.status == "failed"
+    assert receipt.loop_trace is not None and receipt.loop_trace.attempted_iterations == 2
+    operation_id = UUID(hex=receipt.run_id)
+    submission = CandidateOperation(request_id=operation_id, request=request)
+    parent = initial(request).model_copy(update={"run_id": receipt.run_id})
+    monkeypatch.setattr(outcomes, "loop_root_operation", lambda *_: submission)
+    monkeypatch.setattr(graph_results, "read_model", lambda *_args, **_kwargs: parent)
+    evidence = outcomes.outcome_evidence(
+        OperationStoreConfig(
+            state_root=str(tmp_path / "operations"),
+            preparation_roots=(str(tmp_path / "preparations"),),
+            candidate_roots=(str(tmp_path / "workspace"),),
+        ),
+        _snapshot(operation_id, receipt),
+    )
+    assert evidence is not None
+    assert evidence.completed_iterations == 1
+    assert evidence.failed_phases == ("proposal",)
+
+
+def test_loop_consumers_refuse_a_body_record_swapped_after_verification(
+    prepared, loop_tuner, interpretation_provider
+):
+    """#1477: after ``verify_graph_trace`` accepted a body, the loop consumers re-read
+    its native records with ``Path.read_bytes`` and never re-hashed them against the
+    trace's ``record_sha256``, so a record replaced in that window (a forged score,
+    proposal or narrative) fed chain history, the tried-body summary, judge facts
+    and the stop score. Every consumer read must re-hash the bytes it parses; a
+    reverted site parses the forgery and its ``pytest.raises`` fails."""
+    import json
+    from types import SimpleNamespace
+
+    from tools.candidate_worker.loop_evidence import (
+        advance_body,
+        initial_history,
+        summarize_tried_bodies,
+    )
+    from tools.candidate_worker.loop_judge import _body_projection
+    from tools.candidate_worker.loop_stop import project_body_score
+    from workflows.definition.fanout import execution_families
+
+    request = loop_request(prepared)
+    receipt = launch_candidate(request)
+    assert receipt.status == "completed", receipt.error
+    parent = initial(request).model_copy(update={"run_id": receipt.run_id})
+    bodies = verify_loop(request, parent, receipt)
+    body = bodies[0]
+    shape = execution_families(
+        request.preview.document.definition, request.preview.execution_profile
+    )
+    interpretation = shape.interpretation.interpretation
+    proposal = shape.interpretation.proposal
+    tuning = shape.tuning
+    score = project_body_score(request, body, 1)
+    # Only ``summary.metric_id``/``direction`` are read before the projected copy.
+    summary = SimpleNamespace(
+        metric_id="score", direction="higher", model_copy=lambda update: update
+    )
+    asked = SimpleNamespace(summary=summary, model_copy=lambda update: update)
+    consumers = {
+        "advance_body": lambda: advance_body(
+            request, parent, body, initial_history(request, parent)
+        ),
+        "summarize_tried_bodies": lambda: summarize_tried_bodies(
+            request, (body,), (score,), asked, resumed_at=0
+        ),
+        "_body_projection": lambda: _body_projection(request, parent, body, score, 1),
+        "project_body_score": lambda: project_body_score(request, body, 1),
+    }
+    forgeries = {
+        interpretation: ("take_home_message", "forged narrative"),
+        proposal: ("model_name", "forged_model"),
+        tuning: ("best_valid_formal_denoising_score", 1.0e9),
+    }
+    reads = (
+        ("advance_body", interpretation),
+        ("advance_body", proposal),
+        ("advance_body", tuning),
+        ("summarize_tried_bodies", proposal),
+        ("summarize_tried_bodies", tuning),
+        ("_body_projection", tuning),
+        ("_body_projection", interpretation),
+        ("project_body_score", tuning),
+    )
+    records = {item.node_id: Path(item.record_path) for item in body.graph_trace.nodes}
+    for consumer, node in reads:
+        path = records[node]
+        original = path.read_bytes()
+        field, value = forgeries[node]
+        raw = json.loads(original)
+        assert field in raw and raw[field] != value
+        path.write_bytes(json.dumps({**raw, field: value}, indent=2).encode())
+        try:
+            with pytest.raises(ValueError, match="graph native record mismatch"):
+                consumers[consumer]()
+        finally:
+            path.write_bytes(original)
+    # Restored records are the traced bytes again: every consumer reads them.
+    for call in consumers.values():
+        call()

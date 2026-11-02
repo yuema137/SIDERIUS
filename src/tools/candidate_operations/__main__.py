@@ -27,6 +27,7 @@ from .models import (
     LogReadRequest,
     OperationError,
     OperationFailure,
+    OperationResources,
     OperationStoreConfig,
     OperationSubmission,
 )
@@ -73,6 +74,11 @@ def parse_arguments() -> argparse.Namespace:
                 "--advice-file",
                 help="UTF-8 text file with your advice for the resumed segment's proposals "
                 "(1 to 4000 characters after trimming surrounding whitespace)",
+            )
+            command.add_argument(
+                "--resources-file",
+                help="OperationResources JSON reserved for this segment under a host ledger; "
+                "only for a loop whose root declared no resources",
             )
         if name == "submit":
             command.add_argument("--host-ledger")
@@ -149,8 +155,10 @@ def write_loop_resume(
 ) -> CandidateLoopResumeOperation:
     """Review one paused authored-loop segment and save its Resume request; never launch.
 
-    The file is created once so a lost-response retry resubmits the same request ID
-    and the same advice. Invalid advice is refused before any review.
+    The file is created once so a lost-response retry resubmits the same request ID,
+    advice and resources. Invalid advice or resources are refused before any review;
+    whether the resources apply is the submit-time admission's rule
+    (``loop_resume_resources``).
     """
     advice = (
         None
@@ -158,6 +166,13 @@ def write_loop_resume(
         # CRLF files are normalized to LF; a lone CR stays and is refused as a control.
         else OPERATOR_ADVICE.validate_python(
             Path(args.advice_file).absolute().read_bytes().decode("utf-8").replace("\r\n", "\n")
+        )
+    )
+    resources = (
+        None
+        if args.resources_file is None
+        else OperationResources.model_validate_json(
+            Path(args.resources_file).absolute().read_bytes()
         )
     )
     predecessor = UUID(args.operation_id)
@@ -170,6 +185,7 @@ def write_loop_resume(
             predecessor_operation_id=predecessor,
             expected_receipt_digest=review.receipt_digest,
             operator_advice=advice,
+            resources=resources,
         ),
     )
     try:

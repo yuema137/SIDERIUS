@@ -13,6 +13,7 @@ from starlette.exceptions import HTTPException
 
 from tools.candidate_operations import LogReadRequest
 from tools.candidate_operations.models import OperationFailure, UnknownOperation
+from workflows.definition.source import validation_code
 
 from .boundary import RequestBoundary
 from .edited_routes import edited_router
@@ -27,8 +28,10 @@ from .models import (
     OperationCancelSelection,
     PreparedSelection,
     PrepareSelection,
+    ReservationSelection,
 )
 from .native_chain_routes import native_chain_router
+from .profile_assets import add_profile_assets
 from .reusable_models import ReusableAdmissionNotAttempted
 from .reusable_preparation_routes import reusable_preparation_router
 from .reusable_routes import reusable_router
@@ -76,6 +79,14 @@ LOOP_RESUME_REFUSALS = {
         "or it changed since review; read status and review again"
     ),
     "runtime": "the console runtime differs from the one that started this loop",
+    "resources_required": "this console shares a host ledger and the loop's first run "
+    "declared no host resources: declare them for the resumed segment, then review again",
+    "run_resources_conflict": "the loop's first run already declares host resources; "
+    "review again without overriding them",
+    "host_ledger_missing": "host resources need a host ledger in the console "
+    "configuration; review without them",
+    "parallel_budget": "the loop's first run brings its own parallel budget, which a "
+    "host ledger does not accept; resume it from the command line without --host-ledger",
 }
 
 
@@ -119,8 +130,8 @@ def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -
 
     @app.exception_handler(RequestValidationError)
     @app.exception_handler(ValidationError)
-    async def invalid(request: Request, error: Exception):
-        return error_response(422, "validation", "invalid request fields")
+    async def invalid(request: Request, error: RequestValidationError | ValidationError):
+        return error_response(422, validation_code(error.errors()), "invalid request fields")
 
     @app.exception_handler(FileNotFoundError)
     async def missing(request: Request, error: Exception):
@@ -128,11 +139,20 @@ def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -
 
     @app.exception_handler(OperationFailure)
     async def operation_error(request: Request, error: OperationFailure):
-        # Only credential names and the launch-policy and judge-route owners' fixed
-        # refusal texts are forwarded; other native errors may carry paths.
+        # Forward only codes whose owners emit names or fixed, path-free refusals.
+        # Other native errors may carry paths or arbitrary input payloads.
         message = (
             error.detail.message
-            if error.detail.code in ("credentials", "launch_policy", "judge_route")
+            if error.detail.code
+            in (
+                "credentials",
+                "launch_policy",
+                "judge_route",
+                "loop_end",
+                "candidate_preflight",
+                "reusable_preflight",
+                "native_chain_admission",
+            )
             else {
                 "native_chain_policy": "native chain choice is unavailable or overlaps editor writes",
                 "not_supported": "native-chain token aggregation is not supported",
@@ -148,14 +168,33 @@ def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -
                 "not_prepared": "preparation has no verified candidate to review",
                 "host_ledger_missing": "host resources and parallel nodes need a host ledger "
                 "in the console configuration; review without them",
+                "host_queue_full": "host waiting queue is full or disabled; retry when "
+                "capacity is available",
                 "resources_required": "this console shares a host ledger: declare the run's "
                 "host resources, then review again",
+                "resource_refused": "the run's host resources exceed the host budget even "
+                "when it is idle; lower them, then review again",
+                "parallel_unit_exceeds_capacity": "a parallel unit exceeds the host budget "
+                "even alone; lower it in the parallel table or remove its capability",
+                "run_resources_conflict": "the reviewed run already declares other host "
+                "resources or parallel nodes; review again without overriding them",
             }.get(error.detail.code, "native operation could not be verified")
         )
         if isinstance(error, UnknownOperation):
             # Typed absence after a successful store read; the only code that may
             # justify forgetting a retained intent. Plain 404 ``not_found`` never does.
             return error_response(404, "unknown_operation", error.detail.message)
+        if error.detail.blocking_operation_id is not None:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": {
+                        "code": error.detail.code,
+                        "message": message,
+                        "blocking_operation_id": str(error.detail.blocking_operation_id),
+                    }
+                },
+            )
         response = error_response(409, error.detail.code, message)
         if isinstance(error, ReusableAdmissionNotAttempted):
             return JSONResponse(
@@ -234,6 +273,15 @@ def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -
         except OperationFailure as error:
             return refusal(LOOP_RESUME_REFUSALS, error)
 
+    @app.post("/api/operations/{operation_id}/loop-resume-review")
+    async def loop_resume_review_with_resources(operation_id: UUID, request: Request):
+        """The same review with the segment's reservation in the body (#1385)."""
+        selection = ReservationSelection.model_validate_json(await request.body())
+        try:
+            return await run_in_threadpool(service.review_loop_resume, operation_id, selection)
+        except OperationFailure as error:
+            return refusal(LOOP_RESUME_REFUSALS, error)
+
     @app.post("/api/loop-resumes", status_code=202)
     async def loop_resume(request: Request):
         selection = LoopResumeSelection.model_validate_json(await request.body())
@@ -269,6 +317,7 @@ def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -
             LogReadRequest(operation_id=operation_id, kind=kind, offset=offset, max_bytes=max_bytes)
         )
 
+    add_profile_assets(app)
     assets = Path(__file__).parent / "static"
 
     @app.get("/")

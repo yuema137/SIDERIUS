@@ -40,6 +40,7 @@ from core.planner_strategy_identity import PlannerStrategyIdentity
 from core.runtime_control.admission import AdmissionDecision
 from execute_tools.evaluation_execution import CandidateEvaluationResult
 from execute_tools.evaluation_metric import MetricResult, NotScoreableResult
+from execute_tools.evaluation_results import SelectionBinding
 
 #: Names that must NEVER become ``RunBindings`` fields. Each is rebound or
 #: mutated inside the round/attempt loops, so storing it on a "stable bindings"
@@ -241,6 +242,9 @@ class RunBindings:
     planner_strategy_identity: PlannerStrategyIdentity | None = None
     """The resolved provider identity pinned before the first planner call."""
 
+    selection_binding: SelectionBinding | None = None
+    """Resolved effective/source metric identities; absent preserves source ranking."""
+
     def __post_init__(self) -> None:
         offending = sorted(FORBIDDEN_BINDING_FIELDS & {f.name for f in fields(self)})
         if offending:
@@ -300,6 +304,9 @@ class PreparedAttempt:
     #: route. Transient by design: it is not attempt eligibility or record
     #: state, and ``None`` preserves builtin and uncomposed behavior.
     expected_custom_loss_snapshot: CapabilityContractSnapshot | None = None
+    #: Count materialized once during batch planning; guardrails reuse it.
+    #: None denotes legacy/uncomposed preparation without a task row count.
+    resolved_training_rows: int | None = None
     # Owner-produced facts used when planning this attempt, retained for reflection.
     timing_context: PlannerTimingContext | None = None
 
@@ -411,6 +418,7 @@ class _PhaseOutcome:
 
     signal: AttemptSignal = AttemptSignal.PROCEED
     scope_violation_reason: str | None = None
+    environment_admission_refusal: AdmissionDecision | None = None
 
     @classmethod
     def next_attempt(cls, **kw: Any):
@@ -438,7 +446,6 @@ class TrainingOutcome(_PhaseOutcome):
     train_status: Any = None
     train_time: Any = None
     training_results: Any = None
-    environment_admission_refusal: AdmissionDecision | None = None
 
 
 @dataclass(frozen=True)

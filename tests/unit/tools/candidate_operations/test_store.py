@@ -96,3 +96,17 @@ def test_reserved_future_environment_is_rejected_without_store(admitted):
     with pytest.raises(ValueError, match="reserved"):
         validate_submission(config, changed)
     assert not Path(config.state_root).exists()
+
+
+def test_noncanonical_claim_names_actual_directory(admitted):
+    """Do not link to a canonical UUID that is not the blocking directory on disk."""
+    config, submission, record = admitted
+    with locked_store(config) as root:
+        path = claim(root, record)
+        actual = submission.request_id.hex.upper()
+        path.rename(path.with_name(actual))
+        with pytest.raises(OperationFailure) as caught:
+            require_available(root, lambda _: pytest.fail("noncanonical identity observed"))
+    assert caught.value.detail.code == "integrity"
+    assert actual in caught.value.detail.message
+    assert caught.value.detail.blocking_operation_id is None

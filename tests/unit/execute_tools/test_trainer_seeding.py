@@ -11,6 +11,7 @@ import json
 import random
 import sys
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pytest
@@ -62,7 +63,7 @@ def initial_weights(monkeypatch) -> list[dict[str, torch.Tensor]]:
     return recorded
 
 
-def _train(fx: TwoFamilyFixture, tmp_path, name: str, plan: TrainingSeedPlan | None) -> dict:
+def _train(fx: TwoFamilyFixture, tmp_path, name: str, plan: TrainingSeedPlan) -> dict:
     sandbox = {"models": str(tmp_path / name / "m"), "results": str(tmp_path / name / "r")}
     for path in sandbox.values():
         Path(path).mkdir(parents=True)
@@ -126,10 +127,10 @@ class TestEngineSeeding:
     def test_missing_plan_is_refused_before_model_construction(
         self, two_family, tmp_path, initial_weights
     ):
-        """Defect: a missing seed falls back to a hidden value (formerly
+        """Defect: an untyped caller's explicit None falls back to a hidden value (formerly
         ``hash(exp_id)``) instead of raising ``MissingRunSeed``."""
         with pytest.raises(MissingRunSeed):
-            _train(two_family, tmp_path, "a", None)
+            _train(two_family, tmp_path, "a", cast(TrainingSeedPlan, None))
         assert initial_weights == []
 
 

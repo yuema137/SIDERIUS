@@ -51,7 +51,9 @@
         "task_render": "TunerTaskRender",
         "training_diagnosis": "TrainingDiagnosis",
         "execution_provenance": "ExecutionProvenance",
-        "constraint_context": "NoneType"
+        "constraint_context": "NoneType",
+        "round_workload": "RoleTimingContext",
+        "validation_clamps": "tuple"
       }
     },
     {
@@ -101,7 +103,9 @@
         "task_render": "TunerTaskRender",
         "training_diagnosis": "TrainingDiagnosis",
         "execution_provenance": "ExecutionProvenance",
-        "constraint_context": "NoneType"
+        "constraint_context": "NoneType",
+        "round_workload": "RoleTimingContext",
+        "validation_clamps": "tuple"
       }
     }
   ]

@@ -30,6 +30,7 @@ from agent.schemas.task_config import ForwardContract
 from core.capability_registry import CapabilityContractSnapshot, CapabilityMetadata
 from core.generated_artifact_name import validate_generated_artifact_name
 from core.hardware_context import HardwareContext
+from core.record_encoding import EncodingVersion, RecordModel
 
 # Fields the implementor is NEVER allowed to adjust. These are owned by the
 # proposer (dataset-level, global, knowable at proposal time). A violation
@@ -248,6 +249,12 @@ class ImplementorInput(BaseModel):
         description="Worker-stamped digest of the proposal and seed a judged branch's "
         "implementation runs on (inputs.consumed_input_sha256; native-proposal-judged/v1 only). "
         "The node echoes it into the output record. Absent elsewhere.",
+    )
+    consumed_input_encoding: EncodingVersion | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Encoding of consumed_input_sha256's pre-image, stamped with it and "
+        "echoed into the output record. Absent on historical stamps.",
     )
 
     constraint_context: ConstraintContext | None = Field(
@@ -476,7 +483,7 @@ class ImplementorInput(BaseModel):
         return self
 
 
-class ImplementorOutput(BaseModel):
+class ImplementorOutput(RecordModel):
     """
     Output of ml_model_implementor.
 
@@ -498,6 +505,13 @@ class ImplementorOutput(BaseModel):
         description="Worker-stamped digest of the proposal and seed this implementation consumed "
         "(canonical JSON of the proposal and ProposalInput). Judged-branch replay compares it "
         "with the adaptor-selected value and its owner seed; absent for other records.",
+    )
+    consumed_input_encoding: EncodingVersion | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Echoed from ImplementorInput: the encoding replay uses to recompute "
+        "consumed_input_sha256. Absent on historical records, which replay their JSON-mode "
+        "projection.",
     )
     model_type: str = Field(
         description="The PLUGIN_MODEL_TYPE key written into the plugin file. "

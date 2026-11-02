@@ -49,6 +49,7 @@ import pytest
 import yaml
 
 from agent.prompt_templates.interpretation.rendering import render_secondary_metrics
+from examples.quickstart.plugins._quickstart_task import materialize_run_bundle
 from execute_tools.evaluation_metric import (
     MetricResult,
     NotScoreableError,
@@ -58,7 +59,6 @@ from execute_tools.evaluation_metric import (
 )
 from execute_tools.metric_order import MetricOrder
 from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
-from tests.helpers.composition_data_root import COMPOSED_TEST_DATA_ROOT
 from tests.helpers.recording_sandbox import RecordingSandbox
 from tests.helpers.step00_pseudo_iteration import run_bounded_pseudo_iteration
 from workflows.task_composition import (
@@ -192,10 +192,13 @@ def _drive(
 
     composition = compose_run_task_bindings(str(_manifest_with_secondaries(tmp_path, metric_ids)))
     composed = [(m.spec.id, m.spec.direction) for m in composition.secondary_metrics]
+    # Planning counts the real training scope before probing. Keep this lifecycle
+    # fixture honest by supplying the task's sha-verified synthetic shards.
+    bundle = materialize_run_bundle(REPO_ROOT / "examples" / "quickstart", tmp_path / "bundle")
 
     # The C1 link, re-asserted here rather than assumed: the run-scoped binding
     # activates exactly what composition resolved.
-    with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
+    with bind_run_task_composition(composition, physical_data_root=bundle["data_dir"]):
         bound = [(m.spec.id, m.spec.direction) for m in resolve_bound_run_secondary_metrics()]
         _LifecycleSandbox.outcomes = dict(outcomes)
         monkeypatch.setattr(_rs, "RecordingSandbox", _LifecycleSandbox)

@@ -24,6 +24,7 @@ for offline CI. Legacy routes do not import Pydantic AI at runtime.
 | `providers.py` | Construct supported SDK/provider/model objects with SDK retries disabled |
 | `runtime.py` | One Direct API request and exception translation |
 | `accounting.py` | Raw JSON/SSE accounting capture before SDK defaults |
+| `tool_admission.py` | Shared complete single-tool admission for legacy and Direct API routes |
 | `responses.py` | Admit complete representable results and normalize measured usage |
 | `LLMBridge` | Retry policies, remaining-deadline clipping, content repair, labels and usage persistence |
 
@@ -31,13 +32,16 @@ for offline CI. Legacy routes do not import Pydantic AI at runtime.
 
 Default routes for `openai`, `gemini`, and `deepseek` retain the existing OpenAI
 SDK Chat Completions implementation. New providers automatically select this
-backend when specified through workflow `provider` and `model_id` fields:
+backend when specified through workflow `provider` and `model_id` fields.
 
-| Provider | Default endpoint | Credential variable | Default protocol/model adapter |
-| --- | --- | --- | --- |
-| `anthropic` | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` | Anthropic Messages / `AnthropicModel` |
-| `moonshot` | `https://api.moonshot.ai/v1` | `MOONSHOT_API_KEY` | OpenAI-compatible Chat / `MoonshotAIProvider` |
-| `zai` | `https://api.z.ai/api/paas/v4` | `ZAI_API_KEY` | OpenAI-compatible Chat / `ZaiModel` |
+Credential names and model-selection requirements are owned by the
+[installation provider table](../../../docs/getting-started/installation.md#api-keys).
+
+| Provider | Default endpoint | Default protocol/model adapter |
+| --- | --- | --- |
+| `anthropic` | `https://api.anthropic.com` | Anthropic Messages / `AnthropicModel` |
+| `moonshot` | `https://api.moonshot.ai/v1` | OpenAI-compatible Chat / `MoonshotAIProvider` |
+| `zai` | `https://api.z.ai/api/paas/v4` | OpenAI-compatible Chat / `ZaiModel` |
 
 New providers require an explicit model ID. Cross-provider reflector selection
 also requires its own model ID for these providers. No model availability is
@@ -106,6 +110,17 @@ forced output-tool selection. There is no automatic fallback to prompt-only
 JSON, another model, or another protocol. Qualification must exercise JSON and
 tools separately for each intended model/configuration combination.
 
+### Legacy single-tool admission
+
+The default OpenAI-compatible `tool_call` route uses the same count, declared
+name, nonempty call ID and complete JSON-object argument checks as Direct API.
+It additionally requires exactly one response choice, a function call, no
+refusal, and a complete SDK `stop` or `tool_calls` finish reason. Invalid
+responses raise `ValueError` after billed usage is recorded, outside retries.
+A continuing deadline takes precedence over admission and records one late
+receipt. Valid requests and `ToolCallResult` payloads are unchanged. These
+checks do not add argument-schema validation or tool execution.
+
 ## Retry, lifecycle, and errors
 
 Each invocation creates and closes its own asynchronous HTTP/SDK clients.
@@ -159,6 +174,12 @@ all Python sources beneath `llm_transport`, in addition to the existing prompt
 owners. A transport or routing source change after preflight therefore refuses
 the pinned planner identity before the provider request. Source identity does
 not establish equivalence of live model outputs or qualify dependency upgrades.
+The native planner's `content_sha256` fingerprints `prompts.py`, while its
+`assembly_sha256` also fingerprints bridge and transport sources. Admission-only
+changes can therefore preserve content identity while refusing resume against
+an older workspace assembly pin. Such changes require deliberate pin updates
+in `tests/unit/agent/test_planner_strategy.py` and freeze-batch requalification;
+run that test whenever `llm_bridge.py` changes. Do not rewrite archived pins.
 This intentionally changes the assembly digest; existing run locks and archived
 paper identities are not rewritten or treated as equivalent.
 

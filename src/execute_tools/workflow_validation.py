@@ -12,6 +12,7 @@ import math
 import os
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
+from core.record_encoding import decode_record
 from execute_tools.impl_attempts import stage_artifact_dir
 
 # Defaults mirror the chain-test configuration. Callers may override per-run.
@@ -72,7 +73,7 @@ def validate_workflow_outputs(
     interp_path = os.path.join(iter_dir, f"interpretation_{run_name}.json")
     assert os.path.exists(interp_path), f"Interpretation output not found: {interp_path}"
     with open(interp_path) as f:
-        interp = json.load(f)
+        interp = decode_record(json.load(f))
 
     assert set(source_models).issubset(set(interp["model_types"])), (
         f"Expected {list(source_models)} in model_types, got {interp['model_types']}"
@@ -89,7 +90,7 @@ def validate_workflow_outputs(
     proposal_path = os.path.join(attempt_dir, f"proposal_{run_name}.json")
     assert os.path.exists(proposal_path), f"Proposal output not found: {proposal_path}"
     with open(proposal_path) as f:
-        proposal = json.load(f)
+        proposal = decode_record(json.load(f))
 
     model_name = proposal["model_name"]
     assert model_name not in builtin_models, (
@@ -118,7 +119,7 @@ def validate_workflow_outputs(
     impl_path = os.path.join(stage_dir, f"implementor_{run_name}.json")
     assert os.path.exists(impl_path), f"Implementor output not found: {impl_path}"
     with open(impl_path) as f:
-        impl = json.load(f)
+        impl = decode_record(json.load(f))
 
     model_file = impl["model_file_path"]
     test_file = impl["test_file_path"]
@@ -135,7 +136,7 @@ def validate_workflow_outputs(
     valid_path = os.path.join(stage_dir, f"validation_{run_name}.json")
     assert os.path.exists(valid_path), f"Validation output not found: {valid_path}"
     with open(valid_path) as f:
-        validation = json.load(f)
+        validation = decode_record(json.load(f))
 
     assert validation["passed"] is True, (
         f"Validation failed: {validation.get('error_message', 'unknown')}"

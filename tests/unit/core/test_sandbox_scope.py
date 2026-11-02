@@ -20,7 +20,8 @@ from unittest.mock import patch
 
 import pytest
 
-from core.sandbox_executor import StubSandbox, TidmadSandbox
+from core.sandbox_executor import TidmadSandbox
+from core.stub_sandbox import StubSandbox
 from execute_tools.data_paths import bind_physical_data_root
 from execute_tools.dataset_config import DataScope, ScopeViolationError
 from execute_tools.scoring_utils import validate_sample_set

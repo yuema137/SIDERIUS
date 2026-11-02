@@ -7,6 +7,7 @@ from pathlib import Path
 
 import uvicorn
 
+from tests.browser.fixture_metadata import emit_metadata
 from tests.unit.tools.candidate_console.conftest import console_config
 from tests.unit.tools.candidate_prepare.conftest import selection
 from tests.unit.workflows.test_workflow_definition import definition
@@ -78,15 +79,12 @@ def main() -> None:
                 ),
             }
         )
-        print(
-            json.dumps(
-                {
-                    "origin": origin,
-                    "source": str(source),
-                    "token": Path(config.auth_token_file).read_text(),
-                }
-            ),
-            flush=True,
+        emit_metadata(
+            {
+                "origin": origin,
+                "source": str(source),
+                "token": Path(config.auth_token_file).read_text(),
+            }
         )
         uvicorn.run(
             create_app(config), host="127.0.0.1", port=port, proxy_headers=False, log_level="error"

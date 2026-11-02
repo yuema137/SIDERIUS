@@ -63,7 +63,7 @@ class ReusablePreparationExpectation(PreviewModel):
 
 
 class OperationResources(PreviewModel):
-    """The operator's explicit reservation for one candidate operation; nothing is guessed.
+    """The operator's explicit reservation for one candidate or loop segment; nothing is guessed.
 
     Consulted only by a budgeted host ledger. Wall time is not declared here: it is
     the request's ``timeout_seconds``. ``time_budgeted`` states whether the run uses
@@ -119,6 +119,12 @@ class CandidateLoopResumeRequest(PreviewModel):
     # Untrusted operator text for the resumed segment's proposals (not a reviewed input).
     # Omitted when absent, so advice-free requests keep their bytes and request digest.
     operator_advice: OperatorAdvice | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    #: The operator's reservation for this segment when the loop root declared none
+    #: (#1385); consulted only under a host ledger (``host_admission.loop_resume_resources``).
+    #: Omitted when absent, so existing requests keep their bytes and request digest.
+    resources: OperationResources | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
 
@@ -240,6 +246,8 @@ class ProcessIdentity(PreviewModel):
     boot_id: str
     pid: int = Field(gt=0)
     start_ticks: int = Field(ge=0)
+    # None preserves legacy observation; 0 records an unobservable namespace.
+    pid_namespace_inode: int | None = Field(default=None, ge=0)
 
 
 class ProcessObservation(PreviewModel):
@@ -357,11 +365,14 @@ class LogChunk(PreviewModel):
 class OperationError(PreviewModel):
     code: str
     message: str
+    blocking_operation_id: UUID | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class OperationFailure(ValueError):
-    def __init__(self, code: str, message: str):
-        self.detail = OperationError(code=code, message=message)
+    def __init__(self, code: str, message: str, *, blocking_operation_id: UUID | None = None):
+        self.detail = OperationError(
+            code=code, message=message, blocking_operation_id=blocking_operation_id
+        )
         super().__init__(message)
 
 

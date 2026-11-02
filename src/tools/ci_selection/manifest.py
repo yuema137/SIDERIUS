@@ -47,13 +47,23 @@ HUBS: tuple[str, ...] = (
 )
 
 # ---------------------------------------------------------------------------
-# 3. FULL-SUITE TRIGGERS — infrastructure, or the selector itself
+# 3. FULL-SUITE TRIGGERS — infrastructure and unbounded input dependencies
 # ---------------------------------------------------------------------------
 #: A broken selector can select "nothing" and report green, so any change to it
 #: must be validated against everything. The root conftests are autouse
 #: (`tests/unit/conftest.py` installs `forbid_real_heavy_subprocess`), so their
 #: blast radius is the whole suite by construction.
 FULL_SUITE_TRIGGERS: tuple[str, ...] = (
+    # Template loaders compute stage/mode filenames; source import edges and
+    # literal test paths cannot prove all rendering consumers across areas.
+    # Cover the whole tree, including future template families, conservatively.
+    "src/agent/prompt_templates/",
+    # Composition follows YAML references and fingerprints package directories.
+    # Python imports/literal test paths cannot prove every consumer; an area
+    # owner misses cross-area identity tests. Include assets and nested packs.
+    "examples/",
+    "configs/task_composition/",
+    "tests/fixtures/step10_p1/",
     "src/tools/ci_selection/",
     "tests/unit/tools/ci_selection/",
     "tests/conftest.py",
@@ -73,6 +83,21 @@ FULL_SUITE_TRIGGERS: tuple[str, ...] = (
 #: `Path(__file__).resolve().parents[2] / "nodes" / "ml_hyperparameter_tune_agent"`,
 #: which 31 modules / 838 cases depend on. Declared, because derivation cannot.
 DIRECTORY_SCANS: dict[str, tuple[str, ...]] = {
+    # _required_assets builds these roots relative to src and discovers assets
+    # with glob/rglob. Keep all resource families visible to the packaging guard,
+    # even when another direct reader or area suite already owns the change.
+    "tests/unit/packaging/test_package_resources.py": (
+        "src/agent/schemas/vocab_seed.json",
+        "src/agent/prompt_templates/",
+        "src/agent/skills/",
+        "src/agent/data_analysis/reference_packs/",
+        "src/ml_models/",
+        "src/nodes/",
+        "src/dashboard/static/",
+        "src/tools/ci/weights.json",
+        "src/execute_tools/health_checks/resources/health_checks.yaml",
+        "src/tools/claude_hooks/templates/",
+    ),
     # The optional-dependency isolation witness imports the gateway only inside
     # a fresh interpreter's script string, beyond static import discovery.
     "tests/unit/agent/llm_bridge/test_optional_dependency.py": (
@@ -232,7 +257,6 @@ GATE_REQUIREMENTS: dict[str, tuple[str, ...]] = {
 AREA_OWNERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("src/dashboard/", ("tests/unit/dashboard/",)),
     ("src/tools/claude_hooks/", ("tests/unit/tools/claude_hooks/",)),
-    ("examples/", ("tests/unit/examples/",)),
     ("scripts/launch/", ("tests/unit/sdsc_submission_scripts/",)),
     ("scripts/slurm/", ("tests/unit/sdsc_submission_scripts/",)),
     ("scripts/", ("tests/unit/scripts/",)),

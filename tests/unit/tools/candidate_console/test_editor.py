@@ -287,10 +287,17 @@ def test_every_catalog_capability_has_its_paper_label_and_theme_role():
 
     assert set(CAPABILITIES) == set(PAPER_LABELS)
     entries = presentation_entries()
-    assert {name: label for name, (label, _) in entries.items()} == PAPER_LABELS
+    from typing import get_args
+
+    from tools.candidate_worker.graph_models import GraphCapability
+
+    assert set(entries) == set(get_args(GraphCapability))
+    assert {name: entries[name][0] for name in CAPABILITIES} == PAPER_LABELS
+    assert entries["adaptor"] == ("Combine/select", "generic")
     card_css = (STATIC / "editor.css").read_text()
     theme = (STATIC / "theme.css").read_text()
-    for capability, (_, role) in entries.items():
+    for capability in CAPABILITIES:
+        _, role = entries[capability]
         assert role == capability
         assert f".circuit-card.capability-{role} {{" in card_css, role
         # One accent and one tint in each of the light and dark themes.
@@ -792,3 +799,31 @@ def test_filesystem_failures_say_what_was_attempted(editor_config, monkeypatch):
         read = client.get("/api/editor/example", headers=headers).json()["error"]
         assert read["code"] == "filesystem" and "unsaved" not in read["message"].lower()
         assert "not saved" not in read["message"].lower()
+
+
+@pytest.mark.parametrize("anchor", [True, False])
+def test_float_edit_overflow_is_http_validation_refusal(editor_config, anchor):
+    """Out-of-range JSON integers must not escape review as an HTTP 500."""
+    from tests.unit.tools.test_workflow_literal_preservation import browser_document, literal_source
+
+    source = literal_source()
+    path = editor_config.editor_projects[0].source_file
+    path.write_text(source)
+    document = browser_document(source)
+    document["training_settings"]["launch"]["trial_time_budget_minutes"] = 10**310
+    proposal = {"kind": "document", "document": document}
+    if anchor:
+        proposal["source"] = source
+    headers = {
+        "Authorization": "Bearer " + Path(editor_config.auth_token_file).read_text(),
+        "Origin": editor_config.browser_origin,
+    }
+    with TestClient(create_app(editor_config), base_url=editor_config.browser_origin) as client:
+        base = client.get("/api/editor/example", headers=headers).json()
+        response = client.post(
+            "/api/editor/example/review",
+            headers=headers,
+            json={"expected_sha256": base["sha256"], "proposal": proposal},
+        )
+    assert response.status_code == 422, response.text
+    assert path.read_text() == source

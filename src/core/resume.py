@@ -56,6 +56,7 @@ from core.iteration_manifest import (
     restorable_manifest_status,
     verify_iteration_manifest,
 )
+from core.record_encoding import decode_record
 from core.resume_plugins import restore_model_plugin
 from core.run_invariants import (
     RunInvariants,
@@ -1441,7 +1442,7 @@ def load_latest_proposal(
             continue
         try:
             with open(path) as f:
-                data = json.load(f)
+                data = decode_record(json.load(f))
         except (OSError, json.JSONDecodeError) as e:
             warnings.warn(
                 f"[resume] iter {iter_idx:03d}: cannot read proposal "

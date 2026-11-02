@@ -115,3 +115,31 @@ was executed for a documentation change.
 [Metric extension](../../guides/bring-your-own-metric.md),
 [composition](composition.md), [plugins](plugins.md), and
 [objectives and metrics](../../concepts/objectives-and-metrics.md).
+
+## Opt-in structured evaluation declaration
+
+The optional task `evaluation` spec can name primary/secondary metrics as components
+with scientific meaning, units and descriptive ranges. References always use the
+post-transform `MetricResult.scalar` units. `evaluation.selection` is separate from
+the training loss in top-level `objective`. A secondary becomes required evidence
+only if a formula term or constraint references it; listing a component alone keeps
+it observational. Runtime promotion is deferred to #1294/#1295, currently protected
+by launch capability refusals.
+
+Weighted_sum will emit a new higher-is-better selection scalar, never relabel the
+source metric. Health keeps original source metric values, never utility. Existing
+primary-unit thresholds must be explicitly rebound or refused when formula selection
+lands. Rubrics remain outside MetricOrder. See the
+[evaluation contract](../../../src/execute_tools/evaluation-contract.md) for the
+schema, launch gates, identity and mandatory downstream binding rules.
+
+## Effective selection and source evidence
+
+Formula evaluation creates a new effective metric for ranking while retaining the
+source metric for scientific arithmetic and Health. The native scoring child owns
+aggregation; downstream ranking consumes the generated identity and scalar through
+MetricOrder. Typed component/source evidence is persisted beside `metric_result`.
+Required secondary evidence is determined by term references, not mere declaration.
+The [evaluation runtime contract](../../../src/execute_tools/evaluation-contract.md#deterministic-selection-runtime)
+owns output fields, supported routes, generated identity and explicit threshold
+units. Do not feed source per-file vectors into utility ranking.

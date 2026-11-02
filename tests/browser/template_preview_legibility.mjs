@@ -19,7 +19,7 @@ import {createRequire} from 'node:module';
 import {tmpdir} from 'node:os';
 import {join, resolve, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) {
@@ -36,12 +36,7 @@ const templates = [
 const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.workflow_editor_server'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
 let serverErrors = '';
 server.stderr.on('data', chunk => { serverErrors += chunk; });
-const lines = createInterface({input: server.stdout});
-const metadata = await new Promise((resolveMetadata, reject) => {
-  lines.once('line', line => resolveMetadata(JSON.parse(line)));
-  server.once('exit', code => reject(new Error(`server exit ${code}: ${serverErrors}`)));
-  setTimeout(() => reject(new Error(`server startup timeout: ${serverErrors}`)), 15000);
-});
+const metadata = await waitForMetadata(server, {timeoutMs: 15000});
 async function waitUntil(predicate, what) {
   const deadline = Date.now() + 15000;
   while (!(await predicate())) {
@@ -123,7 +118,7 @@ try {
         const where = `${template.id} ${width}px ${colorScheme}`;
         await gallery.locator(`.template-card[data-template="${template.id}"]`).click();
         assert.equal(await gallery.locator('#editor-template-detail h3').textContent(), template.title);
-        if (template.loop) assert.ok((await gallery.locator('#editor-template-detail').textContent()).includes('The first round starts cold: no earlier results are needed.'));
+        if (template.loop) assert.ok((await gallery.locator('#editor-template-detail').textContent()).includes('The first iteration starts cold: no earlier results are needed.'));
         const svg = gallery.locator('#editor-template-detail svg.template-thumbnail');
         assert.equal(await svg.getAttribute('role'), 'img');
         if (template.loop) assert.match(await svg.getAttribute('aria-label'), /repeated up to 1 time\(s\) from train back to interpret/);

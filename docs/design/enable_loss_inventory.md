@@ -1008,7 +1008,7 @@ bash sdsc_submission_scripts/run_chain.sh \
 **Critical parameters** (lesson learned, do NOT omit — see `gate_testing_standard.md` Gate 2 section):
 - `--trial_portion 0.02` — keeps each training epoch under 5 min
 - `--trial_time_budget_minutes 5` — engages the time-risk gate
-- `--no-force_formal_round` — without it the chain's last round defaults to full-dataset formal training (2+ hours); all rounds should stay in trial mode for smoke tests (codified after the 2026-06-22 first Gate 3 run took 2h 02m in iter_002 round 2)
+- `--no-force_formal_round` — without it the chain's last tuning round is forced Formal with its configured training/evaluation scopes (2+ hours in that historical run); all rounds should stay in trial mode for smoke tests (codified after the 2026-06-22 first Gate 3 run took 2h 02m in iter_002 round 2)
 - `--formal_time_budget_minutes 20` — safety net if `--no-force_formal_round` is omitted or silently regressed
 - `--trial_vram_budget_gb 10 --formal_vram_budget_gb 10` — keeps each chain under 10 GB so two chains can run in parallel on the 32 GB RTX 5090 (Gate 2 + Gate 3 launched concurrently in detached `screen` sessions; 20 GB total + ~12 GB OS/driver headroom)
 - `--llm_config openai_tiered_v1.json` — gpt-4o-mini cannot reliably generate proposals that pass the validator
@@ -1071,7 +1071,7 @@ bash sdsc_submission_scripts/run_chain.sh \
 The only diff vs Gate 2 is `--ml_lit_review_enabled`. The lit-review YAML controls root-paper loading, dynamic-search behavior, and synthesis prompts; `--ml_lit_review_config` defaults to `configs/lit_review_config.yaml` inside `run_one_iteration.py` (since `d96a6e5`, `--ml_lit_review_config` is no longer forwarded by the bash wrapper — operators wanting a non-default lit-review YAML must edit the default file or invoke `run_one_iteration.py` directly). The LLM routing for lit-review (`main` + `search` sub-bridges) is taken from the `llm_config`'s `lit_review` block — `openai_tiered_v1.json` ships with `deepseek-v4-pro` for both, isolating lit-review cost from the proposer/implementor/interpreter tier.
 
 Note on time-risk gates (lessons codified in `docs/gates/gate_testing_standard.md` after the 2026-06-22 first Gate 3 run hit `force_formal_round=True` default and iter_002 round 2 ran for 2h 02m):
-- `--no-force_formal_round`: mandatory; without it the last round goes to full-dataset formal training and the chain takes 2+ hours instead of ~35–70 min.
+- `--no-force_formal_round`: mandatory; without it the last tuning round uses the configured Formal scopes; the historical chain took 2+ hours instead of ~35–70 min. Formal does not itself imply full-data training.
 - `--formal_time_budget_minutes 20`: safety net in case `--no-force_formal_round` is accidentally omitted by a future caller or a regression silently re-enables formal forcing.
 - `--trial_vram_budget_gb 10 --formal_vram_budget_gb 10`: pairs with VRAM-aware scoring; 20 GB max headroom on the 32 GB RTX 5090 leaves room for the OS + a second concurrent chain if needed.
 

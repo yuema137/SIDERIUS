@@ -34,6 +34,15 @@ into here one iteration at a time.
 manifest (with a **mandatory** `--data_dir`); LLM routing
 JSON; a `RestoredState` when resuming; pseudo-mode factories for $0 smokes.
 
+The run-level `is_trial` default is owned by
+`agent.schemas.hyperparam_tuning.DEFAULT_IS_TRIAL` (`True`). Launch configuration,
+standard CLI, proposer and tuner inputs/protocols, tuner metadata and authored
+templates derive from that owner.
+Omission enables trial/formal tuning; the existing forced final Formal round
+policy still applies. Explicit `False` / `--no-is_trial` retains legacy
+`single_file` behavior and is refused for composed non-TIDMAD profiles by
+`execute_tools.dataset_config.single_file_mode_refusal`.
+
 ## Outputs
 
 A list of `HyperparamTuningOutput`; the workspace record tree
@@ -66,6 +75,42 @@ invariants lock and effective health config (written via `core` /
 - Plugin registration and generated sources are rooted in the caller-owned
   workspace (`plugins/{run_name}/` and its generated-library paths); the
   workflow does not make the checkout a hidden task workspace.
+
+## Target-score stopping and progress summaries
+
+`termination.target_reached` compares `ChainState.chain_formal_incumbent_reference`
+with `MetricOrder.is_at_least`. The workflow checks before each iteration,
+including the first after resume, using the seed-reconciled metric order before
+any new iteration output exists. A restored incumbent already meeting the target
+therefore creates no iteration directory and invokes no iteration nodes. Startup
+binding, identity checks and seed loading still run. The return list is empty
+for this successful zero-iteration stop; the JSON status is `completed`.
+
+The incumbent is the Health-valid formal value advanced by
+`research_history.advance_completed_history` from `best_valid_formal_denoising_score`,
+including restored valid evidence. No incumbent or no reconciled metric order
+means no target stop. Minimizing metrics meet the target with `<=`; maximizing
+metrics use `>=`. No score is reclassified for validity here.
+
+Console and JSON report the valid chain incumbent (`best_valid_formal_score`)
+and `termination_reason`: `target_reached`, `iterations_exhausted`, or
+`infrastructure_abort`. `termination.workflow_stop_reason` gives infrastructure
+failure precedence and recognizes target success even on the final allowed
+iteration. Exceptions that prevent normal summary generation still propagate.
+
+`best_score_overall` remains unfiltered formal progress for this execution only,
+never restored decision state. The console labels it explicitly; workflow JSON
+preserves that key and adds `best_score_overall_basis` with value
+`unfiltered_formal_current_execution`. Each `iterations[].best_score` preserves
+the tuner result over trial and formal records without Health filtering, with
+`best_score_basis: health_unfiltered_trial_and_formal`; completion and final
+iteration console lines use the same explicit distinction. Report/dashboard
+consumers do not read `best_score_overall`. Resume reconstructs the valid
+incumbent from committed tuner records; workflow JSON is not its decision source.
+
+Changing the workflow source changes `estimation_assembly_digest` and derived
+composition identity even for launches without a target. Historical estimator
+profiles require qualification for the selected framework source.
 
 ## Candidate request enrichment
 
@@ -337,3 +382,68 @@ credential checks use the same provider metadata and argument projections.
 These checks report required credential names, never values, and cannot prove
 provider/model availability. New provider support does not add task defaults,
 change prompts, or modify deterministic training and evaluation.
+
+## Evaluation declaration admission
+
+The task composer delegates optional `evaluation` resolution to
+`evaluation_composition.compose_evaluation`. It carries validated declarations and
+canonical identity without executing them. `bind_run_task_composition` refuses
+unimplemented evaluation capabilities before activating run bindings; standalone
+scoring-child metric composition applies the same guard. Inspection remains
+available through `RunTaskComposition.evaluation.inspect()`. Existing composition
+fingerprint locks own evaluation-only resume refusal. See the
+[evaluation contract](../execute_tools/evaluation-contract.md) for schemas, defaults,
+registry and the explicit source-metric Health / effective-scalar selection boundary.
+
+`task_composition_identity.validate_composed_source_identity` owns the existing
+composed-task artifact-naming and registration-captured source identity checks.
+The composer delegates these prerequisites without changing their refusal behavior.
+
+`bind_run_task_composition` also delegates evaluation prompt-context construction
+and token-reset binding to `agent.evaluation_context`. Verification checks that
+context's evaluation identity against the composition. No node reloads the task
+manifest to render evaluation. Absence binds None, which the shared append path
+checks before entering the new prompt boundary. See the evaluation contract's
+[rendering section](../execute_tools/evaluation-contract.md#evaluation-prompt-rendering).
+
+## Effective metric binding
+
+Formula selection binds ranking consumers to `RunTaskComposition.selection_metric_spec`,
+projected through the selection owner and existing tuner/interpretation protocols.
+The source implementation remains `composition.metric`. Evaluation launch admission
+checks threshold units before effects; the exploration CLI pairs `--target_score`
+with `--target_score_metric`. The shared tuner launch surface transports
+`--score_units_metric` without adding an argument when the shell launcher omits it.
+See the [runtime contract](../execute_tools/evaluation-contract.md#deterministic-selection-runtime)
+for the single authority on formula semantics and unsupported combinations.
+
+### Standard pseudo launch resource decision
+
+When `--is_pseudo_training` selects `StubSandbox`, `run_one_iteration.main` invokes
+`core.pseudo_admission.resolve_pseudo_admission` before constructing the workflow.
+No host ceiling is required: the stub starts no subprocess. Optional
+`SIDERIUS_SUBPROCESS_RSS_GB` declarations are validated and recorded; malformed
+values print the standard `LAUNCH REFUSED` line and exit 2. This decision is
+independent of GPU visibility. `--is_pseudo_llm` alone keeps real execution and
+its admission. The preflight adapter rechecks the same owner for direct callers.
+
+`standard_cli.normalize_args` resolves the pseudo evaluation ceiling through
+`core.pseudo_admission.resolve_pseudo_validation_max_samples`: with
+`--is_pseudo_training` and no `--validation_max_samples`, the launch records
+`PSEUDO_VALIDATION_MAX_SAMPLES` (256 rows) as `validation_max_samples`. An
+explicit value always wins; launches without `--is_pseudo_training` keep the
+parsed value (normally `None`), so real execution is unchanged. The value flows
+through the ordinary launch config, run-invariants lock, setup inspection and
+`ScopeBuildRequest.max_samples`; the task's `build_eval_scope` applies it, so
+selection stays task-owned, deterministic and order-preserving. Health coverage
+is then checked against the bounded scope; a task whose bound cannot cover its
+Health demand is refused by `TaskHealthCoverageError` during attempt planning.
+`run_one_iteration` prints the resolved ceiling in the `[PSEUDO-MODE]` banner.
+Because it is the ordinary `validation_max_samples`, it also bounds an optional
+`--training_validation_portion` snapshot, appears wherever that value is
+disclosed (constraint disclosure, tuner timing context, setup-review packet;
+prompt bytes change only for `--is_pseudo_training` with a real LLM), and is
+pinned in the run-invariants lock: a pseudo workspace created before this
+default recorded `None`, which `--validation_max_samples` (an integer) cannot
+express, so resuming it raises `RunInvariantsViolation`; continue that smoke in
+a new workspace.

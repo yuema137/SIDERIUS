@@ -13,11 +13,14 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import numpy as np
 from pydantic import BaseModel, ConfigDict
 
+from core.seeding import MissingRunSeed
 from execute_tools.task_data_path import (
     DeliverableWriteRequest,
     EpochSamplingParams,
     EvalMaterializationParams,
     EvaluationReadRequest,
+    HealthCoverageRequest,
+    HealthCoverageResult,
     ScopeBuildRequest,
     TaskOutputArtifactInventory,
     ValidationScopeError,
@@ -25,7 +28,7 @@ from execute_tools.task_data_path import (
 )
 
 if TYPE_CHECKING:
-    from torch.utils.data import Dataset
+    from torch.utils.data import TensorDataset
 
 TASK_ID = "synthetic_masked_regression"
 GENERATOR_SEED = 20260829
@@ -35,6 +38,8 @@ FEATURE_DIM = 3
 TRAIN_SHARDS = (0, 1)
 EVAL_SHARD = 2
 SCOPE_KIND = "synthetic_masked_regression_rows"
+# The declared positive dispersion floor cannot be met by one sample: std(ddof=0) = 0.
+MIN_HEALTH_VALID_ROWS = 2
 
 
 class MaskedScopeRow(BaseModel):
@@ -193,7 +198,7 @@ class SyntheticMaskedTaskDataPath:
         return np.asarray(features, dtype=np.float32), np.asarray(supervision, dtype=np.float32)
 
     @staticmethod
-    def _dataset(features: np.ndarray, supervision: np.ndarray) -> Dataset[Any]:
+    def _dataset(features: np.ndarray, supervision: np.ndarray) -> TensorDataset:
         import torch
         from torch.utils.data import TensorDataset
 
@@ -201,10 +206,12 @@ class SyntheticMaskedTaskDataPath:
             torch.from_numpy(features.copy()), torch.from_numpy(supervision.copy())
         )
 
-    def training_dataset(self, scope: object, params: EpochSamplingParams) -> Dataset[Any]:
+    def training_dataset(self, scope: object, params: EpochSamplingParams) -> TensorDataset:
         rows = list(self._require_scope(scope).rows)
         if params.train_portion is not None and params.train_portion < 1.0:
             keep = max(1, math.floor(len(rows) * params.train_portion))
+            if params.epoch_seed is None:
+                raise MissingRunSeed("training subsampling requires epoch_seed")
             rng = np.random.default_rng(params.epoch_seed)
             chosen = sorted(rng.choice(len(rows), keep, replace=False).tolist())
             rows = [rows[index] for index in chosen]
@@ -212,7 +219,7 @@ class SyntheticMaskedTaskDataPath:
             rows = rows[: params.max_samples]
         return self._dataset(*self._materialize(MaskedScope(rows=tuple(rows)), params.data_dir))
 
-    def validation_dataset(self, scope: object, params: EvalMaterializationParams) -> Dataset[Any]:
+    def validation_dataset(self, scope: object, params: EvalMaterializationParams) -> TensorDataset:
         return self._dataset(*self._materialize(scope, params.data_dir))
 
     @staticmethod
@@ -235,7 +242,7 @@ class SyntheticMaskedTaskDataPath:
             raise ValueError("rematerialized source count disagrees with generic inference.")
         payload: dict[str, dict[str, float | bool]] = {}
         for row, prediction, (_features, supervision) in zip(
-            scope.rows, predictions, dataset, strict=True
+            scope.rows, predictions, (dataset[index] for index in range(len(dataset))), strict=True
         ):
             value = float(prediction.reshape(-1)[0].item())
             payload[row.sample_id] = {
@@ -278,6 +285,8 @@ class SyntheticMaskedTaskDataPath:
         rows = [row for shard in shards for row in _rows_for_shard(shard)]
         keep = max(1, math.floor(len(rows) * request.portion))
         if keep < len(rows):
+            if request.seed is None:
+                raise MissingRunSeed("scope subsampling requires request.seed")
             rng = np.random.default_rng(request.seed)
             rows = [rows[index] for index in sorted(rng.choice(len(rows), keep, replace=False))]
         if request.max_samples is not None:
@@ -298,6 +307,30 @@ class SyntheticMaskedTaskDataPath:
 
     def build_eval_scope(self, request: ScopeBuildRequest) -> object:
         return MaskedScope(rows=self._draw((self._eval_shard,), request))
+
+    def validate_health_coverage(self, request: HealthCoverageRequest) -> HealthCoverageResult:
+        """Confirm the valid-prediction view has evidence in this evaluation scope."""
+        scope = self._require_scope(request.evaluation_scope)
+        override = request.health_gate_files
+        if override is not None and tuple(override) != (self._eval_shard,):
+            covered = False
+            reason = (
+                f"Health reads only evaluation shard {self._eval_shard}; "
+                f"health_gate_files override {list(override)} is not supported"
+            )
+        elif any(row.shard != self._eval_shard for row in scope.rows):
+            covered = False
+            reason = f"Health requires rows from evaluation shard {self._eval_shard} only"
+        elif sum(row.valid for row in scope.rows) < MIN_HEALTH_VALID_ROWS:
+            covered = False
+            reason = (
+                f"Health dispersion requires at least {MIN_HEALTH_VALID_ROWS} valid rows; "
+                "evaluation scope has insufficient valid predictions"
+            )
+        else:
+            covered = True
+            reason = "Health reads valid predictions from the evaluation scope"
+        return HealthCoverageResult(applicable=True, covered=covered, reason=reason)
 
     def serialize_scope(self, scope: object) -> str:
         checked = self._require_scope(scope)

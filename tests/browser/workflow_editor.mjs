@@ -9,14 +9,13 @@ import {readFile, writeFile} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 import {showAllConsoleSections} from './console_view_flags.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[name], `Set ${name}`);
 const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.workflow_editor_server'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
 let serverErrors = ''; server.stderr.on('data', chunk => { serverErrors += chunk; });
-const lines = createInterface({input: server.stdout});
-const metadata = await Promise.race([new Promise((accept, reject) => { lines.once('line', line => accept(JSON.parse(line))); server.once('exit', code => reject(new Error(`server exit ${code}: ${serverErrors}`))); }), new Promise((_, reject) => setTimeout(() => reject(new Error('server startup timeout')), 15000))]);
+const metadata = await waitForMetadata(server, {timeoutMs: 15000});
 let browser;
 async function waitUntil(predicate) { const deadline = Date.now() + 15000; while (!(await predicate())) { if (Date.now() > deadline) throw new Error("Browser condition timed out"); await new Promise(resolve => setTimeout(resolve, 50)); } }
 try {
@@ -276,4 +275,4 @@ try {
   await page.unroute('**/api/editor/reusable/save');
   assert.deepEqual(faults, []);
   console.log('PASS: real API inspector → graph → Python diff → exact disk save/reload; agent refresh; two retained conflicts/reconciliation; stale review fence; inert hostile text; reusable managed roles/options; disconnected conflict discard/rebase and retained-review handler gates survive reconnect without requests or draft loss.');
-} finally { if (browser) await browser.close(); server.kill('SIGTERM'); lines.close(); }
+} finally { if (browser) await browser.close(); server.kill('SIGTERM'); }

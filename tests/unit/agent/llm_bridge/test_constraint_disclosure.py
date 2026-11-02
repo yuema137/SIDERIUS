@@ -112,6 +112,12 @@ def test_reflection_preserves_planning_inheritance_when_provenance_is_empty(tmp_
         hypothesis="Same values as winner",
         execution_provenance=ExecutionProvenance(),
         timing_context=timing,
+        trial_config=SimpleNamespace(mode="formal"),
+        # Planning's before/after portion pair; equal means no ceiling clamp.
+        _planned_portions={"trial_portion": 0.05, "train_portion": 1.0, "eval_portion": 0.1},
+        cfg_trial_portion=0.05,
+        cfg_train_portion=1.0,
+        cfg_eval_portion=0.1,
     )
     bridge = BoundaryRecorderBridge()
     exp_id, _, results, reflection_context = reflect_fixture_args()

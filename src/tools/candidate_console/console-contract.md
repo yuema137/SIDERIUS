@@ -96,8 +96,9 @@ unchanged.
 
 Device admission (walkthrough N2): `package_mounts.device_problem` calls the run
 sandbox's own `SandboxProfile.device_paths` for one path (canonical, existing, under
-`/dev`, a character device) and returns its refusal reason; there is no second device
-rule. `add-task`, where the paths are typed, refuses (exit 2, console.json unchanged)
+`/dev`, a character device) and returns its audited refusal text: fixed framework
+guidance plus the operator-declared path, without nested causes or tracebacks.
+There is no second device rule. `add-task`, where the paths are typed, refuses (exit 2, console.json unchanged)
 with `task <id> candidate_devices names <path>, which the run sandbox refuses
 (<reason>); list only device nodes present on this machine (for example ls -l
 /dev/nvidia*)`. `check` and `serve` (and every console construction or global-settings
@@ -116,7 +117,9 @@ already in `task_read_only` is mounted once. `package_mounts.device_warnings(dev
 reports only device paths the sandbox would refuse; `check`/`serve` prefix each with
 `Task <id>: `, and Run review shows the same list for the reviewed request.
 `SandboxProfile.device_paths` refuses a missing `/dev/nvidia<N>` with `GPU device
-<path> is not present on this machine, ...` (the admission cause).
+<path> is not present on this machine, ...`; the console retains its recovery
+instructions to list the available nodes (`ls /dev/nvidia*`) or use the machine
+that has the declared GPU.
 
 `check --gpu [--task <id>]` (`gpu_check.check_gpu`) runs, for each task whose
 `candidate_devices` lists a `/dev/nvidia<N>` node, `python -m
@@ -182,7 +185,7 @@ Owner: `add_task.py`; CLI `python -m tools.candidate_console add-task --config
   must validate and `check_package_mounts` and `check_candidate_devices` (device
   admission above) must pass for the new task.
 - Write: the new entry is appended to `tasks[]` of the parsed document (other keys
-  keep their order), serialized with `json.dumps(indent=2)`. `publish_task` re-reads
+  keep their order), serialized with `json.dumps(indent=2)`. `publish_task` holds `files.private_file_lock(console.json)` across re-reading
   the file and refuses when its bytes differ from the bytes read
   (`console.json changed since add-task read it; nothing was written`), then
   publishes through `settings_service._publish_private` (temp file 0600, fsync,
@@ -214,10 +217,10 @@ unpacked bundle folder and reuses every other `add-task` option except
 | `fetch_data.py`, `README.md` | data writer and human instructions |
 | `SHA256SUMS` | `<64 hex>  <path>` per line (`sha256sum -c` format), sorted by path, unique, every file except itself; paths must be relative POSIX without `.`, `..` or empty parts |
 
-**Verification** (`read_bundle`, before any write): trailing `/` characters of `DIR`
-are dropped (shell tab completion), then `DIR` must be absolute, normalized and
-canonical; `SHA256SUMS` must list `task/task.yaml`, `setup/setup.json` and
-`console-task.json`; each listed file is opened component by component with
+**Verification** (`read_bundle`, before any write): the operator-selected `DIR` is
+resolved strictly, accepting relative paths, trailing slashes, `..` and symlinked
+parents, then validated as a canonical readable directory; `SHA256SUMS` must list
+`task/task.yaml`, `setup/setup.json` and `console-task.json`; each listed file is opened component by component with
 `O_NOFOLLOW`, must be a regular file of at most 16 MiB, and its sha256 must match.
 The verified bytes are kept in memory and are the only bytes used later; files
 not listed are ignored and never copied. Errors: `<path> does not match
@@ -232,7 +235,16 @@ This does not authenticate the running script itself; run `sha256sum -c
 SHA256SUMS` independently before execution.
 `render_shards` calls `read_bundle` on the selected package's parent before
 executing task code. `--package` must name the `task/` folder in an unpacked
-bundle. The generator (`task/plugins/_quickstart_task.py`) and data manifest
+bundle. The operator-selected path is resolved strictly first (relative paths,
+`..` and symlink aliases are accepted); its resolved name must be `task`. There
+is no configured global root allowlist for this operator CLI. The resolved bundle
+root is the read boundary: listed descendants are still opened no-follow and
+cannot escape it. SHA256SUMS establishes integrity, not provenance; only run
+bundles you trust. Before executing generator code, the CLI prints
+`Using task package: <resolved bundle>/task` and flushes stdout.
+Resolution failures name `--package`; shared reader errors
+name the bundle directory without prescribing an importing CLI flag.
+The generator (`task/plugins/_quickstart_task.py`) and data manifest
 (`task/declared/data_manifest.json`) must both be listed. Execution and manifest
 parsing use the verified in-memory bytes, without reopening these files.
 The CLI verifies once and uses the validated `BundleTask.task_id` from that
@@ -241,6 +253,11 @@ Verification failures exit 2 with `fetch_data refused: ...` before task code
 executes or workspace data is written. Generated shard hashes are then checked
 against the verified data manifest before the existing write-once data writer
 runs. No task content, shard hashes or composition fingerprints change.
+
+**Write owner**: `files.write_once(directory, name, payload)` creates a
+caller-validated single filename with `O_EXCL | O_NOFOLLOW`, forces mode 0600,
+writes all bytes and fsyncs. Bundle copy, data generation, setup creation and
+settings export use this shared helper; existing entries are never replaced.
 
 **Pre-copy checks** (`plan_import`): console.json validates and resolves, has
 `workspace_root`, and `experiment_setups.browser_creatable` is true (else
@@ -283,10 +300,12 @@ created: <message>. Create one in the Workflow tab instead.`
 [--version V]`, version default `pyproject.toml`): `task/task.yaml` is
 `configs/task_composition/quickstart.yaml` loaded with `yaml.safe_load`, every
 string starting `../../examples/quickstart/` made package-relative and any other
-absolute or `..` string refused, dumped with `sort_keys=False` under a generated
-header; `task/declared` and `task/plugins` are the `.py`/`.json`/`.yaml` files of
+absolute or `..` string refused (including after prefix removal), dumped with
+`sort_keys=False` under a generated header; `task/declared` and `task/plugins` are the `.py`/`.json`/`.yaml` files of
 `examples/quickstart/{declared,plugins}` (READMEs excluded: their links are
-checkout-relative); `setup/setup.json`, `fetch_data.py`, `README.md` come from
+checkout-relative). Unsupported extensions, symlinks, special files and nested
+folders are refused rather than omitted; `__pycache__` directories are ignored.
+`setup/setup.json`, `fetch_data.py`, `README.md` come from
 `examples/console_bundle/`; `console-task.json` from `TASK_ID`, `TASK_LABEL` and
 `STARTER_VALUES`. Zip entries are sorted, `ZIP_STORED`, mtime 1980-01-01 00:00:00,
 Unix mode 0644; an existing output file is refused. Tests:
@@ -311,8 +330,11 @@ Optional `host_ledger` (`ConsoleHostLedger`: `ledger_root`, `budget_file`;
 omitted when absent, so existing configurations keep their bytes and every
 launch stays serial and unbudgeted). `CandidateConsole.__init__` loads it once
 (`config.host_scheduling`): the directory must already exist with owned mode
-0700 (`host_ledger.ledger_directory`) and the budget is read only through
-`budget_intake.load_host_budget_file`. Either failure raises `ValueError`
+0700 (`host_ledger.ledger_directory`), `budget_file` must be a canonical
+absolute path (`files.canonical`, the rule every configured path follows; a
+relative path is never resolved against the console's working directory), and
+the budget is read only through `budget_intake.load_host_budget_file`. Any of
+these failures raises `ValueError`
 ("configured host ledger is unusable") and the console does not start; it never
 falls back to unbudgeted launches.
 
@@ -341,7 +363,10 @@ different values therefore refuses `stale_review`, and a retried launch replays
 idempotently: the replay check recomputes the same bound digest from the stored
 operation. `with_run_resources` attaches them, revalidating through the
 operation and request owners; without them the reviewed operation is submitted
-byte for byte.
+byte for byte. It sets only the supplied fields: an absent one keeps what the
+reviewed operation already carries (`CandidateOperation.resources`,
+`request.parallel`), and a supplied one that differs from a value the operation
+already carries refuses `run_resources_conflict` instead of replacing it.
 
 Review-time refusals (B3-4c UI review). `CandidateConsole.require_reviewable_resources`
 runs at every candidate review (prepared, edited, reusable): without a host
@@ -351,6 +376,36 @@ with a ledger, a selection without `resources` refuses `resources_required`, the
 ledger's own launch code, so nothing reaches Launch that Launch would refuse or
 silently ignore. `ChoicesView.host_ledger` (omitted when false) tells the browser
 whether a ledger is configured.
+
+Loop resume reservation (#1385). A loop whose root candidate ran without
+`resources` (serially) resumes under the console's ledger with a reservation
+for the resumed segment. `ReservationSelection` (`resources` only; the base of
+`RunResourcesSelection`, which owns `bound_digest`) is the body of
+`POST /api/operations/{UUID}/loop-resume-review`; the `GET` route is the same
+review without one. `CandidateConsole.review_loop_resume(UUID, selection)`
+runs the owner review, then the operations owner's
+`loop_resume_resources(root, selection.resources, ledger=self.host is not None)`,
+so the review refuses what admission would: `resources_required` (ledger, root
+without `resources`, none supplied), `run_resources_conflict` (supplied beside
+the root's own declaration, even an equal one; unlike `with_run_resources`, which
+accepts an equal value, see the operations contract "Loop resume" for why),
+`host_ledger_missing` (supplied without a ledger) and `parallel_budget` (a root whose
+request carries `parallel.budget`), each 409 with a route-local fixed message. A
+supplied reservation is echoed as `LoopResumeReview.resources` and bound into
+`review_digest = bound_digest(expected_receipt_digest)`; both are omitted
+without one, so existing reviews keep their bytes. `LoopResumeSelection` carries
+`resources` and `expected_review_digest` (both omitted when absent, so existing
+Resume bodies are unchanged). `resume_loop` refuses `stale_review` before any
+read or submission when either is present and `expected_review_digest` is not
+`bound_digest(expected_receipt_digest)` of the sent `resources`; otherwise it
+passes `resources` into `CandidateLoopResumeRequest.resources`, and admission
+applies the same rule again. Each resume of an undeclared root supplies its own
+reservation. Witnesses: `test_host_ledger.py`
+(`test_resume_review_binds_the_segment_reservation_of_an_undeclared_root`,
+`test_resume_review_refuses_a_reservation_admission_would_refuse`,
+`test_resume_carries_only_the_reviewed_reservation`,
+`test_candidate_review_digests_are_unchanged_by_the_shared_reservation_binding`)
+and `tests/browser/loop_resume_resources.mjs`.
 
 Prepared review facts (`capture_facts.py`): `ReusableCaptureReview.facts` carries
 `training` (nullable `TrainingReview`) and `task_parameter_rules` (nullable
@@ -362,10 +417,17 @@ before validating native `ProposalInput`, nullable `TaskCompositionRef`, or
 `task_composition_ref.parameter_rules` or the separate `TaskCompositionRef.parameter_rules`;
 training controls come from the captured settings' native launch schema, including
 its defaults. No task import or current editor/settings lookup occurs. Review
-refuses changed input bytes. The projection does not alter launch or its digest.
+refuses missing observations or changed input bytes with `reusable_preparation`.
+Multiple externals may supply task rules (across `proposal.input` and
+`optional.task-composition-ref`) or training settings when their extracted review
+values are equal. This includes one proposal input per proposer in independent
+proposal families. Conflicting extracted `ParameterRules` or `TrainingReview`
+values refuse with `reusable_preparation`; null rules are compared as a value.
+These errors use bounded messages without input paths or payloads.
+The projection does not alter launch or its digest.
 `TrainingReview.max_rounds` carries the captured native integer limit (10 when
-omitted), rendered as **Tuning rounds per body**. It is independent of the
-research-loop body count and cannot be replaced by a later editor draft.
+omitted), rendered as **Tuning rounds per iteration**. It is independent of the
+research-loop iteration count and cannot be replaced by a later editor draft.
 `tests/browser/tuning_rounds.mjs` witnesses the default 10, editing and saving 3,
 and preparing a run whose review facts and visible summary both show 3.
 
@@ -377,7 +439,7 @@ per-role unset caps reference the shared ceiling, without browser default resolu
 Rule JSON preserves exact null values. A workflow without training states that it
 has no training stage. Idle step 2 distinguishes disconnected, no open setup,
 runs disabled, and ready to prepare/open a run; singular no-improvement text says
-"1 completed body passes", plural says "2 completed bodies pass". The HTML declares
+"1 completed iteration passes", plural says "2 completed iterations pass". The HTML declares
 the existing same-origin logo as favicon to prevent the browser's unsupported `/favicon.ico` fetch.
 Targeted witnesses: `test_review_projects_prepared_training_and_task_locks` and
 `tests/browser/run_page_review.mjs` (real prepared review and launch/list refresh;
@@ -415,9 +477,13 @@ panel edit after review discards the review. `operation-outcome.js` renders
 `reason="cancelled_while_queued"` as "cancelled before start" (not a failure;
 `OperationListItemView.reason` carries the reason for `operation_failed` rows
 only). The native-chain card states native chains are serial-only. Under the ledger, `parallel.budget` is refused
-`parallel_budget`; without a configured ledger a `parallel` launch without its
+`parallel_budget`. The shared budget's `max_queued_operations` bounds waiting
+children; admission returns `host_queue_full` before claim/spawn when full
+(default zero disables waiting). See the operations queue contract. Without a configured ledger a `parallel` launch without its
 own budget is refused `parallel_budget_required`. A loop resume inherits its
-root's `resources` and `parallel`. Every refusal reaches the browser as the
+root's `parallel` and, when the root declared them, its `resources`; a root
+without `resources` resumes under the ledger only with the segment's own
+reviewed reservation (see "Loop resume reservation" above). Every refusal reaches the browser as the
 operation owner's typed code. Status: `StatusView.state` and the list state
 include `queued` (B3-5b); its presentation, and "Cancelled before start" for
 `operation_failed` + `cancel_requested` + `cancelled_while_queued`, are the UI
@@ -482,12 +548,20 @@ absent, selecting that library profile as `llm_profile`, and `settings/console.j
 write-once only when absent: `workspace_root`, `port` (default 8740, `--port`),
 `browser_origin`, `tasks: []`, `global_settings: {"browser_writable": true}`,
 `experiment_setups: {"browser_creatable": true}` (see "Experiment setups").
+Init parent ownership and group-write refusals share `_require_private_parent`: both
+name a private `mkdir -m 700 .../siderius` recovery where the caller can write,
+then the matching `--workspace` path. Foreign ownership never suggests chmod.
+
 **`--credential-file PATH`** (init only; `check`/`serve` reject it) is checked
 before anything is created by `files.require_owner_only_file`: `files.canonical`
 path, no-follow parent walk, `stat(follow_symlinks=False)` requiring a regular file
 with `st_uid == os.getuid()` and mode exactly 0600. The file is never opened, so no
 value is read or printed; a failed predicate exits 2 with one fixed message and
-creates nothing. A new `console.json` gets the top-level `credential_file: PATH`.
+creates nothing. The CLI closing validation passes `credential_metadata_only=True`
+through `_load`, `load_console`, `validate_resolved` and `validate_config`, so it
+also uses `require_owner_only_file` without reading credentials. Other callers
+keep format validation by default. A new `console.json` gets the top-level
+`credential_file: PATH`.
 An existing `console.json` is never rewritten: when its `credential_file` differs
 from `PATH` (or is absent), `init` still creates the missing folders and the
 per-task output roots below, then raises `workspace.CredentialFileNotAdded`
@@ -504,6 +578,14 @@ them; it never creates `data/<task_id>`. It finishes with the same load as `chec
 Under any umask it creates folders as 0700 and the token as 0600 (it sets umask
 077 for its own duration and `fchmod`s created folders). It never deletes, overwrites
 or follows a symlink. Refusals exit 2 and say which item failed:
+`WorkspaceRefused` names the folder, or the refused file (`settings/console.json`
+or the library default profile, when it is a symlink, unreadable or has different
+bytes); `MissingSetting` from an existing console.json names the task field; an
+unusable `--workspace` gets its own message. Residual race: `core.durable_io`
+publishes by path, so after the no-follow
+parent check only a same-user process, which already owns the workspace, can swap
+a parent.
+
 Refusals from `ensure_owned_directory` during `init` name the full offending
 path for the workspace root, fixed children and derived task output directories.
 Non-directories/symlinks are
@@ -689,7 +771,7 @@ JSON ≤256 KiB). Refusals are `{"error": {code, message}}` and never echo input
 | Route | Effect | Refusals |
 | --- | --- | --- |
 | `GET /api/settings` | `SettingsView`: `enabled`, `writable`, `settings_sha256` (file on disk), `pending`, `active` + `active_sha256` (startup snapshot), `restart_required = settings_sha256 != active_sha256`, `rows`, choice cards (allowlist IDs and library files whose bytes match their name), `data_roots` (ID/label), `tasks` (with the `data_root` origin), `workspace_root`, `WorkspaceReadiness`, `host` | — |
-| `PUT /api/settings` | `SettingsWrite{expected_sha256, settings}`; under one process lock: re-read the file no-follow and compare sha256 (absent matches only `null`), resolve console.json with the candidate settings, run `validate_resolved`, then publishes 0600 through the parent opened with `files.open_directory` (temp file `O_EXCL\|O_NOFOLLOW`, complete write via `files.write_all`, fsync, `os.replace` with `src_dir_fd`/`dst_dir_fd`, design §5.1; on any failure before the replace the temp file is removed and the previous file is untouched; a failed removal is added as a note to the original error and the 422 says a temporary file may remain). If the directory fsync after a successful replace fails, the save stands: 200 with the new `settings_sha256` and `SettingsView.notice` saying durability is not confirmed; returns the new view. A readable but invalid file keeps its digest, so a Save may replace it under the same CAS | 403 `read_only` (no policy, `browser_writable=false`, or no context); 409 `stale`; 422 `settings_unreadable` (not a private 0600 regular file; names the fix); 422 `settings_invalid` with the `SettingsInvalid` predicate, a generic validation message, or an unavailable/linked settings folder |
+| `PUT /api/settings` | `SettingsWrite{expected_sha256, settings}`; under its thread lock and `files.private_file_lock(global_settings.json)`: re-read the file no-follow and compare sha256 (absent matches only `null`), resolve console.json with the candidate settings, run `validate_resolved`, then publishes 0600 through the parent opened with `files.open_directory` (temp file `O_EXCL\|O_NOFOLLOW`, complete write via `files.write_all`, fsync, `os.replace` with `src_dir_fd`/`dst_dir_fd`, design §5.1; on any failure before the replace the temp file is removed and the previous file is untouched; a failed removal is added as a note to the original error and the 422 says a temporary file may remain). If the directory fsync after a successful replace fails, the save stands: 200 with the new `settings_sha256` and `SettingsView.notice` saying durability is not confirmed; returns the new view. A readable but invalid file keeps its digest, so a Save may replace it under the same CAS | 403 `read_only` (no policy, `browser_writable=false`, or no context); 409 `stale`; 422 `settings_unreadable` (not a private 0600 regular file; names the fix); 422 `settings_invalid` with the `SettingsInvalid` predicate, a generic validation message, or an unavailable/linked settings folder |
 | `POST /api/settings/library` | `LibraryUpload{kind: "llm"\|"advice", label (1..63), content}`; content bytes are validated first (`parse_llm_config_bytes` → 422 `invalid_file` "Not an LLM profile: …"; `parse_advice_bytes(label="upload")` → 422 with the owner's message), then published with `publish_bytes_write_once` (0600) to `library/<kind>/<slug>-<sha12>.json` after `canonical(dir)`; `slug` lowercases the label to `[a-z0-9-]`, ≤50; returns `LibraryRef` | 403 `read_only`; 422 `invalid_file` or empty slug; 409 `exists` when that name holds different bytes (identical bytes return the existing ref); 409 `unavailable` without a library directory |
 | `POST /api/settings/exports` | `ExportRequest{project_id, task_id, name (Id), expected_source_sha256}` (`settings_export.py`): reads the project's saved source with `WorkflowAuthoring.read` and requires its sha256 to equal the request; creates `exported_configs` (0700, ownership-checked via `workspace.ensure_owned_directory`) and `mkdir(name, 0700, dir_fd)` exclusively; writes `workflow.py` (source bytes), `llm.json` (`config_bytes(task.llm_config_file)`) and, only when non-empty, `advice.json`, each `O_CREAT\|O_EXCL\|O_NOFOLLOW` 0600 relative to that descriptor. `advice.json` maps `preparation_options.proposal_advice`/`implementation_advice`/`validation_advice` → `propose`/`implement`/`validate` and `training_settings.launch.human_advice_tune` → `tune`, omits empty values, and is validated with `parse_advice_bytes` before writing; returns `ExportResult{name, files}` | 403 `read_only` (same opt-in as PUT); 404 unknown project/task; 409 `stale`, `unavailable`, or `exists` with a free-name suggestion that is itself a valid ≤80-character name (an interrupted export's directory stays taken; nothing is deleted); 422 `invalid_workflow` (saved source does not parse, so advice cannot be read), `invalid_profile` (`parse_llm_config_bytes` refuses the task profile, as `--llm_config` would) or `invalid_advice`. Any other `OSError` while writing files is the generic 500; the partly written directory stays and its name stays taken |
 | `GET /api/settings/exports/{name}/{file}` | `file` ∈ `workflow.py`/`llm.json`/`advice.json`; opened `O_NOFOLLOW` beneath `files.open_directory(exported_configs/<name>)`, regular file ≤1 MiB; `application/octet-stream` attachment. The browser fetches it through `consoleSession.download` (bearer header) and saves a Blob | 404; 422 unknown file name |
@@ -715,9 +797,17 @@ from `GET /api/settings` rows, the origin of the resolved `llm_config_file` and
 
 `SettingsView.problem` names an unusable settings file on disk and its recovery
 (chmod 600, fix/restore, or Save over a readable invalid file); `pending` is then
-`null` and the view still returns 200. CAS limitation: the lock is per process.
-Two console processes serving one workspace can both pass the digest check before
-either replaces the file; the later replace wins. Serve one console per workspace.
+`null` and the view still returns 200. Cooperative file writers use
+`files.private_file_lock(path)`: exclusive `flock` on `.<filename>.lock` beside
+the target, held from the final re-read/comparison through atomic replacement.
+The lock is a stable owned regular inode, mode 0600, one link, opened through
+no-follow directory descriptors. It is never replaced or unlinked; descriptor
+close releases it, including on exceptions/process exit. The existing thread
+locks still protect in-memory state. This protocol covers global settings,
+experiment setups and add-task's console.json writes. A waiting stale writer
+re-reads after acquisition and refuses instead of overwriting the winner.
+Manual editors or external writers that do not take this lock are outside its
+exclusion guarantee; stop concurrent writers before editing those files.
 The folder listing reports `409 root_changed` when an allowlisted root is no longer
 canonical (it now contains a link or moved).
 
@@ -806,7 +896,8 @@ raw native receipts, arbitrary exception strings, storage paths or scores.
 | POST /api/operations/{UUID}/loop-stop | empty `LoopStopSelection` `{}` → `LoopStopAcknowledgement` (`outcome="requested"`), 200 |
 | POST /api/operations/{UUID}/loop-pause | empty `LoopPauseSelection` `{}` → `LoopPauseAcknowledgement` (`outcome="requested"`), 200 |
 | GET /api/operations/{UUID}/loop-resume-review | `LoopResumeReview` (owner-verified paused segment, digest, bound, names-only `credential_readiness`) |
-| POST /api/loop-resumes | `LoopResumeSelection` (`request_id`, `predecessor_operation_id`, `expected_receipt_digest`) → OperationHandle, 202 |
+| POST /api/operations/{UUID}/loop-resume-review | `ReservationSelection` (optional `resources`) → the same `LoopResumeReview`, plus the echoed `resources` and `review_digest` when supplied (#1385), 200 |
+| POST /api/loop-resumes | `LoopResumeSelection` (`request_id`, `predecessor_operation_id`, `expected_receipt_digest`, optional `operator_advice`, optional `resources` with `expected_review_digest`) → OperationHandle, 202 |
 
 Outer ASGI RequestBoundary checks exact Host (configured bind/browser authorities),
 rejects proxy/forwarded headers and requires constant-time bearer authentication
@@ -941,10 +1032,15 @@ under [Authored loop Stop and state](#authored-loop-stop-and-state).
   a skipped tuner has `tuning_state="skipped"` and `result=null`. The field is
   omitted when empty, so unrouted projections keep their bytes.
 - `outcome` (only with a `result`): `graph_results.tuner_outcome(result)`, one plain
-  sentence from the tuner record's status, termination reason, completed rounds and
-  attempts. `completed_rounds == 0` always reads "No training round completed: …"
+  summary from the tuner record's status, termination reason, completed tuning rounds and
+  attempts. `completed_rounds == 0` always reads "No tuning round completed: …"
   whatever the status; the word "Completed" is used only for tuner status
-  `completed` with at least one round. `tuning_state` reports node execution only.
+  `completed` with at least one tuning round. `tuning_state` reports node execution only.
+  Normal completion has no redundant "ended by completed" suffix. Other endings
+  name the failure limit, validity gate, data scope violation or infrastructure check
+  in plain language. `admission_refusal_reason` copies only the verified output's
+  `environment_admission_refusal.reason`; when present the outcome appends
+  "Training could not start: <reason>" (safe text DOM, never HTML).
 - `GraphRunSummary` is the path-free subset of `RunView`: run name, model type,
   status, termination reason, times, completed rounds, total attempts, `metric`,
   `metric_source`, `ranking_refusal`, declared secondary metric identities, the
@@ -993,14 +1089,20 @@ only from this segment's native receipt `loop_trace` (`null` while no receipt
 exists; counts are cumulative over the run). `stop_reason` is the receipt's
 verified `loop_trace.stop_reason`, present only when a declared stop condition
 completed the loop early; Monitor renders it in plain words ("Research loop
-stopped early after body 3 of up to 5: accuracy reached 0.9 (threshold 0.85,
-higher is better; best at body 3)", "… no improvement for 2 bodies …", or "… the judge
+stopped early after iteration 3 of up to 5: accuracy reached 0.9 (threshold 0.85,
+higher is better; best at iteration 3)", "… no improvement for 2 iterations …", or "… the judge
 decided to stop") from the existing status poll, with recorded values unrounded.
 `input_request` is the receipt's verified `loop_trace.input_request`
 (`LoopInputRequest{reason, summary}`), present only when a declared
 `on_met="request_input"` condition paused the loop ("Pause and ask me"); omitted
 otherwise, so other loops' status bytes are unchanged. It is projected unchanged;
 its meaning and readback belong to the worker contract ("Condition input pause").
+Monitor renders a populated `summary.what_was_tried` in the pause card as text:
+retained count, iteration number, proposed model, validation outcome, best valid
+score with metric direction, and the tuning stop reason when tuning did not complete,
+as a plain label (`TUNING_STOP_LABELS` in `loop-control.js`, one entry per
+`HyperparamTuningOutput.termination_reason` other than `completed`; an unknown value
+is shown raw). Missing lists keep the previous display. Model names are never inserted as HTML.
 `judge_verdicts` (B2-5, read-only; omitted when empty) lists the receipt's verified
 `loop_trace.judge_verdicts` in boundary order as `JudgeVerdictView{iteration, decision,
 rationale, confidence}`: `decision` is `stop`/`continue`, or `null` for a recorded
@@ -1008,9 +1110,9 @@ abstention; `rationale`/`confidence` are copied from that verdict's judge eviden
 read by `agent.judge.evidence.read_call_evidence` (digest-checked, inside the run
 workspace) and left `null` for an abstention or an unreadable/foreign file, which never
 fails the status read. Monitor lists them under the loop state (`#loop-judge`) as
-"Judge after body N: stop · <rationale> (confidence …)". The receipt's body
+"Judge after iteration N: stop · <rationale> (confidence …)". The receipt's body
 numbers (`attempted_iterations`, `stop_reason.iteration` and its incumbent
-iterations) are whole-run indices, so a resumed segment's line says "Body numbers
+iterations) are whole-run indices, so a resumed segment's line says "Iteration numbers
 count the whole run, including earlier segments." The console never
 infers per-body progress from an active process. `stop_requested` and
 `pause_requested` (status only; `false` in the operation list) are read by
@@ -1074,8 +1176,8 @@ Monitor: `loop-control.js` owns `window.renderLoopControl` and
 segment), state `active` and no receipt. A click disables the button for the pending request, so
 one click sequence issues one POST; after acknowledgement the button is hidden and
 the state reads "Stop requested … Not yet stopped." until a receipt arrives. A
-receipt `stopped` reads "stopped at a completed body boundary after N of M
-bodies"; `completed` reads "finished after N of M bodies" (and notes that a
+receipt `stopped` reads "stopped at a completed iteration boundary after N of M
+iterations"; `completed` reads "finished after N of M iterations" (and notes that a
 requested Stop did not take effect); `paused` is described under Pause and Resume;
 other statuses read "ended (status)". The
 acknowledgement is memory-only for the selected operation: a reload or another
@@ -1105,9 +1207,16 @@ the owner's `conflict`. If the request UUID is
 already admitted it replays with an empty environment before any root or credential
 read, so a retry after an unconfirmed outcome returns the same operation. Otherwise
 the root's `environment_names` are read from the configured `credential_file` with
-the same `credentials` helper as Launch. Refusals on both routes: `loop_resume`
+the same `credentials` helper as Launch. If that helper refuses, the console checks
+the UUID again: an admission during the credential read replays through the owner;
+an absent record retains the credentials refusal, and an unreadable record fails
+closed with its own error. Under a host ledger a loop whose root
+declared no `resources` is reviewed and resumed with the segment's reservation
+(see "Loop resume reservation" under Host reservation ledger). Refusals on both
+routes: `loop_resume`
 (not an exited, cleanly paused segment, already continued, terminal, or a stale
-digest), `kind`, `not_ready` and `runtime` 409 with route-local fixed messages;
+digest), `kind`, `not_ready`, `runtime`, `resources_required`,
+`run_resources_conflict` and `host_ledger_missing` 409 with route-local fixed messages;
 `credentials` 409 carrying missing names only; `busy`/`conflict` use the global
 messages. Unknown predecessor 404.
 
@@ -1119,22 +1228,30 @@ set with `textContent` only.
 
 Monitor shows **Pause at next boundary** beside Stop for an active loop
 segment with no receipt; after acknowledgement it reads "Pause requested … Not yet
-paused." A `paused` receipt reads "paused at a completed body boundary after N of M
-bodies" and is resumable, never "ended". A `paused` receipt with `loop.input_request`
+paused." A `paused` receipt reads "paused at a completed iteration boundary after N of M
+iterations" and is resumable, never "ended". A `paused` receipt with `loop.input_request`
 instead reads "Waiting for your input." followed by what was met in plain words from
-the request (for example "No improvement for 3 bodies (best 0.81 at body 4, higher
-is better). Paused after body 7 of 12."; a judge request adds the rationale of that
-boundary's `judge_verdicts` entry), then "Review and resume to continue with body
+the request (for example "No improvement for 3 iterations (best 0.81 at iteration 4, higher
+is better). Paused after iteration 7 of 12."; a judge request adds the rationale of that
+boundary's `judge_verdicts` entry), then "Review and resume to continue with iteration
 N+1." or "A resumed segment continues this run." with a successor. A recorded
 Stop without a successor instead uses the ended display below. The exact recorded
 values stay in the state's tooltip. A paused status with `stop_requested` and no successor (either pause kind)
-reads "Ended by you at the pause after body N." and offers no Resume or End:
+reads "Ended by you at the pause after iteration N." and offers no Resume or End:
 the owner refuses a stopped run. This is a terminal display derived from the
 paused receipt and durable Stop marker; the native status remains `paused`. Resuming an input
 request uses the same reviewed Resume below; it sends no advice. Without a successor it offers **Review
 resume** (one GET on click, never polled), then **Resume loop**, disabled unless
 credentials are ready. **End loop here** is offered beside these actions on a
-paused tail that is no longer finishing. It confirms that completed results are
+paused tail that is no longer finishing. End eligibility is independent of Resume:
+a verified completed pause can be ended even when the next iteration slot is occupied.
+Clean supervision, bound completion and successor-session safeguards still apply.
+A refused End renders `End loop was not recorded: <owner message>` in
+`#loop-stop-status`; the owner message contains only the reason, avoiding a second
+End loop prefix. It remains available for retry without Resume review.
+Typed loop admission refusals from submission display the worker owner's profile,
+iteration-shape or feedback explanation; they are never relabelled as changed inputs.
+It confirms that completed results are
 kept and the run cannot resume, then posts `{}` to the existing `loop-stop` route.
 Pending Stop and Resume requests disable competing actions. Success triggers a
 fresh Monitor read, including its status sentence and observation label; a
@@ -1149,16 +1266,57 @@ and retains it in `localStorage` at
 opaque operations store id; `<predecessor>` is the lowercase predecessor operation
 UUID. The JSON record contains `origin` (`location.origin`),
 `expected_receipt_digest` (the reviewed receipt digest), `request_id` (the generated
-UUID), and optional `operator_advice` (trimmed text, omitted when empty). Reuse
-requires a matching origin and receipt digest. A retry reuses the record, and the
+UUID), optional `operator_advice` (trimmed text, omitted when empty), and optional
+`resources` with `expected_review_digest` (the reviewed reservation and its
+`review_digest`, omitted without one). Reuse
+requires a matching origin and receipt digest. A legacy
+`siderius.loop-resume.v1:<UUID>` record with that origin and digest is moved on
+first use only when no store-scoped record exists. A retry reuses the record, and the
 record is released once status shows the successor. After a review,
 `#loop-resume-advice` (a textarea, `maxlength=4000`) is
 shown. It is prefilled with the retained record's advice when one exists, otherwise
-with this paused segment's own `operator_advice`. The first Resume attempt trims the
-text and fixes it: the retained record stores the request UUID together with
+with this paused segment's own `operator_advice`. The first Resume attempt trims
+using Python `str.strip` whitespace (including U+001C–001F and U+0085, excluding
+BOM), matching `OperatorAdvice`, and fixes it: the retained record stores the request UUID together with
 `operator_advice` (omitted when empty), and the textarea becomes read-only, so a
-retry is byte-identical. Only a 422 (refused before admission) clears the record and
-unlocks the textarea. Empty advice sends no `operator_advice` key. A 409 clears the review. On success the monitor selects the resumed
+retry is byte-identical. Pre-admission refusals listed below clear the record and
+unlock the textarea. Other 409 errors clear the review but keep the retained request;
+transport uncertainty keeps both the review and retained request. Empty advice sends
+no `operator_advice` key. If a record from another tab or legacy migration contains
+advice different from the typed canonical advice, submission stops before POST,
+displays its canonical advice read-only, and explains that a second Resume click
+retries the earlier request. Legacy records keep their original body bytes and UUID,
+even when canonical display removes edge whitespace. Review also identifies retained
+advice as an earlier request's binding.
+Host resources for the resumed segment (#1385): the `#loop-resume-resources`
+fieldset (`loop-resume-resources-declare`, `-gpu`, `-vram`, `-memory`, `-cpus`,
+`-timed`, read and filled by `run-scheduling.js` `readResources(prefix)` /
+`fillResources(prefix, value)`, the same rules as the Run lane's panel) is hidden
+until a review or Resume is refused `resources_required` (only a console with
+`host_ledger` returns it), or a retained record carries `resources`. It is not
+gated on `ChoicesView.host_ledger`: a `#monitor/<UUID>` deep link connects through
+`GET /api/operations/<UUID>` and never reads `/api/choices`, so
+`consoleSession.hostLedger` stays `null` there. While shown, Review
+resume sends its declared values as `POST .../loop-resume-review {resources}`
+(`GET` otherwise); an invalid value is shown in `#loop-resume-status` and nothing
+is sent. The summary appends "Host resources: " and the `describe` sentence of the
+echoed reservation. Any fieldset edit discards the review ("Host resources changed.
+Review again before resuming."); the fieldset is disabled while a review is pending, so the values sent are the ones shown. The Resume POST sends the
+retained `resources`/`expected_review_digest`; once retained, the fieldset is
+disabled like the advice textarea and is refilled from the record on re-review.
+A Resume refused with 422, or 409 with a code returned before any operation is
+claimed (`stale_review`, `resources_required`, `run_resources_conflict`,
+`host_ledger_missing`, `host_ledger_required`, `parallel_budget`,
+`parallel_budget_required`, `resource_refused`, `parallel_unit_exceeds_capacity`,
+`placement_unreachable`, `credentials`, `loop_resume`; the admission owner replays
+existing requests, and the console rechecks credential failures as described above), drops
+the retained record and unlocks the advice and fieldset. A retained record whose
+`resources` differ from a newer successful review never overrides it silently: the
+client reads `GET /api/operations/<retained request_id>`; only `unknown_operation`
+drops the record (the newer review stands, with a new UUID on Resume). A readable
+operation keeps the record and its values, shown with "A Resume with other host
+resources was already admitted; Resume reconnects to it."; any other error refuses
+the review. On success the monitor selects the resumed
 segment, which reads "Resumed segment." and shows Stop and Pause while active and
 its per-body results once completed. A continued predecessor shows "Continued by
 <UUID>" (a Slow-control link) and no Resume. Witnesses:
@@ -1256,7 +1414,11 @@ unknown task, or a `setup_id` equal to an `editor_projects` ID raises
 `SettingsInvalid`, so `check`/`serve` fail at startup (`validate_config(...,
 workspace=…)`). Every setup project (both sources) passes
 `check_setup_project`: `WorkflowAuthoring(project)` path checks and recovery
-separate from every run output root.
+separate from every run output root. `SetupStore.load` owns these checks on the
+exact snapshot it returns, including the re-read in `create_app`; `validate_config`
+delegates to that same loader. Changes between an earlier check and app creation
+cannot bypass registry project validation. This does not pin project source bytes
+against later edits; authoring/admission retain their existing validation owners.
 
 **Readers.** All seven former `editor_projects` readers go through the registry:
 `app.create_app` (one `SetupStore` given to `CandidateConsole`; `console.setups`
@@ -1290,7 +1452,7 @@ console.json only.
 | Route | Behaviour | Refusals |
 | --- | --- | --- |
 | `GET /api/tasks/{task_id}/setups` | `SetupList{setups: [SetupView{setup_id, label, runnable, saved_version, refs_match_task}], browser_creatable}` for setups whose task is `task_id`; `browser_creatable` is `SetupStore.creatable`, the predicate `POST` enforces; `saved_version` is the sha256 of the saved source (`null` if unreadable); `refs_match_task` compares the source's resolved refs with the task's | 404 `not_found` (unknown task) |
-| `POST /api/tasks/{task_id}/setups` | `SetupCreate{label, template_id: TemplateId \| null}` → 201 `SetupView`. Renders `templates.render_shape(template_id, ReusableTaskReferences(manifest=task_manifest, data_root=data_root), binding)` (`null`: `blank_document()`, a single Propose node fed by `proposal.input`, since a declaration needs one node). `binding` is the task's `task_revision` only after `observe_target` + `identity_matches` pass; no `task_revision` writes no binding. Under the store lock: CAS pre-check, `setup_id` = label slug (`-2`, `-3`… past registered IDs and existing folders), `projects/` via `ensure_owned_directory`, `mkdir` 0700, `.recovery` 0700, `workflow.py` write-once 0600, `check_setup_project`, then CAS re-check and `_publish_private` of the whole registry | 403 `read_only`; 404 `not_found`; 409 `identity_mismatch`/`inspection_failed` with a blocked `finding` (nothing created); 409 `stale` (file changed since load/last write; restart); 409 `unavailable`/`invalid_setup`/`exists`. After folders exist, a refusal names `projects/<id>/` left in place; nothing is deleted or overwritten |
+| `POST /api/tasks/{task_id}/setups` | `SetupCreate{label, template_id: TemplateId \| null}` → 201 `SetupView`. Renders `templates.render_shape(template_id, ReusableTaskReferences(manifest=task_manifest, data_root=data_root), binding)` (`null`: `blank_document()`, a single Propose node fed by `proposal.input`, since a declaration needs one node). `binding` is the task's `task_revision` only after `observe_target` + `identity_matches` pass; no `task_revision` writes no binding. Under the store lock: CAS pre-check, `setup_id` = label slug (`-2`, `-3`… past registered IDs and existing folders), `projects/` via `ensure_owned_directory`, `mkdir` 0700, `.recovery` 0700, `workflow.py` write-once 0600, `check_setup_project`, then `private_file_lock(experiment_setups.json)` across the CAS re-check and `_publish_private` of the whole registry | 403 `read_only`; 404 `not_found`; 409 `identity_mismatch`/`inspection_failed` with a blocked `finding` (nothing created); 409 `stale` (file changed since load/last write; restart); 409 `unavailable`/`invalid_setup`/`exists`. After folders exist, a refusal names `projects/<id>/` left in place; nothing is deleted or overwritten |
 
 **Run attribution.** The console records the selected setup on reusable runs:
 `ReusableCandidatePreparationRequest.setup_id` (set by `ReusablePreparation` to the
@@ -1300,7 +1462,14 @@ check). Both are optional, `^[a-zA-Z0-9_-]{1,80}$`, and omitted when `None`, so
 older records and their request digests are byte-identical. When present they are
 bound into the operation request digest (the prepare one through its request; the
 candidate one by `store.digest`), so a replay with another attribution is a
-conflict. Legacy `editor_projects` runs are attributed too.
+conflict. Legacy `editor_projects` runs are attributed too. Compatibility is
+forward-only for records containing `setup_id`: older builds that do not declare
+that field refuse it as an extra field. Attribution does not compare setup IDs:
+if setup B aliases setup A’s captured project root and source path, and the task
+policy matches, A’s capture may be launched under B. Preparation remains attributed
+to A and the candidate to B. Same task alone is insufficient: `check_capture_policy`
+refuses distinct project/source paths, so separate console-created setup folders
+cannot exchange captures. Captured bindings and run admission checks still apply.
 
 | `GET /api/operations?project_id=` | rows attributed to that setup | 422 for a malformed ID |
 |---|---|---|
@@ -1315,8 +1484,10 @@ Records without attribution have `project_id: null` and appear only unfiltered.
 list never claims completeness the scan did not have.
 
 CAS: `SetupStore` holds the sha256 of the bytes it last read or wrote; a write
-from another process (or a hand edit) refuses with `stale` and leaves the file
-unchanged. `add-task --from-bundle` is the one other caller of
+from another process, or a hand edit observed by the final locked re-read,
+refuses with `stale` and leaves the file unchanged. Cooperating writers cannot
+interleave the comparison and replace; nonparticipating editors are outside the
+lock guarantee described under global settings. `add-task --from-bundle` is the one other caller of
 `SetupStore.create` (see "Example bundles"). Templates for an opened project keep using `instantiate`, which now
 delegates to `render_shape`.
 
@@ -1586,8 +1757,9 @@ Canvas view state (zoom, scroll, expanded optional rows) is owned by
 viewing sends no request and cannot change saved bytes. The canvas is a CSS
 `transform: scale()` of the world, with positions kept in document pixels
 (drags divide screen deltas by the zoom). On opening a graph it fits once
-(`editorCircuitGeometry.fitScale`: never above 100 %, never below 40 %, then the
-canvas scrolls); the toolbar offers Fit to view, zoom out/in, Actual size, Check
+(`editorCircuitGeometry.fitScale` with the canvas's 75% floor; manual zoom reaches
+40%); oversized graphs scroll with selected/first-module framing as specified below.
+The toolbar offers Fit to view, zoom out/in, Actual size, Check
 the loop and Tidy up (the one layout tool; the former display-only Arrange view was
 removed because a drag in it saved the arranged layout, red-team A-1). The canvas
 grows with its zoomed content up to `clamp(420px, 100vh - 200px, 860px)`, shows edge
@@ -1605,12 +1777,12 @@ loop. Loop-only edits review as `LoopProposal` on the draft's anchor source; wit
 other draft edits pending, the document or draft proposal carries them. A third
 fieldset, Stop conditions, adds/removes at most one `metric_threshold` (metric id
 text plus threshold; the editor does not know the task metric), one
-`no_improvement` (completed bodies) and one `judge` (B2-5: `criterion` text,
-`min_completed_bodies`, `on_failure` fail/continue; exactly `JudgeStop`'s declared
+`no_improvement` (`completed_bodies`, labeled **Completed iterations without improvement**) and one `judge` (B2-5: `criterion` text,
+`min_completed_bodies` (labeled **First judged after iterations**), `on_failure` fail/continue; exactly `JudgeStop`'s declared
 fields). The judge route and `max_judge_calls` are operator-owned
 (`WorkflowLLMConfig.judge`) and are not authored here; the row says so. The capture
 review summary states a judge as "a language-model judge decides to stop ("…"), first
-after N completed bodies; a failed judge call …". The capture launch review refuses a judge the captured
+after N completed iterations; a failed judge call …". The capture launch review refuses a judge the captured
 model settings cannot run, before any launch (409 `judge_route`, the owner's own
 message forwarded): `reusable_candidate.admit_captured_judge_route` calls the worker's
 `candidate_worker.loop_judge.admit_judge_route` with the reviewed loop and the request's
@@ -1623,14 +1795,14 @@ stay local in the loop draft state (`loopDrafts`, separate from training drafts)
 and block Review and circuit edits exactly as an invalid limit does. Cross-field
 rules (one per kind, `completed_bodies < final_iteration`) are the declaration's:
 a refused loop review reads "Review refused the research loop: …" with the
-diagnostic `field_path`. Loop edits preserve bytes only for an already-canonical
-source; Review re-renders the whole declaration, so hand-formatted or commented
-sources are rewritten (visible in the diff). The panel
+diagnostic `field_path`. Loop edits patch exact source values; untouched literals
+retain their original bytes, including in hand-formatted sources (see the authoring
+contract). The panel
 does not draw a back-edge or annotate cards, and it shares the source-dirty,
 conflict and saving fences of the unified draft. Capture review (`ReusableCaptureReview.loop`)
 reports the executed request's authored loop, refusing a request loop that differs
 from the captured declaration, and the launch summary states "up to N iterations"
-or "none (one workflow body)", followed by "stops early when …" for each declared
+or "none (one workflow iteration)", followed by "stops early when …" for each declared
 stop condition.
 
 The Selection inspector groups one node's parameters (`editor-node-parameters.js`,
@@ -1652,6 +1824,20 @@ by the task manifest, shown as `definition.task.manifest` and any task binding;
 no control edits them). A card whose server inventory has a required unbound input
 gets `.has-required-unbound` and a small `.circuit-problem-badge` count; the soft red
 ring is on the unconnected socket itself.
+For a refused one-tuning-round review, `editorNodeParameters.reviewHint` appends
+the native `max_rounds` help description and names **Tuning rounds per iteration**
+in **Training settings**. It applies only when HTTP 422 carries the native
+`trial_override_schedule` error code, directly or in a source diagnostic. The
+native `validate_trial_override_schedule` validator owns this refusal identity;
+`workflows.definition.source.validation_code` allowlists it for both boundaries.
+All other validation types map to `validation`; messages remain fixed and no
+input/context or arbitrary error type is forwarded. The browser does not inspect
+`max_rounds` to infer the cause. Conflict, authentication, unrelated invalid
+settings and source syntax errors do not earn this reminder. Loop reviews
+retain their existing loop-specific guidance. Native error redaction is unchanged.
+`tests/browser/editor_max_rounds_help.mjs` exercises schema help/minimum projection,
+the refused one-round edit and successful correction to two with a preserved Trial
+override; neither review writes the source or launches training.
 `#editor-problems` (`editor-problems.js`, beside Review) lists "N problems" from
 server diagnostics only: draft `problems` (`DraftProblem`) and source diagnostics
 (`SourceDiagnostic`). It is hidden when empty. A located item selects its node and
@@ -1727,7 +1913,14 @@ preparation. Type-compatible highlights do not claim runtime compatibility. Exis
 unrouteable/overlapping layouts retain every binding in the textual connection list.
 Stored positions remain exact. Nodes without one get a display-only fallback placed
 right of every stored card (card size is measured from the rendered cards), so a
-partial code-authored set never overlaps. A pointer drag and Alt + arrows call the
+partial code-authored set never overlaps. `placeCards` reuses `geometry.place` after
+card border-box size changes (including hidden-to-visible transitions, optional
+inputs and mapping expansion). Observers disconnect from replaced cards; pointer
+drags keep ownership of their live coordinates. The visible viewport remeasures
+before pending Fit chooses a scale. This updates fallback display coordinates and
+wire geometry only: stored positions, draft state and source bytes are unchanged.
+Advanced mapping details are present for every protocol-backed card; they do not
+indicate an incompatible advice connection. A pointer drag and Alt + arrows call the
 same move: it records every displayed position, the moved one updated, so the next
 open shows the same layout; a save without a move keeps positions unchanged.
 Keyboard buttons share pointer actions; Escape/right-click cancels a pending wire.
@@ -1735,7 +1928,9 @@ Card headings, palette, loop, run and result views use one sentence-case display
 name per capability (`Interpret results`, `Literature review`, `Propose model`,
 `Implement`, `Validate`, `Train & tune`; the paper figure's stages in plain words)
 from `editor-capability-presentation.js`, their single owner;
-a unit census binds that table to the catalog. Shared semantic theme tokens own colors.
+a unit census binds that table to the catalog and all graph evidence capabilities
+(including adaptor: `Combine/select`, with generic styling). Shared semantic theme
+tokens own colors.
 
 Source/form/base changes invalidate Review. Unreviewed inspector edits disable
 the source textarea until Review synchronizes the rendered proposal, preventing
@@ -1929,12 +2124,56 @@ time>` (ISO and UUID on hover) and states its outcome with the shared
 step (`python -m tools.candidate_operations status --store-config … --operation-id …`).
 Manual UUID entry remains available.
 
+Receipt outcome evidence (`outcomes.py`, issues #1198/#1242): both `StatusView`
+and `OperationListItemView` carry the same optional `OutcomeEvidence` projection.
+`validation_passed` carries the same receipt flag to both callers, so successful
+completion headlines also agree. `failed_phases` carries typed `GraphCapability`
+IDs only for graph nodes/adaptors whose state is `failed`, in verified order with
+repeated IDs removed. `operationOutcome.sentence` resolves these through
+`editorCapabilityPresentation.label`; the list and Monitor share that renderer.
+`editor-capability-presentation.js` is loaded before it and owns the adaptor label
+as well as the catalog capability labels; the census covers every `GraphCapability`.
+Blocked/skipped/rejected nodes are not failures. Loop aggregate receipts have no graph trace, so the projection resolves
+the root through `loop_root_operation` and reads iteration receipts through
+`graph_results.verified_bodies` and the worker's `verify_loop`. Missing or changed
+loop evidence refuses through the existing integrity boundary on direct status reads.
+The list catches only an outcome `OperationFailure` with code `integrity`, sets
+that row's outcome to null and retains other rows; other failures propagate.
+Successful list projections are cached in the service by `(operation_id,
+receipt_digest)` only for completed snapshots with a digest. The lock-protected
+LRU holds at most 200 identities; integrity refusals are never cached. Every poll
+still uses the operations owner's verified listing before cache lookup; status
+bypasses the cache. The cache adds no persisted identity or execution behavior.
+Phases are never guessed from a false validation flag or logs. Without recorded failed nodes the
+headline retains a generic failure. Native failure/timeout/interruption takes
+precedence over validation flags in `operationOutcome.sentence` for every caller.
+
+`OutcomeEvidence.completed_iterations` is the count of verified iteration receipts
+with status `completed`, including preceding segments, or null without a loop trace.
+The native `LoopTrace.attempted_iterations` remains unchanged: it includes a failed
+attempt. Monitor and the operation list display the completed count, never substitute
+attempts for completions, and show unavailable/bound-only wording without evidence.
+A failure in proposal on attempt 2 after one completed iteration therefore reads
+"Failed during Propose model." and "after 1 of 3 completed iterations."
+This read-only projection changes no worker records, prompt bytes or identities.
+`candidate_worker/test_console_list_cost.py` is an opt-in offline benchmark
+(`SIDERIUS_CONSOLE_OUTCOME_BENCHMARK=1`): 20 distinct operation records, each with
+three completed iterations, then three list reads. Provider/training effects use
+the existing doubles; operation admission, worker receipts and list verification
+are real. Timings are reported, not asserted as a machine-independent threshold.
+The ordinary outcome tests cover identity-keyed reuse, refusal non-caching and
+strict status reads after a cache hit.
+Targeted witnesses: `test_outcomes.py`, `test_graph_results.py`,
+`tests/browser/monitor_outcomes.mjs`, `tests/browser/graph_results_monitor.mjs`.
+
 Status and logs (`app.js`): the status line is one `operationOutcome.sentence`
 (M-2; native `failed`, `timed_out` and `interrupted` read "Failed: the <run, preparation,
 native chain, …> …" in plain words for every kind, including a preparation (#1145),
 native `cancelled` (Stop run, #1027) reads "Stopped on request before finishing; no
 candidate result was produced.", and a store `unknown` state whose process reason is
-`missing_identity` reads "… is starting."). For a failed operation `#monitor-cause` shows "Cause (from the
+`missing_identity` reads "… is starting."). A preparation with `preparation_error`
+shows that fixed category as its cause; see [preparation diagnostics](#preparation-refusal-and-parent-failure-diagnostics).
+Otherwise, for a failed operation `#monitor-cause` shows "Cause (from the
 log): <last exception line>" (`operationOutcome.cause`, the last line shaped like
 `Name(Error|Exception|Failure|Refusal): …`; a line over 300 characters is cut at the
 last space before character 300, trailing punctuation dropped, and ends with "…", never
@@ -1942,7 +2181,7 @@ mid-word) from the log text already displayed; the
 Run page reads the last 64 KiB of the native, then operation, log once
 (`operationOutcome.readCause`) and appends the same line, for a failed launch in step 2
 and for a failed preparation in step 1 (#1145; a preparation's native log is the run's
-`inputs/preparation/worker.log`, which the step-1 status line also names). Loop body counts are singular/plural correct; `state`, `native_status`, process, reason and validation stay in the developer
+`inputs/preparation/worker.log`, which the step-1 status line also names). Loop iteration counts are singular/plural correct; `state`, `native_status`, process, reason and validation stay in the developer
 Operation facts. `#operation-observed` shows local time (ISO and UUID in its title).
 After a terminal state (`completed`/`operation_failed`, process `exited`, not
 `finishing`) has been read and its log drained to `observed_size`, the operation is
@@ -2009,8 +2248,8 @@ intent are persisted. The launch intent contains only origin/project navigation
 context, retained preparation identity, request digest and operation UUID; never
 source bytes, native requests or credentials. Operation-bearing records are keyed by the
 opaque operations store id: reusable intents (`…v2/<store>/<project>`) and loop
-Resume request ids (`siderius.loop-resume.v2/<store>/<predecessor UUID>`; a legacy
-`siderius.loop-resume.v1:<UUID>` with the same receipt digest is moved on first use).
+Resume request ids (see [Pause and Resume](#pause-and-resume) for the key, record
+contents and legacy migration).
 Preferences (theme, view flags, tour) and the last-opened operation UUID stay per
 origin because they are read before connecting. Settings (advanced) **Forget this
 browser's console data** (`browser-data.js`) removes every `siderius.*` key except
@@ -2108,7 +2347,7 @@ to 20 s for the saved source (else shows the editor's status, L-3) and focuses t
 advice field (L-6) through `editorAdvice.focusSettled()`, the bounded re-focus the
 gallery's template import also uses; it stops at the author's first click or key. The
 template is the loop whose Propose model `human_advice` socket is connected (managed
-`advice`), so that advice reaches the proposal agent. Rounds, stop conditions and
+`advice`), so that advice reaches the proposal agent. Iterations, stop conditions and
 training settings are then edited in the ordinary panel. The Run page's step-1 entry is
 one section (`#run-entry`); steps 2-3 read only the `reusableCandidate.openPrepared`
 handoff, so another entry can replace it. When this page created a preparation, the
@@ -2127,7 +2366,7 @@ status is not `prepared`; a native `paused` research loop is `resumed` (a
 requested; this run cannot continue."), `paused_for_input` (`loop.input_request`, "The
 research loop paused and is waiting for your input. Open it in Monitor to read the
 summary, add advice and resume.") or `paused` ("The research loop is paused at a
-completed body. Open it in Monitor to resume."); `null` otherwise (running, unresolved,
+completed iteration. Open it in Monitor to resume."); `null` otherwise (running, unresolved,
 prepared, accepted, rejected, stopped). For example a failed preparation reads "The preparation
 failed. The cause and its log are named below; start over to try again." and a failed
 launch "The run failed. The cause is shown below; open it in Monitor for the full log."
@@ -2263,7 +2502,8 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   flex column with `overflow: clip` (never scrolled, not even by `scrollIntoView`) whose
   `#editor-graph` (`flex: 1 1 0`) grid gives `.circuit-viewport` exactly the remaining
   height; the viewport scrolls and zooms inside it. Fit frames the union of every card's
-  box plus a 40 px margin (`FIT_PAD`), scrolled to that box's origin, within the visible viewport.
+  box plus a 40 px margin (`FIT_PAD`), scrolled to that box's origin when it fits.
+  At the 75% floor, an oversized graph uses selected/first-module framing (see below).
   Open disclosures in the panel (port-type legend, canvas help and connection
   mappings 120 px) scroll internally. Invariant (witnessed by `layout_onboarding.mjs`
   and `first_use_journey.mjs`): viewport inside the canvas panel, viewport height ≤
@@ -2329,8 +2569,14 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   controls get a one-line tooltip from `data-tip-label`.
 - Cards fold every optional input that is not fed by a wire (not connected, or fed by an
   external input) into one `+N optional` row. Fit to view never zooms below 75% (the legibility floor, `FIT_MIN`);
-  a larger graph scrolls inside the viewport and the view note says "Scroll the canvas". Manual
-  zoom out still reaches 40%.
+  a larger graph scrolls inside the viewport. The visible live view note counts partly
+  off-screen modules, explains the 75% Fit floor, and directs users to scroll. When the
+  padded graph exceeds the viewport at the fitted scale, Fit centres the selected module
+  (first module if none selected). For a module larger than the viewport, it aligns its
+  leading edge/heading instead. This is view-only: no saved positions, dirty state or
+  mutation requests change. Manual zoom out still reaches 40%.
+  `tests/browser/editor_fit_overflow.mjs` covers tall/wide/offset overflow, desktop and
+  narrow viewports, selected/first framing, scroll reachability and source-byte preservation.
 - Canvas controls are one secondary icon cluster bottom-right (zoom out, zoom %, zoom
   in, Actual size, Fit, Check the workflow, Tidy up); the connector legend is a bottom-left
   chip whose content opens as a two-column popover above it.
@@ -2380,7 +2626,7 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   no module is left, and Review/Save refuse (`draft_incomplete`) until no problem
   remains, so the saved file is never invalid. A deletion nobody reads, with no other
   edits, is a targeted byte-preserving removal; otherwise the combined document is
-  rendered canonically. Deleting every module shows the §7.2 empty state.
+  patched while preserving untouched literals. Deleting every module shows the §7.2 empty state.
 - Disabled Save shows `#editor-save-reason` inline ("Fix N problems to save",
   "Checking…", "Saving…"); disabled Next: Run shows `#workflow-next-reason` ("Save a
   version to run" or "Not set up for runs").
@@ -2486,6 +2732,29 @@ isolation, connection races/401 and pending-draft/reload behavior. Existing edit
 console and theme browser harnesses exercise the shared shell and disclosures.
 These are local browser witnesses; they do not qualify native execution, complete
 circuit editing, results, resume or production deployment.
+
+Remembered Monitor input is scoped by `session.js` to
+`siderius.operation_id.v1/<operations_store_id>`. Its `rememberOperation` and
+`rememberedOperation` methods are the sole persistence owner for Monitor and the
+legacy preparation, candidate and native-chain launch controls. The old global
+`siderius.operation_id` is ignored, never migrated: it has no attributable store.
+Connect clears the previous session's store identity. Without an explicit Monitor
+UUID, the convenience input is cleared during reconnection and restored only after
+validated choices identify the current store; malformed stored UUIDs are ignored.
+Disconnect, 401 and Connect retain the last Monitor observation (facts, logs and
+tokens), including observations opened by legacy Prepare/Launch without a route UUID.
+The page retains the last identified store separately from session connection state.
+Across connection changes, a different identified store resets that observation;
+same-store reconnect preserves it. An explicit route UUID is then selected again
+against the new store.
+Restoration only fills the input; it never submits a read or launch. Explicit UUID
+routes win and retain independent operation-only authentication. Until choices
+identify the store, reads/writes of remembered selection are no-ops; storage failures
+also leave explicit monitoring available. No credential or request payload is stored.
+`tests/browser/operation_selection.mjs` covers shared-origin store switching, reload,
+legacy isolation, 401-after-Prepare observation retention, same-store reconnect,
+changed-store observation reset, explicit route precedence, native launch persistence
+and unavailable localStorage using synthetic observations, without native execution.
 
 
 ## Reusable capture consumption
@@ -2610,7 +2879,13 @@ could not train. An unreadable profile is `stale_review`. Training admission
 (`candidate_worker.training_admission.refuse_untrainable_launch`, after
 `run_launch_self_test`) and tuner startup (`validate_training_mode_startup`, composed
 runs only) ask the same owner again. Templates declare `is_trial: true`,
-`healthgate_mode: blocking` and `result_authority: scientific` (`templates.DECLARED_LAUNCH_POLICY`).
+`healthgate_mode: blocking`, `result_authority: scientific`, `formal_portion: 1.0`
+and `max_rounds: 2` (`templates.DECLARED_LAUNCH_POLICY`). They explicitly allow
+Trial before forced Formal and use the full declared training scope; native
+launch defaults remain .1 and 10. The editor projects descriptions for
+`is_trial`, `max_rounds` and `formal_portion` from `WorkflowLaunchConfig` through
+`training.control_help`, including the per-iteration last-round rule and the
+Default reset behavior. No browser-side execution/default authority is added.
 Prepare reuses the same review, so the refusal there carries
 `admission_not_attempted`. The browser keeps the version name
 as `source_version` beside, not inside, the retained intent payload. Both use the
@@ -2887,9 +3162,10 @@ States: `observing` (child running; poll the same URL), `ready`, `failed`
 `unavailable` (`unavailable: {reason, hint}`; `reason` is `sandbox_missing`,
 `data_root_missing`, `manifest_missing` or `llm_config_unreadable`). The model
 profile is read because the child resolves its planner strategy exactly as the
-editor's task observation does. Console-side failure messages are truncated to
-`tools.setup_review.composition_models.FAILURE_MESSAGE_MAX_CHARS`, the same cap
-used for child failures.
+editor's task observation does. Console-side exceptions and package scope/storage/sample-count exceptions use
+`tools.setup_review.summary_errors.summary_error_message`: fixed, bounded filesystem,
+invalid-value or unexpected-error categories. Raw exception text and task-defined
+exception class names are never included by this owner.
 
 Observation: the request thread reads the manifest digest and model profile, then
 builds `CompositionJob(summary=TaskSummaryRequest(data_root, count_samples))` with
@@ -2910,13 +3186,20 @@ View fields:
 - `data_root`, `run_policy` (`TaskChoice` timeouts, network, devices,
   `candidate_environment_names` as names only, `allowed_output_types`). No credential
   file is read; no secret value can appear.
-- `data_volume`: `{files, bytes, complete, entry_cap}` from a no-follow walk
+- `data_volume`: `{files, bytes, complete, entry_cap, incomplete_reason}` from a no-follow walk
   (`os.scandir`, symlinks counted as entries and never followed), capped at
   100 000 entries and a five-second monotonic wall-time budget. Entries on a
   different `st_dev` from the data root are skipped (including mounted
   subdirectories). Entry/time caps, skipped devices and filesystem errors yield
-  `complete=false` with partial totals. The deadline is checked between filesystem
-  operations; it cannot interrupt an already-blocked kernel call.
+  `complete=false` with partial totals. `incomplete_reason` is `null` for complete
+  totals; otherwise `entry_cap`, `time_budget`, `other_device` or `unreadable`
+  (including vanished entries). A stopping cap/time budget takes precedence over
+  skipped-entry reasons; otherwise the first skip reason is retained. The Task tab
+  renders the reported reason and labels both totals as lower bounds.
+  An entry error skips only that entry; directory open/iteration errors skip the
+  remaining directory. The deadline is checked before visiting more entries or
+  directories, so completing the final entry after the deadline remains complete.
+  It cannot interrupt an already-blocked kernel call.
 - `package` (only when `ready`): `identity` (`semantic_fingerprint`,
   `task_data_path_id`, configured `task_revision`, `revision_matches`),
   `description` and `model_io` (the composed `task_description` and
@@ -2983,3 +3266,204 @@ requests `?refresh=1` and is disabled while observing. `GET /api/tasks` items ca
 so existing check/editor job digests and observations are byte-identical. The
 transport refuses a passed result whose `package`/`sample_counts` presence does not
 match the request.
+
+### Preparation refusal and parent failure diagnostics
+
+Run retains the last typed Prepare response for the exact in-page intent across
+`unknown_operation` polling. It renders HTTP status, fixed server code/message,
+and, when supplied, the UUID `error.blocking_operation_id` as a Monitor link.
+The UUID comes from the admission owner's blocking claim, never from exception
+text or the derived active pointer. This does not certify non-admission: the
+existing two-read absence and explicit dismissal rules still govern Forget.
+Only an initial response with `admission_not_attempted` is labeled `Prepare refused`;
+other typed errors say the outcome is unconfirmed. A retained response overrides
+only `unknown_operation` polls; transport and other check errors show their current
+message, including unreachable-server guidance.
+The phrase `after Retry` is used only after an explicit Retry dispatch in this
+page. Refusal and retry evidence are page-local, cleared on intent change; a
+reload resumes observation without inventing a remembered refusal or retry.
+
+`StatusView.preparation_error` is omitted except for a verified failed preparation
+receipt with an error, a preparation in `operation_failed` (except deliberate
+`cancelled_while_queued`), or a preparation with `unknown/native_outcome_unresolved`
+completion. The latter reports an error without a verified result and explicitly
+keeps the outcome unresolved; it does not enable Start over or release admission.
+`service.preparation_error` uses `tools.setup_review.summary_errors.error_category`
+for legacy receipt diagnostics and renders fixed filesystem,
+invalid-input/changed-source, child-worker, or generic preparation messages.
+Child-worker failures direct the author to the native log; parent failures direct
+them to the server/operation log.
+Neither exception text nor task-defined exception class names reach that field.
+Run and Monitor cause summaries prefer this field over log extraction, including
+an outstanding asynchronous log read. Raw logs remain explicit diagnostic evidence
+for task authors. Parent catches log full tracebacks through server logging;
+operation children inherit the private operation log. Receipts and their identities
+are unchanged.
+
+Non-loop candidate/preparation interruptions use `operation_process_exited` and
+`operation_process_exiting` from the operation owner. The shared outcome renderer
+explains stopped processes versus unresolved writers; only verified termination
+allows new work. Native-chain continuation recovery is unchanged.
+
+Pre-dispatch preparation failures have no receipt but still carry a fixed
+`preparation_error`. Run and Monitor use that field instead of automatically
+extracting a cause from the private operation traceback. Explicit log access
+remains available to task authors. The shared category owner classifies live
+exceptions by hierarchy and legacy text by recognized built-in/standard class
+identities (including `JSONDecodeError`); unknown custom names remain generic.
+
+
+### Safe Task, GPU and setup failure projection
+
+`setup_review.summary_errors.error_category` is the single classifier for live
+exceptions and serialized standard exception names. `TaskSummaries._run` logs the
+serialized stage/type/message server-side, then projects only
+`summary_error_message(failure.exception_type)`. Task-defined class names and raw
+messages never enter `SummaryFailure.message`. `SandboxUnavailable` keeps the
+existing unavailable hint. Unexpected console observation failures retain their
+traceback in the server logger while returning fixed summary category text.
+Composition diagnostic artifacts are unchanged; this is a console projection boundary.
+
+`error_messages.console_error_message` logs the live exception/traceback and maps
+the shared category to fixed console text. GPU import/allocation/profile/startup
+failures and setup validation/registry/route failures use it. Existing status codes,
+setup-relative leftover-folder guidance and the GPU success result remain unchanged.
+The CLI GPU probe uses Python logging on stderr (including inside its child), so
+operators retain diagnostic output; that output is not a browser view model.
+Server/CLI diagnostic logs can contain private causes and must be handled accordingly.
+
+Regression owners: `test_error_projection.py`, `test_setups.py`, and the AST sweep
+`test_error_projection_guard.py`. The sweep rejects direct str/repr conversions,
+exception interpolation, and serialized message forwarding outside logging. It is
+not whole-program taint analysis. Precisely enumerated pre-existing statements in
+`error_projection_followups.json` are retained for the separate settings/import/
+authoring audit #1328; no Task-summary or GPU leak is exempted. SetupRefused's
+already projected `message` remains the route carrier. New statements are not
+allowed by this baseline. The deadline regression models 332 GiB using patched
+stat sizes over empty files, without allocating large sparse files.
+
+Browser evidence: `tests/browser/console_error_projection.mjs` injects a synthetic
+private cause in the real HTTP fixture (`setups_fixture --error-projections`) and
+checks Task and setup-dialog text, response bodies and server logging. The ordinary
+Task and experiment-setup witnesses continue to cover the surrounding navigation.
+
+
+Editor `/review` and `AuthoringError.proposal` responses apply `safe_review` at the
+console adapter. It copies `task_reference_update.observation` and
+`current_observation`, logs each native failure privately, and replaces only the
+failure's `message` and `exception_type` with fixed summary text and the shared
+category identifier. Native authoring objects and diagnostic artifacts remain
+unchanged. Ordinary reviews and successful observations retain their existing
+representation. Both observations are sanitized before the browser's JSON details
+renderer receives them; client-side hiding is not the protection boundary.
+
+Registry stale errors retain exactly the two `_REGISTRY_ERRORS` literals owned by
+`setups._read`: private-file mode guidance and invalid-registry-schema guidance.
+`_registry_problem` compares the complete exception args tuple to these constants,
+returns the constant on a match, and otherwise uses fixed generic category text.
+It never trusts arbitrary SettingsInvalid text. Raw causes remain in logging;
+joined stale messages do not contain `. ;`/`.;` punctuation.
+
+The AST guard additionally checks format calls/percent formatting, exception args,
+and chained `x.result.failure.message` access, and counts duplicate statement
+occurrences (multiple raw expressions in one statement count once). Named safe
+projection calls are boundaries for the syntactic scan. Explicit reviewed baseline
+entries retain audited fixed guidance and typed carriers. Alias, dynamic
+attribute, whole-model serialization, safe-owner shadowing and JavaScript gaps are
+listed in #1339; behavioral HTTP/browser sentinel tests cover the editor model
+projection independently of this syntactic guard. The editor browser witness
+renders real sanitized HTTP observations through the production JSON details
+component, using synthetic visibility gates only; it does not qualify saving or
+scientific compatibility.
+
+### Bounded alias and whole-model projection evidence (#1339)
+
+`test_error_projection_guard._forwarding` scans lexical scopes independently.
+Handler-bound exceptions and conventionally named, annotated exception carriers
+seed a conservative fixed point over local assignments. Direct assignment,
+chained aliases, literal tuple/list unpacking and container literals propagate
+exception/message provenance; assigning `str`, `repr` or `format` also preserves
+the formatting-call check. Safe projection calls and private logger calls retain
+their existing boundaries. Fixed conditional result strings do not become raw
+messages merely because the condition examines an exception.
+
+The guard checks aliased returns, message/detail/error/content keywords,
+JSONResponse/dict/json serialization and whole-carrier model_dump/model_dump_json
+calls. Five newly visible existing statements are individually reviewed in the
+exact baseline: SetupRefused finding serialization and response alias, the
+SourceDiagnostic response, the code-filtered admission-not-attempted response,
+and `example_bundle.copy_package`'s `AddTaskRefused` raise. The package-copy
+message comes from audited `WorkspaceRefused` guidance or `console_error_message`;
+its suffix adds fixed partial-copy guidance and the explicit target path.
+Their owners supply framework guidance; there are no whole-file exemptions.
+Existing #1328 repairs remove their own legacy entries independently.
+
+Arbitrary models are not proven safe by syntax. `test_error_model_inventory`
+inventories every typed CheckFailure path below the existing ReviewView boundary.
+Each inventoried path must be populated with a private sentinel, safely projected,
+and leave the native model unchanged. The real HTTP witnesses in
+`test_editor_errors` exercise both ordinary review and AuthoringError.proposal
+serialization. Adding a typed failure path requires a projection and witness
+update even when the adapter never directly accesses `.failure.message`.
+
+Limits remain explicit: unknown helper returns, closure capture, mutation of
+containers after assignment, dynamically selected attributes, arbitrary
+formatting APIs, aliases/shadowing of logger or safe-projection owners, unannotated
+exception parameters without a handler binding, unrelated model types and
+JavaScript transformations still require source-aware review and boundary tests.
+The analysis is control-insensitive and does not kill aliases after reassignment;
+its findings are review obligations, not proof of a runtime leak. This bounded
+tripwire is not an interprocedural taint analyzer or a general serialization
+security proof. No runtime behavior, scientific default or identity changes.
+
+### Settings, import and authoring error projections (#1328)
+
+`error_messages.console_error_message` remains the console projection owner and
+uses `setup_review.summary_errors.error_category`; raw causes and custom exception
+class names are diagnostic-log data, not response messages. Settings profile
+upload/export, external-manifest inspection, package-copy OSError, add-task folder
+creation and entry validation, and host-ledger intake use that
+owner. Existing refusal codes and no-write/partial-copy recovery hints remain.
+Device warnings retain the audited `SandboxProfile.device_paths` / `_canonical_path`
+refusal text, including the configured path and specific missing-GPU recovery.
+These sources construct only fixed framework text plus the declared path; nested
+causes and tracebacks are not forwarded.
+
+`advice_error_message` adds the advice owner's recognised key inventory and
+nonempty text/list requirements to the safe category. Library upload, inline
+export and settings advice loading share it. Unknown uploaded keys, parser text
+and nested causes are not forwarded. This changes console diagnostics only;
+`workflows.advice` still owns parsing and consumability and its runtime behavior
+is unchanged.
+
+Typed-carrier provenance audit:
+
+| Carrier | Reviewed sources and projection rule |
+| --- | --- |
+| `SettingsInvalid` | `settings_file`, `package_mounts`, `workspace`, `config`: fixed field/path/permission recovery guidance; nested advice causes use `advice_error_message`. |
+| `AdviceArtifactError` | `workflows.advice` can contain unknown keys and nested parser/file errors; console adapters categorise rather than trust the carrier text. |
+| `AuthoringError` | `service`, task publication, node edits, source edits and version records: retain fixed policy/conflict/recovery guidance and explicit authored identifiers. Native `definition.draft.inspect_draft` now projects validator messages rather than `str(ValidationError)` input snapshots, also protecting draft and node-draft views. |
+| `TemplateRefusal` | `templates.import_template`: fixed unsupported-source guidance. |
+| `WorkspaceRefused` | `workspace.ensure_owned_directory` and init: fixed ownership/permission recovery with explicit paths and stat fields; package-copy forwarding is restricted to this typed carrier, while OSError is categorised. |
+| `AddTaskRefused` | `add_task`, `example_bundle`: fixed planning/recovery text; generic inspection/copy/entry errors are categorised; custom exception names are not shown. |
+| `MissingConfigFile` | `config_errors`: configured resource field and path; existing name/path recovery guidance remains. |
+| launch policy / judge route | `validate_declared_policy` and `loop_judge.admit_judge_route`: fixed framework policy/budget/route guidance; no nested arbitrary cause is interpolated. |
+
+The exact AST baseline removes repaired raw projections and documents the narrow
+WorkspaceRefused forwarding statement; it is not an exemption for arbitrary typed
+errors. HTTP/CLI sentinel tests live in `test_remaining_error_projections.py`.
+Authoring validation retains the validator's field/contract guidance, but omits
+Pydantic's input snapshot. No scientific defaults, prompt bytes, protected digest
+algorithms or experiment-owned settings change.
+
+### Execution profile browser binding
+
+`profile_assets.add_profile_assets` serves `/execution-profiles.js` from the
+workflow declaration owners `NATIVE_INTERPRETATION_PROFILE`,
+`NATIVE_LITERATURE_PROFILE` and `NATIVE_PROPOSAL_FAMILIES_PROFILE`. The index loads
+it before editor and captured-run scripts. The frozen `window.executionProfiles`
+object exposes `nativeInterpretation`, `nativeLiterature` and
+`nativeProposalFamilies`; captured-run descriptions use these keys, and editor
+loop controls use `nativeInterpretation`. Fanout has no JavaScript consumer and
+is not exported. The asset contains no task state or credentials and changes no
+profile admission or serialized identifier.

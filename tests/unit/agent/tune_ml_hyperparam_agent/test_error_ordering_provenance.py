@@ -16,6 +16,7 @@ import pytest
 from agent.schemas.hyperparam_tuning import ExperimentRecord, HyperparamTuningInput
 from agent.schemas.ordering import ResolvedOrdering
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from examples.quickstart.plugins._quickstart_task import write_data_dir
 from execute_tools.evaluation_metric import (
     NotScoreableError,
     NotScoreableResult,
@@ -110,6 +111,8 @@ def run_failure(tmp_path):
             sandbox.save_record.side_effect = lambda record: saved.append(deepcopy(record))
             for name in ("configs", "data", "denoised"):
                 (tmp_path / name).mkdir(exist_ok=True)
+            # Batch-fit planning materializes the composed dataset before phase dispatch.
+            write_data_dir(tmp_path / "data")
             sandbox.dirs = {name: str(tmp_path / name) for name in ("configs", "data", "denoised")}
             sandbox.base_dir = str(tmp_path / "denoised")
             stub_scoring(sandbox, [1.75] * 4, 1.75)
@@ -185,7 +188,12 @@ def test_phase_failures_preserve_selection_and_existing_payload(
     assert phase in dispatched
     assert saved[0]["status"] == f"error_{phase.removesuffix('_skill')}{suffix}"
     assert_selected(saved[0])
-    assert {key: saved[0][key] for key in before[0]} == before[0]
+    # #1322: the emission seam promotes the record-only resolution receipt out
+    # of params; everything else the builder wrote is persisted unchanged.
+    builder = deepcopy(before[0])
+    receipt = builder["params"].pop("resolution_events")
+    assert saved[0]["resolution_events"] == receipt
+    assert {key: saved[0][key] for key in builder} == builder
     assert not (_FIELDS & before[0].keys()), "builder must not duplicate mapping"
 
 

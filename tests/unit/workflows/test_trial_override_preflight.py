@@ -104,3 +104,19 @@ def test_direct_workflow_refuses_before_composition_or_nodes(
                 workspace=str(workspace), run_name="preflight", launch=launch
             )
     assert not workspace.exists()
+
+
+def test_trial_schedule_refusal_preserves_key_names_and_type():
+    """Typed transport must retain the actionable native key list for CLI callers."""
+    from agent.schemas.hyperparam_tuning import validate_trial_override_schedule
+
+    with pytest.raises(ValueError) as caught:
+        validate_trial_override_schedule(
+            plan_overrides={"trial_portion": 0.2, "eval_portion": 0.3},
+            is_trial=True,
+            max_rounds=1,
+            force_formal_round=True,
+            formal_training_scope_source="operator",
+        )
+    assert "['eval_portion', 'trial_portion']" in str(caught.value)
+    assert "{trial_scoped}" not in str(caught.value)

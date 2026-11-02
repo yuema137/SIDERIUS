@@ -10,6 +10,7 @@ from pathlib import Path
 
 import uvicorn
 
+from tests.browser.fixture_metadata import emit_metadata
 from tools.candidate_console import ConsoleConfig, RecordedExampleChoice
 from tools.candidate_console.app import create_app
 from tools.candidate_operations import OperationStoreConfig
@@ -91,19 +92,16 @@ def main() -> None:
         auth_token_file=str(token),
     )
     before = tree_digest(workspace)
-    print(
-        json.dumps(
-            {
-                "origin": config.browser_origin,
-                "token": token.read_text(),
-                "example_id": "tess-recorded",
-                "workspace": str(workspace),
-                "before": before,
-                "invalid_workspace": str(invalid_workspace),
-                "invalid_before": tree_digest(invalid_workspace),
-            }
-        ),
-        flush=True,
+    emit_metadata(
+        {
+            "origin": config.browser_origin,
+            "token": token.read_text(),
+            "example_id": "tess-recorded",
+            "workspace": str(workspace),
+            "before": before,
+            "invalid_workspace": str(invalid_workspace),
+            "invalid_before": tree_digest(invalid_workspace),
+        }
     )
 
     import tools.candidate_console.service as service_module

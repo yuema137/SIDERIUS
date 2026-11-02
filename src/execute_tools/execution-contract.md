@@ -67,10 +67,16 @@ records (`metric_result` / `metric_refusal`), typed training results.
 - Scientific metric implementations and their frozen definitions belong to the
   task package. Generic execution does not select a scientific formula.
 - **Seeded training**: `train_engine_sandbox.run_experiment_streaming`
-  requires a `TrainingSeedPlan` (`None` raises `MissingRunSeed`), seeds the
-  process RNGs before model construction (`process_seeding.seed_process`) and
-  gives every `DataLoader` an explicit generator and `worker_init_fn`. The
-  trainer CLI is a run-seed entry boundary (`--seed_context_json`, otherwise
+  and the legacy Python callable `run_experiment` (implemented in
+  `legacy_training.py`, re-exported by the engine) require a `TrainingSeedPlan`
+  as a required keyword-only `seed_plan` argument (omission raises `TypeError`;
+  explicit `None` raises `MissingRunSeed`) and seed the process RNGs before model
+  construction (`process_seeding.seed_process`). The streaming path gives every
+  `DataLoader` an explicit generator and
+  `worker_init_fn`. Direct legacy callers own their supplied loader and its
+  sampling generators. The already-seeded legacy CLI calls the private shared
+  training body without reseeding after dataset construction, preserving its
+  RNG sequence. The trainer CLI is a run-seed entry boundary (`--seed_context_json`, otherwise
   generated). See the [seeding mechanism](../../docs/agent-reference/mechanisms/seeding.md#trainer-seeding).
 
 ## Non-owned semantics
@@ -170,3 +176,14 @@ Declared from a manifest via `file:` — never by editing this package.
 `tests/unit/execute_tools/` (registry two-phase rule, scope transport,
 scoreability ordering, metric reconciliation, deliverable naming) and the
 Gate-2 harnesses under `scripts/` for real-execution evidence.
+
+### Deterministic evaluation selection
+
+On the native task-owned scoring route, `denoising_score_single` evaluates the
+source primary and declared secondaries, then delegates opted-in formula selection
+to `evaluation_aggregation`. The child emits the effective scalar and its generated
+metric identity together with typed component evidence; `evaluation_child` validates
+that transport before ranking or record construction. Health receives the source
+primary scalar/vector through `source_health_inputs`. No formula is computed by an
+agent. Unsupported anchor/external routes and ambiguous threshold units fail closed;
+see [evaluation contract](evaluation-contract.md) for the owning rules and schema.

@@ -103,7 +103,8 @@ call shape production would reject.
 
 ## Dependencies
 
-- `core/sandbox_executor.py` — `TidmadSandbox` / `StubSandbox`
+- `core/sandbox_executor.py` — `TidmadSandbox`
+- `core/stub_sandbox.py` — `StubSandbox` (pseudo mode)
 - `execute_tools/train_engine_sandbox.py` — the training subprocess
 - `skill_config.json` — the LLM-facing tool schema (legacy; the tuner
   calls `run_skill` directly rather than through tool-calling)
@@ -114,3 +115,12 @@ call shape production would reject.
 the final partial batch and step estimates use ceiling rather than floor.
 See [training batch policy](../../../../docs/reference/training-batches.md)
 for measured row-count receipts and model compatibility requirements.
+
+## Estimator input resolution
+
+`estimator._usable` excludes booleans from numeric dimensions and counts.
+`resolve_model_field` and `resolve_train_field` fall back to the declared schema
+default, then their caller-provided safety margin, for an unusable value.
+`require_declared_segmentation_size` instead refuses an explicitly unusable
+segmentation size. Live proposal validation rejects boolean segmentation sizes
+before advisory estimation and delegates supplied training values to `TrainConfig`.

@@ -285,6 +285,8 @@ def _make_input(
     # tests run a deterministic, small number of attempts regardless of the
     # default budget knobs (which the design may tune over time).
     return HyperparamTuningInput(
+        # This fixture exercises legacy single-file attempts, not trial scheduling.
+        is_trial=False,
         run_seed=TEST_RUN_SEED,
         planner_strategy="native-timing-v1",
         model_type="punet",

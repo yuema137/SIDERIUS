@@ -168,5 +168,5 @@ def test_profile_the_cli_would_refuse_is_not_exported(exported, tmp_path):
     config.write_text(json.dumps(document))
     response = _export(_client(_load(workspace)), source)
     assert response.status_code == 422 and response.json()["error"]["code"] == "invalid_profile"
-    assert "unknown configuration keys" in response.json()["error"]["message"]
+    assert "Invalid value." in response.json()["error"]["message"]
     assert not (workspace / "exported_configs" / "my-export").exists()

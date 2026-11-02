@@ -630,6 +630,38 @@ Selection is conservative:
   readers, plus any test with a literal contract-file edge;
 - Python changes select direct tests, tests of explicit transitive callers,
   declared dynamic readers and the changed area's owning suite;
+- every path under `src/agent/prompt_templates/` triggers the full unit suite.
+  Proposal loaders compute stage and exploration-mode filenames, and other
+  template loaders read assets through filename arguments. Source edges model
+  Python imports, not these file reads; literal test references cannot prove all
+  rendering consumers. The tree-wide trigger includes future template families
+  and deliberately trades selection speed for complete rendering and packaging
+  coverage. It takes precedence over document and area ownership;
+- `DIRECTORY_SCANS` declares all resource families enumerated by
+  `tests/unit/packaging/test_package_resources.py::_required_assets`: vocabulary,
+  prompt templates, skill configs, analysis reference-pack manifests, model
+  descriptions, node Markdown, dashboard assets, CI weights, Health policy and
+  hook templates. Directory entries conservatively include all descendants,
+  including nested node Markdown. Packaging ownership is additive to existing
+  readers and area suites; these declarations remain explicit even where a
+  full-suite trigger currently covers the input. The packaging module's
+  `test_resource_census_and_selection_declarations_stay_in_sync` executes the
+  actual census and rejects uncovered assets or declarations matching no assets.
+  A census edit selects this guard itself, so adding a resource family cannot
+  silently leave the selector's declarations behind;
+- every path under `examples/`, `configs/task_composition/`, or
+  `tests/fixtures/step10_p1/` triggers the full
+  unit suite, including Markdown, declared assets, nested task templates and
+  console bundles. Composition follows manifest references and fingerprints
+  package directories; the selector's Python import graph and literal test
+  references cannot prove all consumers of those inputs. The fixture root covers
+  the davis, pets, tidmad and fourth_task composition packs, including their
+  local plugins and declared assets. Current tracked composition manifests under
+  `tests/` reside in this root; their file-based plugins live here or under
+  `examples/`. New manifest/plugin locations outside these roots require an explicit
+  dependency audit and selection coverage before narrowing is safe. This trades
+  selection speed for complete composition/identity coverage without a test-name
+  allowlist. The trigger takes precedence over document and area ownership;
 - shared hubs, CI/selector infrastructure, dependencies, missing/deleted paths,
   unmapped importable files, inventory/parse errors and malformed transport run
   the full suite with a reason;
@@ -659,7 +691,7 @@ and diagnostics, including dropped stale splits, go to stderr. Use `bulk` in
 place of `plan` only when the selected tests should actually execute. An absent or invalid
 changed-path file deliberately produces a full plan.
 
-## Ordinary documentation fast path
+## 11. Ordinary documentation fast path
 
 PR CI classifies the shared NUL-delimited Git diff before installing application
 dependencies. `src/tools/ci_selection/docs_preflight.py` owns the ordinary-document
@@ -683,3 +715,56 @@ comments, docstrings and schema descriptions use normal CI; no semantic equivale
 inferred from a small textual diff. Normal PRs keep the affected-test selector, and
 master pushes, scheduled/manual runs and unknown impact keep their existing full-suite
 policy. Production and paper experiment configuration are unchanged.
+
+## 12. Offline success-path budgets on slow scratch storage
+
+Candidate-worker `prepared` requests in `tests/unit/tools/candidate_worker/conftest.py`
+select a finite 600-second worker budget. CPU child-process success tests in
+`tests/unit/core/test_native_gpu_execution.py` select the same 600-second ceiling
+for preparation, acknowledgement, watchdog and observation-barrier waits. The
+launch matrix retains its fixed wiring clocks and original synthetic observation
+freshness policy (see `tests/unit/core/native-launch-testing.md`). These are test
+inputs: durable fixture publication and receipt reads consume wall time on slow
+scratch storage. They do not measure production latency. No production
+deadline, scientific default, prompt or identity changes with these selections.
+
+Controlled-clock expiry cases retain their exact small boundaries. The real
+missing-acknowledgement test still selects 0.1 seconds and requires timeout,
+process-group cleanup and absence of forward execution. Successful runs still
+require complete receipts and native validation; they are never retried. The
+worker budget transport assertions still require a positive remaining limit no
+larger than the request budget, including resumed segments.
+
+Use an explicit `TMPDIR` and pytest `--basetemp` on the selected scratch filesystem,
+with the thread limits in section 3.1. Even these finite test ceilings require
+storage that makes progress within 600 seconds; a stall beyond that bound is a
+test-resource limitation to diagnose, not grounds to bypass supervision.
+
+### 12.1 Product witnesses and hang cost
+
+`tests/helpers/inference_startup.py` owns the shared startup builder and accepts
+clock and preparation/acknowledgment budgets independently. Native launch tests
+retain their former small controlled-clock defaults and finite real-process
+budgets. The storage witness passes an explicit clock; it does not replace
+another test module's `time` namespace. Authorization at virtual time 90 permits
+consumption at 650 under a 600-second ACK window even though preparation's
+deadline was 600; consumption at 690 must fail before being recorded. Both cases
+use real receipt publication and the production startup state machine.
+
+The candidate-worker witness advances only the worker budget's clock by 90,
+then observes the actual `PytestLimit` passed into real validator pytest. It
+requires the original request budget minus that elapsed interval, not merely
+an accepted run. Resetting or dropping the transported limit fails the witness.
+No real 90/600-second sleep is needed for these policy checks.
+
+A genuine stall in a real-process success witness can still consume the selected
+600-second limit per wait. There is no new progress watchdog: durable filesystem
+I/O does not expose a reliable fixture progress signal, and interrupting the
+forking parent independently risks abandoning its child cleanup. Such a watchdog
+would recreate the host-dependent timing assumption these budgets removed.
+The separate GitHub Actions ceilings remain 25 minutes per bulk job and 15
+minutes for the sensitive lane; they bound CI resource use, not a product
+latency contract or each individual local test. A controlled-clock expiry
+witness validates the refusal promptly; it does not claim to shorten a genuine
+filesystem hang. Diagnose stalled runs from their captures rather than retrying
+or increasing production deadlines.

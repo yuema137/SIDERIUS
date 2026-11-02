@@ -19,6 +19,7 @@ from tools.workflow_authoring.models import (
     NodeDraftsRequest,
     Project,
     ReviewRequest,
+    ReviewView,
     SaveRequest,
 )
 from tools.workflow_authoring.options import node_catalog
@@ -27,6 +28,7 @@ from tools.workflow_authoring.task_models import TaskReferenceTarget
 from workflows.definition import TaskBinding
 from workflows.definition.source import WorkflowSourceError
 
+from .error_messages import safe_review
 from .models import TaskChoice
 from .setups import SetupRegistry
 from .template_routes import add_template_routes
@@ -97,14 +99,17 @@ def editor_router(
         action: Callable[[], BaseModel], *, writing: bool = False
     ) -> BaseModel | JSONResponse:
         try:
-            return action()
+            result = action()
+            return safe_review(result) if isinstance(result, ReviewView) else result
         except AuthoringError as error:
             return JSONResponse(
                 status_code=409,
                 content={
                     "error": {"code": error.code, "message": str(error)},
                     "current": error.current.model_dump(mode="json") if error.current else None,
-                    "proposal": error.proposal.model_dump(mode="json") if error.proposal else None,
+                    "proposal": safe_review(error.proposal).model_dump(mode="json")
+                    if error.proposal
+                    else None,
                 },
             )
         except WorkflowSourceError as error:

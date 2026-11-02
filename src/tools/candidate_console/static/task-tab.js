@@ -179,7 +179,15 @@
       else rows.push(['Training and evaluation split', `could not be read: ${scopes.message || 'no message'}`]);
     }
     facts(box, rows);
-    if (volume && !volume.complete) note(box, `The count is incomplete: it stops after ${count(volume.entry_cap)} entries, and unreadable folders are skipped.`);
+    if (volume && !volume.complete) {
+      const reasons = {
+        entry_cap: `the limit of ${count(volume.entry_cap)} entries was reached`,
+        time_budget: 'the time budget was reached',
+        other_device: 'entries on another filesystem device were skipped',
+        unreadable: 'some files or folders could not be read or disappeared',
+      };
+      note(box, `The count is incomplete: ${reasons[volume.incomplete_reason] || 'some entries could not be counted'}.`);
+    }
     if (pkg?.scopes.basis) note(box, pkg.scopes.basis, 'muted task-basis');
     if (!pkg) return;
     const actions = el('div', '', box, 'actions task-count');

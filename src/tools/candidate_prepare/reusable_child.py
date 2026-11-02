@@ -13,6 +13,7 @@ from workflows.definition import (
     parse_workflow_source,
     render_workflow_source,
 )
+from workflows.definition.models import NATIVE_INTERPRETATION_PROFILE, NATIVE_LITERATURE_PROFILE
 
 from .admission import verify_sources
 from .layout import preparation_layout
@@ -83,10 +84,10 @@ def execute(request_path: Path) -> None:
         expected_task_binding=document.task_binding,
         layout=layout,
         literature_document=document
-        if document.execution_profile == "native-literature-candidate/v1"
+        if document.execution_profile == NATIVE_LITERATURE_PROFILE
         else None,
         reusable_document=document
-        if document.execution_profile == "native-interpretation-candidate/v1"
+        if document.execution_profile == NATIVE_INTERPRETATION_PROFILE
         else None,
     )
     for name, workflow_payload in (

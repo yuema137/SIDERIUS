@@ -301,8 +301,9 @@ def release_reservation(ledger_root: str, operation_id: UUID) -> ReservationRele
     """Operator release of a stuck reservation or queue entry; refuses while anything appears live.
 
     Unlike the automatic sweep, this does not require a positive exit: an
-    unbound entry whose child never published an identity is released on
-    the operator's word, as is an unknown leader with no visible session member.
+    unknown leader with a readable, empty session can be released. Live or
+    unobservable evidence, including an unknown recorded submitter or namespace,
+    refuses release even when the child never published an identity.
     """
     with locked_ledger(ledger_root) as root:
         state = read_state(root)

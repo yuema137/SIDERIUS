@@ -10,7 +10,7 @@ import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {tmpdir} from 'node:os';
 import {mkdir} from 'node:fs/promises';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const key of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[key], `Set ${key}`);
@@ -24,11 +24,7 @@ const waitUntil = async (predicate, what) => {
   while (!(await predicate())) { if (Date.now() > deadline) throw new Error(`${what} timed out`); await new Promise(next => setTimeout(next, 30)); }
 };
 try {
-  const metadata = await new Promise((accept, reject) => {
-    const timer = setTimeout(() => reject(new Error(`Fixture startup timeout: ${errors}`)), 30000);
-    createInterface({input: server.stdout}).once('line', line => { clearTimeout(timer); accept(JSON.parse(line)); });
-    server.once('exit', code => { clearTimeout(timer); reject(new Error(`Fixture exited ${code}: ${errors}`)); });
-  });
+  const metadata = await waitForMetadata(server, {timeoutMs: 30000});
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
   const page = await browser.newPage({viewport: {width: 1440, height: 1000}}), faults = [];

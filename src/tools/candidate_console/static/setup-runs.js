@@ -1,6 +1,7 @@
 /* Run page: "Runs of this setup" from GET /api/operations?project_id=<setup> (the store's
  * own attribution, newest first). Presentation only; selecting a run opens Monitor. It
- * reads when Run opens or the open setup changes, and on Refresh. */
+ * reads when Run opens, the open setup changes, the session changes, a run is
+ * observed for the open setup, and on Refresh (background events read only on Run). */
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);

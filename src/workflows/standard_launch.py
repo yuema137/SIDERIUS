@@ -100,6 +100,7 @@ def build_standard_launch_config(
         validation_max_samples=args.validation_max_samples,
         validation_max_phase_seconds=args.validation_max_phase_seconds,
         skip_formal_min_delta=args.skip_formal_min_delta,
+        score_units_metric=args.score_units_metric,
         bypass_formal_time_budget_min_delta=args.bypass_formal_time_budget_min_delta,
         bypass_formal_time_budget_minutes=args.bypass_formal_time_budget_minutes,
         trial_time_budget_minutes=args.trial_time_budget_minutes,
@@ -133,6 +134,9 @@ def build_standard_launch_config(
         runtime_watchdog_safety_factor=args.runtime_watchdog_safety_factor,
         runtime_watchdog_floor_seconds=args.runtime_watchdog_floor_seconds,
         runtime_verification_max_wall_seconds=(args.runtime_verification_max_wall_seconds),
+        runtime_verification_pathological_min_unit_ms=(
+            args.runtime_verification_pathological_min_unit_ms
+        ),
         human_advice_interpret=args.human_advice_interpret,
         human_advice_analysis=args.human_advice_analysis,
         analysis_source_prompt=args.analysis_source_prompt,

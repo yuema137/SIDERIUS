@@ -219,12 +219,10 @@ def local_full_context(
 
     # Run-level fields for the proposer's evaluate_time_skill gate. Each is
     # only included when the caller supplied it; otherwise ProposalInput's
-    # schema default takes effect (mirrors HyperparamTuningInput defaults:
-    # is_trial=False, trial_portion=0.1, train_portion=0.1,
-    # trial_time_budget_minutes=None,
-    # formal_time_budget_minutes=None, data_dir=None). Phase I splits the
-    # single budget into two so each mode has its own ceiling; both are
-    # independently optional.
+    # schema default takes effect. ProposalInput derives the run mode from
+    # hyperparam_tuning.DEFAULT_IS_TRIAL so omitted proposer and tuner settings
+    # agree. Trial and Formal budgets are independently optional; the selected
+    # run mode chooses the advisory budget.
     if is_trial is not None:
         result["is_trial"] = is_trial
     if data_scope is not None:

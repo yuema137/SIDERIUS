@@ -12,6 +12,7 @@ The pipeline runner loads and assembles prompts at runtime via
 load_stage_prompt() and render_expert_context().
 """
 
+import json
 import os
 
 from agent.prompt_rendering import prompt_boundary
@@ -126,6 +127,23 @@ def load_stage_prompt(
     return prompt + render_native_training_appendix()
 
 
+def _single_line_label(label: str) -> str:
+    """Render a label on one line while keeping distinct raw labels distinguishable.
+
+    The one presentation owner for contributor names, contribution IDs, source
+    names, citation labels and Data Analysis identifiers (report reference,
+    question, finding, method, result key and unit) on every proposal evidence
+    surface (#1462, #1465, #1497). Labels containing a line break, or starting with a double quote,
+    render as JSON strings; every other label, including the empty string,
+    keeps its bytes. Evidence prose is never passed through here.
+    """
+    # Reserve leading quotes for JSON encoding so literal encoded-looking IDs
+    # cannot collide with multiline labels. Ordinary labels keep their bytes.
+    if label.startswith('"') or label.splitlines() != ([label] if label else []):
+        return json.dumps(label, ensure_ascii=True)
+    return label
+
+
 def render_agent_cards(cards: list) -> str:
     """
     Render agent name cards as a labeled 'Contributors' section.
@@ -151,7 +169,7 @@ def render_agent_cards(cards: list) -> str:
         if hasattr(card, "model_dump"):
             card = card.model_dump()
         name = card.get("agent_name", "unknown")
-        lines.append(f"### {name}")
+        lines.append(f"### {_single_line_label(str(name))}")
         # trust_level renders first — it is the machine-readable calibration the
         # proposer's synthesis rules reference; the prose fields are explanatory
         # context underneath.
@@ -231,10 +249,12 @@ def render_expert_context(items: list) -> str:
             continue
         for item in sorted(groups[kind], key=_conf_key, reverse=True):
             label = KIND_LABELS.get(kind, kind.upper())
-            source = item.get("source", "unknown")
+            # Deduplication above keys on the RAW source_ref; only the
+            # displayed labels are kept on one line.
+            source = _single_line_label(str(item.get("source", "unknown")))
             confidence = item.get("confidence")
             conf_str = f", confidence={confidence}" if confidence is not None else ""
-            source_ref = item.get("source_ref", "")
+            source_ref = _single_line_label(str(item.get("source_ref", "")))
 
             lines.append(f"[{label}] (from {source}{conf_str}, source_ref={source_ref})")
             lines.append(f"  {item.get('content', '')}")
@@ -245,7 +265,9 @@ def render_expert_context(items: list) -> str:
         if kind in KIND_ORDER:
             continue
         for item in sorted(items_in_group, key=_conf_key, reverse=True):
-            lines.append(f"[{kind.upper()}] (from {item.get('source', 'unknown')})")
+            kind_label = _single_line_label(str(kind).upper())
+            source = _single_line_label(str(item.get("source", "unknown")))
+            lines.append(f"[{kind_label}] (from {source})")
             lines.append(f"  {item.get('content', '')}")
             lines.append("")
 
@@ -257,7 +279,9 @@ def render_data_analysis_evidence(evidence) -> str:
 
     ``None`` deliberately renders no bytes so analysis-disabled proposal
     prompts retain their legacy shape.  The renderer never opens report or
-    skill artifact references.
+    skill artifact references.  Identifier labels pass through
+    ``_single_line_label`` so a line separator inside one cannot forge a
+    bullet or heading; summaries, statements and descriptions stay prose.
     """
 
     if evidence is None:
@@ -267,32 +291,33 @@ def render_data_analysis_evidence(evidence) -> str:
 
     lines = [
         "## Data Analysis Evidence",
-        f"Report: {evidence['report_ref']['logical_ref']} "
+        f"Report: {_single_line_label(evidence['report_ref']['logical_ref'])} "
         f"(sha256={evidence['report_ref']['sha256']})",
         f"Executive summary: {evidence['executive_summary']}",
     ]
     for outcome in evidence.get("question_outcomes", []):
         lines.append(
-            f"- Question {outcome['question_id']} [{outcome['status']}]: {outcome['summary']}"
+            f"- Question {_single_line_label(outcome['question_id'])} "
+            f"[{outcome['status']}]: {outcome['summary']}"
         )
     for finding in evidence.get("findings", []):
         lines.append(
-            f"- Finding {finding['finding_id']} "
+            f"- Finding {_single_line_label(finding['finding_id'])} "
             f"[{finding['confidence_level']} confidence]: {finding['statement']}"
         )
         lines.append(f"  Modeling relevance: {finding['modeling_relevance']}")
         methods = [
-            *(f"skill:{item}" for item in finding.get("method_skill_ids", [])),
+            *(f"skill:{_single_line_label(item)}" for item in finding.get("method_skill_ids", [])),
             *(
-                f"generated_program:{item}"
+                f"generated_program:{_single_line_label(item)}"
                 for item in finding.get("method_generated_program_ids", [])
             ),
         ]
         lines.append(f"  Methods: {', '.join(methods)}")
         for measurement in finding.get("quantitative_evidence", []):
-            unit = f" {measurement['unit']}" if measurement.get("unit") else ""
+            unit = f" {_single_line_label(measurement['unit'])}" if measurement.get("unit") else ""
             lines.append(
-                f"  Measurement {measurement['result_key']}: "
+                f"  Measurement {_single_line_label(measurement['result_key'])}: "
                 f"{measurement['value']}{unit} ({measurement['description']})"
             )
     for limitation in evidence.get("limitations", []):
@@ -320,8 +345,8 @@ def render_literature_review_evidence(evidence) -> str:
             card = contribution["agent_card"]
             lines.extend(
                 [
-                    f"### Review: {review['contribution_id']}",
-                    f"Contributor: {card['agent_name']} ({card['trust_level']})",
+                    f"### Review: {_single_line_label(review['contribution_id'])}",
+                    f"Contributor: {_single_line_label(card['agent_name'])} ({card['trust_level']})",
                     f"Coverage: {card['coverage']}",
                     f"Limitations: {card['limitations']}",
                 ]
@@ -330,7 +355,8 @@ def render_literature_review_evidence(evidence) -> str:
                 confidence = finding.get("confidence")
                 confidence_label = "unscored" if confidence is None else str(confidence)
                 lines.append(
-                    f"- Literature claim [{finding['source_ref']}; confidence={confidence_label}]: "
+                    f"- Literature claim [{_single_line_label(finding['source_ref'])}; "
+                    f"confidence={confidence_label}]: "
                     f"{finding['content']}"
                 )
         lines.append(
@@ -341,7 +367,7 @@ def render_literature_review_evidence(evidence) -> str:
     card = evidence["agent_card"]
     lines = [
         "## Machine Learning Literature Review Evidence",
-        f"Contributor: {card['agent_name']} ({card['trust_level']})",
+        f"Contributor: {_single_line_label(card['agent_name'])} ({card['trust_level']})",
         f"Coverage: {card['coverage']}",
         f"Limitations: {card['limitations']}",
     ]
@@ -349,7 +375,8 @@ def render_literature_review_evidence(evidence) -> str:
         confidence = finding.get("confidence")
         confidence_label = "unscored" if confidence is None else str(confidence)
         lines.append(
-            f"- Literature claim [{finding['source_ref']}; confidence={confidence_label}]: "
+            f"- Literature claim [{_single_line_label(finding['source_ref'])}; "
+            f"confidence={confidence_label}]: "
             f"{finding['content']}"
         )
     lines.append(

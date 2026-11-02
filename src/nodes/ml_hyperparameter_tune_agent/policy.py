@@ -45,7 +45,7 @@ from execute_tools.health_checks.schemas import (
     GateAction,
     GateResult,
 )
-from execute_tools.metric_order import MetricOrder
+from execute_tools.metric_order import MetricOrder, finite_score
 
 
 class RoundDecision(StrEnum):
@@ -501,6 +501,10 @@ def _build_reflection_context(
     Returns:
         The reflector context dict — exactly the 23 keys WF-2 pins.
     """
+    # A non-finite current score has no rank, is never a new best and is never
+    # "more efficient": it is treated exactly as the null it used to arrive as.
+    if not finite_score(current_score):
+        current_score = None
     successful: list[dict] = [
         r
         for r in memory_history
@@ -639,9 +643,10 @@ class BestTracks:
     filters are what carry the meaning:
 
     * ``top`` — any successful, finite-scored record;
-    * ``formal`` — of those, the full-scope (non-trial) ones. Formal records
-      have no ``is_trial`` key (it is set only when ``trial_config.is_trial``);
-      absence == formal;
+    * ``formal`` — of those, the Formal-round (non-trial) ones, which train on
+      the run's Formal training scope (``formal_portion`` by default, not
+      necessarily full data). Formal records have no ``is_trial`` key (it is
+      set only when ``trial_config.is_trial``); absence == formal;
     * ``valid`` — of those, the HealthGate-valid ones;
     * ``valid_formal`` — valid AND formal (the chain incumbent's source);
     * ``valid_trial`` — valid AND trial. V19 PR 1 (P1-C4) bookkeeping,

@@ -15,9 +15,10 @@ from typing import get_args
 from pydantic import TypeAdapter
 
 from agent.schemas.health_feedback import HealthFeedbackRetentionPolicy
-from agent.schemas.hyperparam_tuning import TrainingValidationPortion
+from agent.schemas.hyperparam_tuning import DEFAULT_IS_TRIAL, TrainingValidationPortion
 from agent.schemas.ordering import parse_file_order_cli
 from agent.schemas.parameter_rules import ParameterRules
+from core.pseudo_admission import resolve_pseudo_validation_max_samples
 from core.retired_seed_pins import retired_pin_message
 from core.run_seed_lock import run_seed_argument
 from core.runtime_control.watchdog_policy import RuntimeWatchdogDeadlinePolicy
@@ -223,6 +224,11 @@ def build_parser() -> argparse.ArgumentParser:
         "mode-agnostic --max_epochs.",
     )
     parser.add_argument(
+        "--score_units_metric",
+        default=None,
+        help="Explicit effective metric id for active score-unit tuner settings.",
+    )
+    parser.add_argument(
         "--skip_formal_min_delta",
         type=float,
         default=-1.0,
@@ -309,11 +315,11 @@ def build_parser() -> argparse.ArgumentParser:
         # read `args.is_trial or True`, so an explicit False was erased and
         # the flag could never express anything. Default stays True, so
         # omitting it behaves exactly as before; `--no-is_trial` is now the
-        # way to ask for a formal-from-the-start run.
+        # way to ask for legacy single-file execution.
         "--is_trial",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Enable trial mode (default: True). Use --no-is_trial for formal.",
+        default=DEFAULT_IS_TRIAL,
+        help="Enable trial/formal mode (default: %(default)s). Use --no-is_trial for legacy single-file mode.",
     )
     parser.add_argument(
         "--trial_strategy",
@@ -519,7 +525,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="JSON string of hard overrides for the LLM's ExperimentPlan. "
         'E.g. \'{"trial_portion": 0.2, "train_portion": 1.0}\'. '
-        "Keys must be valid ExperimentPlan fields.",
+        "Keys must be valid ExperimentPlan fields. Nested dictionaries such as "
+        "train_config, model_config and loss_config are replaced, not merged per key; "
+        "include every key you want to retain.",
     )
     parser.add_argument(
         "--disclose_execution_constraints",
@@ -897,6 +905,13 @@ def build_parser() -> argparse.ArgumentParser:
         "the first production steps, not a separate probe workload.",
     )
     parser.add_argument(
+        "--runtime_verification_pathological_min_unit_ms",
+        type=float,
+        default=None,
+        help="Slowdown floor in observation wall-time milliseconds (finite, nonnegative). "
+        "Omit to preserve 100 ms; 0 disables the absolute floor for historical reproduction.",
+    )
+    parser.add_argument(
         "--execution_regime",
         type=str,
         choices=sorted(get_args(ExecutionRegime)),
@@ -1108,7 +1123,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Swap TidmadSandbox → StubSandbox in the tuner agent. Skips "
         "real training and returns canned trial / formal scores. Use "
-        "for chain-wiring smoke tests; not for production runs.",
+        "for chain-wiring smoke tests; not for production runs. Records "
+        "--validation_max_samples 256 unless given, so synthetic "
+        "deliverables cost a bounded row count.",
     )
     parser.add_argument(
         "--max_failed_iterations",
@@ -1391,6 +1408,13 @@ def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
         )
     except ValueError as exc:
         parser.error(f"--workflow_parameter_rules is invalid: {exc}")
+
+    # Pseudo training writes synthetic deliverables for the whole evaluation
+    # scope. Resolve its row ceiling here, once, so the launch lock, setup
+    # inspection and the task's own scope builder all see the same value.
+    args.validation_max_samples = resolve_pseudo_validation_max_samples(
+        args.validation_max_samples, is_pseudo_training=args.is_pseudo_training
+    )
 
     # DS7 — deprecated no-op strategy flags (removal tracked as FU-2).
     if args.trial_strategy != "snapshot" or args.target_files is not None:

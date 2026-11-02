@@ -1,7 +1,7 @@
-"""Issue #983 S8 (T9): every RNG site and torch process entry in ``src`` is
+"""Issue #983 S8 (T9): every RNG site and torch process entry in source and examples is
 seeded from the run seed or is a listed, reasoned exemption.
 
-The census (``rng_census.py``) walks the whole ``src/**/*.py`` set with the
+The census (``rng_census.py``) walks the whole ``src/**/*.py`` and ``examples/**/*.py`` set with the
 AST, resolving import aliases, so a new site cannot hide behind a name. Both
 an unlisted site and a stale allowlist entry fail. The synthetic-tree test
 proves the census itself sees each defect class it guards against.
@@ -11,7 +11,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tests.unit.core.rng_census import Site, census
+import pytest
+
+from tests.unit.core.rng_census import EXAMPLES, SRC, Site, census
 
 _SEEDED_SCOPE = "runs inside seeded_scope or a seeded probe child (validation.probe, S7b)"
 _TRAINER = "the trainer seeds the process from its TrainingSeedPlan before this runs (S2)"
@@ -42,14 +44,14 @@ ALLOWLIST: dict[Site, str] = {
         "agent/skills/model_io_probe_skill.py", "build_model_input", "torch.randint"
     ): _SEEDED_SCOPE,
     Site("agent/skills/model_io_probe_skill.py", "build_model_input", "torch.randn"): _SEEDED_SCOPE,
-    Site("core/sandbox_executor.py", "StubSandbox.__init__", "random.Random"): (
-        "test stub with a string seed; no scientific output"
-    ),
-    Site("core/sandbox_executor.py", "StubSandbox.set_run_context", "random.Random"): (
-        "test stub with a string seed; no scientific output"
-    ),
     Site("core/seeding.py", "generate_run_seed", "secrets.randbelow"): (
         "the single run-seed generator, called only at entry boundaries"
+    ),
+    Site("core/stub_sandbox.py", "StubSandbox.__init__", "random.Random"): (
+        "test stub with a string seed; no scientific output"
+    ),
+    Site("core/stub_sandbox.py", "StubSandbox.set_run_context", "random.Random"): (
+        "test stub with a string seed; no scientific output"
     ),
     Site("execute_tools/process_seeding.py", "apply_process_seeds", "np.random.seed"): "seed owner",
     Site("execute_tools/process_seeding.py", "apply_process_seeds", "random.seed"): "seed owner",
@@ -175,16 +177,60 @@ ENTRY_ALLOWLIST: dict[str, str] = {
 }
 
 
-def test_every_rng_site_and_process_entry_is_seeded_or_listed():
+EXAMPLE_ALLOWLIST: dict[Site, str] = {
+    Site(
+        "quickstart/plugins/_quickstart_task.py", "generate_shard", "np.random.default_rng"
+    ): "exempt: pinned task dataset generation seed and shard; independent of run sampling",
+    Site(
+        "quickstart/plugins/_quickstart_task.py",
+        "QuickstartTaskDataPath.training_dataset",
+        "np.random.default_rng",
+    ): "caller supplies TrainingSeedPlan epoch subsample seed; refuses None when sampling",
+    Site(
+        "quickstart/plugins/_quickstart_task.py",
+        "QuickstartTaskDataPath._draw_rows",
+        "np.random.default_rng",
+    ): "caller supplies run-derived scope sampling seed; refuses None when sampling",
+    Site(
+        "synthetic_masked_regression/plugins/_masked_task.py",
+        "generate_shard",
+        "np.random.default_rng",
+    ): "exempt: pinned task dataset generation seed and shard; independent of run sampling",
+    Site(
+        "synthetic_masked_regression/plugins/_masked_task.py",
+        "SyntheticMaskedTaskDataPath.training_dataset",
+        "np.random.default_rng",
+    ): "caller supplies TrainingSeedPlan epoch subsample seed; refuses None when sampling",
+    Site(
+        "synthetic_masked_regression/plugins/_masked_task.py",
+        "SyntheticMaskedTaskDataPath._draw",
+        "np.random.default_rng",
+    ): "caller supplies run-derived scope sampling seed; refuses None when sampling",
+    Site(
+        "task_templates/csv_classification/plugins/_csv_task.py",
+        "CsvClassificationTaskDataPath._subsample",
+        "np.random.default_rng",
+    ): "caller supplies scope or epoch seed; refuses None when sampling",
+}
+
+
+@pytest.mark.parametrize(
+    ("root", "allowlist", "entry_allowlist"),
+    [(SRC, ALLOWLIST, ENTRY_ALLOWLIST), (EXAMPLES, EXAMPLE_ALLOWLIST, {})],
+    ids=["src", "examples-including-templates"],
+)
+def test_every_rng_site_and_process_entry_is_seeded_or_listed(
+    root: Path, allowlist: dict[Site, str], entry_allowlist: dict[str, str]
+):
     """Fails on an unlisted RNG site or torch process entry (a new unseeded
     path), and on a stale allowlist entry (an exemption that no longer
     matches source, which would otherwise hide the next site there)."""
-    sites, entries = census()
-    assert sorted(sites - ALLOWLIST.keys()) == [], "unlisted RNG sites"
-    assert sorted(ALLOWLIST.keys() - sites) == [], "stale RNG allowlist entries"
-    assert sorted(entries - ENTRY_ALLOWLIST.keys()) == [], "unseeded torch process entries"
-    assert sorted(ENTRY_ALLOWLIST.keys() - entries) == [], "stale process-entry allowlist"
-    assert all(reason.strip() for reason in (*ALLOWLIST.values(), *ENTRY_ALLOWLIST.values()))
+    sites, entries = census(root)
+    assert sorted(sites - allowlist.keys()) == [], "unlisted RNG sites"
+    assert sorted(allowlist.keys() - sites) == [], "stale RNG allowlist entries"
+    assert sorted(entries - entry_allowlist.keys()) == [], "unseeded torch process entries"
+    assert sorted(entry_allowlist.keys() - entries) == [], "stale process-entry allowlist"
+    assert all(reason.strip() for reason in (*allowlist.values(), *entry_allowlist.values()))
 
 
 def test_census_sees_each_guarded_defect_class(tmp_path: Path):
@@ -233,3 +279,15 @@ def test_entry_rule_follows_torch_through_src_imports(tmp_path: Path):
     (tmp_path / "pkg" / "plain_main.py").write_text("import json\n")
     _sites, entries = census(tmp_path)
     assert entries == {"pkg/probe_worker_main.py"}
+
+
+@pytest.mark.parametrize("relative", ["quickstart/plugins", "task_templates/new_task/plugins"])
+def test_census_sees_new_example_and_template_draws(tmp_path: Path, relative: str):
+    """An added example or nested template cannot hide an aliased RNG call."""
+    plugin = tmp_path / relative / "data.py"
+    plugin.parent.mkdir(parents=True)
+    plugin.write_text(
+        "from numpy.random import default_rng as rng\ndef draw():\n    return rng()\n"
+    )
+    sites, _ = census(tmp_path)
+    assert sites == {Site(f"{relative}/data.py", "draw", "np.random.default_rng")}

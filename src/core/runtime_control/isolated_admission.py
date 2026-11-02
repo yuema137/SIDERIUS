@@ -12,7 +12,11 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from core.runtime_control.admission import AdmissionDecision
+from core.runtime_control.admission import (
+    AdmissionDecision,
+    AdmissionDetail,
+    AdmissionExecutionConditions,
+)
 from core.runtime_control.gpu_accounting import GpuAccountingSnapshot
 from core.runtime_control.gpu_accounting import OccupancyBound as OccupancyBound
 from core.runtime_control.gpu_requirement_evidence import GpuRequirementOwnership
@@ -25,12 +29,17 @@ from core.runtime_control.process_visibility import (
 
 
 def environment_refusal(
-    detail: str, evidence: dict[str, Any], *, requirement_source: str = "unavailable"
+    detail: str,
+    evidence: dict[str, Any],
+    *,
+    requirement_source: str = "unavailable",
+    refusal_detail: AdmissionDetail | None = None,
 ) -> AdmissionDecision:
     """An unconditional isolated-mode stop, with no candidate-capacity claim."""
     return AdmissionDecision(
         admitted=False,
         reason_code="environment_headroom_unproven",
+        detail=refusal_detail,
         requirement_source=requirement_source,
         reason=(
             f"GPU phase not started: environment headroom was not demonstrated. {detail} "
@@ -51,6 +60,7 @@ def evaluate_isolated_admission(
     sampling_error: str | None,
     requirement_ownership: GpuRequirementOwnership | None = None,
     requirement_error: str | None = None,
+    require_evidence: bool = False,
 ) -> AdmissionDecision:
     """Require new-worker demand plus all retained pre-spawn occupancy to fit.
 
@@ -84,10 +94,17 @@ def evaluate_isolated_admission(
             "The explicit GPU process-visibility declaration is invalid.", evidence
         )
     evidence["effective_execution_conditions"] = conditions.model_dump(mode="json")
+    if isinstance(snapshot, GpuAccountingSnapshot) and snapshot.query_failure is not None:
+        evidence["query_failure"] = snapshot.query_failure.value
+        return environment_refusal(
+            "The device query failed; retry sampling.", evidence, refusal_detail="sampler_error"
+        )
     if sampling_error is not None:
         evidence["sampling_error"] = sampling_error
         return environment_refusal(
-            "Obtain a current device occupancy sample before retrying.", evidence
+            "Obtain a current device occupancy sample before retrying.",
+            evidence,
+            refusal_detail="sampler_error",
         )
     if (
         not isinstance(snapshot, GpuAccountingSnapshot)
@@ -133,6 +150,7 @@ def evaluate_isolated_admission(
             sampling_error=sampling_error,
             requirement_ownership=requirement_ownership,
             requirement_error=requirement_error,
+            require_evidence=require_evidence,
         )
         return decision.model_copy(
             update={
@@ -140,10 +158,12 @@ def evaluate_isolated_admission(
                     **evidence,
                     **decision.evidence,
                     "process_visibility": conditions.process_visibility,
-                    "effective_execution_conditions": {
-                        **conditions.model_dump(mode="json"),
-                        "refusal_enforcement": "phase_policy",
-                    },
+                    "effective_execution_conditions": AdmissionExecutionConditions.model_validate(
+                        {
+                            **conditions.model_dump(mode="json"),
+                            "refusal_enforcement": "phase_policy",
+                        }
+                    ).model_dump(mode="json"),
                 }
             }
         )

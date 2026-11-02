@@ -15,33 +15,38 @@
     if (value.state === 'queued') return `${what} is queued: it starts by itself when earlier runs free the host resources it needs.`;
     if (value.state === 'active' || value.finishing) return `${what} in progress.`;
     if (cancelledBeforeStart(value)) return `${what} cancelled before start: it never ran, and nothing was produced.`;
-    if (value.state === 'unknown' && value.reason === 'loop_process_exiting') return `${what}: its worker exited, but its remaining processes are not confirmed stopped. The result is still unresolved.`;
+    if (value.state === 'unknown' && value.preparation_error) return value.preparation_error;
+    if (value.state === 'unknown' && ['loop_process_exiting', 'operation_process_exiting'].includes(value.reason)) return `${what}: its worker exited, but its remaining processes are not confirmed stopped. The result is still unresolved.`;
     if (value.state === 'operation_failed' && value.reason === 'loop_process_exited') return `${what} was interrupted: its worker exited without reporting a result. ` + (value.kind === 'candidate_loop_resume'
       ? 'Open the paused predecessor to end the loop once its worker processes have stopped. This segment cannot be resumed.'
       : 'This run cannot be resumed. New work can start once its worker processes have stopped.');
+    if (value.state === 'operation_failed' && value.reason === 'operation_process_exited') return `${what} was interrupted: its worker and remaining processes stopped without reporting a result. New work can start.`;
     if (value.state === 'operation_failed') return value.reason === 'spawn_failed'
       ? `${what} did not start: the worker could not be launched.`
-      : `${what} failed before reporting a result.`;
+      : value.preparation_error || `${what} failed before reporting a result.`;
     // Before the worker records its process identity the store reports `unknown` (L-6).
     if (value.state === 'unknown' && value.process?.reason === 'missing_identity') return `${what} is starting.`;
     if (value.state !== 'completed') return `${what}: its status cannot be determined right now.`;
-    const preparation = value.kind === 'prepare' || value.kind === 'prepare_reusable';
-    if (preparation && native === 'prepared') return 'Prepared and ready to launch.';
-    if (native === 'accepted' || (native === 'completed' && value.validation_passed === true)) {
-      return `Finished: the ${what === 'Run' ? 'candidate' : what.toLowerCase()} passed validation.`;
-    }
-    if (native === 'rejected' || value.validation_passed === false) {
-      return 'Finished: validation rejected the candidate.';
-    }
-    if (native === 'cancelled') return 'Stopped on request before finishing; no candidate result was produced.';
-    if (native === 'stopped') return 'Finished: stopped at a completed body boundary.';
-    if (native === 'paused') return 'Paused at a completed body boundary.';
-    if (native === 'completed') return 'Finished.';
     // Typed native failures in plain words (L-2, #1145); the cause line comes from the log.
     const noun = what.toLowerCase();
+    if (native === 'failed' && value.outcome?.failed_phases?.length) return `Failed during ${value.outcome.failed_phases.map(window.editorCapabilityPresentation.label).join(', ')}.`;
+    if (native === 'failed' && value.preparation_error) return `Failed: ${value.preparation_error}`;
     if (native === 'failed') return `Failed: the ${noun} stopped with an error before finishing.`;
     if (native === 'timed_out') return `Failed: the ${noun} reached its time limit and was stopped.`;
     if (native === 'interrupted') return `Failed: the ${noun} was interrupted before finishing.`;
+    const validated = value.outcome?.validation_passed ?? value.validation_passed;
+    const preparation = value.kind === 'prepare' || value.kind === 'prepare_reusable';
+    if (preparation && native === 'prepared') return 'Prepared and ready to launch.';
+    if (native === 'accepted' || (native === 'completed' && validated === true)) {
+      return `Finished: the ${what === 'Run' ? 'candidate' : what.toLowerCase()} passed validation.`;
+    }
+    if (native === 'rejected' || (native === 'completed' && validated === false)) {
+      return 'Finished: validation rejected the candidate.';
+    }
+    if (native === 'cancelled') return 'Stopped on request before finishing; no candidate result was produced.';
+    if (native === 'stopped') return 'Finished: stopped at a completed iteration boundary.';
+    if (native === 'paused') return 'Paused at a completed iteration boundary.';
+    if (native === 'completed') return 'Finished.';
     if (preparation) return `Preparation finished without a prepared run (${native || 'no result'}).`;
     return `Finished with status ${native || 'unknown'}.`;
   }

@@ -7,9 +7,14 @@ They are populated from raw dicts returned by the DataSource ABC —
 the API layer is the only place that touches these models.
 """
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, TypeAdapter
+
+from agent.schemas.hyperparam_tuning import ExperimentRecord as PersistedExperimentRecord
+
+# Project the owning field without duplicating its vocabulary or source-bound schema.
+_RECORD_STATUS = TypeAdapter[str](PersistedExperimentRecord.model_fields["status"].annotation)
 
 # ---------------------------------------------------------------------------
 # Experiment record — mirrors the schema written by ml_hyperparameter_tune_agent.py
@@ -126,7 +131,9 @@ class ExperimentRecord(BaseModel):
     """
 
     exp_id: str
-    status: Literal["success", "skipped_oom_risk", "error"]
+    status: Annotated[str, BeforeValidator(_RECORD_STATUS.validate_python)] = Field(
+        json_schema_extra=_RECORD_STATUS.json_schema()
+    )
     model_type: str
     timestamp: str | None = None
     denoising_score: float | None = None
@@ -201,6 +208,9 @@ class ModelOverview(BaseModel):
     total_experiments: int = 0
     status_counts: StatusCounts = Field(default_factory=StatusCounts)
     runs: list[str] = Field(default_factory=list)
+    # Preserve the data source's explanation when records cannot participate in ranking.
+    metric_identity_unavailable_rows: int = 0
+    metric_ranking_unavailable: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -209,7 +219,8 @@ class ModelOverview(BaseModel):
 
 
 class LeaderboardEntry(BaseModel):
-    rank: int
+    rank: int | None
+    metric_ranking: str | None = None
     exp_id: str
     run_name: str
     denoising_score: float | None = None

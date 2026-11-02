@@ -6,13 +6,14 @@ from uuid import UUID
 from core.control_json import encode_control
 from core.durable_io import publish_bytes_write_once
 from core.runtime_control.scheduling import HostBudget
+from workflows.evaluation_selection import selection_metric
 from workflows.llm_config import WorkflowLLMConfig
 from workflows.task_composition import RunTaskComposition
 
 from .budget import WorkerBudget
 from .graph_evidence import read_graph_control
 from .layout import candidate_control_dir
-from .loop_models import LoopContinuation, LoopPause, LoopStop, LoopTrace, admit_loop
+from .loop_models import LoopContinuation, LoopPause, LoopStop, LoopTrace, require_loop
 from .loop_stop import (
     BodyScore,
     JudgeBoundaryVerdict,
@@ -73,14 +74,21 @@ def execute_loop(
     from .graph_evidence import verify_graph_trace
     from .loop_evidence import advance_body, initial_history
 
-    admit_loop(request)
+    require_loop(request)
+    from workflows.evaluation_admission import admit_formula_definition
+
+    admit_formula_definition(composition, request.preview.document.definition)
     loop = request.preview.document.definition.loop
     assert loop is not None
     if loop.stop_conditions:
         from .loop_judge import admit_judge_route
 
         # Before any dispatch: a mismatch found after body 1 would orphan its records.
-        admit_stop_conditions(loop, captured_metric(request, initial), composition.metric.spec)
+        admit_stop_conditions(
+            loop,
+            captured_metric(request, initial),
+            selection_metric(composition, composition.metric.spec),
+        )
         admit_judge_route(loop, config)
     history = initial_history(request, initial)
     attempted = 0
@@ -145,7 +153,13 @@ def execute_loop(
             scores = (*scores, project_body_score(request, last, iteration))
             completed = (*completed, last)
             decided, asked, verdict = _boundary_decision(
-                request, initial, completed, scores, prior_calls=len(verdicts), anchor=anchor
+                request,
+                initial,
+                completed,
+                scores,
+                prior_calls=len(verdicts),
+                anchor=anchor,
+                resumed_at=resumed_at,
             )
             verdicts = verdicts if verdict is None else (*verdicts, verdict)
             if decided.decision == "stop":
@@ -178,11 +192,13 @@ def _boundary_decision(
     *,
     prior_calls: int,
     anchor: int,
+    resumed_at: int,
 ) -> tuple[StopEvaluationOutput, LoopInputRequest | None, JudgeBoundaryVerdict | None]:
     """Deterministic conditions first; the judge is called only when the boundary needs it.
 
     A judgeable boundary pre-empted by a deterministic decision records a skip marker.
     """
+    from .loop_evidence import summarize_tried_bodies
     from .loop_judge import call_stop_judge, mark_skipped_stop_judge
 
     loop = request.preview.document.definition.loop
@@ -195,4 +211,7 @@ def _boundary_decision(
     else:
         mark_skipped_stop_judge(initial, value)
     decided = evaluate_stop(value)
-    return decided, input_request(value, decided), verdict
+    asked = input_request(value, decided)
+    if asked is not None:
+        asked = summarize_tried_bodies(request, completed, scores, asked, resumed_at=resumed_at)
+    return decided, asked, verdict

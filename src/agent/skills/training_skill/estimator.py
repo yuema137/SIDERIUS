@@ -129,7 +129,7 @@ def _usable(value: Any) -> bool:
     ``bool`` is excluded deliberately: ``True`` is an ``int`` in Python
     and is not a segmentation size.
     """
-    return not (isinstance(value, int | float) and not isinstance(value, bool) and value <= 0)
+    return not isinstance(value, bool) and not (isinstance(value, int | float) and value <= 0)
 
 
 def resolve_model_field(

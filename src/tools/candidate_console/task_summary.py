@@ -7,6 +7,7 @@ task code never runs in the console process. The console adds its own
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
@@ -22,7 +23,6 @@ from agent.schemas.output_types import OutputTypeName
 from execute_tools.health_checks.roster_projection import HealthRosterProjection
 from tools.setup_review.composition_check import observe_composition
 from tools.setup_review.composition_models import (
-    FAILURE_MESSAGE_MAX_CHARS,
     CompositionJob,
     CompositionObservation,
     DataScopeFacts,
@@ -31,11 +31,14 @@ from tools.setup_review.composition_models import (
     TaskSummaryRequest,
 )
 from tools.setup_review.composition_transport import manifest_digest
+from tools.setup_review.summary_errors import summary_error_message
 from tools.workflow_preview.models import PreviewModel
 from workflows.definition import TaskBinding
 from workflows.llm_config import parse_llm_config_bytes
 
 from .models import TaskChoice
+
+logger = logging.getLogger(__name__)
 
 DATA_WALK_ENTRY_CAP = 100_000
 DATA_WALK_SECONDS = 5.0
@@ -64,13 +67,17 @@ class SummaryFailure(PreviewModel):
     message: str
 
 
+IncompleteReason = Literal["entry_cap", "time_budget", "other_device", "unreadable"]
+
+
 class DataVolume(PreviewModel):
-    """Regular files under ``data_root`` without following links; partial when capped."""
+    """Regular files under ``data_root`` without following links; partial when entries are skipped."""
 
     files: int
     bytes: int
     complete: bool
     entry_cap: int
+    incomplete_reason: IncompleteReason | None = None
 
 
 class RunPolicy(PreviewModel):
@@ -164,39 +171,50 @@ def walk_data_root(root: Path, cap: int = DATA_WALK_ENTRY_CAP) -> DataVolume:
     The deadline is cooperative: it cannot interrupt a blocked filesystem call.
     """
     files = size = entries = 0
-    complete = True
+    reason: IncompleteReason | None = None
     deadline = time.monotonic() + DATA_WALK_SECONDS
+
+    def volume(cause: IncompleteReason | None) -> DataVolume:
+        return DataVolume(
+            files=files,
+            bytes=size,
+            complete=cause is None,
+            entry_cap=cap,
+            incomplete_reason=cause,
+        )
+
     try:
         device = root.stat().st_dev
     except OSError:
-        return DataVolume(files=0, bytes=0, complete=False, entry_cap=cap)
+        return volume("unreadable")
     pending = [str(root)]
     while pending:
         if time.monotonic() >= deadline:
-            complete = False
-            break
+            return volume("time_budget")
         try:
             with os.scandir(pending.pop()) as listing:
                 for entry in listing:
-                    entries += 1
-                    if entries > cap or time.monotonic() >= deadline:
-                        return DataVolume(files=files, bytes=size, complete=False, entry_cap=cap)
-                    info = entry.stat(follow_symlinks=False)
+                    if entries >= cap:
+                        return volume("entry_cap")
                     if time.monotonic() >= deadline:
-                        return DataVolume(files=files, bytes=size, complete=False, entry_cap=cap)
-                    if info.st_dev != device:
-                        complete = False
-                        continue
-                    if entry.is_dir(follow_symlinks=False):
-                        pending.append(entry.path)
-                    elif entry.is_file(follow_symlinks=False):
-                        size += info.st_size
-                        files += 1
+                        return volume("time_budget")
+                    entries += 1
+                    try:
+                        info = entry.stat(follow_symlinks=False)
+                        if info.st_dev != device:
+                            reason = reason or "other_device"
+                            continue
+                        if entry.is_dir(follow_symlinks=False):
+                            pending.append(entry.path)
+                        elif entry.is_file(follow_symlinks=False):
+                            size += info.st_size
+                            files += 1
+                    except OSError:
+                        # A vanished entry must not hide its readable siblings.
+                        reason = reason or "unreadable"
         except OSError:
-            complete = False
-    return DataVolume(
-        files=files, bytes=size, complete=complete and time.monotonic() < deadline, entry_cap=cap
-    )
+            reason = reason or "unreadable"
+    return volume(reason)
 
 
 def _metric(spec: dict[str, JsonValue]) -> MetricView:
@@ -378,6 +396,13 @@ class TaskSummaries:
             entry.volume = walk_data_root(Path(task.data_root), self._cap)
             observed = self._observer(job, task)
             failure = observed.result.failure
+            if failure is not None:
+                logger.error(
+                    "Task summary %s failure (%s): %s",
+                    failure.stage,
+                    failure.exception_type,
+                    failure.message,
+                )
             if failure is None:
                 entry.state, entry.package = "ready", project_package(task, observed)
             elif failure.stage == "sandbox" and failure.exception_type == "SandboxUnavailable":
@@ -386,11 +411,14 @@ class TaskSummaries:
                     reason="sandbox_missing", hint=_HINTS["sandbox_missing"]
                 )
             else:
-                entry.failure = SummaryFailure(stage=failure.stage, message=failure.message)
+                entry.failure = SummaryFailure(
+                    stage=failure.stage, message=summary_error_message(failure.exception_type)
+                )
         except Exception as error:
+            logger.exception("Task summary observation failed")
             entry.failure = SummaryFailure(
                 stage="console",
-                message=f"{type(error).__name__}: {error}"[:FAILURE_MESSAGE_MAX_CHARS],
+                message=summary_error_message(error),
             )
         with self._lock:
             self._entries[key] = entry

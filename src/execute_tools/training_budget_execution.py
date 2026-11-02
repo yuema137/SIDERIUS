@@ -101,6 +101,10 @@ class TrainingBudgetExecution:
         for phase, unit, count in workloads:
             if phase == "validation" and validation_rows is None:
                 continue
+            existing = session.observation.components.get(phase)
+            if phase == "training" and existing is not None and existing.actual_seconds is not None:
+                # The planned optimizer boundary already reconciled this scope.
+                continue
             session.record_executed_workload(
                 ResolvedPhaseWorkload(
                     phase=phase,
@@ -168,6 +172,40 @@ def return_on_allocation_rejection[**P, R](
     return run
 
 
+def complete_planned_optimizer_work(
+    session: RuntimeVerificationSession,
+    *,
+    verifier: RuntimeVerifier | None,
+    optimizer_steps: int,
+    completed_epochs: int,
+    training_seconds: float,
+    epoch0_dataset_seconds: float,
+) -> None:
+    """Publish the final planned training actual before validation can reject.
+
+    The caller establishes that no planned optimizer work remains. Adaptive
+    workloads initially describe only calibration, so reconcile their training
+    count without claiming that pending validation has completed.
+    """
+    if session.policy.training_budget is not None:
+        session.record_executed_workload(
+            ResolvedPhaseWorkload(
+                phase="training",
+                unit="optimizer_step",
+                unit_count=optimizer_steps,
+                detail={"source": "planned_training_completed", "epochs": completed_epochs},
+            ),
+            extra_predicted_seconds=(completed_epochs - 1) * epoch0_dataset_seconds,
+        )
+    session.complete_phase_workload(
+        "training",
+        actual_seconds=training_seconds,
+        executed_unit_count=optimizer_steps,
+        verifier=verifier,
+        source="real_training_verification",
+    )
+
+
 def complete_training_workload(
     session: RuntimeVerificationSession,
     *,
@@ -199,14 +237,18 @@ def complete_training_workload(
         if budget_execution is not None and completed_epochs < epoch_limit
         else "requested_horizon"
     )
-    session.complete_phase_workload(
-        "training",
-        actual_seconds=training_seconds,
-        executed_unit_count=optimizer_steps,
-        reason=reason,
-        verifier=training_verifier,
-        source="real_training_verification",
-    )
+    # A planned-boundary actual is authoritative even without eligible completion.
+    # Keep its duration and do not finalize its verifier a second time.
+    training = session.observation.components["training"]
+    if training.actual_seconds is None:
+        session.complete_phase_workload(
+            "training",
+            actual_seconds=training_seconds,
+            executed_unit_count=optimizer_steps,
+            reason=reason,
+            verifier=training_verifier,
+            source="real_training_verification",
+        )
     if validation_rows is not None:
         session.complete_phase_workload(
             "validation",

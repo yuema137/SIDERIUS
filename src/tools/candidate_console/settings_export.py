@@ -22,7 +22,8 @@ from pydantic import Field
 
 from tools.workflow_preview.models import PreviewModel
 
-from .files import config_bytes, open_directory, write_all
+from .error_messages import advice_error_message, console_error_message
+from .files import config_bytes, open_directory, write_once
 from .settings_models import Id
 
 if TYPE_CHECKING:
@@ -80,20 +81,12 @@ def inline_advice(document: object) -> bytes | None:
     try:
         parse_advice_bytes(payload, label="exported advice")
     except AdviceArtifactError as error:
-        raise ExportRefused(422, "invalid_advice", str(error)) from None
+        raise ExportRefused(
+            422,
+            "invalid_advice",
+            advice_error_message(error),
+        ) from None
     return payload
-
-
-def _write_once(directory: int, name: str, payload: bytes) -> None:
-    descriptor = os.open(
-        name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory
-    )
-    try:
-        os.fchmod(descriptor, 0o600)
-        write_all(descriptor, payload)
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
 
 
 def _free_name(exports: int, name: str) -> str:
@@ -148,7 +141,7 @@ def export(setups: SetupRegistry, workspace: Path, request: ExportRequest) -> Ex
         raise ExportRefused(
             422,
             "invalid_profile",
-            f"the task's LLM profile is not usable with --llm_config: {error}",
+            f"the task's LLM profile is not usable with --llm_config: {console_error_message(error)}",
         ) from None
     files: dict[ExportFile, bytes] = {"workflow.py": source, "llm.json": profile}
     advice = inline_advice(view.document)
@@ -178,7 +171,7 @@ def export(setups: SetupRegistry, workspace: Path, request: ExportRequest) -> Ex
         try:
             os.fchmod(target, 0o700)
             for name, payload in files.items():
-                _write_once(target, name, payload)
+                write_once(target, name, payload)
         finally:
             os.close(target)
     finally:

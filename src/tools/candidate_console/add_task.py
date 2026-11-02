@@ -46,7 +46,8 @@ from typing import Any
 from tools.candidate_operations.models import OperationFailure
 from tools.workspace_sandbox.gpu import GPU_NODE
 
-from .files import canonical, config_bytes
+from .error_messages import console_error_message
+from .files import canonical, config_bytes, private_file_lock
 from .models import ConsoleConfig
 from .package_mounts import check_candidate_devices, check_package_mounts
 from .settings_file import SettingsInvalid
@@ -156,7 +157,7 @@ def _external_directories(manifest: Path) -> tuple[str, ...]:
     try:
         references = manifest_references(manifest)
     except (OSError, ValueError) as error:
-        raise AddTaskRefused(str(error)) from None
+        raise AddTaskRefused(console_error_message(error)) from None
     directories: set[Path] = set()
     for reference in references:
         target = reference.path.resolve()
@@ -250,7 +251,7 @@ def plan_task(request: AddTaskRequest) -> TaskPlan:
             "--config and --manifest must be canonical paths without symlinks"
         ) from None
     except OSError as error:
-        raise AddTaskRefused(f"cannot read {error.filename or 'the given file'}") from None
+        raise AddTaskRefused(f"cannot read the manifest: {console_error_message(error)}") from None
     if not manifest.is_file():
         raise AddTaskRefused(f"the manifest {manifest} is not a file")
     from .settings_models import ConsoleFile
@@ -305,9 +306,9 @@ def plan_task(request: AddTaskRequest) -> TaskPlan:
     except SettingsInvalid as error:
         raise AddTaskRefused(str(error)) from None
     except (OSError, ValueError, OperationFailure) as error:
-        # Pydantic and file errors: name the class only; messages may quote input values.
+        # Exception messages and custom class names may quote private input values.
         raise AddTaskRefused(
-            f"the new task entry is not valid ({type(error).__name__}); console.json was not changed"
+            f"the new task entry is not valid ({console_error_message(error)}); console.json was not changed"
         ) from None
     payload = (json.dumps(updated, indent=2) + "\n").encode()
     return TaskPlan(config_path, read_bytes, entry, payload, workspace)
@@ -317,15 +318,16 @@ def publish_task(plan: TaskPlan) -> None:
     """Compare-and-swap on the bytes ``plan_task`` read, then an atomic 0600 replace."""
     from .settings_service import _publish_private
 
-    try:
-        current = config_bytes(str(plan.config_path))
-    except (OSError, OperationFailure):
-        current = None
-    if current != plan.read_bytes:
-        raise AddTaskRefused(
-            "console.json changed since add-task read it; nothing was written, run add-task again"
-        )
-    _publish_private(plan.config_path, plan.payload)
+    with private_file_lock(plan.config_path):
+        try:
+            current = config_bytes(str(plan.config_path))
+        except (OSError, OperationFailure):
+            current = None
+        if current != plan.read_bytes:
+            raise AddTaskRefused(
+                "console.json changed since add-task read it; nothing was written, run add-task again"
+            )
+        _publish_private(plan.config_path, plan.payload)
 
 
 def create_folders(plan: TaskPlan) -> None:
@@ -475,7 +477,9 @@ def _from_bundle(args: argparse.Namespace) -> tuple[int, str | None]:
     try:
         create_folders(plan)
     except (OSError, ValueError) as error:
-        print(f"Creating the task's folders stopped: {error}.", file=sys.stderr)
+        print(
+            f"Creating the task's folders stopped: {console_error_message(error)}", file=sys.stderr
+        )
     try:
         setup_id = create_first_setup(str(plan.config_path), target.task_id, bundle.setup)
     except SetupRefused as error:
@@ -526,7 +530,9 @@ def run_command(argv: list[str]) -> tuple[int, str | None]:
     try:
         create_folders(plan)
     except (OSError, ValueError) as error:
-        print(f"Creating the task's folders stopped: {error}.", file=sys.stderr)
+        print(
+            f"Creating the task's folders stopped: {console_error_message(error)}", file=sys.stderr
+        )
     return 0, str(plan.config_path)
 
 

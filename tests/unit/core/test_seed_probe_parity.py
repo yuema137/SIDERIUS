@@ -102,6 +102,7 @@ def test_probe_epoch_seed_equals_the_trainer_epoch_zero_subsample(tmp_path, monk
     from execute_tools.train_engine_sandbox import _load_seed_context_arg
 
     gpu_execution = importlib.import_module("nodes.ml_hyperparameter_tune_agent.gpu_execution")
+    probe_data = importlib.import_module("nodes.ml_hyperparameter_tune_agent.probe_data")
 
     seen = {}
 
@@ -109,16 +110,18 @@ def test_probe_epoch_seed_equals_the_trainer_epoch_zero_subsample(tmp_path, monk
         seen.update(kwargs)
         raise RuntimeError("captured")
 
-    monkeypatch.setattr(gpu_execution, "build_task_probe_data", capture)
+    monkeypatch.setattr(probe_data, "build_task_probe_data", capture)
     prepared = SimpleNamespace(
-        task_scopes=object(),
+        task_scopes=SimpleNamespace(training=object()),
         trial_config=SimpleNamespace(seed_context=CONTEXT, train_portion=0.5),
         active_params={},
     )
     bindings = SimpleNamespace(
         sandbox=None,
         time_data_dir=str(tmp_path),
-        agent_input=SimpleNamespace(task_composition_ref=None, validation_max_train_samples=None),
+        agent_input=SimpleNamespace(
+            task_composition_ref=object(), validation_max_train_samples=None
+        ),
     )
     with pytest.raises(RuntimeError, match="captured"):
         gpu_execution._spec(bindings, prepared, "training", None, 0.0, tmp_path)

@@ -129,10 +129,10 @@
     }
     if (state.bindings.length) {
       // The server inspects patches over this edited document, so layout and inspector edits travel with them.
-      return {kind: 'draft', draft: {base_document: clone(state.document), bindings: clone(state.bindings)}};
+      return {kind: 'draft', source: state.anchor.source, draft: {base_document: clone(state.document), bindings: clone(state.bindings)}};
     }
     const anchor = state.anchor.document;
-    if (withoutLoop(state.document) !== withoutLoop(anchor)) return {kind: 'document', document: clone(state.document)};
+    if (withoutLoop(state.document) !== withoutLoop(anchor)) return {kind: 'document', source: state.anchor.source, document: clone(state.document)};
     // Loop-only edits keep every other authored byte of the anchor source.
     if (canonical(state.document.definition.loop) !== canonical(anchor.definition.loop)) {
       return {kind: 'loop', source: state.anchor.source, loop: clone(state.document.definition.loop ?? null)};

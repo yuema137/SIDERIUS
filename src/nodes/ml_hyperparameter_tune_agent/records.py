@@ -31,6 +31,7 @@ from agent.skills.evaluate_time_skill.wrapper import _aggregate_inference_file_t
 from agent.skills.evaluate_vram_skill.evidence import preflight_memory_fields
 from core.checkpoint_selection import CheckpointSelection
 from core.durable_io import publish_json_atomically
+from core.record_encoding import encoded_record, model_record_value
 from core.record_role import AttemptRole
 from core.run_invariants import (
     RunInvariants,
@@ -44,11 +45,11 @@ from execute_tools.deliverable_spec import (
     DeliverableNaming,
     default_deliverable_naming,
 )
+from execute_tools.evaluation_child import evaluation_record_fields
 from execute_tools.evaluation_metric import (
     NotScoreableError,
 )
 from execute_tools.health_checks.candidate_eligibility import formal_validity_of
-from execute_tools.scoring_utils import coerce_nonfinite_to_none
 from execute_tools.trained_model_artifact import (
     TrainedModelEmissionContext,
     TrainingArtifactCandidate,
@@ -80,11 +81,15 @@ from nodes.ml_hyperparameter_tune_agent.feedback import (
     _build_trial_validity_feedback,
     _render_gate_exhaustion_log_line,
 )
+from nodes.ml_hyperparameter_tune_agent.parameter_rule_receipts import (
+    attach_attempt_receipts,
+)
 from nodes.ml_hyperparameter_tune_agent.policy import (
     _compute_termination_state,
     _json_safe_reference,
     _select_best_records,
 )
+from workflows.evaluation_selection import selection_metric
 from workflows.task_composition import active_composition_fingerprint
 
 
@@ -775,6 +780,7 @@ def _emit_record(
     # emit a record its own labelled run refuses at the next resume.
     if experiment_arm is not None:
         record["experiment_arm"] = experiment_arm
+    attach_attempt_receipts(record)
     ExperimentRecord.model_validate(record)
     sandbox.save_record(record)
 
@@ -985,6 +991,9 @@ def _build_scoring_failure_record(
     if isinstance(exc, NotScoreableError):
         # Step 06 C4 — the structured refusal, on the record (additive).
         record["metric_refusal"] = exc.result.model_dump(mode="json")
+        evidence = getattr(exc, "evaluation_result", None)
+        if evidence is not None:
+            record["evaluation_result"] = evidence.model_dump(mode="json")
     return record
 
 
@@ -1080,15 +1089,14 @@ def _resume_progress(
 def publish_run_output(output_path: str, agent_output: HyperparamTuningOutput) -> None:
     """Persist ``run_output`` through the storage owner.
 
-    Coerce float('-inf') no-signal sentinels (and NaN) to JSON null at the
-    storage boundary: ``model_dump_json`` would otherwise emit non-standard
-    ``-Infinity`` tokens that break the dashboard's ``JSON.parse``.
+    Preserve non-finite evidence through the shared versioned strict JSON
+    owner. Typed float paths distinguish it from missing values and strings.
     S2 / U5: serialise-first + atomic replace. ``run_output`` is the artifact
     the iteration manifest hashes, so a crash mid-write must leave either the
     previous file or the complete new one, never a truncated one that the next
     iteration's replay check then reports as a tamper.
     """
-    safe_output = coerce_nonfinite_to_none(agent_output.model_dump())
+    safe_output = encoded_record(model_record_value(agent_output))
     publish_json_atomically(output_path, safe_output, indent=4)
 
 
@@ -1314,7 +1322,7 @@ def finalize_run_output(
         # this transports THAT value so the interpreter never derives a
         # second one. Passed as the instance: the field's validator accepts
         # a MetricSpec unchanged and rebinds only a mapping.
-        "metric_spec": bindings.run_metric.spec,
+        "metric_spec": selection_metric(bindings, bindings.run_metric.spec),
         # Step 10 / P2b — the run's DECLARED secondary set, stamped from the
         # same bound authorities and by the same single writer as `metric_spec`
         # above. This is what lets the interpreter report a declared secondary
@@ -1388,7 +1396,10 @@ def finalize_run_output(
             # stop existing because the tuner later failed. Dumped rather
             # than passed as an instance because this dict is written with
             # `json.dump(..., default=str)`, which would stringify the model.
-            "metric_spec": bindings.run_metric.spec.model_dump(),
+            "metric_spec": selection_metric(
+                bindings,
+                bindings.run_metric.spec,
+            ).model_dump(),
             # Step 10 / P2b — the same rule, for the same reason: which
             # secondaries this run DECLARED is a launch fact and does not stop
             # existing because the tuner later failed. Dumped rather than
@@ -1410,7 +1421,7 @@ def finalize_run_output(
         agent_output = HyperparamTuningOutput.model_validate(partial_dict)
 
     if termination_reason == "completed":
-        print(f"\nCompleted {completed_rounds} research rounds. Loop terminated.")
+        print(f"\nCompleted {completed_rounds} tuning rounds. Loop terminated.")
     elif termination_reason == "aborted_fail_rounds":
         print(
             f"\nAborted after {consecutive_fails} consecutive fail-rounds "
@@ -1539,6 +1550,7 @@ def build_attempt_record(
         # readable (additive; None where scoring did not go through
         # the handle, e.g. a legacy child that predates C3).
         "metric_result": metric_payload,
+        **evaluation_record_fields(score_results),
         # Health-check failure reason from tuner-side gate
         # evaluation (commit-5b). Written unconditionally when
         # non-None — a failed trial-round gate also propagates its

@@ -11,7 +11,8 @@ Two sources feed ``SetupRegistry``:
   and the 0700 recovery directory ``projects/<setup_id>/.recovery``.
 
 ``SetupStore`` is the only writer of the registry file: compare-and-swap on the
-sha256 of the bytes it last read or wrote, then the global-settings private
+sha256 of the bytes it last read or wrote under a shared private file lock, then
+the global-settings private
 publish (``settings_service._publish_private``). An ID present in both sources
 fails startup. Creation is allowed only when console.json sets
 ``experiment_setups.browser_creatable``; it never overwrites or deletes, and a
@@ -39,7 +40,8 @@ from tools.workflow_preview.models import PreviewModel
 from workflows.definition import ReusableTaskReferences, TaskBinding
 
 from .config_errors import MissingConfigFile
-from .files import open_directory, private_bytes
+from .error_messages import console_error_message
+from .files import open_directory, private_bytes, private_file_lock
 from .models import ConsoleConfig, TaskChoice
 from .settings_file import SettingsInvalid
 from .settings_models import ExperimentSetupsPolicy, Id, Label
@@ -126,19 +128,32 @@ def setup_project(workspace: Path, setup_id: str) -> Project:
     )
 
 
+_REGISTRY_ERRORS = (
+    f"settings/{SETUPS_FILE} must be a private regular file (mode 600)",
+    f"settings/{SETUPS_FILE} is not valid {SETUPS_SCHEMA} JSON",
+)
+
+
+def _registry_problem(error: SettingsInvalid) -> str:
+    """Only exact framework-owned messages retain their corrective guidance."""
+    generic = console_error_message(error)
+    for safe in _REGISTRY_ERRORS:
+        if error.args == (safe,):
+            return safe
+    return generic.rstrip(".")
+
+
 def _read(path: Path) -> tuple[tuple[SetupEntry, ...], str | None]:
     try:
         payload = private_bytes(str(path))
     except FileNotFoundError:
         return (), None
     except (OSError, OperationFailure) as error:
-        raise SettingsInvalid(
-            f"settings/{SETUPS_FILE} must be a private regular file (mode 600)"
-        ) from error
+        raise SettingsInvalid(_REGISTRY_ERRORS[0]) from error
     try:
         document = SetupsFile.model_validate_json(payload)
     except ValidationError:
-        raise SettingsInvalid(f"settings/{SETUPS_FILE} is not valid {SETUPS_SCHEMA} JSON") from None
+        raise SettingsInvalid(_REGISTRY_ERRORS[1]) from None
     return document.setups, hashlib.sha256(payload).hexdigest()
 
 
@@ -164,10 +179,8 @@ class SetupStore:
         workspace: Path | None,
         policy: ExperimentSetupsPolicy | None = None,
     ) -> SetupStore:
-        """Read the registry; an unknown task or an ID shared with editor_projects fails."""
-        if workspace is None:
-            return cls()
-        entries, digest = _read(registry_path(workspace))
+        """Read and validate one snapshot: tasks, unique IDs and all setup project paths."""
+        entries, digest = ((), None) if workspace is None else _read(registry_path(workspace))
         store = cls(workspace, policy, entries, digest)
         tasks = {task.task_id for task in config.tasks}
         for entry in entries:
@@ -175,7 +188,9 @@ class SetupStore:
                 raise SettingsInvalid(
                     f"experiment setup {entry.setup_id!r} names unknown task {entry.task_id!r}"
                 )
-        SetupRegistry(config, store).setups()  # ID collisions fail here
+        # Validate the exact loaded snapshot, including app construction after an earlier check.
+        for project in SetupRegistry(config, store).projects():
+            check_setup_project(project, config)
         return store
 
     def entries(self) -> tuple[SetupEntry, ...]:
@@ -220,7 +235,7 @@ class SetupStore:
                 raise SetupRefused(
                     409,
                     "invalid_setup",
-                    f"the setup folder failed validation ({error}); {created} was left in place",
+                    f"the setup folder failed validation ({console_error_message(error)}); {created} was left in place",
                 ) from None
             entry = SetupEntry(
                 setup_id=setup_id,
@@ -239,7 +254,7 @@ class SetupStore:
         try:
             _, digest = _read(registry_path(workspace))
         except SettingsInvalid as error:
-            digest, problem = "unreadable", str(error)
+            digest, problem = "unreadable", _registry_problem(error)
         else:
             problem = None
         if digest != self._sha256:
@@ -254,11 +269,12 @@ class SetupStore:
     def _publish(self, workspace: Path, entry: SetupEntry, created: str) -> None:
         from .settings_service import _publish_private
 
-        self._check_unchanged(workspace, created=created)
         document = SetupsFile(schema_version=SETUPS_SCHEMA, setups=(*self._entries.values(), entry))
         payload = (document.model_dump_json(indent=2) + "\n").encode()
         try:
-            _publish_private(registry_path(workspace), payload)
+            with private_file_lock(registry_path(workspace)):
+                self._check_unchanged(workspace, created=created)
+                _publish_private(registry_path(workspace), payload)
         except (OSError, OperationFailure):
             raise SetupRefused(
                 409,
@@ -443,7 +459,7 @@ def _slug(label: str) -> str:
 
 def _materialize(workspace: Path, label: str, registry: SetupRegistry, source: bytes) -> str:
     """Create ``projects/<id>/`` (0700), its recovery folder (0700) and the source (0600)."""
-    from .settings_export import _write_once
+    from .files import write_once
     from .workspace import WorkspaceRefused, ensure_owned_directory
 
     taken = {setup.project.project_id for setup in registry.setups()}
@@ -478,7 +494,7 @@ def _materialize(workspace: Path, label: str, registry: SetupRegistry, source: b
             try:
                 os.fchmod(target, 0o700)
                 os.close(ensure_owned_directory(target, RECOVERY_NAME, created + RECOVERY_NAME))
-                _write_once(target, SOURCE_NAME, source)
+                write_once(target, SOURCE_NAME, source)
             finally:
                 os.close(target)
         except (OSError, WorkspaceRefused):

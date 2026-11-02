@@ -31,6 +31,7 @@ from .test_finite_loop import loop_tuner as loop_tuner
 from .test_interpretation import interpretation_provider as interpretation_provider
 from .test_native import native_runner as native_runner
 from .test_training import training_runner as training_runner
+from .validation_child import install_fresh_validation_units
 
 #: Names the offline fixtures bind in the test process that a real launcher would
 #: provide some other way; every other inherited name is dropped like Popen(env=...).
@@ -44,13 +45,14 @@ FIXTURE_ENVIRONMENT = (
 
 
 @pytest.fixture
-def process_segments(monkeypatch):
-    """Fork retains only SDK doubles; each native segment runs in a separate process."""
+def process_segments(native_runner, monkeypatch, tmp_path):
+    """Fork SDK doubles; exec validation so parent autograd state cannot leak."""
     from core.runtime_control.process_group import terminate_observed_group
     from tools.candidate_operations.child import execute as operation
     from tools.candidate_worker.child import execute
     from tools.candidate_worker.loop_resume import execute_continuation
 
+    install_fresh_validation_units(monkeypatch, tmp_path)
     operations = []
 
     def observed(profile, argv, *, cancel_requested=None, **_supervision):
@@ -207,9 +209,9 @@ def test_completed_pause_resumes_actual_body_in_new_process(
         )
         with pytest.raises(OperationFailure, match="exited"):
             review_loop_resume(config, first_id)
-    # A partial next slot already invalidates the paused readback, before admission.
+    # A partial next slot blocks Resume, while the completed pause remains readable.
     (root / "iteration_002").mkdir()
-    with pytest.raises(OperationFailure, match="verified paused"):
+    with pytest.raises(OperationFailure, match="next iteration slot"):
         review_loop_resume(config, first_id)
     (root / "iteration_002").rmdir()
     stop = {"run_id": first.receipt.run_id, "declaration_digest": first.receipt.declaration_digest}
@@ -630,37 +632,11 @@ def test_resumed_segment_reports_run_total_tokens_from_both_segments(
 
     witness = tmp_path / "reported_calls.log"
 
-    def report(bridge):
-        context = bridge.context
-        assert context is not None, "provider called without a bound run context"
-        row = {
-            "ts": "2026-10-27T10:00:00Z",
-            "run_id": context["run_id"],
-            "run_name": context["run_name"],
-            "label": "response",
-            "provider": "openai",
-            "model": "fixture-model",
-            "served_model": None,
-            "tokens": {"prompt": 11, "completion": 2, "total": 13},
-            "chars": {"system": 0, "user": 0, "total": 0},
-        }
-        with (Path(context["workspace"]) / "token_usage.jsonl").open("a") as ledger:
-            ledger.write(json.dumps(row) + "\n")
-        with witness.open("a") as stream:
-            stream.write("call\n")
+    from .provider_usage import install_reporting
 
-    def reporting(method):
-        def call(self, *args, **kwargs):
-            result = method(self, *args, **kwargs)
-            report(self)
-            return result
-
-        return call
-
+    witness.touch()  # Explicitly enable the same reporter in the exec-created validator.
     for owner in (native_runner, interpretation_provider):
-        for name in ("generate", "generate_text"):
-            if name in vars(owner):  # wrap each provider method exactly once
-                monkeypatch.setattr(owner, name, reporting(vars(owner)[name]))
+        install_reporting(monkeypatch, owner, witness)
 
     request = loop_request(prepared, final_iteration=2)
     config = OperationStoreConfig(
@@ -702,7 +678,14 @@ def test_resumed_segment_reports_run_total_tokens_from_both_segments(
     process_segments()
     second = read_operation(config, next_id)
     assert second.receipt is not None and second.receipt.status == "completed", second
-    all_calls = len(witness.read_text().splitlines())
+    calls = [json.loads(line) for line in witness.read_text().splitlines()]
+    validators = [call for call in calls if call["label"] == "validator.code_review"]
+    assert {call["iteration"] for call in validators} == {1, 2}
+    assert all(call["safe_path"] and call["hash_seed"] == "0" for call in validators)
+    assert {call["pid"] for call in validators}.isdisjoint(
+        call["pid"] for call in calls if call["label"] != "validator.code_review"
+    )
+    all_calls = len(calls)
     assert all_calls > first_segment_calls  # the successor segment reported usage too
 
     segment = read_operation_tokens(config, next_id)
@@ -806,24 +789,9 @@ def test_resumed_segment_bounds_validator_pytest_by_its_own_worker_budget(
     """Fails if loop.py or the continuation entry drops ``budget=`` (issue #984)."""
     from tools.candidate_worker import training
 
-    validator = importlib.import_module("nodes.ml_code_validator_agent.ml_code_validator_agent")
+    # The fresh validation child records the real generated-pytest call and limit.
     record = tmp_path / "pytest_limits.jsonl"
 
-    # Forked segments inherit this double; a file carries their observations back.
-    def launched(test_file_path, env, *, limit=None):
-        with record.open("a") as stream:
-            stream.write(
-                json.dumps(
-                    {
-                        "path": test_file_path,
-                        "limit": None if limit is None else limit.model_dump(),
-                    }
-                )
-                + "\n"
-            )
-        return True, "1 passed"
-
-    monkeypatch.setattr(validator, "run_generated_pytest", launched)
     request = loop_request(prepared, final_iteration=2)
     config = OperationStoreConfig(
         state_root=str(tmp_path / "operations"),
@@ -937,6 +905,7 @@ def test_budgeted_resume_reaches_its_segment_placed_or_queued(
         host_memory_gib=64.0,
         cpu_slots=16,
         max_concurrent_units=4,
+        max_queued_operations=1,
         source="file",
     )
     ledger = tmp_path / "ledger"
@@ -1065,7 +1034,7 @@ def test_condition_input_pause_resumes_without_pause_marker_and_refuses_forgery(
     # Every body scores 0.75: body 1 improves, bodies 2 and 3 tie, so k=2 asks after 3.
     request = loop_request(
         prepared,
-        final_iteration=5,
+        final_iteration=6,
         stop_conditions=(NoImprovementStop(completed_bodies=2, on_met="request_input"),),
     )
     config = OperationStoreConfig(
@@ -1110,9 +1079,12 @@ def test_condition_input_pause_resumes_without_pause_marker_and_refuses_forgery(
     process_segments()
     resumed = read_operation(config, next_id).receipt
     # Counting from the anchor (body 3), body 4 is one body later: no second request.
-    assert resumed.status == "completed", resumed
+    assert resumed.status == "paused", resumed
     assert resumed.loop_trace.attempted_iterations == 5
-    assert resumed.loop_trace.input_request is None
+    assert [item.iteration for item in resumed.loop_trace.input_request.summary.what_was_tried] == [
+        4,
+        5,
+    ]
     assert not (root / "pause.json").exists()
     assert len(verify_loop(request, launched, resumed)) == 5
 
@@ -1318,3 +1290,116 @@ def test_resume_without_advice_replaces_earlier_advice_across_three_segments(
         (2, None),
     )
     assert len(verify_loop(request, launched, last.receipt)) == 3
+
+
+def test_an_undeclared_root_resumes_placed_with_its_own_resources(
+    prepared, loop_tuner, interpretation_provider, process_segments, monkeypatch, tmp_path
+):
+    """#1385: a root that ran serially without ``resources`` could not be resumed under a
+    host ledger at all (``resources_required``); the segment now reserves its own reviewed
+    declaration. Once any segment ran placed, a serial Resume is refused: only the root's
+    ``placement.json`` was checked, so the next hop would run unaccounted beside placed runs.
+    """
+    from core.runtime_control.pair_admission import ResolvedGpuCeiling
+    from core.runtime_control.scheduling import GpuHardwareClass, GpuSlot, HostBudget
+    from tools.candidate_operations.host_ledger import HostScheduling
+    from tools.candidate_operations.models import OperationResources
+    from tools.candidate_operations.store import operation_path
+    from tools.candidate_worker import training
+
+    budget = HostBudget(
+        gpus=(
+            GpuSlot(
+                uuid="GPU-aaaa",
+                hardware_class=GpuHardwareClass(
+                    device_name="NVIDIA H100",
+                    total_memory_bytes=80 * 1024**3,
+                    compute_capability=(9, 0),
+                ),
+                ceiling=ResolvedGpuCeiling(
+                    operator_ceiling_gib=4.0,
+                    operator_source="caller",
+                    host_quota_gib=None,
+                    measured_capacity_gib=80.0,
+                ),
+            ),
+        ),
+        host_memory_gib=64.0,
+        cpu_slots=16,
+        max_concurrent_units=4,
+        source="file",
+    )
+    ledger = tmp_path / "ledger"
+    ledger.mkdir(mode=0o700)
+    host = HostScheduling(ledger_root=str(ledger), budget=budget)
+    config = OperationStoreConfig(
+        state_root=str(tmp_path / "operations"),
+        preparation_roots=(str(tmp_path),),
+        candidate_roots=(str(tmp_path),),
+    )
+    env = {"OPENAI_API_KEY": "offline-stub"}
+    root_id, first_id, second_id = uuid4(), uuid4(), uuid4()
+    real_tune = training.HyperparamTuningAgent.run
+    pause_during = {"iteration_001": root_id, "iteration_002": first_id}
+
+    def pause_by_slot(self, value):
+        output = real_tune(self, value)
+        for slot, operation_id in pause_during.items():
+            if slot in value.storage.local.workspace:
+                request_loop_pause(config, operation_id)
+        return output
+
+    monkeypatch.setattr(training.HyperparamTuningAgent, "run", pause_by_slot)
+    resources = OperationResources(
+        gpu_count=0, host_memory_gib=4.0, cpu_slots=2, time_budgeted=False
+    )
+
+    def resume(predecessor_id, request_id, supplied, ledger_host):
+        review = review_loop_resume(config, predecessor_id)
+        return submit_operation(
+            config,
+            CandidateLoopResumeOperation(
+                request_id=request_id,
+                request=CandidateLoopResumeRequest(
+                    predecessor_operation_id=predecessor_id,
+                    expected_receipt_digest=review.receipt_digest,
+                    resources=supplied,
+                ),
+            ),
+            launch_environment=env,
+            host=ledger_host,
+        )
+
+    def refused(*args) -> str:
+        with pytest.raises(OperationFailure) as failure:
+            resume(*args)
+        return failure.value.detail.code
+
+    submit_operation(
+        config,
+        CandidateOperation(request_id=root_id, request=loop_request(prepared, final_iteration=3)),
+        launch_environment=env,
+    )
+    process_segments()
+    assert refused(root_id, first_id, None, host) == "resources_required"
+    assert refused(root_id, first_id, resources, None) == "host_ledger_missing"
+    claimed = Path(config.state_root) / "operations"
+    assert not (claimed / str(first_id)).exists(), "a refused Resume left a claim"
+
+    assert resume(root_id, first_id, resources, host).observation == "starting"
+    process_segments()
+    placement = json.loads((operation_path(config, first_id) / "placement.json").read_text())
+    assert (placement["decision"], placement["gpu_uuid"]) == ("placed", None)
+    assert placement["reserved"]["cpu_slots"] == 2
+    first = read_operation(config, first_id)
+    assert first.receipt.status == "paused", first
+
+    # The root never ran placed; the paused segment did.
+    assert not (operation_path(config, root_id) / "placement.json").exists()
+    assert refused(first_id, second_id, None, None) == "host_ledger_required"
+    assert not (claimed / str(second_id)).exists(), "a refused Resume left a claim"
+    resume(first_id, second_id, resources, host)
+    process_segments()
+    second = read_operation(config, second_id)
+    assert second.receipt.status == "completed", second
+    assert (operation_path(config, second_id) / "placement.json").exists()

@@ -35,7 +35,7 @@ def test_tuner_phase_uses_actual_assessment_and_shared_budget(
         lambda **kw: sources,
     )
     probe = bound_spec.task_probe_data.model_copy(update={"evaluation_scope_payload": "evaluation"})
-    monkeypatch.setattr(gpu, "build_task_probe_data", lambda **kw: probe)
+    monkeypatch.setattr(gpu, "build_attempt_task_probe_data", lambda **kw: probe)
     monkeypatch.setattr(gpu, "candidate_evaluation_executor", lambda: None)
     sandbox = SimpleNamespace(
         base_dir=str(tmp_path),

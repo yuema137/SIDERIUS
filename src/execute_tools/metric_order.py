@@ -46,7 +46,9 @@ Steps 09/10/M2 migrate them. Deliberately NOT imported by the scoring path:
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Iterable, Sequence
+from fractions import Fraction
 from typing import TypeVar
 
 from execute_tools.evaluation_metric import MetricDeclaration, MetricDirection
@@ -54,6 +56,17 @@ from execute_tools.evaluation_metric import MetricDeclaration, MetricDirection
 _T = TypeVar("_T")
 
 _HIGHER: MetricDirection = "higher"
+
+
+def finite_score(value: object) -> bool:
+    """A usable golden-metric scalar: a real finite number.
+
+    ``None`` (missing, or a legacy null projection), NaN and ±inf are all "no
+    usable score": never ranked, never best, never counted as scored. Scorer
+    transport and records keep non-finite floats as evidence (#1111, #1316), so
+    consumers test this rather than ``is not None``.
+    """
+    return isinstance(value, int | float) and not isinstance(value, bool) and math.isfinite(value)
 
 
 class MetricOrder:
@@ -182,6 +195,15 @@ class MetricOrder:
         the bypass banner's counterpart to :attr:`comparison_symbol`.
         """
         return ">=" if self._higher else "<="
+
+    @staticmethod
+    def utility_direction() -> MetricDirection:
+        """The declared preference of a normalized utility output."""
+        return _HIGHER
+
+    def normalized_utility(self, value: Fraction) -> Fraction:
+        """Orient a normalized [0, 1] value toward greater utility."""
+        return value if self._higher else 1 - value
 
     # -- extremes -----------------------------------------------------------
 

@@ -2,6 +2,16 @@
 
 > Selects and executes authorized scientific-analysis skills under a bounded resource envelope, then returns a structured `DataAnalysisReport`.
 
+
+## Structured evaluation prompt context
+
+Structured-output calls and repairs receive the shared block. Units and meanings inform analysis without granting scoring or feasibility authority.
+
+The run-scoped composition supplies this context through the shared append path.
+Absence adds no bytes and never enters the new boundary under historical profiles.
+The [evaluation contract](../../execute_tools/evaluation-contract.md#evaluation-prompt-rendering)
+owns formatting, profile admission and runtime capability distinctions.
+
 ## Position in the pipeline
 
 - **CLI entry**: **absent** — standalone callers use the Python capability API because task-owned materialization is an executable protocol object, not an arbitrary filesystem convention.
@@ -241,6 +251,81 @@ allocation. Enforcement is cooperative request/worker timeout propagation, not
 a process-killing watchdog; a non-cooperative blocking capability may return late
 and its result is then rejected. Whole-process deadlines remain caller-owned.
 
+Skill workers (`agent.data_analysis.executor._run_worker`: interface
+resolution, parameter validation and execution) bind the allocation's absolute
+expiry when the `analysis.worker` boundary admits them. Parent-side
+request publication (fsync) is charged to the allocation; the per-skill
+timeout still starts at process launch, and the worker stops at the earlier of
+the two. Enforcement latency after that stop instant (or after the end of a
+request publication that itself crosses expiry, because one fsync cannot be
+interrupted) is one 0.02 s poll plus one `/proc` RSS sample, then
+`terminate_observed_group`: SIGTERM, reaping the leader while waiting, so a
+group that exits on SIGTERM costs only its exit time; a group still present
+after the 1.0 s grace receives SIGKILL and the leader is awaited for at most
+1.0 s more before a second SIGKILL. A process in uninterruptible kernel sleep
+(D state) cannot be bounded by any signal. After the leader is reaped, the
+post-loop check observes the process group once more; if any member is still
+observable (a descendant that survived, or a killed descendant its new parent
+has not reaped yet), a second `terminate_observed_group` round runs. It can add
+up to one more 1.0 s grace plus SIGKILL to the bound above (the leader wait
+returns at once because the leader is already reaped). Disposition precedence
+(#1448): a disposition the supervisor decided in its loop (`timed_out`,
+`memory_limit_exceeded`) is never replaced by that observation; only a worker
+that exited on its own becomes `orphaned_process_tree`. The observation itself
+is kept in `WorkerObservation.orphaned_process_tree` and, for executions, as
+`SkillExecutionProvenance.host_details["orphaned_process_tree"] = true`
+alongside `supervisor_disposition` (the key is absent when nothing was
+observed). Unchecked parent work between two named boundaries (store publication,
+materialization) is not interrupted; a `budget_receipt.json` overrun therefore
+belongs to the interval ending at `last_boundary`. Measured for #1425 under
+host I/O load with a 1.0 s allocation and a sleeping child: overrun before
+this binding up to 3.8 s (5.8 s for a SIGTERM-ignoring child); after it, at
+most 0.021 s beyond an uninterruptible publication (1.03 s when SIGTERM is
+ignored).
+
+Generated programs (`AnalysisCodeSandbox.execute`, reached through
+`execute_generated_program`) follow the same binding under the
+`analysis.generated_program` boundary: the absolute expiry is bound on entry,
+so the capability probe and the fsync'd request publication are charged to the
+allocation; the program timeout (`min(per_skill_timeout_s,
+resource_request.wall_time_s)`, or less when the caller passes the remaining
+allocation) starts at launch, and the program stops at the earlier of the two.
+Termination uses the same wrapper as skill workers,
+`agent.data_analysis.process_termination.terminate_process_group`, which owns
+the shared poll interval (`SUPERVISION_POLL_S`, 0.02 s), SIGTERM grace
+(`TERMINATION_GRACE_S`, 1.0 s) and leader wait over the core
+`terminate_observed_group` owner. `runtime_environment_identity`
+(`generated_programs.py`) hashes the sandbox, this wrapper and the core owners
+the sandbox calls directly: `core/runtime_control/process_group.py` (group
+signalling and reaping), `core/execution_deadline.py` (allocation expiry) and
+`core/training_seeds.py` (`NUMPY_SEED_MASK` for the program seed). A change to
+any of them changes `runtime_environment_sha256`. A persisted generated program
+whose recorded identity no longer matches fails closed on reuse (#1493, #1500).
+`core/campaign_identity.py` and `core/durable_io.py` are not hashed: they only
+validate path components and publish bytes atomically. The capability probe has a 10 s ceiling
+(`PROBE_TIMEOUT_S`) and is also bounded by the remaining allocation, both in
+`execute` and in the pre-materialization probe in `execute_resolved_action`. A
+probe cut short by the allocation is a timeout, not missing isolation: the
+invocation records status and `failure_type` `timed_out` without launching
+generated code (no `worker_pid` is recorded, because none exists). A probe that fails before expiry still refuses with
+`generated_code_sandbox_unavailable`.
+
+The local historical-model inference worker
+(`LocalPytorchHistoricalModelInferenceCapability.run_historical_inference`)
+receives the allocation's absolute expiry as
+`HistoricalModelInferenceRequest.deadline_monotonic_s`. Its clock starts
+before input verification, artifact staging and the fsync'd worker request
+publication, so all of them are charged to both the expiry and the per-skill
+timeout: the worker stops at `min(deadline_monotonic_s, start +
+per_skill_timeout_s)`. Unlike skill workers and generated programs, the
+per-skill timeout here therefore does not start at launch. Termination uses the
+same `terminate_process_group` wrapper, so a worker that exits on SIGTERM
+costs only its exit time (#1480); the receipt status stays `timed_out`
+(`inference_timeout`) or `failed` (`inference_host_memory_limit`). Measured with
+a sleeping child replacing the worker and a 1.0 s publication stall: overrun
+past the deadline 1.01–1.02 s before this change, 0.009–0.013 s after it
+(about 1.01 s either way for a SIGTERM-ignoring child, which needs SIGKILL).
+
 ### Generated artifact paths
 
 The generated function receives `output_directory`, the artifact certification
@@ -296,3 +381,11 @@ generation, synthesis and promotion. It grants no data access. Present context
 participates in input identity; absent context is omitted from serialization.
 See the [disclosure contract](../../../docs/agent-reference/mechanisms/constraint-disclosure.md)
 for the explicit historical transport and rendering requirements.
+
+### Canonical numeric records
+
+The [UTF-8 identity contract](../../agent/schemas/data_analysis/canonical-identity-contract.md)
+owns strict non-finite encoding, typed record readback, legacy null limitations
+and identity/prompt compatibility. `AnalysisRunStore` publishes those canonical
+bytes; exact-input resume compares the same bytes and never treats an archived
+null as a current non-finite measurement.

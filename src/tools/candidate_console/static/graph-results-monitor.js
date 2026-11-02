@@ -26,7 +26,7 @@
     section.append(summary, facts([
       ['Run', run.run_name], ['Status', run.status], ['Termination', run.termination_reason],
       ['Started', run.started_at], ['Finished', run.finished_at],
-      ['Completed rounds', run.completed_rounds], ['Reported attempts', run.total_attempts],
+      ['Completed tuning rounds', run.completed_rounds], ['Reported attempts', run.total_attempts],
       ['Metric', metricLabel(run.metric)], ['Metric source', run.metric_source],
       ['Best experiment', run.headline.best_exp_id], ['Best score', run.headline.best_score],
       ['Best formal score', run.headline.best_formal_score],
@@ -59,15 +59,15 @@
     panel.hidden = false;
     const heading = document.createElement('h2'); heading.textContent = 'Workflow training results';
     const note = document.createElement('p'); note.className = 'muted';
-    note.textContent = 'Native tuner reports are shown separately for each verified workflow body. No cross-iteration score is calculated.';
+    note.textContent = 'Native tuner reports are shown separately for each verified workflow iteration. No cross-iteration score is calculated.';
     panel.append(heading, note);
     if (!projection.bodies.length) {
-      const empty = document.createElement('p'); empty.textContent = 'No verified workflow body was recorded, so no score is available.'; panel.append(empty); return;
+      const empty = document.createElement('p'); empty.textContent = 'No verified workflow iteration was recorded, so no score is available.'; panel.append(empty); return;
     }
     for (const body of projection.bodies) {
       const group = document.createElement('section'); group.className = 'graph-result-body';
       const title = document.createElement('h3');
-      title.textContent = projection.bodies.length > 1 ? `Iteration ${body.iteration}` : 'Workflow body';
+      title.textContent = projection.bodies.length > 1 ? `Iteration ${body.iteration}` : 'Workflow iteration';
       const stage = window.editorCapabilityPresentation?.label('tuning') || 'tuning';
       // The node state says only that the node executed; the outcome comes from the tuner record.
       const rows = [[`${stage} node execution`, body.tuning_state]];
@@ -81,7 +81,7 @@
       if (body.result) group.append(renderRun(body.result));
       else {
         const unavailable = document.createElement('p'); unavailable.className = 'muted';
-        unavailable.textContent = 'No score is available: this body has no succeeded native tuning record.'; group.append(unavailable);
+        unavailable.textContent = 'No score is available: this iteration has no succeeded native tuning record.'; group.append(unavailable);
       }
       panel.append(group);
     }

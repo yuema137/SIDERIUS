@@ -14,7 +14,7 @@ import {createServer} from 'node:net';
 import {tmpdir} from 'node:os';
 import {dirname, resolve, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 import {showAllConsoleSections} from './console_view_flags.mjs';
 import {chooseFirstConfiguredTask} from './console_task_choice.mjs';
 
@@ -38,17 +38,16 @@ const origin = `http://127.0.0.1:${probe.address().port}`; await new Promise(don
 const prepId = '11451145-1145-4145-8145-114511451145', runId = '22452245-2245-4245-8245-224522452245';
 const runFolder = '33453345-3345-4345-8345-334533453345';
 const prepDigest = 'c'.repeat(64), runDigest = 'd'.repeat(64);
-const prepLog = 'Traceback (most recent call last):\n  File "child.py", line 1\n' +
+let prepLog = 'Traceback (most recent call last):\n  File "child.py", line 1\n' +
   'workflows.task_composition.TaskCompositionError: plugin file /task/plugins/model.py does not exist\n';
 const runLog = 'Traceback (most recent call last):\n  File "worker.py", line 1\nRuntimeError: CUDA is required for native training\n';
 const status = (id, kind, digest, fields) => ({operation_id: id, kind, request_digest: digest, observed_at: '2026-10-29T10:00:00Z',
   state: 'completed', process: {status: 'exited', reason: 'observed'}, finishing: false, receipt_available: true,
   native_status: 'failed', native_id: 'fixture', validation_passed: null, reason: 'native_terminal', seed: 'Seed 7 (generated)', ...fields});
-let browser;
+let browser, predispatch = false;
 try {
   const provider = start('provider', root);
-  const lines = createInterface({input: provider.stdout});
-  const endpoint = await new Promise(done => lines.once('line', line => done(JSON.parse(line).endpoint))); lines.close();
+  const {endpoint} = await waitForMetadata(provider);
   const metadata = JSON.parse((await completed(start('setup', root, '--origin', origin, '--endpoint', endpoint, '--captures-count', '0'))).trim().split('\n').at(-1));
   start('serve', root);
   await until(async () => { try {return (await fetch(origin + '/')).ok;} catch {return false;} });
@@ -65,7 +64,9 @@ try {
     if (!(id in observed)) return route.continue();
     assert.equal(route.request().method(), 'GET', 'A failed operation is only read');
     if (sub === 'log') {
-      const text = url.searchParams.get('kind') === 'native' ? (id === prepId ? prepLog : runLog) : '';
+      const text = id === prepId && predispatch
+        ? (url.searchParams.get('kind') === 'operation' ? prepLog : '')
+        : url.searchParams.get('kind') === 'native' ? (id === prepId ? prepLog : runLog) : '';
       const offset = Number(url.searchParams.get('offset')), max = Number(url.searchParams.get('max_bytes'));
       const chunk = text.slice(offset, offset + max);
       return route.fulfill({json: {operation_id: id, kind: url.searchParams.get('kind'), offset, next_offset: offset + chunk.length,
@@ -129,6 +130,35 @@ try {
   await page.locator('#monitor-status').filter({hasText: 'Failed: the preparation stopped with an error before finishing.'}).waitFor();
   await page.locator('#monitor-cause').filter({hasText: 'TaskCompositionError: plugin file'}).waitFor();
 
+  // #1163: parent causes use a fixed status category, never the raw log exception.
+  observed[prepId] = status(prepId, 'prepare_reusable', prepDigest, {preparation_error: 'Invalid input or changed source while preparing the run. See the server log for details.'});
+  await retained('preparation');
+  await prepStatus.filter({hasText: 'Invalid input or changed source'}).waitFor();
+  await delay(500);
+  assert.doesNotMatch(await prepStatus.textContent(), /TaskCompositionError|\/task\/plugins/);
+  await shot('preparation-parent-failed');
+  await page.locator('#new-run-monitor').click();
+  await page.locator('#monitor-cause').filter({hasText: 'Invalid input or changed source'}).waitFor();
+  assert.doesNotMatch(await page.locator('#monitor-cause').textContent(), /TaskCompositionError|\/task\/plugins/);
+
+  observed[prepId] = status(prepId, 'prepare_reusable', prepDigest, {state: 'unknown', receipt_available: false, native_status: null, reason: 'native_outcome_unresolved', preparation_error: 'Preparation reported an error without a verified result. Its outcome remains unresolved; inspect the operation log.'});
+  await retained('preparation');
+  await prepStatus.filter({hasText: 'outcome remains unresolved'}).waitFor();
+  assert.equal(await page.locator('#new-run-dismiss').isHidden(), true);
+
+  // Pre-dispatch failures have no receipt; automatic summaries must still be safe.
+  predispatch = true;
+  prepLog = 'ValueError: /private/pre-dispatch-secret-sentinel\n';
+  observed[prepId] = status(prepId, 'prepare_reusable', prepDigest, {state: 'operation_failed', receipt_available: false, native_status: null, reason: 'reusable_preparation_failed', preparation_error: 'Preparation failed before reporting a result. See the operation log for details.'});
+  await retained('preparation');
+  await prepStatus.filter({hasText: 'See the operation log for details'}).waitFor();
+  await delay(500);
+  assert.doesNotMatch(await prepStatus.textContent(), /private|secret-sentinel|ValueError/);
+  await page.locator('#new-run-monitor').click();
+  await page.locator('#monitor-cause').filter({hasText: 'See the operation log for details'}).waitFor();
+  assert.doesNotMatch(await page.locator('#monitor-cause').textContent(), /private|secret-sentinel|ValueError/);
+  await shot('preparation-predispatch-safe-cause');
+
   // Item 4: a failed launch says the run failed, with the cause; never "has finished".
   observed[runId] = status(runId, 'candidate', runDigest, {});
   await retained('candidate');
@@ -155,7 +185,7 @@ try {
   for (const [fields, text] of [
     [{loop: loop({input_request: {reason: {kind: 'no_improvement'}, summary: {iteration: 2}}})},
       'The research loop paused and is waiting for your input. Open it in Monitor to read the summary, add advice and resume.'],
-    [{loop: loop({})}, 'The research loop is paused at a completed body. Open it in Monitor to resume.'],
+    [{loop: loop({})}, 'The research loop is paused at a completed iteration. Open it in Monitor to resume.'],
     [{loop: loop({stop_requested: true})}, 'Stop was requested; this run cannot continue.'],
   ]) {
     observed[runId] = status(runId, 'candidate', runDigest, {native_status: 'paused', ...fields});

@@ -1,0 +1,81 @@
+{
+  "scope": "Audited fixed framework guidance and typed carriers. Exact expressions only; arbitrary task/GPU/setup causes have no exception.",
+  "expressions": {
+    "reusable_candidate.py": [
+      "raise OperationFailure('judge_route', str(error)) from error",
+      "raise ReusableAdmissionNotAttempted(error.detail.code, error.detail.message) from error"
+    ],
+    "add_task.py": [
+      "print(f'The task was added, but its first experiment setup was not created: {error.message}. Create one in the Workflow tab instead.', file=sys.stderr)",
+      "print(f'add-task refused: {error}.', file=sys.stderr)",
+      "print(f'add-task refused: {error}.', file=sys.stderr)",
+      "print(f'add-task refused: {error}.{left}', file=sys.stderr)",
+      "raise AddTaskRefused(str(error)) from None"
+    ],
+    "settings_file.py": [
+      "raise SettingsInvalid(f'global settings file is not valid {SETTINGS_SCHEMA} JSON at {invalid_fields(error, payload)}') from None"
+    ],
+    "setup_routes.py": [
+      "content: dict[str, object] = {'error': {'code': error.code, 'message': error.message}}",
+      "content['finding'] = error.finding.model_dump(mode='json')",
+      "return JSONResponse(status_code=error.status, content=content)"
+    ],
+    "editor.py": [
+      "return JSONResponse(status_code=409, content={'error': {'code': error.code, 'message': str(error)}, 'current': error.current.model_dump(mode='json') if error.current else None, 'proposal': safe_review(error.proposal).model_dump(mode='json') if error.proposal else None})",
+      "return JSONResponse(status_code=422, content={'error': {'code': 'source', 'message': 'proposal is not a supported declaration'}, 'diagnostics': [item.model_dump(mode='json') for item in error.diagnostics]})"
+    ],
+    "example_bundle.py": [
+      "message = str(error) if isinstance(error, WorkspaceRefused) else console_error_message(error)",
+      "raise AddTaskRefused(f'copying the task package failed ({message}){left}') from None"
+    ],
+    "app.py": [
+      "message = error.detail.message if error.detail.code in ('credentials', 'launch_policy', 'judge_route', 'loop_end', 'candidate_preflight', 'reusable_preflight', 'native_chain_admission') else {'native_chain_policy': 'native chain choice is unavailable or overlaps editor writes', 'not_supported': 'native-chain token aggregation is not supported', 'example': 'recorded example is not configured', 'example_path': 'recorded example is unavailable', 'busy': 'another operation is active or unresolved', 'conflict': 'operation ID already identifies different content', 'stale_review': 'reviewed source or bindings changed; review again', 'unsupported': 'saved declaration bindings cannot be reviewed; inspect source and prepared context', 'context': 'saved declaration differs from selected prepared context', 'editor_policy': 'project is not enabled for candidate runs', 'task_policy': 'preparation does not match the configured task policy', 'not_prepared': 'preparation has no verified candidate to review', 'host_ledger_missing': 'host resources and parallel nodes need a host ledger in the console configuration; review without them', 'host_queue_full': 'host waiting queue is full or disabled; retry when capacity is available', 'resources_required': \"this console shares a host ledger: declare the run's host resources, then review again\", 'resource_refused': \"the run's host resources exceed the host budget even when it is idle; lower them, then review again\", 'parallel_unit_exceeds_capacity': 'a parallel unit exceeds the host budget even alone; lower it in the parallel table or remove its capability', 'run_resources_conflict': 'the reviewed run already declares other host resources or parallel nodes; review again without overriding them'}.get(error.detail.code, 'native operation could not be verified')",
+      "return JSONResponse(status_code=409, content={'error': {'code': error.detail.code, 'message': message, 'admission_not_attempted': True}})",
+      "return JSONResponse(status_code=409, content={'error': {'code': error.detail.code, 'message': message, 'blocking_operation_id': str(error.detail.blocking_operation_id)}})",
+      "return error_response(404, 'unknown_operation', error.detail.message)"
+    ],
+    "reusable_preparation.py": [
+      "raise OperationFailure('launch_policy', str(error)) from error",
+      "raise ReusableAdmissionNotAttempted(error.detail.code, error.detail.message) from error"
+    ],
+    "__main__.py": [
+      "print(f'  .venv/bin/python -m tools.candidate_console check --config {error.config_path}', file=sys.stderr)",
+      "print(f'  {error.member}', file=sys.stderr)",
+      "print(f'  {error.member},', file=sys.stderr)",
+      "print(f'Console configuration is incomplete: {error}.', file=sys.stderr)",
+      "print(f'Console settings are invalid: {error}.', file=sys.stderr)",
+      "print(f'Workspace init refused: {error}. Nothing was deleted.', file=sys.stderr)",
+      "print(f'Workspace init stopped: console settings are invalid: {error}. Nothing was deleted.', file=sys.stderr)",
+      "print(f'Workspace init stopped: console.json is incomplete: {error}. Nothing was deleted.', file=sys.stderr)"
+    ],
+    "settings_routes.py": [
+      "return JSONResponse(status_code=error.status, content={'error': {'code': error.code, 'message': error.message}})"
+    ],
+    "settings_service.py": [
+      "error.add_note(f'temporary file {temporary} could not be removed: {cleanup.strerror}')",
+      "raise SettingsRefusal(422, 'settings_invalid', str(error)) from None",
+      "raise SettingsRefusal(error.status, error.code, error.message) from None",
+      "raise SettingsRefusal(error.status, error.code, error.message) from None",
+      "raise SettingsRefusal(error.status, error.code, error.message) from None",
+      "return (None, digest, f'settings/global_settings.json: {error}. Fix or restore the file and Reload, or choose values here and Save to replace it.')"
+    ],
+    "template_routes.py": [
+      "raise AuthoringError('unsupported', str(error), current) from error"
+    ],
+    "setups.py": [
+      "if error.args == (safe,):\n    return safe"
+    ],
+    "package_mounts.py": [
+      "return str(error)"
+    ]
+  },
+  "reviewed_safe_statements": {
+    "setups.py": "Exact args equality against the two framework-owned registry literals returns the literal, never arbitrary exception text.",
+    "editor.py": "AuthoringError guidance is audited in the console contract; its ReviewView proposal is projected through safe_review. Native draft diagnostics omit Pydantic input snapshots. Whole SourceDiagnostic serialization carries framework validation/syntax codes, messages and source locations from definition.source; arbitrary native exception objects are not serialized.",
+    "app.py": "Audited typed operation guidance and UUID carriers plus fixed code-specific recovery messages; provenance is recorded in the console contract. The admission_not_attempted response forwards the same reviewed code-filtered message plus a boolean marker.",
+    "example_bundle.py": "Only WorkspaceRefused is forwarded: workspace.ensure_owned_directory constructs fixed permission/ownership guidance from explicit paths and stat fields. Raw OSError uses console_error_message; no arbitrary exception text or custom class name is forwarded. The aliased message in the reviewed AddTaskRefused raise comes only from that typed branch or safe category; left adds fixed partial-copy guidance plus the explicit target path.",
+    "package_mounts.py": "SandboxProfile.device_paths and _canonical_path raise only fixed framework guidance plus the operator-declared path, including missing-GPU recovery instructions. Only str(error) is forwarded; nested causes and tracebacks are not rendered.",
+    "setup_routes.py": "SetupRefused.message already uses safe projection; TaskReferenceFinding is fixed framework finding guidance from candidate_compatibility, not a native exception model. The now-visible content alias and finding dump are exact reviewed statements."
+  },
+  "guard_limits": "https://github.com/Galileo-Sandbox/SIDERIUS/issues/1339"
+}

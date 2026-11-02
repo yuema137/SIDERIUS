@@ -236,10 +236,11 @@ def _read_record(
                 cancel_requested=cancel is not None,
             )
         waiting = is_queued(path) and not os.path.lexists(path / PLACEMENT_FILE)
-        if is_authored_loop(record) and process.status == "exited":
+        if process.status == "exited":
             from .loop_recovery import sessions_ended
 
             ended = sessions_ended(record)
+            prefix = "loop" if is_authored_loop(record) else "operation"
             return OperationSnapshot(
                 operation_id=operation_id,
                 kind=record.submission.kind,
@@ -248,7 +249,7 @@ def _read_record(
                 state="operation_failed" if ended else "unknown",
                 process=process,
                 cancel_requested=cancel is not None,
-                reason="loop_process_exited" if ended else "loop_process_exiting",
+                reason=f"{prefix}_process_exited" if ended else f"{prefix}_process_exiting",
             )
         state = "unknown" if process.status != "alive" else "queued" if waiting else "active"
         return OperationSnapshot(
@@ -291,7 +292,7 @@ def releasable(config: OperationStoreConfig, operation_id: UUID) -> bool:
         snapshot = read_operation(config, operation_id)
     except (OSError, ValueError):
         return False
-    if snapshot.reason == "loop_process_exited":
+    if snapshot.reason in {"loop_process_exited", "operation_process_exited"}:
         from .loop_recovery import sessions_ended
 
         return sessions_ended(load_record(config, operation_id))

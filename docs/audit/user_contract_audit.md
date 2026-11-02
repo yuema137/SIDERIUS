@@ -87,7 +87,11 @@ _REQUIRED_KEYS = frozenset(
 - Workflow-side fallback literals: `workflows/model_exploration.py:2716-2717` — `valid_llm.get("provider", "gemini")`, `valid_llm.get("model_id", "gemini-3.1-flash-lite-preview")`.
 - Lit review defaults: `LitReviewLLMConfig` main+search = `deepseek` / `deepseek-v4-pro` (`llm_config.py:188-210`).
 
-**Genuinely required knobs**: API keys only, via env / `.env` — `run_one_iteration.py:67` `load_dotenv(dotenv_path=Path(SIDERIUS_ROOT) / ".env")`; provider table `agent/llm_bridge.py:121-134`: `OPENAI_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY` (a commented-out `claude` entry exists, `:137-143`). Lit-review additionally reads `S2_API_KEY` (`agent/skills/paper_resolver_skill/wrapper.py:79`).
+**Current credential setup**: use the [installation provider table](../getting-started/installation.md#api-keys)
+for supported key names and model-selection requirements. The observations below
+refer to the audit SHA above, not the current provider inventory.
+
+**Genuinely required knobs (at audit SHA)**: API keys only, via env / `.env` — `run_one_iteration.py:67` `load_dotenv(dotenv_path=Path(SIDERIUS_ROOT) / ".env")`; provider table `agent/llm_bridge.py:121-134`: `OPENAI_API_KEY`, `GEMINI_API_KEY`, `DEEPSEEK_API_KEY` (a commented-out `claude` entry exists, `:137-143`). Lit-review additionally reads `S2_API_KEY` (`agent/skills/paper_resolver_skill/wrapper.py:79`).
 
 **Is there ONE documented safe default?** Partially. Shipped configs: `llm_configs/{openai_tiered_pro, openai_tiered_v1, deepseek_tiered_pro, certify_minimal}.json` (operator practice pins `openai_tiered_pro.json` for Gates). `docs/getting-started/first-run.md`'s Level-2 command passes **no `--llm_config`**, which silently selects the all-gemini deprecated default — while `docs/getting-started/installation.md:51-53` lists `OPENAI_API_KEY=...` first and marks `GEMINI_API_KEY` "# optional". A user with only an OpenAI key who follows the docs verbatim launches into gemini auth failures. **Product gap (MINOR, doc-level): the documented first run should carry `--llm_config llm_configs/openai_tiered_pro.json` (or the docs should name one canonical config).**
 

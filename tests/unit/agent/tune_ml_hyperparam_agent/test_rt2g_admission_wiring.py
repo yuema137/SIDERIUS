@@ -124,6 +124,8 @@ def _completed_observation_block(tmp_dir: str) -> dict:
 
 def _make_input(tmp_path) -> HyperparamTuningInput:
     return HyperparamTuningInput(
+        # This fixture exercises legacy single-file attempts, not trial scheduling.
+        is_trial=False,
         run_seed=TEST_RUN_SEED,
         planner_strategy="native-timing-v1",
         model_type="punet",

@@ -6,13 +6,14 @@ import functools
 import os
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
 
 from core.durable_io import publish_bytes_write_once
-from core.runtime_control.admission import RESOURCE_REJECTIONS, evaluate_gpu_admission
+from core.runtime_control.admission import evaluate_gpu_admission
 from core.runtime_control.gpu_accounting import sample
-from core.runtime_control.gpu_execution_evidence import AttemptGpuExecution
+from core.runtime_control.gpu_execution_evidence import AttemptGpuExecution, GpuExecutionReceipt
 from core.runtime_control.gpu_observer import GpuPhaseObserver
 from core.runtime_control.gpu_protection import GpuProtectionBinding, TimedGpuObservation
 from core.runtime_control.inference_measurement_binding import inference_measurement_binding
@@ -125,10 +126,13 @@ def admit_phase(sandbox, phase: str) -> dict | None:
     entry = state.phases[phase]
     requirement = entry.requirement()
     started = time.monotonic()
-    snapshot = sample(os.getpid(), sandbox.device_identity)
-    observed = TimedGpuObservation(
-        sequence=0, query_started_at=started, query_completed_at=time.monotonic(), snapshot=snapshot
-    )
+    snapshot = None
+    sampling_error = None
+    try:
+        snapshot = sample(os.getpid(), sandbox.device_identity)
+    except Exception as error:
+        sampling_error = f"{type(error).__name__}: {error}"
+    completed = time.monotonic()
     policy = sandbox.admission_policy
     decision = evaluate_gpu_admission(
         snapshot=snapshot,
@@ -139,19 +143,17 @@ def admit_phase(sandbox, phase: str) -> dict | None:
         mode=policy.mode,
         ceiling_gib=policy.ceiling_gib,
         run_name=state.experiment_id,
+        sampling_error=sampling_error,
+        require_evidence=True,
     )
     state.current_admission = decision
     if not decision.admitted:
         return {
-            "status": (
-                "skipped_resource_admission"
-                if decision.reason_code in RESOURCE_REJECTIONS
-                else "aborted_infrastructure"
-            ),
+            "status": "skipped_resource_admission",
             "message": decision.reason,
             "admission": decision.model_dump(mode="json"),
         }
-    if snapshot.device_total_mib is None:
+    if snapshot is None or snapshot.device_total_mib is None:
         return {
             "status": "aborted_infrastructure",
             "message": "admission omitted current physical device capacity",
@@ -169,7 +171,9 @@ def admit_phase(sandbox, phase: str) -> dict | None:
         snapshot.device,
         protection_policy=state.policy.protection,
         protection_binding=binding,
-        initial_observation=observed,
+        initial_observation=TimedGpuObservation(
+            sequence=0, query_started_at=started, query_completed_at=completed, snapshot=snapshot
+        ),
     )
     return None
 
@@ -331,24 +335,69 @@ def record_protected_phase(phase: Literal["training", "inference"]):
                 detail=result.get("message", ""),
                 startup=startup.receipt if startup is not None else None,
             )
-            directory = Path(sandbox.base_dir) / "gpu_execution" / state.attempt_token
-            try:
-                directory.mkdir(parents=True, exist_ok=True)
-                publish_bytes_write_once(
-                    str(directory / f"{phase}-terminal.json"), receipt.model_dump_json().encode()
-                )
-            except Exception as error:
-                result["status"] = "aborted_infrastructure"
-                result["message"] = (
-                    f"Execution outcome was {receipt.outcome}; GPU terminal evidence could not be persisted: {error}"
-                )
-                receipt = receipt.model_copy(
-                    update={"outcome": "aborted_infrastructure", "detail": result["message"]}
-                )
-                state.receipts[-1] = receipt
-            result["gpu_execution"] = receipt.model_dump(mode="json")
-            return result
+            transient = (
+                result.get("status") == "skipped_resource_admission"
+                and state.current_admission is not None
+                and state.current_admission.refusal_kind == "transient_sampling"
+            )
+            filename = (
+                f"{phase}-admission-{len(state.receipts)}.json"
+                if transient
+                else f"{phase}-terminal.json"
+            )
+            return _publish_receipt(sandbox, result, receipt, filename)
 
         return run
 
     return decorate
+
+
+def _publish_receipt(sandbox, result: dict, receipt: GpuExecutionReceipt, filename: str) -> dict:
+    state = active_attempt(sandbox)
+    assert state is not None
+    directory = Path(sandbox.base_dir) / "gpu_execution" / state.attempt_token
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        publish_bytes_write_once(str(directory / filename), receipt.model_dump_json().encode())
+    except Exception as error:
+        result["status"] = "aborted_infrastructure"
+        result["message"] = (
+            f"Execution outcome was {receipt.outcome}; GPU execution evidence could not be persisted: {error}"
+        )
+        receipt = receipt.model_copy(
+            update={"outcome": "aborted_infrastructure", "detail": result["message"]}
+        )
+        state.receipts[-1] = receipt
+    result["gpu_execution"] = receipt.model_dump(mode="json")
+    return result
+
+
+def finalize_admission_refusal(
+    sandbox, phase: Literal["training", "inference"], result: dict
+) -> dict:
+    """Publish the last protected sampling refusal when its owner exhausts retries."""
+    state = active_attempt(sandbox)
+    if state is None:
+        return result
+    receipt = state.receipts[-1]
+    if receipt.phase != phase or receipt.admission != state.current_admission:
+        raise ValueError("protected admission finalization differs from the last phase receipt")
+    return _publish_receipt(sandbox, result, receipt, f"{phase}-terminal.json")
+
+
+def pause_admission_retry(
+    sandbox, phase: str, seconds: float, pause: Callable[[float], None]
+) -> None:
+    """Charge protected retry waiting as preparation without renewing its deadline."""
+    state = active_attempt(sandbox)
+    if state is None:
+        pause(seconds)
+        return
+    remaining = state.allowance.remaining
+    if remaining <= 0:
+        return  # The next phase entry publishes the exhausted-allowance result.
+    state.allowance.begin(f"{phase}_admission_backoff")
+    try:
+        pause(min(seconds, remaining))
+    finally:
+        state.allowance.finish("admission backoff")

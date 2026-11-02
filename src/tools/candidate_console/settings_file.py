@@ -18,6 +18,7 @@ from pydantic import ValidationError
 
 from tools.candidate_operations.models import OperationFailure
 
+from .error_messages import advice_error_message
 from .files import canonical, config_bytes, private_bytes
 from .models import ConsoleConfig
 from .settings_models import (
@@ -263,7 +264,7 @@ def advice_bytes(path: Path, *, label: str) -> bytes:
     try:
         parse_advice_bytes(payload, label=label)
     except AdviceArtifactError as error:
-        raise SettingsInvalid(str(error)) from None
+        raise SettingsInvalid(f"{label}: {advice_error_message(error)}") from None
     return payload
 
 

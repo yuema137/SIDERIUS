@@ -42,6 +42,11 @@ from nodes.ml_hyperparameter_tune_agent.contracts import (
 from nodes.ml_hyperparameter_tune_agent.health_coverage import (
     validate_attempt_health_coverage,
 )
+from nodes.ml_hyperparameter_tune_agent.parameter_rule_receipts import (
+    inactive_parameter_rule_record,
+    resolution_event_record,
+)
+from nodes.ml_hyperparameter_tune_agent.plan_logging import render_effective_plan
 from nodes.ml_hyperparameter_tune_agent.policy import (
     _apply_mode_override_chain,
     _apply_plan_overrides,
@@ -63,6 +68,11 @@ from nodes.ml_hyperparameter_tune_agent.timing_context import (
     build_timing_context,
     partial_scope_strategy_overrides,
 )
+from nodes.ml_hyperparameter_tune_agent.training_batch_plan import (
+    resolve_training_batch_plan,
+    training_batch_fit_record,
+)
+from workflows.evaluation_selection import selection_metric
 
 
 def _apply_declared_objective(plan: Any, composition_ref: Any) -> Any:
@@ -480,7 +490,7 @@ def _request_attempt_plan(
         task_render=run_task_render,
         # Step 07 PR 07b (P3) — the run's golden-metric
         # declaration: direction words + metric identity.
-        metric_spec=run_metric.spec,
+        metric_spec=selection_metric(agent_input.task_composition_ref, run_metric.spec),
     )
 
     return _PlannerResponse(
@@ -866,6 +876,12 @@ def prepare_attempt(
         # with.
         task_parameters={"seg_size": declared_segmentation_size},
     )
+    from workflows.evaluation_admission import require_formula_route
+
+    require_formula_route(
+        agent_input.task_composition_ref,
+        "TASK_OWNED" if task_scopes.evaluation is not None else "ANCHOR_NORMALIZED",
+    )
 
     # 01B2 — a composed Health-enabled attempt may execute only after the
     # bound task confirms that THIS opaque evaluation scope covers its own
@@ -886,6 +902,19 @@ def prepare_attempt(
         health_gate_files=agent_input.health_gate_files,
     )
 
+    # The batch fit counts training rows, which may construct the task's
+    # training dataset (eager reads for some tasks). It therefore runs only
+    # after the Health coverage refusal above, so an uncovered scope is refused
+    # before any dataset is built.
+    plan, resolved_training_rows = resolve_training_batch_plan(
+        plan,
+        bindings=bindings,
+        trial_config=trial_config,
+        scopes=task_scopes,
+        resolution=resolution,
+        model_type=model_type,
+    )
+
     # Segment counts for records and reflector context. EXTRACTED (§E.2):
     # seam B's declared-absence case would otherwise have grown this function
     # by four branch nodes, and the accounting is its own responsibility.
@@ -902,10 +931,6 @@ def prepare_attempt(
     exp_id = f"{model_type}_{run_name}_{total_attempts:03d}"
     hypothesis = plan.hypothesis
 
-    print(f"Action: {model_type.upper()} | ID: {exp_id}")
-    print(f"Hypothesis: {hypothesis}")
-    print(f"Reasoning: {plan.reasoning or 'No reasoning provided.'}")
-
     # Save validated TrialConfig
     _persist_trial_config(sandbox.dirs["configs"], exp_id, trial_config)
 
@@ -921,6 +946,11 @@ def prepare_attempt(
     # Lane D / F15 — close the tracker (the model channel is not plan-visible).
     execution_provenance = resolution.finish_with_model(
         plan, executed_model_type=model_type, trial_config=trial_config
+    )
+    print(
+        render_effective_plan(
+            exp_id=exp_id, model_type=model_type, plan=plan, provenance=execution_provenance
+        )
     )
     active_params = {
         "exp_id": exp_id,
@@ -945,6 +975,9 @@ def prepare_attempt(
 
     # Clean params for records — exclude bulky SampleSet dicts
     record_params = {
+        **inactive_parameter_rule_record(plan),
+        **resolution_event_record(execution_provenance),
+        **training_batch_fit_record(execution_provenance),
         "exp_id": exp_id,
         "run_name": run_name,
         "model_type": model_type,
@@ -967,6 +1000,7 @@ def prepare_attempt(
         train_sample_set=train_sample_set,
         eval_sample_set=eval_sample_set,
         task_scopes=task_scopes,
+        resolved_training_rows=resolved_training_rows,
         train_psd_segments=train_psd_segments,
         eval_psd_segments=eval_psd_segments,
         ordering=ordering,

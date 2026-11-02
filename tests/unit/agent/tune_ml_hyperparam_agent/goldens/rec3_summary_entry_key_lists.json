@@ -23,7 +23,8 @@
       "ordering_resolution_source",
       "ordering_observation",
       "candidate_id",
-      "task_composition_fingerprint"
+      "task_composition_fingerprint",
+      "$siderius_encoding"
     ]
   },
   {
@@ -77,7 +78,8 @@
       "attempt_role",
       "ordering_observation",
       "candidate_id",
-      "task_composition_fingerprint"
+      "task_composition_fingerprint",
+      "$siderius_encoding"
     ]
   },
   {
@@ -124,7 +126,8 @@
       "is_trial",
       "ordering_observation",
       "candidate_id",
-      "task_composition_fingerprint"
+      "task_composition_fingerprint",
+      "$siderius_encoding"
     ]
   }
 ]

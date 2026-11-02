@@ -13,12 +13,13 @@ docs/external_agents_architecture.md §6 ("insertable, not refactorable").
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from agent.schemas.proposal import AgentCard, ExpertContextItem, VocabEntry
+from core.record_encoding import RecordModel
 
 
-class ExternalAgentOutput(BaseModel):
+class ExternalAgentOutput(RecordModel):
     """Four-channel contribution from one external agent into ProposalInput.
 
     Channels rank from soft (always-on) to strong (rarely populated):

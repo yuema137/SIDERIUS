@@ -427,3 +427,11 @@ because it never invokes `run_judge_call`.
   B6-9.
 - `tuning.output` and `validation.output` have no projector, so rubric ranking of
   trained candidates is refused (B6-9/B3 multi-tuning).
+
+### UTF-8 identity encoding
+
+Invocation, combined-value and evidence identities use the
+[Data Analysis UTF-8 canonical owner](../../agent/schemas/data_analysis/canonical-identity-contract.md).
+Its non-finite encoding is shared with `core.record_encoding`; finite strategy,
+rubric and prompt identities retain their bytes. This does not relax the judge
+schemas' finite-number admission policy or the anchored replay checks above.

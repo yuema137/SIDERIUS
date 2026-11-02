@@ -130,7 +130,7 @@ def test_terminal_and_unconfirmed_operations_refuse_without_recording(claimed):
     publish(path / "process.json", identity)
     with pytest.raises(OperationFailure) as refused:
         request_cancel(config, operation_id)
-    assert refused.value.detail.code == "not_running"
+    assert refused.value.detail.code == "terminal"
     native_records(record, "accepted")
     with pytest.raises(OperationFailure) as refused:
         request_cancel(config, operation_id)

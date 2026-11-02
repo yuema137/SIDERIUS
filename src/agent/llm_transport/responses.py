@@ -7,14 +7,11 @@ from pydantic_ai.messages import ModelResponse, TextPart, ThinkingPart, ToolCall
 
 from agent.llm_transport.contracts import Choice, Completion, FunctionCall, Message, ToolCall, Usage
 from agent.llm_transport.requests import JSON_TOOL
-
-
-def strict_arguments(call: ToolCallPart) -> dict[str, Any]:
-    """Do not use the library's partial-JSON parser for execution arguments."""
-    payload = json.loads(call.args) if isinstance(call.args, str) else call.args
-    if not isinstance(payload, dict):
-        raise ValueError("Tool arguments must be a complete JSON object")
-    return payload
+from agent.llm_transport.tool_admission import (
+    declared_arguments,
+    object_arguments,
+    require_single_call,
+)
 
 
 def measured_usage(raw: dict[str, Any]) -> Usage | None:
@@ -59,7 +56,7 @@ def normalize(
             failure = "JSON output requires exactly one declared result tool"
         else:
             try:
-                payload = strict_arguments(calls[0])
+                payload = object_arguments(calls[0].args)
                 if set(payload) != {"value"} or not isinstance(payload["value"], (dict, list)):
                     raise ValueError("Expected JSON object or array in value")
                 content = json.dumps(payload["value"], ensure_ascii=False)
@@ -69,28 +66,20 @@ def normalize(
         if calls or not content:
             failure = "Expected JSON text without tool calls"
     elif tool_names:
-        if len(calls) != 1:
-            failure = "The one-shot bridge requires exactly one tool call"
-        else:
+        try:
+            require_single_call(len(calls), result.finish_reason)
             call = calls[0]
-            try:
-                args = strict_arguments(call)
-                if (
-                    call.tool_name not in tool_names
-                    or not call.tool_call_id
-                    or not isinstance(args, dict)
-                ):
-                    raise ValueError("Unknown tool or missing call identity/object arguments")
-                tools = [
-                    ToolCall(
-                        id=call.tool_call_id,
-                        function=FunctionCall(
-                            name=call.tool_name, arguments=json.dumps(args, ensure_ascii=False)
-                        ),
-                    )
-                ]
-            except (ValueError, TypeError) as exc:
-                failure = f"Invalid tool call: {type(exc).__name__}"
+            args = declared_arguments(call.tool_name, call.tool_call_id, call.args, tool_names)
+            tools = [
+                ToolCall(
+                    id=call.tool_call_id,
+                    function=FunctionCall(
+                        name=call.tool_name, arguments=json.dumps(args, ensure_ascii=False)
+                    ),
+                )
+            ]
+        except (ValueError, TypeError) as exc:
+            failure = f"Invalid tool call: {type(exc).__name__}"
     elif calls or not content:
         failure = "Expected nonempty text without tool calls"
     return Completion(

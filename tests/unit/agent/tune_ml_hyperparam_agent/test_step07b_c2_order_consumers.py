@@ -283,6 +283,17 @@ class TestReflectionContextInverts:
         assert _reflect(LOWER, -5.0)["is_new_best"] is True
         assert _reflect(LOWER, -2.0)["is_new_best"] is False
 
+    @pytest.mark.parametrize("score", [float("inf"), float("-inf")], ids=str)
+    def test_a_non_finite_current_score_is_never_a_new_best(self, score):
+        """Defect: the scorer now transports -inf/NaN instead of null (#1316), so a
+        non-finite round reaches this context as a float. Without normalization a
+        -inf round is "the new best" under a minimised metric (+inf under a
+        maximised one), exactly what a null round never was."""
+        for order in (HIGHER, LOWER):
+            context = _reflect(order, score)
+            assert context["is_new_best"] is False
+            assert context["rank"] is None
+
     @pytest.mark.parametrize("order", [HIGHER, LOWER], ids=["higher", "lower"])
     def test_a_tie_with_the_incumbent_is_not_a_new_best(self, order):
         assert _reflect(order, -2.4 if order is HIGHER else -3.0)["is_new_best"] is False

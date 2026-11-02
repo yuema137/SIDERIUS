@@ -47,6 +47,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import numpy as np
 from pydantic import BaseModel, ConfigDict
 
+from core.seeding import MissingRunSeed
 from execute_tools.task_data_path import (
     DeliverableWriteRequest,
     EpochSamplingParams,
@@ -324,14 +325,15 @@ class QuickstartTaskDataPath:
         """A torch dataset over ``scope``, honouring the per-epoch knobs.
 
         ``train_portion`` subsamples the scope's rows with the per-epoch seed
-        (``epoch_seed=None`` draws non-deterministically, preserving the
-        builder's contract); ``max_samples`` is an absolute ceiling applied
-        after the draw.
+        (``epoch_seed=None`` raises ``MissingRunSeed`` when subsampling);
+        ``max_samples`` is an absolute ceiling applied after the draw.
         """
         checked = self._require_scope(scope)
         rows = list(checked.rows)
         if params.train_portion is not None and params.train_portion < 1.0:
             keep = max(1, math.floor(len(rows) * params.train_portion))
+            if params.epoch_seed is None:
+                raise MissingRunSeed("training subsampling requires epoch_seed")
             rng = np.random.default_rng(params.epoch_seed)
             chosen = sorted(rng.choice(len(rows), size=keep, replace=False).tolist())
             rows = [rows[i] for i in chosen]
@@ -522,11 +524,13 @@ class QuickstartTaskDataPath:
         # none and deliberately ignores unknown keys (the tuner always sends
         # {"seg_size": ...} — see the module docstring).
         rows: list[QuickstartScopeRow] = []
-        rng = np.random.default_rng(request.seed)
+        rng = None if request.seed is None else np.random.default_rng(request.seed)
         for shard in shards:
             shard_rows = _rows_for_shard(shard)
             keep = max(1, math.floor(len(shard_rows) * request.portion))
             if keep < len(shard_rows):
+                if rng is None:
+                    raise MissingRunSeed("scope subsampling requires request.seed")
                 chosen = sorted(rng.choice(len(shard_rows), size=keep, replace=False).tolist())
                 shard_rows = [shard_rows[i] for i in chosen]
             rows.extend(shard_rows)

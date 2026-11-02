@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from agent.schemas.hyperparam_tuning import TrialConfig
+from core.training_seeds import TrainingSeedPlan
 from execute_tools.evaluation_execution import candidate_evaluation_executor
 from execute_tools.task_data_path import (
     EpochSamplingParams,
@@ -13,6 +15,41 @@ from execute_tools.task_data_path import (
     resolve_task_scope_capability,
 )
 from workflows.task_composition import active_task_manifest_path
+
+
+def epoch_zero_training_sampling(
+    trial_config: TrialConfig, *, data_dir: str, max_samples: int | None
+) -> EpochSamplingParams:
+    """The shared sampling request for planning and both training probe routes."""
+    return EpochSamplingParams(
+        data_dir=data_dir,
+        epoch_seed=TrainingSeedPlan(trial_config.seed_context).epoch(0).subsample,
+        train_portion=trial_config.train_portion,
+        max_samples=max_samples,
+    )
+
+
+def build_attempt_task_probe_data(
+    *,
+    task_composition_ref: Any,
+    task_scopes: Any,
+    trial_config: TrialConfig,
+    data_dir: str | None,
+    max_samples: int | None,
+) -> TaskProbeDataSpec | None:
+    """Project the attempt with the same epoch-zero sampling as row resolution."""
+    if task_composition_ref is None or getattr(task_scopes, "training", None) is None:
+        return None
+    if not data_dir:
+        raise ValueError("Training probe requires the resolved data root")
+    sampling = epoch_zero_training_sampling(
+        trial_config, data_dir=data_dir, max_samples=max_samples
+    )
+    return build_task_probe_data(
+        task_composition_ref=task_composition_ref,
+        task_scopes=task_scopes,
+        **sampling.model_dump(),
+    )
 
 
 def build_task_probe_data(

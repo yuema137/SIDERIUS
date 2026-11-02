@@ -222,3 +222,40 @@ def test_observation_validates_the_data_root_it_mounts(tmp_path):
     with pytest.raises(ValueError, match="differs from the task-summary job"):
         observe_composition(job, (tmp_path,), data_root=tmp_path / "other")
     assert not (tmp_path / "scratch").exists()
+
+
+@pytest.mark.parametrize("stage", ["scope", "storage", "counts"])
+@pytest.mark.parametrize(
+    ("error_type", "category"),
+    [
+        (OSError, "Filesystem error"),
+        (ValueError, "Invalid value"),
+        (RuntimeError, "Unexpected error"),
+    ],
+)
+def test_package_fact_failures_hide_raw_exception_details(tmp_path, stage, error_type, category):
+    """Scope, storage and counting failures must not expose task exception payloads."""
+    secret = "sk-secret-from-task-error"
+
+    class FailingTask(_StorageTask):
+        def build_training_scope(self, request):
+            if stage == "scope":
+                raise error_type(secret)
+            return super().build_training_scope(request)
+
+        def storage_read_scope(self, data_dir, scope):
+            if stage == "storage":
+                raise error_type(secret)
+            return super().storage_read_scope(data_dir, scope)
+
+        def training_dataset(self, scope, params):
+            raise error_type(secret)
+
+    facts = project_package_facts(
+        _composition(FailingTask()),
+        TaskSummaryRequest(data_root=str(tmp_path), count_samples=True),
+    )
+    result = facts.sample_counts if stage == "counts" else facts.scopes
+    assert result is not None and result.state == "failed"
+    assert result.message == f"{category} while reading task summary facts."
+    assert secret not in facts.model_dump_json()

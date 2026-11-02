@@ -15,9 +15,8 @@ Chat Completions path. Nodes continue to call `LLMBridge`.
    Package consumers can install `siderius[pydantic-ai]` instead.
 
 2. Bind the selected provider's credential to your launching process, following
-   the [installation guide](../../../docs/getting-started/installation.md#api-keys).
-   Use `ANTHROPIC_API_KEY`, `MOONSHOT_API_KEY`, or `ZAI_API_KEY`. Never put the
-   secret value in workflow JSON.
+   the [provider key table and installation procedure](../../../docs/getting-started/installation.md#api-keys).
+   Never put the secret value in workflow JSON.
 
 3. Set the provider and an actual model ID in your project's LLM configuration.
    For example, this config routes the implementation node to Anthropic:
@@ -48,6 +47,12 @@ adapter currently handles one-shot text, JSON, and single-tool selection. It
 uses native JSON-object output when the model adapter declares support; otherwise
 JSON uses a result tool and requires compatible tool support. Truncated
 results are rejected rather than accepted as complete artifacts.
+
+Tool selection returns one complete call to a tool offered in that request,
+with a call ID and JSON-object arguments. This also applies to the default
+OpenAI-compatible route. Extra calls, truncation, or unknown tool names fail
+after usage is recorded; the bridge does not execute tools or retry an invalid
+returned selection.
 
 Before a campaign, test the actual model and operations your workflow needs.
 Offline adapter tests do not establish account access, quotas, or scientific

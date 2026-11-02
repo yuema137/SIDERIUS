@@ -1162,6 +1162,9 @@ def print_resolved_launch_config(args: argparse.Namespace) -> int:
         "runtime_watchdog_safety_factor": watchdog_policy.safety_factor,
         "runtime_watchdog_floor_seconds": watchdog_policy.floor_seconds,
         "runtime_verification_max_wall_seconds": (args.runtime_verification_max_wall_seconds),
+        "runtime_verification_pathological_min_unit_ms": (
+            args.runtime_verification_pathological_min_unit_ms
+        ),
         "runtime_watchdog_provenance": watchdog_policy.provenance,
         # F-H100-WD-1-PRETAG — the DECLARED requirement, recorded whether or
         # not it was made, so "no binding was declared" is an observable
@@ -1475,7 +1478,15 @@ def _run_bound_iteration(
 
         bridge_factory = StubLLMBridge
     if args.is_pseudo_training:
-        from core.sandbox_executor import StubSandbox
+        from core.execution_calibration import MalformedCeilingOverride
+        from core.pseudo_admission import resolve_pseudo_admission
+        from core.stub_sandbox import StubSandbox
+
+        try:
+            resolve_pseudo_admission()
+        except MalformedCeilingOverride as exc:
+            print(f"[run_one_iteration] LAUNCH REFUSED: {exc}", file=sys.stderr)
+            sys.exit(2)
 
         sandbox_factory = StubSandbox
     if args.is_pseudo_llm or args.is_pseudo_training:
@@ -1487,7 +1498,13 @@ def _run_bound_iteration(
         print(
             f"[PSEUDO-MODE ACTIVE] {' + '.join(modes)} stub(s) engaged — "
             f"this run is a $0-cost wiring smoke; outputs are canned and "
-            f"do not reflect real LLM / training behaviour.",
+            f"do not reflect real LLM / training behaviour."
+            + (
+                f" Evaluation ceiling validation_max_samples={args.validation_max_samples}"
+                f" (override with --validation_max_samples)."
+                if args.is_pseudo_training
+                else ""
+            ),
             file=sys.stderr,
         )
 

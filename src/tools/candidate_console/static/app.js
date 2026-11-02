@@ -19,8 +19,18 @@
     if (at) element.title = 'Operation ' + id + ' · ' + at; else element.title = 'Operation ' + id;
   }
   const say = (id, value) => { if (document.getElementById(id).textContent !== value) document.getElementById(id).textContent = value; };
-  const remember = id => { try { localStorage.setItem('siderius.operation_id', id); } catch { /* Storage may be unavailable. */ } };
-  try { $('operation-id').value = localStorage.getItem('siderius.operation_id') || ''; if ($('operation-id').value) say('remembered-operation', 'Last opened on this browser.'); } catch { /* Optional convenience. */ }
+  const remember = id => window.consoleSession.rememberOperation(id);
+  let monitorStoreId = null;
+  window.addEventListener('console-store', event => {
+    const storeId = event.detail.operationsStoreId;
+    if (monitorStoreId !== null && monitorStoreId !== storeId) setMonitor('');
+    monitorStoreId = storeId;
+    const explicit = window.consoleNavigation?.operation;
+    if (explicit) { setMonitor(explicit); return; }
+    const id = window.consoleSession.rememberedOperation();
+    $('operation-id').value = window.consoleNavigation.isOperationId(id) ? id : '';
+    say('remembered-operation', $('operation-id').value ? 'Last opened on this browser for this operations store.' : '');
+  });
 
   const api = (path, body) => window.consoleSession.request(path, body);
   const monitorStop = window.operationStop.mount('operation-stop');
@@ -75,8 +85,9 @@
   window.consoleSession.subscribe(state => {
     connected = state.connected; monitorEpoch++;
     controls();
-    if (connected) { if (window.consoleNavigation?.view !== 'monitor') void loadChoices(); void poll(); }
+    if (connected) { if (!window.consoleNavigation?.operation) void loadChoices(); void poll(); }
     else {
+      if (!window.consoleNavigation?.operation) { $('operation-id').value = ''; say('remembered-operation', ''); }
       if (monitorId) say('monitor-status', 'Observation unconfirmed. Reconnect to refresh; last displayed facts are retained.');
       if (preparation?.pending) say('prepare-status', 'Submission unconfirmed after connection change. Read this UUID or retry the same frozen request.');
       if (launch?.pending) say('launch-status', 'Submission unconfirmed after connection change. Read this UUID or retry the same frozen request.');
@@ -181,13 +192,15 @@
     } finally { current.pending = false; controls(); }
   });
   function setMonitor(id) {
-    if (monitorId.toLowerCase() === id.toLowerCase()) return;
-    monitorEpoch++; settled = ''; lastStatus = null; $('monitor-cause').hidden = true; window.renderNativeChain(null); window.renderGraphResults(null); window.renderLoopControl(null); monitorStop.render(null); monitorId = id; graphResultsAttemptedFor = ''; cursor = 0; logText = ''; say('log', ''); $('operation-id').value = id; remember(id); $('operation-facts').replaceChildren();
-    $('token-rows').replaceChildren(); $('tokens-table').hidden = true; say('tokens-times', ''); say('tokens-provenance', '');
+    remember(id);
+    $('operation-id').value = id;
     say('remembered-operation', '');
-    observedLine(id, null, false);
-    say('tokens-status', 'Reading reported tokens…');
-    say('monitor-status', 'Reading operation ' + id + '…');
+    if (monitorId.toLowerCase() === id.toLowerCase()) return;
+    monitorEpoch++; settled = ''; lastStatus = null; $('monitor-cause').hidden = true; window.renderNativeChain(null); window.renderGraphResults(null); window.renderLoopControl(null); monitorStop.render(null); monitorId = id; graphResultsAttemptedFor = ''; cursor = 0; logText = ''; say('log', ''); $('operation-facts').replaceChildren();
+    $('token-rows').replaceChildren(); $('tokens-table').hidden = true; say('tokens-times', ''); say('tokens-provenance', '');
+    if (id) observedLine(id, null, false); else say('operation-observed', '');
+    say('tokens-status', id ? 'Reading reported tokens…' : '');
+    say('monitor-status', id ? 'Reading operation ' + id + '…' : 'No operation selected.');
   }
   $('monitor-form').addEventListener('submit', async event => {
     event.preventDefault(); const id = $('operation-id').value.trim();
@@ -235,9 +248,9 @@
       if (logText.length > 262144) logText = '[Earlier displayed text omitted]\n' + logText.slice(-262144);
       say('log', logText);
       // L-2: a failed run names its cause in one line, taken from the log shown below.
-      const failure = window.operationOutcome.failed(lastStatus) ? window.operationOutcome.cause(logText) : null;
+      const failure = lastStatus?.preparation_error || (window.operationOutcome.failed(lastStatus) ? window.operationOutcome.cause(logText) : null);
       $('monitor-cause').hidden = !failure;
-      say('monitor-cause', failure ? 'Cause (from the log): ' + failure : '');
+      say('monitor-cause', failure ? (lastStatus?.preparation_error ? 'Cause: ' : 'Cause (from the log): ') + failure : '');
       say('log-status', chunk.missing ? 'Log not available yet.' : `Log observed: ${chunk.observed_size} source bytes · Next byte offset: ${cursor}`);
       // One full read after a terminal state, then no further polling of this operation.
       if (terminal && epoch === monitorEpoch && (chunk.missing || cursor >= chunk.observed_size)) settled = id;

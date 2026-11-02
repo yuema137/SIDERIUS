@@ -62,9 +62,9 @@ class ChainState:
     #: appended as new candidates are proposed.
     all_model_types: list[str] = field(default_factory=list)
 
-    #: This EXECUTION's best raw formal score — print banner and workflow
-    #: summary ONLY. Deliberately never seeded from restored chain state and
-    #: never fed to the tuner (V19 PR 1 two-state design). Kept separate from
+    #: This EXECUTION's best raw formal score — labelled diagnostic progress in the
+    #: console and workflow JSON; never target-stop decision evidence. Never
+    #: seeded from restored chain state or fed to the tuner. Kept separate from
     #: :attr:`chain_formal_incumbent_reference` on purpose: they look alike and
     #: mean different things, and unifying them would silently change which
     #: number reaches a decision.
@@ -73,8 +73,8 @@ class ChainState:
     #: The chain's formal-incumbent DECISION state. Seeded from
     #: ``RestoredState``; updated after each in-process iteration commit from
     #: that iteration's committed VALID formal, so an in-process multi-iteration
-    #: run is equivalent to N chained subprocesses. Consumed only by the tune
-    #: protocol.
+    #: run is equivalent to N chained subprocesses. Consumed by the tune protocol
+    #: and target-score stopping (including resume); reported in final summaries.
     chain_formal_incumbent_reference: float | None = None
 
     # --- cross-iteration memory ----------------------------------------------

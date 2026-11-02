@@ -56,7 +56,7 @@ class LoadedSkill:
         return parameter_schema_sha256(self.parameter_schema)
 
     def validated_parameters_sha256(self, parameters: BaseModel) -> str:
-        return canonical_sha256(parameters.model_dump(mode="json"))
+        return canonical_sha256(parameters)
 
     def resolved_interface(self) -> ResolvedSkillInterface:
         schema = self.parameter_schema.model_json_schema()

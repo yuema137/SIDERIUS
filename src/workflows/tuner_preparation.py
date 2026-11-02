@@ -120,6 +120,7 @@ def prepare_native_tuner_input(
         validation_max_samples=launch.validation_max_samples,
         validation_max_phase_seconds=launch.validation_max_phase_seconds,
         skip_formal_min_delta=launch.skip_formal_min_delta,
+        score_units_metric=launch.score_units_metric,
         bypass_formal_time_budget_min_delta=launch.bypass_formal_time_budget_min_delta,
         bypass_formal_time_budget_minutes=launch.bypass_formal_time_budget_minutes,
         max_retries=tune_llm.get("max_retries"),
@@ -165,6 +166,9 @@ def prepare_native_tuner_input(
         runtime_watchdog_safety_factor=launch.runtime_watchdog_safety_factor,
         runtime_watchdog_floor_seconds=launch.runtime_watchdog_floor_seconds,
         runtime_verification_max_wall_seconds=(launch.runtime_verification_max_wall_seconds),
+        runtime_verification_pathological_min_unit_ms=(
+            launch.runtime_verification_pathological_min_unit_ms
+        ),
         # V19 PR 1 (P1-C3) — the chain incumbent travels as a NAMED
         # protocol parameter (two-state design, design doc §3.4).
         # ``chain_formal_incumbent_reference`` is decision state:

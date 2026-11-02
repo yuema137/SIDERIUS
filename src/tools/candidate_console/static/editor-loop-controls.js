@@ -22,7 +22,7 @@
       input.value = draft ?? String(state.loop.final_iteration);
       if (draft !== undefined) input.setCustomValidity('Enter a whole number of at least 1.');
       input.addEventListener('input', () => actions.limit(input));
-      node('small', 'The loop runs at most this many complete workflow bodies.', group);
+      node('small', 'The loop runs at most this many complete workflow iterations.', group);
     },
     function feedback(parent, state) {
       const group = node('fieldset', '', parent); node('legend', 'Feedback', group);
@@ -66,7 +66,7 @@
     input.id = `editor-loop-stop-${field.replaceAll('_', '-')}`; input.required = true;
     // The task's declared metric ids are offered as suggestions (datalist #task-metric-ids).
     if (field === 'metric_id') { input.type = 'text'; input.placeholder = 'for example accuracy'; input.spellcheck = false; input.setAttribute('list', 'task-metric-ids'); }
-    else if (field === 'criterion') { input.rows = 3; input.maxLength = 2000; input.placeholder = 'for example: stop once the last two bodies add no new insight'; }
+    else if (field === 'criterion') { input.rows = 3; input.maxLength = 2000; input.placeholder = 'for example: stop once the last two iterations add no new insight'; }
     else { input.type = 'number'; input.step = field === 'threshold' ? 'any' : '1'; if (field !== 'threshold') input.min = '1'; }
     const key = draftKey(condition.kind, field), draft = state.drafts.get(key);
     input.value = draft ?? String(condition[field]);
@@ -114,7 +114,7 @@
     const group = node('fieldset', '', parent); group.id = 'editor-loop-stop-conditions'; node('legend', 'Stop conditions', group);
     const conditions = state.loop.stop_conditions || [];
     node('p', conditions.length
-      ? 'After each completed body the conditions below are checked in this order: conditions set to Stop first, then those set to Pause and ask me. Stop completes the loop early. Pause and ask me pauses it and waits for you on Monitor; Resume continues with the next body. The iteration limit still applies.'
+      ? 'After each completed iteration the conditions below are checked in this order: conditions set to Stop first, then those set to Pause and ask me. Stop completes the loop early. Pause and ask me pauses it and waits for you on Monitor; Resume continues with the next iteration. The iteration limit still applies.'
       : 'None. The loop runs until its iteration limit.', group);
     for (const condition of conditions) {
       const row = node('div', '', group); row.className = 'editor-loop-stop'; row.dataset.stopKind = condition.kind;
@@ -124,13 +124,13 @@
         stopField(row, condition, 'threshold', 'Threshold', state, actions);
         node('small', 'Stops once the best valid Formal score is at least as good as the threshold. "Better" follows the task metric declaration; the metric id must equal the task metric or the run fails.', row);
       } else if (condition.kind === 'no_improvement') {
-        stopField(row, condition, 'completed_bodies', 'Completed bodies', state, actions);
-        node('small', 'Stops after this many consecutive completed bodies leave the best valid Formal score unimproved. Must be below the final iteration.', row);
+        stopField(row, condition, 'completed_bodies', 'Completed iterations without improvement', state, actions);
+        node('small', 'Stops after this many consecutive completed iterations leave the best valid Formal score unimproved. Must be below the final iteration.', row);
       } else if (condition.kind === 'judge') {
         stopField(row, condition, 'criterion', 'What the judge looks for', state, actions);
-        stopField(row, condition, 'min_completed_bodies', 'First judged after bodies', state, actions);
+        stopField(row, condition, 'min_completed_bodies', 'First judged after iterations', state, actions);
         onFailure(row, condition, actions);
-        node('small', 'A language-model judge decides at each completed body boundary, after the other conditions continue, never at the final iteration. When set to Pause and ask me, a judge decision to stop pauses the loop instead. The judge model and the maximum number of judge calls are set by the console operator in the run\'s model settings, not here.', row);
+        node('small', 'A language-model judge decides at each completed iteration boundary, after the other conditions continue, never at the final iteration. When set to Pause and ask me, a judge decision to stop pauses the loop instead. The judge model and the maximum number of judge calls are set by the console operator in the run\'s model settings, not here.', row);
       }
       onMet(row, condition, actions);
       if (condition.on_met === 'request_input') {
@@ -162,7 +162,7 @@
     parent.replaceChildren();
     node('h2', 'Research loop', parent);
     if (!state.loop) {
-      node('p', 'No research loop declared. Each launch runs the workflow body once.', parent).id = 'editor-loop-absent';
+      node('p', 'No research loop declared. Each launch runs the workflow once.', parent).id = 'editor-loop-absent';
       const add = control(node('button', 'Add research loop', parent), !state.template);
       add.type = 'button'; add.id = 'editor-loop-add';
       add.addEventListener('click', actions.add);
@@ -181,7 +181,7 @@
       const broken = node('p', 'The research loop feeds back between deleted modules. Undo the delete, or remove the research loop.', parent);
       broken.id = 'editor-loop-broken'; broken.className = 'field-problem-text';
     } else for (const section of sections) section(parent, state, actions);
-    if (state.profile !== 'native-interpretation-candidate/v1') {
+    if (state.profile !== window.executionProfiles.nativeInterpretation) {
       node('p', 'Only the native interpretation execution profile runs a research loop; preparation or launch admission refuses this declaration otherwise.', parent).className = 'muted';
     }
     const remove = control(node('button', 'Remove research loop', parent));
@@ -194,6 +194,6 @@
       element.disabled = !enabled || element.dataset.loopUnavailable !== undefined;
     }
   }
-  const refusalHint = 'Stop conditions need a non-empty metric id, a finite threshold, a judge criterion, at most one condition per kind, and no-improvement or judge bodies below the final iteration.';
+  const refusalHint = 'Stop conditions need a non-empty metric id, a finite threshold, a judge criterion, at most one condition per kind, and no-improvement or judge iterations below the final iteration.';
   window.editorLoopControls = Object.freeze({render, setEnabled, refusalHint});
 })();

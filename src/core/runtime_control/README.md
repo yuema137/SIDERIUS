@@ -50,6 +50,20 @@ that cannot establish headroom, stops execution even in `observe_only`; repair
 the environment rather than shrinking the model on that basis. See the
 [GPU admission contract](gpu-ceilings.md#apis-and-errors) for the evidence checks
 and how trial, formal and observation modes differ.
+
+During tuning, a failed GPU sampling call can be retried before training or
+inference starts. The tuner keeps the same model settings and uses the remaining
+attempt allowance for that tuning round to bound these retries. It waits a
+quarter second before the first retry, half a second before the second, and at
+most one second before each later retry. If enforced admission
+keeps refusing because sampling fails or environment evidence or policy is missing,
+tuning stops so you can repair the environment. An inference sampling retry keeps the
+already trained model. See the [tuner contract](../../nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md)
+for classification and accounting. This also applies when you select protected
+native GPU execution: retries keep the measured phase and remaining preparation
+allowance. Only refused admission is retried; launched training or inference is
+never repeated by this recovery step.
+
 The measured demand is an empirical estimate, not a bound on every later input.
 This check does not add runtime GPU monitoring or supply missing trial/inference
 measurements. Historical unlabelled requirements remain readable but cannot
@@ -61,8 +75,12 @@ the changed observation/decision source identity before reuse.
 A task that has finished its selected work does not need a prediction of how
 long that same work would take. The default `completed-workload-v1` policy checks
 its actual elapsed time against the budget. Remaining work still needs the
-existing conservative checks. A completed training stage includes its required
-validation; inference must finish writing every prediction before it can pass.
+existing conservative checks. Once the last planned optimizer step finishes,
+validation admission uses the measured training cost. A candidate still needs
+successful validation. Later finalization preserves the training duration recorded
+before validation, even when its timing evidence cannot qualify for completion;
+inference must finish writing every prediction before it
+can pass.
 
 This does not make a few fast batches a reliable speed estimate. Their timing
 record remains unsuitable for future calibration. Partial work cannot claim
@@ -414,6 +432,11 @@ Inspect `gpu_execution/<attempt-token>/training-terminal.json` and
 `inference-terminal.json` inside the executor's run directory. Measurement details
 are in the corresponding `training/measurement.json` and `inference/measurement.json`.
 Completed experiment records also carry the attempt's typed `gpu_execution` evidence.
+
+Temporary pre-launch sampling failures produce numbered `training-admission-*.json`
+or `inference-admission-*.json` receipts. The terminal file is written when that
+phase finishes or the tuner exhausts its sampling retries.
+
 A missing measurement, changed source/checkpoint, unavailable monitoring or failed
 cleanup stops the run as an infrastructure error. It is not evidence that the model
 should be smaller. A complete capacity refusal retains its resource refusal status.

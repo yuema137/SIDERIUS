@@ -13,7 +13,7 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, overload
 from uuid import UUID
 
 from core.runtime_control.scheduling import HostBudget, Placement, ResourceRequest, plan_dispatch
@@ -37,7 +37,7 @@ from .host_ledger import (
     write_state,
 )
 from .host_liveness import GRANT_FILE, PLACEMENT_FILE
-from .host_queue import QUEUE_FILE, HostQueueTicket
+from .host_queue import QUEUE_FILE, RESERVATION_FILE, HostQueueTicket, HostReservationTicket
 from .models import (
     CandidateOperation,
     OperationFailure,
@@ -141,6 +141,16 @@ class LedgerSlot(HostSlot):
         ).replacing((*prior.entries(), entry))
         # Fail closed: the entry exists before any child can.
         write_state(self.root, state)
+        try:
+            self._publish(path)
+        except BaseException:
+            # No spawn can occur until publication returns. Release under the
+            # admission lock even if publication was interrupted midway.
+            self.spawn_failed(record.submission.request_id)
+            raise
+
+    def _publish(self, path: Path) -> None:
+        placement = self.admitted.placement
         if placement.decision == "queued":
             ticket = HostQueueTicket(
                 ledger_root=self.host.ledger_root,
@@ -150,6 +160,10 @@ class LedgerSlot(HostSlot):
             )
             publish(path / QUEUE_FILE, ticket)
         else:
+            # The child confirms its entry in this ledger before any work (#1108).
+            publish(
+                path / RESERVATION_FILE, HostReservationTicket(ledger_root=self.host.ledger_root)
+            )
             publish(path / PLACEMENT_FILE, placement)
             if self.admitted.parallel:
                 publish(path / GRANT_FILE, HostGrant(budget=self.host.budget, placement=placement))
@@ -169,18 +183,14 @@ def host_slot(
     submission: OperationSubmission,
 ) -> Iterator[HostSlot]:
     if host is None:
-        _require_unplaced_root(config, submission)
+        _require_unplaced_loop(config, submission)
         _require_serial_or_own_budget(config, submission)
+        if submission.kind == "candidate_loop_resume":
+            loop_resume_resources(None, submission.request.resources, ledger=False)
         yield HostSlot()
         return
     root_operation, resources = _declared(config, submission)
-    parallel = root_operation.request.parallel
-    if parallel is not None and parallel.budget is not None:
-        raise OperationFailure(
-            "parallel_budget",
-            "a ledger-placed parallel run schedules inside its reservation; "
-            "remove parallel.budget from the request",
-        )
+    _require_ledger_parallel(root_operation.request)
     _require_disjoint(host.ledger_root, config, root_operation)
     with locked_ledger(host.ledger_root) as root:
         state = sweep(root)
@@ -190,22 +200,37 @@ def host_slot(
         yield LedgerSlot(root, host, admitted)
 
 
-def _require_unplaced_root(config: OperationStoreConfig, submission: OperationSubmission) -> None:
-    """A loop whose root ran placed in a host ledger never resumes outside it.
+def _require_ledger_parallel(request: CandidateRunRequest) -> None:
+    """A ledger-placed parallel run schedules inside its reservation, never its own budget."""
+    parallel = request.parallel
+    if parallel is not None and parallel.budget is not None:
+        raise OperationFailure(
+            "parallel_budget",
+            "a ledger-placed parallel run schedules inside its reservation; "
+            "remove parallel.budget from the request",
+        )
+
+
+def _require_unplaced_loop(config: OperationStoreConfig, submission: OperationSubmission) -> None:
+    """A loop any of whose segments ran placed in a host ledger never resumes outside it.
 
     The serial path would run the segment unaccounted beside ledger-placed runs;
-    the operator resumes it with the same ledger and budget instead.
+    the operator resumes it with the same ledger and budget instead. Every earlier
+    segment counts, not only the root: a root without ``resources`` runs serially,
+    and its resumes may still be placed with their own declaration (#1385).
     """
     if submission.kind != "candidate_loop_resume":
         return
-    from .loop_resume import root_record
+    from .loop_resume import loop_chain
 
-    root = root_record(load_record(config, submission.request.predecessor_operation_id))
-    placed = operation_path(config, root.submission.request_id) / PLACEMENT_FILE
-    if os.path.lexists(placed):
+    chain = loop_chain(load_record(config, submission.request.predecessor_operation_id))
+    if any(
+        os.path.lexists(operation_path(config, record.submission.request_id) / PLACEMENT_FILE)
+        for record in chain
+    ):
         raise OperationFailure(
             "host_ledger_required",
-            "this loop's root ran placed in a host ledger; resume it with the same "
+            "this loop ran placed in a host ledger; resume it with the same "
             "--host-ledger and --host-budget",
         )
 
@@ -213,12 +238,16 @@ def _require_unplaced_root(config: OperationStoreConfig, submission: OperationSu
 def _declared(
     config: OperationStoreConfig, submission: OperationSubmission
 ) -> tuple[CandidateOperation, OperationResources]:
-    """The candidate whose request and declaration the ledger reserves for.
+    """The candidate whose request the ledger reserves for, and the reservation.
 
-    A loop resume inherits its root candidate's declaration and launch request:
-    the segment runs that request again in the same workspace.
+    A loop resume runs its root candidate's launch request again in the same
+    workspace; its reservation is ``loop_resume_resources``.
     """
     operation = _root_candidate(config, submission)
+    if operation is not None and submission.kind == "candidate_loop_resume":
+        return operation, loop_resume_resources(
+            operation, submission.request.resources, ledger=True
+        )
     if operation is None or operation.resources is None:
         raise OperationFailure(
             "resources_required",
@@ -226,6 +255,58 @@ def _declared(
             "resources declaration",
         )
     return operation, operation.resources
+
+
+@overload
+def loop_resume_resources(
+    root: CandidateOperation, supplied: OperationResources | None, *, ledger: Literal[True]
+) -> OperationResources: ...
+@overload
+def loop_resume_resources(
+    root: CandidateOperation | None, supplied: OperationResources | None, *, ledger: bool
+) -> OperationResources | None: ...
+def loop_resume_resources(
+    root: CandidateOperation | None, supplied: OperationResources | None, *, ledger: bool
+) -> OperationResources | None:
+    """The one rule for what a loop resume reserves (#1385); refusals are typed.
+
+    ``supplied`` is the resume request's own ``resources``. Without a ledger
+    nothing is reserved, so a supplied declaration refuses ``host_ledger_missing``
+    instead of being ignored. Under a ledger the root candidate's declaration is
+    the authority when it has one, and a supplied one then refuses
+    ``run_resources_conflict`` even when equal; a root without one requires the
+    supplied declaration (``resources_required``). A predecessor segment's
+    declaration is never inherited: each segment of an undeclared root supplies
+    its own. Under a ledger a root whose request carries ``parallel.budget``
+    refuses ``parallel_budget`` first, as ``host_slot`` does for every placed run,
+    so the console review refuses it too. Host admission and the console's
+    Resume review both call this.
+    """
+    if not ledger:
+        if supplied is not None:
+            raise OperationFailure(
+                "host_ledger_missing",
+                "a loop resume's resources are reserved only in a host ledger; submit with "
+                "--host-ledger and --host-budget, or omit resources",
+            )
+        return None
+    if root is not None:
+        _require_ledger_parallel(root.request)
+    declared = None if root is None else root.resources
+    if supplied is not None:
+        if declared is not None:
+            raise OperationFailure(
+                "run_resources_conflict",
+                "the loop root already declares resources; resume without a resources declaration",
+            )
+        return supplied
+    if declared is None:
+        raise OperationFailure(
+            "resources_required",
+            "the loop root declares no resources; a budgeted resume supplies its own "
+            "resources declaration",
+        )
+    return declared
 
 
 def _root_candidate(
@@ -307,7 +388,20 @@ def admit(
     decision = plan_dispatch((*waiting, unit), running, budget, on_refusal="continue")
     own = [p for p in decision.placements + decision.refused if p.unit_id == str(operation_id)]
     if own[0].decision == "refused":
-        raise OperationFailure("resource_refused", "; ".join(own[0].reasons))
+        reasons = "; ".join(own[0].reasons)
+        if request.parallel is not None:
+            # Every envelope quantity is clamped to the budget, never below the run's
+            # own declaration: only that floor can still exceed the idle budget.
+            reasons = (
+                "the run's resources declaration exceeds this host budget (its parallel "
+                f"units are already clamped to it); lower resources: {reasons}"
+            )
+        raise OperationFailure("resource_refused", reasons)
+    if own[0].decision == "queued" and len(state.queued) >= budget.max_queued_operations:
+        raise OperationFailure(
+            "host_queue_full",
+            f"host queue limit {budget.max_queued_operations} reached; retry after capacity frees",
+        )
     return Admitted(
         placement=own[0], state=state, resources=resources, parallel=request.parallel is not None
     )

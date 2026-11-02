@@ -165,3 +165,16 @@ def test_success_uses_snapshot_without_mutable_origin(reusable, direct_child):
     assert read_reusable_terminal(reusable, expected, invocation)[0] == result
     (Path(result.envelope) / "receipt.json").unlink()
     assert read_reusable_terminal(reusable, expected, invocation) is None
+
+
+def test_parent_admission_failure_is_logged(reusable, monkeypatch, caplog):
+    """A reusable parent failure before native control still has a server diagnostic."""
+    launch = importlib.import_module("tools.candidate_prepare.reusable_launch")
+
+    def fail(*args):
+        raise ValueError("private-reusable-source-sentinel")
+
+    monkeypatch.setattr(launch, "admit", fail)
+    receipt = prepare_reusable_candidate(reusable)
+    assert receipt.status == "failed"
+    assert "private-reusable-source-sentinel" in caplog.text

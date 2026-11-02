@@ -2,6 +2,7 @@
 
 import hashlib
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -12,7 +13,14 @@ from execute_tools.impl_attempts import impl_attempt_dir
 from workflows.definition.fanout import execution_families
 
 from . import readiness
-from .graph_models import GraphCapability, GraphNodeEvidence, GraphReason, GraphState, GraphTrace
+from .graph_models import (
+    DISPATCHED_STATES,
+    GraphCapability,
+    GraphNodeEvidence,
+    GraphReason,
+    GraphState,
+    GraphTrace,
+)
 from .layout import graph_instance_dir
 from .models import CandidateRunReceipt, CandidateRunRequest, tuning_seed_scope
 from .route_eval import RouteEvaluationOutput
@@ -122,6 +130,26 @@ def record_digest(path: str) -> str:
         return digest.hexdigest()
 
 
+def read_traced_record(entry: GraphNodeEvidence, *, bounded: bool = True) -> bytes:
+    """The bytes of ``entry``'s native record, proven to be the bytes its trace digest names.
+
+    The trace's ``record_sha256`` check (``record_digest``) proves the file at
+    one instant; every later parse re-reads the file, so each use re-hashes the
+    bytes it parses rather than trusting that earlier check (#1407).
+    ``bounded`` applies the 4 MiB control-read limit (``read_graph_control``).
+    """
+    if entry.record_path is None or entry.record_sha256 is None:
+        raise ValueError("graph native record mismatch")
+    if bounded:
+        payload = read_graph_control(Path(entry.record_path))
+    else:
+        with open_identity_file(entry.record_path, require_no_follow=True) as handle:
+            payload = handle.read()
+    if hashlib.sha256(payload).hexdigest() != entry.record_sha256:
+        raise ValueError("graph native record mismatch")
+    return payload
+
+
 # Reasons a node closed without a native record may carry, by terminal state.
 _UNDISPATCHED_REASONS: dict[GraphState, frozenset[GraphReason]] = {
     "failed": frozenset(("native_failure",)),
@@ -130,13 +158,78 @@ _UNDISPATCHED_REASONS: dict[GraphState, frozenset[GraphReason]] = {
 }
 
 
+# Terminal closure the drain gives entries that were not dispatched.
+_DRAIN_CLOSURE: tuple[GraphState, GraphReason] = ("blocked", "dependency_not_successful")
+
+
+@dataclass(frozen=True)
+class DrainWindow:
+    """Receipt timing a ``parallel-v1`` replay needs (``parallel_evidence.drained_entries``)."""
+
+    ended: Mapping[str, int]  # `ended_event` of every dispatched entry
+    failure_end: int | None  # `ended_event` of the first failed entry; None without one
+
+
+def settled_sources_end(
+    node_id: str, recorded: Mapping[str, GraphNodeEvidence], window: DrainWindow
+) -> int:
+    """The last end event among ``node_id``'s sources, through sources closed without dispatch.
+
+    A closure is decided at the first readiness step after its sources ended, so
+    a node cannot have been closed before this event.
+    """
+    latest = 0
+    pending = list(recorded[node_id].predecessors)
+    seen: set[str] = set()
+    while pending:
+        source = pending.pop()
+        if source in seen:
+            continue
+        seen.add(source)
+        if source in window.ended:
+            latest = max(latest, window.ended[source])
+        else:
+            pending.extend(recorded[source].predecessors)
+    return latest
+
+
+def _replay_step(
+    step: readiness.ReadinessOutput,
+    recorded: Mapping[str, GraphNodeEvidence],
+    window: DrainWindow | None,
+) -> GraphNodeEvidence:
+    """The recorded entry readiness acts on; raise unless its record agrees.
+
+    A ``parallel-v1`` trace (``window``) is replayed without the failure stop: it
+    dispatches by completion, not declaration order. Once one of its entries
+    failed, any entry may instead carry the drain closure (decision B3-Q2: nothing
+    undispatched runs after the first failure ended), and a ``skipped`` closure
+    is accepted only if its sources had all ended before that failure did.
+    """
+    if step.next is not None:
+        item = recorded[step.next]
+        valid = item.state in DISPATCHED_STATES
+    elif step.terminal:
+        node_id, state, reason = step.terminal[0]
+        item = recorded[node_id]
+        valid = (item.state, item.reason) == (state, reason)
+        if valid and state == "skipped" and window is not None and window.failure_end is not None:
+            valid = settled_sources_end(node_id, recorded, window) < window.failure_end
+    else:
+        raise ValueError("graph trace violates serial readiness or failure stop")
+    drained = window is not None and window.failure_end is not None
+    if not valid and not (drained and (item.state, item.reason) == _DRAIN_CLOSURE):
+        raise ValueError("graph trace violates serial readiness or failure stop")
+    return item
+
+
 def replay_readiness(
     nodes: tuple[GraphNodeEvidence, ...],
     *,
     decisions: tuple[RouteEvaluationOutput, ...] = (),
     routing: Mapping[str, readiness.NodeRouting] | None = None,
     skipped_inputs: Mapping[str, GraphReason] | None = None,
-    drained: frozenset[str] = frozenset(),
+    drained: DrainWindow | None = None,
 ) -> None:
     """Replay readiness only, never native execution, over recorded terminal states.
 
@@ -145,10 +238,10 @@ def replay_readiness(
     failed), so a node run inside a non-selected arm or a skip readiness would not
     produce is refused. Uncertainty (a failure) stops later effects.
 
-    ``drained`` (trace v2, ``parallel-v1``): nodes whose receipts prove they were
-    already running when the body's first failure ended. Such a node may carry
-    its real outcome where the serial replay closes it as blocked, but only when
-    its own sources permit it (no abort).
+    ``drained`` (trace v2, ``parallel-v1``): the receipt timing of the trace,
+    whose failure stop is the drain rather than declaration order (``_replay_step``).
+    Receipts already prove each dispatched entry started before the first
+    failure ended; the replay still proves its sources permitted it to run.
     """
     recorded = {item.node_id: item for item in nodes}
     complete: dict[str, GraphNodeEvidence] = {}
@@ -164,33 +257,8 @@ def replay_readiness(
                 skipped_inputs=skipped_inputs,
             )
         )
-        if step.next is not None:
-            item = recorded[step.next]
-            valid = item.state in ("succeeded", "rejected", "failed")
-        elif step.terminal:
-            node_id, state, reason = step.terminal[0]
-            item = recorded[node_id]
-            valid = (item.state, item.reason) == (state, reason) or (
-                aborted
-                and node_id in drained
-                and item.state in ("succeeded", "rejected", "failed")
-                and readiness.may_run(
-                    node_id,
-                    readiness.readiness_input(
-                        nodes,
-                        complete,
-                        aborted=False,
-                        decisions=decisions,
-                        routing=routing,
-                        skipped_inputs=skipped_inputs,
-                    ),
-                )
-            )
-        else:
-            raise ValueError("graph trace violates serial readiness or failure stop")
-        if not valid:
-            raise ValueError("graph trace violates serial readiness or failure stop")
-        aborted = aborted or item.state == "failed"
+        item = _replay_step(step, recorded, drained)
+        aborted = aborted or (drained is None and item.state == "failed")
         complete[item.node_id] = item
 
 
@@ -365,11 +433,7 @@ def _check_validation_verdict(item: GraphNodeEvidence) -> None:
     """
     from agent.schemas.validator import ValidatorOutput
 
-    assert item.record_path is not None
-    payload = read_graph_control(Path(item.record_path))
-    if hashlib.sha256(payload).hexdigest() != item.record_sha256:
-        raise ValueError("graph native record mismatch")
-    passed = ValidatorOutput.model_validate_json(payload).passed
+    passed = ValidatorOutput.model_validate_json(read_traced_record(item)).passed
     if item.state != ("succeeded" if passed else "rejected"):
         raise ValueError("graph validation state contradicts its native verdict")
 
@@ -393,7 +457,7 @@ def _check_adaptor_entry(
         ):
             raise ValueError("graph incomplete invocation claims output")
         return
-    if item.state not in ("succeeded", "rejected", "failed") or any(
+    if item.state not in DISPATCHED_STATES or any(
         states[key] in ("pending", "running", "failed", "blocked") for key in item.predecessors
     ):
         raise ValueError("graph adaptor ran before its inputs were terminal")
@@ -512,13 +576,9 @@ def verify_interpretation_evidence(
                 ),
             ),
         )
-    path = nodes[edge.interpretation].record_path
-    assert path is not None
-    with open_identity_file(path, require_no_follow=True) as handle:
-        payload = handle.read()
-    if hashlib.sha256(payload).hexdigest() != nodes[edge.interpretation].record_sha256:
-        raise ValueError("interpretation record changed while verifying")
-    output = InterpretationOutput.model_validate_json(payload)
+    output = InterpretationOutput.model_validate_json(
+        read_traced_record(nodes[edge.interpretation], bounded=False)
+    )
     if nodes[edge.proposal].state == "succeeded":
         proposal = ProposalInput.model_validate_json(
             read_graph_control(
@@ -607,11 +667,12 @@ def verify_graph_training(
     from .adaptor_phase import tuning_branch
 
     implementation_node, validation_node = tuning_branch(shape, outcomes or {})
-    proposal_path = nodes[shape.families[0].proposal].record_path
-    validation_path = nodes[validation_node].record_path
-    assert proposal_path is not None and validation_path is not None
-    proposal = ProposalOutput.model_validate_json(Path(proposal_path).read_bytes())
-    validation = ValidatorOutput.model_validate_json(Path(validation_path).read_bytes())
+    proposal = ProposalOutput.model_validate_json(
+        read_traced_record(nodes[shape.families[0].proposal], bounded=False)
+    )
+    validation = ValidatorOutput.model_validate_json(
+        read_traced_record(nodes[validation_node], bounded=False)
+    )
     value = HyperparamTuningInput.model_validate_json(
         read_graph_control(
             tuning_input_path(Path(initial.workspace), shape.tuning, iteration=iteration)
@@ -627,7 +688,7 @@ def verify_graph_training(
             )
         )
     )
-    output = NativeOutputIdentity.model_validate_json(Path(tuner.record_path).read_bytes())
+    output = NativeOutputIdentity.model_validate_json(read_traced_record(tuner, bounded=False))
     _check_staged_implementation(
         nodes[implementation_node],
         tuner.storage,
@@ -698,7 +759,7 @@ def verify_judged_branches(
         if not isinstance(ranked, ProposalOutput):
             raise ValueError(f"judged branch {implementation} ranked output is not a proposal")
         implemented = ImplementorOutput.model_validate_json(
-            read_graph_control(Path(implementation_path))
+            read_traced_record(nodes[implementation])
         )
         owner_seed = ProposalInput.model_validate_json(
             read_graph_control(
@@ -710,16 +771,15 @@ def verify_judged_branches(
                 )
             )
         )
-        if implemented.consumed_input_sha256 != consumed_input_sha256(owner_seed, ranked):
+        if implemented.consumed_input_sha256 != consumed_input_sha256(
+            owner_seed, ranked, version=implemented.consumed_input_encoding
+        ):
             raise ValueError(
                 f"judged branch {implementation} consumed a proposal or seed other than "
                 f"adaptor {source.adaptor} output {source.index} of owner {owner}"
             )
-        validation_path = nodes[validation].record_path
-        if validation_path is not None:
-            validated = ValidatorOutput.model_validate_json(
-                read_graph_control(Path(validation_path))
-            )
+        if nodes[validation].record_path is not None:
+            validated = ValidatorOutput.model_validate_json(read_traced_record(nodes[validation]))
             if validated.candidate_id != ranked.candidate_id:
                 raise ValueError(
                     f"judged branch {validation} validated a candidate other than "
@@ -763,11 +823,7 @@ def _check_staged_implementation(
     from agent.schemas.implementor import ImplementorOutput
     from core.sandbox_executor import get_plugin_dir
 
-    assert implementation_node.record_path is not None
-    payload = read_graph_control(Path(implementation_node.record_path))
-    if hashlib.sha256(payload).hexdigest() != implementation_node.record_sha256:
-        raise ValueError("graph native record mismatch")
-    implementation = ImplementorOutput.model_validate_json(payload)
+    implementation = ImplementorOutput.model_validate_json(read_traced_record(implementation_node))
     staged = Path(get_plugin_dir(tuner_storage, run_name)) / f"{proposal.model_name}.py"
     plugins = Path(implementation_node.storage) / "models"
     if not Path(implementation.model_file_path).resolve().is_relative_to(plugins.resolve()):

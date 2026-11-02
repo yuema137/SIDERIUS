@@ -65,6 +65,13 @@ def _boot_id() -> str:
     return Path("/proc/sys/kernel/random/boot_id").read_text().strip()
 
 
+def _pid_namespace_inode() -> int:
+    try:
+        return Path("/proc/self/ns/pid").stat().st_ino
+    except OSError:
+        return 0  # Persist failed capture distinctly from a legacy missing field.
+
+
 def _stat(pid: int) -> tuple[str, int]:
     payload = Path(f"/proc/{pid}/stat").read_text()
     prefix, fields = payload.rsplit(")", 1)
@@ -89,6 +96,7 @@ def identity_of(record: OperationRecord, pid: int) -> ProcessIdentity:
         boot_id=_boot_id(),
         pid=pid,
         start_ticks=ticks,
+        pid_namespace_inode=_pid_namespace_inode(),
     )
 
 
@@ -140,6 +148,23 @@ def _scan_fields(name: str) -> list[str] | None:
     return fields if len(fields) >= 4 else _UNREADABLE
 
 
+def _namespace_observation(identity: ProcessIdentity) -> ProcessObservation | None:
+    """PID numbers are comparable only within their recorded namespace."""
+    if identity.pid_namespace_inode is None:
+        return None  # Legacy records retain their same-namespace assumption.
+    if identity.pid_namespace_inode == 0:
+        return ProcessObservation(status="unknown", reason="pid_namespace_unobservable")
+    try:
+        namespace = _pid_namespace_inode()
+    except OSError:
+        return ProcessObservation(status="unknown", reason="pid_namespace_unobservable")
+    if namespace == 0:
+        return ProcessObservation(status="unknown", reason="pid_namespace_unobservable")
+    if namespace != identity.pid_namespace_inode:
+        return ProcessObservation(status="unknown", reason="pid_namespace_mismatch")
+    return None
+
+
 def observe(identity: ProcessIdentity) -> ProcessObservation:
     try:
         boot = _boot_id()
@@ -148,6 +173,9 @@ def observe(identity: ProcessIdentity) -> ProcessObservation:
     try:
         if boot != identity.boot_id:
             return ProcessObservation(status="exited", reason="different_boot")
+        namespace_observation = _namespace_observation(identity)
+        if namespace_observation is not None:
+            return namespace_observation
         state, ticks = _stat(identity.pid)
         if ticks != identity.start_ticks:
             return ProcessObservation(status="exited", reason="pid_reused")

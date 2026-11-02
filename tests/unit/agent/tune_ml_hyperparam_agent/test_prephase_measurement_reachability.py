@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import re
 
 import pytest
 
@@ -127,9 +128,9 @@ class TestTheCallSiteExists:
         """O-7 requires stopping BEFORE formal GPU work. A measurement
         after `_run_skill('training_skill', ...)` would be a post-mortem."""
         source = tuner_lifecycle_source()
-        assert source.index("_handle_prephase_gpu_measurement(") < source.index(
-            '_run_skill("training_skill"'
-        )
+        training_call = re.search(r'_run_skill\(\s*"training_skill"', source)
+        assert training_call is not None, "the lifecycle must reach the literal training skill"
+        assert source.index("_handle_prephase_gpu_measurement(") < training_call.start()
 
 
 class TestApplicability:
@@ -137,6 +138,22 @@ class TestApplicability:
         """O-7 governs formal execution; trial already proceeds while
         recording what it could not prove."""
         assert _call(tmp_path, is_trial=True) is tuner.PrephaseOutcome.PROCEED
+
+    def test_pseudo_with_real_device_identity_is_not_measured(self, tmp_path, monkeypatch):
+        """A GPU host must not turn the legacy fallback into a real pseudo probe."""
+        from core.stub_sandbox import StubSandbox
+        from execute_tools.data_paths import bind_physical_data_root
+
+        with bind_physical_data_root(str(tmp_path)):
+            sandbox = StubSandbox(workspace=str(tmp_path), device_identity=DEVICE)
+
+        def forbidden(*args, **kwargs):
+            pytest.fail("synthetic execution reached a real GPU measurement")
+
+        monkeypatch.setattr(
+            "core.runtime_control.gpu_measurement_runner.run_prephase_measurement", forbidden
+        )
+        assert _call(tmp_path, sandbox=sandbox) is tuner.PrephaseOutcome.PROCEED
 
     def test_a_run_with_no_device_is_untouched(self, tmp_path):
         """The same rule `_admission_refusal` already applies: no card

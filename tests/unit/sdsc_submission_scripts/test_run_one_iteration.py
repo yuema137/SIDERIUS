@@ -1381,7 +1381,7 @@ class TestPseudoModeFactoryWiring:
         assert kwargs["sandbox_factory"] is None
 
     def test_is_pseudo_training_swaps_sandbox_only(self, tmp_path, isolated_registries):
-        from core.sandbox_executor import StubSandbox
+        from core.stub_sandbox import StubSandbox
 
         code, kwargs = self._invoke(tmp_path, "--is_pseudo_training")
         assert code == 0
@@ -1395,7 +1395,7 @@ class TestPseudoModeFactoryWiring:
         capsys,
     ):
         from agent.llm_bridge import StubLLMBridge
-        from core.sandbox_executor import StubSandbox
+        from core.stub_sandbox import StubSandbox
 
         code, kwargs = self._invoke(
             tmp_path,

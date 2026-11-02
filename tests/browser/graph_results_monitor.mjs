@@ -4,7 +4,7 @@ import {spawn} from 'node:child_process';
 import {createRequire} from 'node:module';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 import {tmpdir} from 'node:os';
 import {showAllConsoleSections} from './console_view_flags.mjs';
 
@@ -12,21 +12,10 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[name], `Set ${name}`);
 const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.workflow_editor_server'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
 let errors = ''; server.stderr.on('data', chunk => {errors += chunk;});
-const lines = createInterface({input: server.stdout});
 const operation = '22222222-2222-4222-8222-222222222222';
 let browser;
 try {
-  const metadata = await new Promise((accept, reject) => {
-    const timer = setTimeout(() => reject(new Error(`Server startup timeout: ${errors}`)), 15000);
-    lines.on('line', line => {
-      try {
-        const value = JSON.parse(line);
-        if (!value.origin || !value.token) return;
-        clearTimeout(timer); lines.close(); accept(value);
-      } catch { /* Native plugin registration may write one informational line first. */ }
-    });
-    server.once('exit', code => {clearTimeout(timer); reject(new Error(`Server ${code}: ${errors}`));});
-  });
+  const metadata = await waitForMetadata(server, {timeoutMs: 15000});
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
   showAllConsoleSections(browser);
@@ -59,7 +48,7 @@ try {
     }, ...(iteration === 2 ? {skipped: [{node_id: 'build1', reason: 'route_not_selected'}],
       // The node executed, but the tuner record says no round completed: the outcome row,
       // not the node state, carries that (a 0-round body must never read as succeeded).
-      outcome: 'No training round completed: 0 completed rounds in 9 attempts (tuner status partial; ended by aborted fail rounds).'} : {})}))});
+      outcome: 'No tuning round completed: 0 completed tuning rounds in 9 attempts Consecutive tuning rounds reached the failure limit. Training could not start: GPU evidence is unavailable.'} : {})}))});
     return reply({operation_id: operation, kind: 'candidate', request_digest: 'a'.repeat(64), observed_at: 'fixture', state: 'completed',
       process: {status: 'exited', reason: 'observed'}, finishing: false, receipt_available: true, native_status: 'completed',
       native_id: 'fixture-run', validation_passed: true, reason: 'native_terminal'});
@@ -81,7 +70,8 @@ try {
   assert.equal(await panel.getByText('Train & tune node execution', {exact: true}).count(), 2, 'stage uses the paper capability label and names node execution, not outcome');
   assert.equal(await panel.getByText('Train & tune state', {exact: true}).count(), 0, 'node state is not presented as the tuning outcome');
   assert.equal(await panel.getByText('Train & tune outcome', {exact: true}).count(), 1, 'only the body with a tuner outcome shows the outcome row');
-  assert.ok(await panel.getByText(/^No training round completed: 0 completed rounds in 9 attempts/).count(), 'the 0-round outcome is shown verbatim');
+  assert.ok(await panel.getByText(/^No tuning round completed: 0 completed tuning rounds in 9 attempts/).count(), 'the 0-round outcome is shown verbatim');
+  assert.ok(await panel.getByText(/Training could not start: GPU evidence is unavailable/).count());
   assert.equal(await panel.locator('.graph-result-body').count(), 2, 'per-body summaries remain separate');
   assert.equal(requests.filter(item => item.path.endsWith('/graph-results')).length, 1, 'results are read once after terminal status');
   assert.equal(await panel.locator('.graph-result-skipped').count(), 1, 'only the routed body lists skipped nodes');
@@ -92,5 +82,5 @@ try {
   console.log('PASS: terminal authored-run results render separate iteration summaries through one GET-only read.');
 } finally {
   if (browser) await browser.close();
-  server.kill('SIGTERM'); lines.close();
+  server.kill('SIGTERM');
 }

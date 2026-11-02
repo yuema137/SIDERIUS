@@ -220,6 +220,7 @@ def test_native_loops_and_validation_preserve_fractional_batches(tmp_path, monke
                 DataLoader(dataset, batch_size=2),
                 _sandbox(tmp_path, "run"),
                 "run",
+                seed_plan=TrainingSeedPlan(SeedContext(run_seed=42)),
             )
         assert result is not None
         assert [batch.shape[0] for batch in batches] == [2, 1]

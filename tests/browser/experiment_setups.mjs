@@ -11,25 +11,20 @@ import {mkdir, readFile, stat} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 import {showAllConsoleSections} from './console_view_flags.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE', 'CONSOLE_EVIDENCE_DIR']) assert.ok(process.env[name], `Set ${name}`);
 const evidence = process.env.CONSOLE_EVIDENCE_DIR; await mkdir(evidence, {recursive: true});
 const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.setups_fixture'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
 let errors = ''; server.stderr.on('data', chunk => {errors += chunk;});
-const lines = createInterface({input: server.stdout});
 let browser;
 async function waitUntil(predicate, timeout = 20000) {
   const deadline = Date.now() + timeout;
   while (!(await predicate())) { if (Date.now() > deadline) throw new Error('Condition timed out'); await new Promise(done => setTimeout(done, 50)); }
 }
 try {
-  const metadata = await new Promise((accept, reject) => {
-    const timer = setTimeout(() => reject(new Error('Server startup timeout')), 30000);
-    lines.once('line', line => {clearTimeout(timer); accept(JSON.parse(line));});
-    server.once('exit', code => {clearTimeout(timer); reject(new Error(`Server ${code}: ${errors}`));});
-  });
+  const metadata = await waitForMetadata(server, {timeoutMs: 30000});
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
   showAllConsoleSections(browser);

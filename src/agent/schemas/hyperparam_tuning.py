@@ -24,12 +24,14 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from pydantic_core import PydanticCustomError
 
 from agent.llm_settings import DEFAULT_LLM_PROVIDER, ProviderName, default_model_for_provider
 from agent.prompt_templates.timing_attribution import TIMING_SPLIT_SEMANTICS
 from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.custom_loss_contract import CustomLossApplicability, TaskOwnedCustomLoss
 from agent.schemas.data_analysis.trained_model import TrainedModelArtifactRef
+from agent.schemas.execution_provenance import ResolutionEvent
 from agent.schemas.health_feedback import FormalValidityFeedback, TrialValidityFeedback
 from agent.schemas.judge import JudgeRoutes
 from agent.schemas.llm_retry import RetryPolicy
@@ -43,13 +45,14 @@ from agent.schemas.ordering import (
     resolve_ordering,
     validate_ordering_shape,
 )
-from agent.schemas.parameter_rules import ParameterRules
+from agent.schemas.parameter_rules import InactiveParameterRule, ParameterRules
 from agent.schemas.preflight import StaticPreflightEvidence
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.training_diagnosis import TrainingDiagnosis
 from core.checkpoint_selection import SelectedCheckpoint
 from core.planner_strategy_identity import PlannerStrategyIdentity
+from core.record_encoding import RecordModel
 from core.record_role import AttemptRole, RecordRoleError, is_formal_role
 from core.retired_seed_pins import RetiredSeedPins, split_retired_seed_pins
 
@@ -80,6 +83,11 @@ from core.training_seeds import SeedContext
 from execute_tools.dataset_config import NUM_FILES, DataScope
 from execute_tools.evaluation_execution import CandidateEvaluationResult
 from execute_tools.evaluation_metric import MetricResult, MetricSpecField, NotScoreableResult
+from execute_tools.evaluation_results import (
+    EvaluationEvidence,
+    SelectionBinding,
+    validate_record_evaluation,
+)
 from execute_tools.health_checks._composition import TaskHealthBinding
 from execute_tools.health_checks.schemas import PersistedHealthGateResult
 from execute_tools.training_history import TrainingHistory
@@ -414,7 +422,21 @@ class ExperimentMemory(BaseModel):
     )
 
 
-class ExperimentRecord(BaseModel):
+class ExperimentRecord(RecordModel):
+    inactive_parameter_rules: tuple[InactiveParameterRule, ...] = Field(
+        default=(),
+        exclude_if=lambda value: not value,
+        description="Rules inactive for this attempt's selected loss; not applied constraints.",
+    )
+    resolution_events: tuple[ResolutionEvent, ...] = Field(
+        default=(),
+        exclude_if=lambda value: not value,
+        description=(
+            "Final ExecutionProvenance.events: each authored plan value the framework "
+            "resolved to a different effective value before this attempt. Empty (omitted) "
+            "when nothing diverged or when the record predates the field (issue #1322)."
+        ),
+    )
     record_type: Literal["experiment", "attempt_failure"] = "experiment"
     exp_id: str
     status: Literal[
@@ -861,6 +883,10 @@ class ExperimentRecord(BaseModel):
     # them so identity, direction and value are machine-readable on every
     # record for Steps 07a/09; every record written before Step 06 validates
     # unchanged (optional, default None).
+    evaluation_result: EvaluationEvidence | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
     metric_result: MetricResult | None = Field(
         default=None,
         description=(
@@ -1001,6 +1027,7 @@ class ExperimentRecord(BaseModel):
         there ``denoising_score`` is the gate policy's penalty by design.
         ``metric_result`` and ``metric_refusal`` are mutually exclusive.
         """
+        validate_record_evaluation(self.evaluation_result, self.metric_result, self.metric_refusal)
         if self.metric_result is not None and self.metric_refusal is not None:
             raise ValueError(
                 "metric_result and metric_refusal are mutually exclusive: an attempt is "
@@ -1117,10 +1144,23 @@ class TrialConfig(BaseModel):
     """
 
     is_trial: bool = Field(
-        description="Whether this round uses trial (sparse) or formal (full) mode.",
+        description=(
+            "Whether this round is a Trial round (True) or a Formal round "
+            "(False). Trial rounds train on the planner-requested trial "
+            "workload (trial_portion / train_portion) within the run's "
+            "constraints and Trial budgets. Formal rounds train on "
+            "formal_portion of the training data (operator-set on "
+            "HyperparamTuningInput, default 0.1; the plan's portions when "
+            "formal_training_scope_source='agent'), so Formal does not "
+            "imply full-data training, and score on formal_eval_portion."
+        ),
     )
     mode: Literal["trial", "formal", "single_file"] = Field(
-        description="Execution mode: trial (sparse multi-file), formal (full multi-file), or single_file (legacy).",
+        description=(
+            "Execution mode: trial (planner-requested trial workload), formal "
+            "(formal_strategy / formal_portion training scope, formal_eval_portion "
+            "evaluation scope), or single_file (legacy)."
+        ),
     )
 
     # --- Training data ---
@@ -1252,6 +1292,12 @@ class ExperimentPlan(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
+    inactive_parameter_rules: tuple[InactiveParameterRule, ...] = Field(
+        default=(),
+        exclude_if=lambda value: not value,
+        description="Rules inactive for this attempt's selected loss; not applied constraints.",
+    )
+
     # --- Hyperparameter decisions ---
     model_type: str = Field(
         default="fcnet",
@@ -1284,7 +1330,16 @@ class ExperimentPlan(BaseModel):
     # --- Trial/formal decision (per-round) ---
     is_trial: bool = Field(
         default=True,
-        description="Whether this round uses trial (sparse) or formal (full) mode.",
+        description=(
+            "Whether this round is a Trial round (True) or a Formal round "
+            "(False). Trial rounds train on the planner-requested trial "
+            "workload (trial_portion / train_portion) within the run's "
+            "constraints and Trial budgets. Formal rounds train on "
+            "formal_portion of the training data (operator-set on "
+            "HyperparamTuningInput, default 0.1; the plan's portions when "
+            "formal_training_scope_source='agent'), so Formal does not "
+            "imply full-data training, and score on formal_eval_portion."
+        ),
     )
 
     # Training data
@@ -1538,6 +1593,9 @@ class TaskCompositionRef(BaseModel):
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
+    selection_binding: SelectionBinding | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     model_probe_context: ModelProbeContext | None = Field(
         default=None,
@@ -1679,8 +1737,9 @@ def validate_trial_override_schedule(
         # only auto-bundling route), and that surface HAS NO
         # force-formal flag — so the universally-typeable remedies
         # lead, and the force-formal escape is marked chain-path-only.
-        raise ValueError(
-            f"plan_overrides carries trial-scoped key(s) {sorted(trial_scoped)} "
+        raise PydanticCustomError(
+            "trial_override_schedule",
+            "plan_overrides carries trial-scoped key(s) {trial_scoped} "
             "but max_rounds=1 with force_formal_round=True forces the run's "
             "only round to FORMAL, so the override would apply to zero "
             "rounds (formal workload comes from --formal_strategy / "
@@ -1691,7 +1750,8 @@ def validate_trial_override_schedule(
             "--max_rounds so trial rounds exist, or drop the trial-scoped "
             "request (--is_trial / the trial overrides); on the CHAIN "
             "launcher only, --no-force_formal_round makes the final round "
-            "honor the trial plan (the tuner node CLI has no such flag)."
+            "honor the trial plan (the tuner node CLI has no such flag).",
+            {"trial_scoped": str(sorted(trial_scoped))},
         )
 
 
@@ -1708,19 +1768,24 @@ class EpochCapResolution(NamedTuple):
     source: Literal["trial_max_epochs", "formal_max_epochs", "max_epochs"] | None
 
 
+# Run-level launch policy; per-round plans and historical records have their own
+# semantics and must not derive their role from this default.
+DEFAULT_IS_TRIAL: bool = True
+
+
 class HyperparamTuningInput(BaseModel):
     """
     Full specification for a tune_ml_hyperparam_agent run.
 
     Fields are grouped by concern:
       - Research:  what to explore and how hard to push
-      - Trial:     optional sparse-sampling mode for fast iteration (default = off)
+      - Trial:     trial/formal tuning mode (enabled by default)
       - Guidance:  expert advice steering the LLM planner
       - Seeding:   pre-existing records the agent should treat as prior knowledge
       - LLM:       which model drives the planning and reflection steps
       - Infra:     storage paths (managed by the communication interface in production)
 
-    When ``is_trial=False`` (the default), the agent runs in normal single-file
+    When ``is_trial=False`` explicitly, the agent runs in legacy single-file
     mode using ``file_index``. All trial fields are ignored. When ``is_trial=True``,
     the agent builds a SampleSet from the trial strategy and ignores ``file_index``.
     """
@@ -1844,9 +1909,9 @@ class HyperparamTuningInput(BaseModel):
         ),
     )
 
-    # --- Trial mode (optional — all defaults preserve normal single-file behavior) ---
+    # --- Run-level trial/formal mode ---
     is_trial: bool = Field(
-        default=False,
+        default=DEFAULT_IS_TRIAL,
         description="When True, run in trial-explore mode with sparse sampling across multiple files.",
     )
 
@@ -1991,8 +2056,8 @@ class HyperparamTuningInput(BaseModel):
             "  ``train_config.epochs``, and ``train_config.batch_size`` "
             "  from the highest-scoring trial-mode success record in the "
             "  current iteration. Maximum execution certainty: the formal "
-            "  round is a longer training of the trial winner with full "
-            "  eval — not a sandbox for new architectures, losses, or "
+            "  round is a longer training of the trial winner on the "
+            "  configured Formal scopes — not a sandbox for new architectures, losses, or "
             "  hyperparameters. Required for the trial→formal "
             "  inference-time measurement reuse landed in commits B-D of "
             "  ``docs/refine_inference_time_estimator.md``.\n"
@@ -2001,7 +2066,7 @@ class HyperparamTuningInput(BaseModel):
             "  planner's ``model_config``, ``train_config.epochs``, and "
             "  ``train_config.batch_size`` survive verbatim. Audit / "
             "  exploration use case: lock the evaluation surface (loss + "
-            "  lr) but let the LLM scale capacity for the full-data pass. "
+            "  lr) but let the LLM scale capacity for the Formal pass. "
             "  The time gate may reject the planner's heavier choice; "
             "  that is the trade-off.\n"
             "* ``independent`` — the planner's choices for the formal "
@@ -2083,6 +2148,8 @@ class HyperparamTuningInput(BaseModel):
             "comment above)."
         ),
     )
+    score_units_metric: str | None = Field(default=None, exclude_if=lambda value: value is None)
+
     skip_formal_min_delta: float = Field(
         default=-1.0,
         description=(
@@ -2366,8 +2433,12 @@ class HyperparamTuningInput(BaseModel):
             "gates rounds where the planner picks formal mode (plan.is_trial=False). "
             "None = formal gate disabled; the tuner prints a one-time warning "
             "at startup and skips the time check for formal rounds. Sized "
-            "independently from the trial budget because formal runs use the "
-            "full dataset and have a wall-time scale 50-100× longer."
+            "independently from the trial budget because formal rounds train "
+            "on the Formal training scope (formal_portion × "
+            "formal_train_portion, default 0.1 × 1.0; the plan's portions when "
+            "formal_training_scope_source='agent') and score on "
+            "formal_eval_portion (default 1.0), so their wall time can differ "
+            "greatly from trial rounds."
         ),
     )
     runtime_completion_policy: RuntimeCompletionPolicy = "completed-workload-v1"
@@ -2513,6 +2584,18 @@ class HyperparamTuningInput(BaseModel):
         ),
     )
 
+    runtime_verification_pathological_min_unit_ms: float | None = Field(
+        default=None,
+        ge=0.0,
+        allow_inf_nan=False,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Optional slowdown floor in observation wall-time milliseconds. "
+            "None preserves the verifier's 100 ms default; 0 disables the "
+            "absolute floor for both streak and distribution slowdown checks."
+        ),
+    )
+
     # --- VRAM-budget gate (evaluate_vram_skill, Phase K) ---
     # Mirrors the trial/formal split of the time gate. The tuner picks the
     # right one per round via plan.is_trial. Each is independently optional:
@@ -2577,8 +2660,9 @@ class HyperparamTuningInput(BaseModel):
             "where the planner picks formal mode (plan.is_trial=False). "
             "None = formal VRAM gate disabled; the tuner prints a one-time "
             "warning at startup and skips the VRAM check for formal rounds. "
-            "Sized independently from the trial budget because formal runs may "
-            "use larger batch sizes or full-dataset sampling."
+            "Sized independently from the trial budget because formal rounds "
+            "may use larger batch sizes or a larger training scope "
+            "(formal_portion, default 0.1) than trial rounds."
         ),
     )
     vram_probe_step_timeout_seconds: float = Field(
@@ -2877,7 +2961,10 @@ class HyperparamTuningInput(BaseModel):
             "produces it. Keys must be valid ExperimentPlan field names or "
             "aliases (e.g. trial_portion, model_config) — unknown keys fail "
             "schema validation, and keys are normalized to alias form. The "
-            "merged plan is re-validated every round; an invalid effective "
+            "override replaces the entire field: nested dictionaries such as "
+            "train_config, model_config and loss_config are replaced, not "
+            "merged per key. Include every key you want to retain. The "
+            "resolved plan is re-validated every tuning round; an invalid effective "
             "plan raises PlanOverridesError and terminates the run (FU-10 — "
             "the operator lock is never silently released). Empty dict "
             "(default) = LLM has full control."
@@ -3636,7 +3723,7 @@ class PhysicalRejection(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class HyperparamTuningOutput(BaseModel):
+class HyperparamTuningOutput(RecordModel):
     """
     Full report produced by a completed tune_ml_hyperparam_agent run.
 
@@ -3892,7 +3979,7 @@ class HyperparamTuningOutput(BaseModel):
         default=None,
         description=(
             "Score comparison table from the most recent successful formal "
-            "(full 20-file) round. Distinct from best_score_table because "
+            "round (configured Formal evaluation scope). Distinct from best_score_table because "
             "cross-architecture comparability only holds at formal scope — "
             "the interpreter prefers this table when deciding which models "
             "to promote. None when no formal round succeeded."

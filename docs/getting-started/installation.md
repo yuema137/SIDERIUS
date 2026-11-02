@@ -18,7 +18,7 @@
   the run sandbox; `add-task` writes this machine's nodes for you. A CPU is enough for installation, focused tests, `--dry-run`,
   pseudo runs (`--is_pseudo_llm`, `--is_pseudo_training`) and the synthetic
   Quickstart's data preparation and component checks
-- At least one LLM API key — OpenAI, Gemini and/or DeepSeek — for **real
+- API keys for your [selected model providers](#api-keys) for **real
   runs only**: the full unit suite runs with no key at all
 - Optional: a Semantic Scholar key, only for the literature-review stage
 
@@ -170,14 +170,19 @@ single map; the linked procedures own the details.
 Supported provider identifiers and credential names are declared in
 `src/agent/llm_settings.py` (`KNOWN_PROVIDERS` and `OPTIONAL_PROVIDERS`):
 
-| Service / model family | `provider` | Credential variable |
-| --- | --- | --- |
-| OpenAI | `openai` | `OPENAI_API_KEY` |
-| Google Gemini | `gemini` | `GEMINI_API_KEY` |
-| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` |
-| Anthropic / Claude | `anthropic` | `ANTHROPIC_API_KEY` |
-| Moonshot / Kimi | `moonshot` | `MOONSHOT_API_KEY` |
-| Z.AI / GLM | `zai` | `ZAI_API_KEY` |
+| Service / model family | `provider` | Credential variable | Model selection |
+| --- | --- | --- | --- |
+| OpenAI | `openai` | `OPENAI_API_KEY` | Default model available (`KNOWN_PROVIDERS`) |
+| Google Gemini | `gemini` | `GEMINI_API_KEY` | Default model available (`KNOWN_PROVIDERS`) |
+| DeepSeek | `deepseek` | `DEEPSEEK_API_KEY` | Default model available (`KNOWN_PROVIDERS`) |
+| Anthropic / Claude | `anthropic` | `ANTHROPIC_API_KEY` | Explicit `model_id` required (`OPTIONAL_PROVIDERS`) |
+| Moonshot / Kimi | `moonshot` | `MOONSHOT_API_KEY` | Explicit `model_id` required (`OPTIONAL_PROVIDERS`) |
+| Z.AI / GLM | `zai` | `ZAI_API_KEY` | Explicit `model_id` required (`OPTIONAL_PROVIDERS`) |
+
+OpenAI, Gemini and DeepSeek are always recognized and have default models when
+`model_id` is omitted. See [LLM defaults](../reference/llm-defaults.md) for routing
+and current defaults. Recognition does not require supplying every provider key:
+only the selected routes need credentials.
 
 Anthropic, Moonshot and Z.AI require an explicit `model_id` and the
 `pydantic-ai` extra. Follow the [additional-provider setup](../../src/agent/llm_transport/README.md)

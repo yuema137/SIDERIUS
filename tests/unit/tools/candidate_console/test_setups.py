@@ -281,3 +281,71 @@ def test_setup_project_check_names_missing_registry_source(workspace):
     assert str(error.value) == (
         f"experiment setup my-setup: source file {project.source_file} is missing"
     )
+
+
+@pytest.mark.parametrize("surface", ["validation", "registry", "route"])
+def test_setup_failure_keeps_cause_only_in_server_log(workspace, monkeypatch, caplog, surface):
+    """Setup creation, stale registry and route fallback must not echo nested causes."""
+    from tools.candidate_console import setups
+
+    secret = "private-setup-secret-sentinel"
+    api = _client(_load(workspace))
+
+    def fail(*args, **kwargs):
+        raise SettingsInvalid(secret)
+
+    if surface == "validation":
+        monkeypatch.setattr(setups, "check_setup_project", fail)
+    elif surface == "registry":
+        monkeypatch.setattr(setups, "_read", fail)
+    else:
+        monkeypatch.setattr(api.app.state.console.setup_store, "create", fail)
+    response = _create(api)
+    assert response.status_code == 409
+    assert secret not in response.text
+    assert "Invalid value" in response.text
+    assert ".;" not in response.text
+    assert secret in caplog.text
+    if surface == "validation":
+        assert "projects/my-setup/ was left in place" in response.text
+        assert (workspace / "projects/my-setup").is_dir()
+
+
+@pytest.mark.parametrize("problem", ["permissions", "json"])
+def test_registry_refusal_preserves_fixed_recovery_guidance(workspace, problem):
+    """The stale-registry response must keep fixed mode/schema guidance, without '.;'."""
+    api = _client(_load(workspace))
+    assert _create(api).status_code == 201
+    path = _registry(workspace)
+    if problem == "permissions":
+        path.chmod(0o644)
+        expected = "settings/experiment_setups.json must be a private regular file (mode 600)"
+    else:
+        path.write_text("not JSON private-raw-registry-sentinel")
+        expected = "settings/experiment_setups.json is not valid siderius.console-experiment-setups/v1 JSON"
+    response = _create(api, label="Second")
+    assert response.status_code == 409
+    assert expected in response.json()["error"]["message"]
+    assert ".;" not in response.text
+    assert "private-raw-registry-sentinel" not in response.text
+
+
+def test_app_revalidates_registry_projects_loaded_after_startup_check(workspace):
+    """A valid schema/task ID must not smuggle unchecked project paths into the app."""
+    from tools.candidate_console.app import create_app
+    from tools.candidate_console.config import validate_config
+
+    resolved = _load(workspace)
+    store = resolved.config.operation_store
+    config = resolved.config.model_copy(
+        update={
+            "operation_store": store.model_copy(
+                update={"candidate_roots": (*store.candidate_roots, str(workspace / "projects"))}
+            )
+        }
+    )
+    validate_config(config, workspace=workspace)  # no registered projects yet
+    assert _create(_client(resolved)).status_code == 201
+    # A separate console published the setup after this console's startup check.
+    with pytest.raises(ValueError, match="recovery must be separate"):
+        create_app(config, resolved.settings)

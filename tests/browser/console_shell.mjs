@@ -9,29 +9,18 @@ import {mkdir} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 import {showAllConsoleSections} from './console_view_flags.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[name], `Set ${name}`);
 const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.workflow_editor_server'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
 let errors = ''; server.stderr.on('data', chunk => {errors += chunk;});
-const lines = createInterface({input: server.stdout});
 const loopRun = '12121212-1212-4212-8212-121212121212';
 const prepared = '34343434-3434-4434-8434-343434343434';
 let browser;
 try {
-  const metadata = await new Promise((accept, reject) => {
-    const timer = setTimeout(() => reject(new Error(`Server startup timeout: ${errors}`)), 15000);
-    lines.on('line', line => {
-      try {
-        const value = JSON.parse(line);
-        if (!value.origin || !value.token) return;
-        clearTimeout(timer); lines.close(); accept(value);
-      } catch { /* Native plugin registration may write one informational line first. */ }
-    });
-    server.once('exit', code => {clearTimeout(timer); reject(new Error(`Server ${code}: ${errors}`));});
-  });
+  const metadata = await waitForMetadata(server, {timeoutMs: 15000});
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
   showAllConsoleSections(browser);
@@ -149,7 +138,7 @@ try {
   await items.nth(1).waitFor();
   assert.equal(await items.count(), 2);
   assert.match(await items.nth(0).textContent(), /five_node · candidate/);
-  assert.match(await items.nth(0).textContent(), /3 of 3 bodies/);
+  assert.match(await items.nth(0).textContent(), /3 of 3 iterations/);
   assert.match(await page.locator('#operations-status').textContent(), /1 record could not be verified/);
   assert.ok(Math.abs((await left('#view-monitor .operations-panel')) - (await left('nav.actions a'))) <= 2, 'Monitor content aligns with nav');
   await items.nth(0).locator('a').click();

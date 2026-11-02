@@ -66,12 +66,16 @@ SUPPORTED_LAUNCH_FIELDS = frozenset(
         "runtime_safety_factor",
         "runtime_trial_safety_factor",
         "runtime_verification_max_wall_seconds",
+        "runtime_verification_pathological_min_unit_ms",
         "runtime_verifier",
         "runtime_verifier_identity",
         "runtime_watchdog_deadline_policy",
         "runtime_watchdog_enabled",
         "runtime_watchdog_floor_seconds",
         "runtime_watchdog_safety_factor",
+        # #1294: effective-unit acknowledgement for degenerate_penalty_score under
+        # formula selection; admitted by the same rule as the direct workflow.
+        "score_units_metric",
         "train_portion",
         "train_validation_align",
         "training_validation_portion",
@@ -125,6 +129,7 @@ INACTIVE_LAUNCH_FIELDS = frozenset(
         "source_run_name",
         "start_iteration",
         "target_score",
+        "target_score_metric",
         "training_budget_reserve_fraction",
         "validation_fixed_candidate_plan",
     }

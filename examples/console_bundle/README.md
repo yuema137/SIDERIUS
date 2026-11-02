@@ -21,8 +21,8 @@ releases. For research runs, use the
 - A working run sandbox
   ([workspace sandbox](https://github.com/yuema137/SIDERIUS/blob/master/src/tools/workspace_sandbox/README.md)).
 - An API key for the model provider. The standard model profile uses OpenAI,
-  so runs need `OPENAI_API_KEY`. No command below reads or prints the key;
-  only a launched run receives it.
+  so runs need `OPENAI_API_KEY`. No command prints your key; `check`,
+  `add-task` and `serve` confirm the file's format.
 - The zip, `siderius-example-quickstart-<version>.zip`. Download it from the
   [SIDERIUS releases page](https://github.com/yuema137/SIDERIUS/releases) when
   the release lists it. Until then, build it from your checkout with the
@@ -59,6 +59,8 @@ version in the zip's name. That number is the package version from
    inside this folder as an independent check; every line should end in `OK`.
    Steps 3 and 4 also verify the listed files, but `fetch_data.py` cannot check
    its own code, which is already running when it checks the bundle.
+   Run only bundles from the releases page or your own build: `SHA256SUMS`
+   proves the files are intact, not who made them.
 
 2. Create your private key file and the console workspace. The first command
    creates an empty key file that only you can read (mode `600`; its folder must
@@ -77,8 +79,8 @@ version in the zip's name. That number is the package version from
    never prints its contents, and records its path as `credential_file` in the new
    `console.json`. If `console.json` already exists, `init` leaves it unchanged
    and prints the one `"credential_file": ...` line to add yourself. Now open
-   the key file in your editor and write `{"OPENAI_API_KEY": "your key"}`; a run
-   reads it only when you launch. The
+   the key file in your editor and write `{"OPENAI_API_KEY": "your key"}`.
+   The launch passes the required keys to the run. The
    [console guide](https://github.com/yuema137/SIDERIUS/blob/master/src/tools/candidate_console/README.md#set-up-and-open-the-console)
    lists the folders `init` creates, and its
    [Credentials section](https://github.com/yuema137/SIDERIUS/blob/master/src/tools/candidate_console/README.md#credentials)
@@ -107,10 +109,10 @@ version in the zip's name. That number is the package version from
    is written; unpack the zip again. It refuses a workspace or data folder that
    is a symlink, belongs to another user, or that your group or others can
    write to. Running it again keeps identical files and never overwrites a
-   different one. If you pass `--package`, it must name the `task/` folder
-   inside an unpacked bundle with its own `SHA256SUMS`. The default task ID
-   comes from that bundle's verified `console-task.json`; `--task-id`
-   overrides it.
+   different one. To select another unpacked bundle, pass `--package` with
+   its `task/` folder; the command prints the resolved path before running it.
+   The default task ID comes from that bundle's verified `console-task.json`;
+   `--task-id` overrides it.
 
 4. Import the task and its experiment setup.
    `add-task` finds this machine's NVIDIA GPUs (`/dev/nvidia<N>`) and passes
@@ -222,3 +224,7 @@ It prints the path of `siderius-example-quickstart-<version>.zip` (version from
 `pyproject.toml`, or `--version`). Two builds of the same checkout are byte for
 byte identical. The format is specified in the
 [console contract](https://github.com/yuema137/SIDERIUS/blob/master/src/tools/candidate_console/console-contract.md#example-bundles-add-task---from-bundle).
+
+## Training settings in the imported setup
+
+These small-task settings use `formal_portion=1.0` and `max_rounds=2`; see [Trial and Formal training](../../src/tools/candidate_console/README.md#trial-and-formal-training) for scope, round limits and framework defaults.

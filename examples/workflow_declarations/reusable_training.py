@@ -76,6 +76,9 @@ document = ReusableWorkflowDocument(
             "healthgate_mode": "observe_only",
             "result_authority": "diagnostic",
             "is_trial": True,
+            # Use all small-example training data for the Formal tuning round.
+            "formal_portion": 1.0,
+            "max_rounds": 2,  # Allow Trial before the forced Formal tuning round.
         },
     },
     preparation_options=CandidatePreparationOptions(

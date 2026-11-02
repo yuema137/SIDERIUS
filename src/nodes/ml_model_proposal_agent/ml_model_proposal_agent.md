@@ -1,5 +1,15 @@
 # MLModelProposalAgent
 
+
+## Structured evaluation prompt context
+
+Legacy and pipeline messages, including corrections/retries, receive the shared user-message block. Comparison and causal metric context refer to that block; prediction direction/refutation rules still apply to their named metric.
+
+The run-scoped composition supplies this context through the shared append path.
+Absence adds no bytes and never enters the new boundary under historical profiles.
+The [evaluation contract](../../execute_tools/evaluation-contract.md#evaluation-prompt-rendering)
+owns formatting, profile admission and runtime capability distinctions.
+
 ## Live output names
 
 `run()` checks `storage.local.run_name` before proposal work when the local
@@ -68,7 +78,7 @@ not silently restore the previous ignored-configuration behavior.
 | `agent_cards` | `list[AgentCard]` | No | `[]` | Self-descriptions of all external agents contributing context this round. Rendered as a "Contributors" section above the Expert Context block. Carries `trust_level` (`hard_limit` / `strong_prior` / `soft_prior`) for synthesis-rule routing. |
 | `mindset` | `str \| None` | No | `None` | Mindset block injected at `{# EXPLORATION_MODE_BLOCK #}` in the causal-reasoning stage prompt. Overrides the default `_explore.md` / `_exploit.md` fallback. |
 | `vocab_seed` | `list[VocabEntry]` | No | `[]` | The runtime vocabulary available to the reasoning pipeline (canonical seed + promoted candidates + active candidates). Populated by the upstream interpretation node via the protocol. |
-| `is_trial` | `bool` | No | `False` | Whether the run uses trial (sparse) sampling; this selects inputs to the static `estimate_proposal_time` advisory. |
+| `is_trial` | `bool` | No | `hyperparam_tuning.DEFAULT_IS_TRIAL` (`True`) | Whether the run uses trial (sparse) sampling; this selects inputs to the static `estimate_proposal_time` advisory. |
 | `trial_strategy` | `Literal["snapshot", "anchors", "target"]` | No | `"snapshot"` | Sampling strategy for the training scope: `snapshot` (all 20 files), `anchors` (files 0/10/19), `target` (caller-specified files). Mirrors `HyperparamTuningInput.trial_strategy`. |
 | `trial_portion` | `float` | No | `0.1` | Fraction of segments per file for the training scope. Mirrors `HyperparamTuningInput.trial_portion`. |
 | `target_files` | `list[int]` | No | `[]` | File indices to sample from. Required when `trial_strategy="target"`. |
@@ -282,9 +292,42 @@ The constructor accepts `bridge_factory` (test injection — defaults to `LLMBri
   blocking_eligible=no, including a warning not to infer a parameter-count
   ceiling and the deciding policy identity), never a revision or rejection. A task without the
   TIDMAD topology priced by this legacy formula returns `applicable=False`;
-  the proposer records `PREFLIGHT_SKIPPED` and continues. Blocking runtime
+  the proposer records `PREFLIGHT_SKIPPED` and continues. A draft without a
+  declared temporal dimension raises `SegmentationDimensionUnavailableError`
+  in the estimator; `_run_preflight_check` records `PREFLIGHT_SKIPPED` with
+  the exception type and reason and returns `None`, allowing both legacy and
+  pipeline proposals to return with unset preflight fields. This narrow
+  advisory-boundary catch does not change estimator requirements: invalid
+  dimensions and unexpected exceptions still propagate. Memo notes are persisted
+  in `ProposalOutput` and research history, but the implementor protocol does
+  not forward them and the interpreter reads selected previous-proposal fields
+  rather than rendering the full object. The skip note adds no prompt bytes
+  through these consumers. Blocking runtime
   authority belongs to measured evidence via the shared policy (C4/C8);
   structural validation retries (`_MAX_PROPOSING_RETRIES=2`) are unchanged.
+  `ProposalOutput._validate_baseline_segmentation_size` rejects booleans, explicit zero
+  and negative `baseline_config.model_config.segmentation_size` values before
+  `_run_preflight_check` at both parse sites, after parameter-rule resolution.
+  `ProposalOutput._validate_supplied_training_config` validates every supplied
+  `train_config` object through `TrainConfig`, including `batch_size`, `epochs`,
+  `drop_last` and schedule cross-field constraints. The owner's coercion rules
+  include rejecting boolean integer counts (`epochs`, `batch_size`);
+  normalized supplied values replace raw values before advisory use.
+  Omitted sections/fields remain omitted, extension keys remain intact, and
+  explicit null/non-object training sections refuse. Unknown generated model
+  architecture fields retain the implementation contract; no registered model
+  constraints are invented for them.
+  Pipeline validation failures enter `proposing_stage_errors` and retry only
+  the proposing stage; legacy mode raises `ValidationError` without an inner
+  repair loop. Missing segmentation remains permitted by the schema and takes
+  the typed advisory skip above when no model default supplies it. Regression
+  coverage in `test_preflight_advisory.py` checks repair-prompt delivery and
+  that estimation sees only the corrected draft, not merely schema rejection.
+  `test_supplied_training_config.py` covers training repair, legacy refusal,
+  coercion transport and omission preservation. Valid normalized proposals keep
+  existing prompt bytes; newly refused drafts add the existing structural-error
+  feedback to retry prompts. The schema source change updates the rendering
+  assembly identity even without template changes.
 - **Causal-reasoning minimum-boldness retry** (`_MAX_REASONING_RETRIES=1`). In pipeline mode, the causal-reasoning stage emits a `FalsifiablePrediction` with a `boldness` score. If the score falls below the configured minimum, the stage retries ONCE with a "be bolder" nudge. This is independent of the pre-flight loop.
 - **Citation discipline** (`_check_citation_discipline`). The reasoning stage's output is checked for valid `source_ref` values: each ref must correspond to an entry in `expert_context` or `agent_cards`. Invalid refs (hallucinated citations) trigger an error message appended to the next attempt's prompt.
 - **Inherited-component source format**: causal and proposing prompts include examples of the existing `InheritedComponent` contract: bare model types for experiments, and supplied `prefix:identifier` references for external agents or humans. Examples are not permission to invent sources. The existing schema validation and causal-stage correction path remain authoritative.
@@ -466,3 +509,33 @@ separator, colons and Unicode control characters are refused through the existin
 retry feedback. Names are never sanitized. The workflow independently repeats
 this check before name-derived attempt renaming and tuning directory creation,
 including operator-supplied fixed plans; archival decoding remains permissive.
+
+### Native output record encoding
+
+The native output writer delegates to `core.record_encoding` for versioned
+strict JSON, preserving typed non-finite floats. Load with the output schema's
+`model_validate_json`; legacy unversioned records remain supported. The
+[core contract](../../core/core-contract.md#versioned-non-finite-record-json-issue-1111)
+owns metadata, legacy projection and digest impact. Legacy records may contain null where a float was non-finite. New native output
+and `LocalRecorder` writes preserve that float through the versioned encoding.
+
+### Conditional loss parameter rules
+
+Rule guidance states conditional loss-field applicability when loss rules are
+present; train/model-only and empty-rule prompts keep their prior bytes.
+`resolve_proposal_baseline_config` uses shared resolution: dead rules under a
+rule-fixed loss type fail, while planner-selected inactive fields are skipped
+with log disclosure. Unknown proposal types defer activity. The tuner recomputes
+and persists typed attempt receipts; proposal metadata is not receipt authority.
+
+## Persisted proposal compatibility
+
+The supplied-training validator also runs when saved `ProposalOutput` records
+are reloaded. `run_one_iteration` fixed-candidate file loading,
+`model_exploration` fixed-plan construction, and candidate-worker
+`loop_evidence` / `graph_evidence` validation therefore refuse old records
+containing invalid training values. This is not an automatic
+migration or a live proposer repair: callers must regenerate/correct the invalid
+proposal, or replay with its recorded framework revision. Such invalid values
+would otherwise fail execution; boolean integer values are additionally refused
+instead of silently becoming 0/1. Valid typed records remain compatible.

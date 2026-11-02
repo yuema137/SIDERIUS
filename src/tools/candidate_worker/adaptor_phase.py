@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
-from core.canonical_json import canonical_json_bytes
+from core.canonical_json import canonical_json_bytes, replay_json_bytes
 from core.durable_io import publish_bytes_write_once
 from workflows.adaptors import (
     AdaptorInputRef,
@@ -41,7 +41,8 @@ from workflows.definition.fanout import ProposalFamilies, execution_families
 from workflows.definition.llm_strategies import LLM_STRATEGY_TYPES
 
 from . import readiness
-from .graph_evidence import read_graph_control, record_digest
+from .adaptor_replay import replay_record
+from .graph_evidence import read_graph_control, read_traced_record, record_digest
 from .graph_models import GraphNodeEvidence, GraphReason, GraphState, GraphTrace
 from .layout import adaptor_dir, adaptor_output_path, adaptor_record_path
 from .models import CandidateRunReceipt, CandidateRunRequest
@@ -336,19 +337,29 @@ def verify_adaptors(
     readback contacts no provider.
     """
     entries = {item.node_id: item for item in (*nodes, *adaptors)}
+    # Each record is read once, re-hashed against its trace digest (the digest check
+    # proved the file at an earlier instant), and both the replay anchor and the
+    # byte comparison use those bytes (#1476).
+    stored = {
+        item.node_id: read_traced_record(item) for item in adaptors if item.record_path is not None
+    }
     outcomes: dict[str, AdaptorOutcome] = {}
-    judge = _replay_context(request, initial, entries)
+    judge = _replay_context(request, initial, stored)
     for adaptor in request.preview.document.definition.adaptors:
         entry = entries[adaptor.id]
         if entry.record_path is None:
             continue
+        stored_bytes = stored[adaptor.id]
+        stored_record = AdaptorRecord.model_validate_json(stored_bytes)
+        version = stored_record.encoding_version
         outcome, record = decide(adaptor, entries, iteration=iteration, skips=skips, judge=judge)
+        record = replay_record(record, outcome, adaptor, version)
         if isinstance(adaptor.combine, LLM_STRATEGY_TYPES) and record.strategy_evidence is None:
             from .adaptor_llm import judge_evidence_dir
 
             if judge_evidence_dir(workspace, adaptor.id, iteration).exists():
                 raise ValueError(f"adaptor {adaptor.id} has judge evidence its record never ran")
-        if read_graph_control(Path(entry.record_path)) != canonical_json_bytes(record):
+        if stored_bytes != replay_json_bytes(record, version=version):
             raise ValueError(f"adaptor {adaptor.id} record does not match its recomputation")
         if (entry.state, entry.reason) != graph_closure(outcome):
             raise ValueError(f"adaptor {adaptor.id} terminal state does not match its record")
@@ -360,7 +371,7 @@ def verify_adaptors(
                 workspace, adaptor.id, PORT, output.index, iteration=iteration
             )
             emitted.add(path.name)
-            if read_graph_control(path) != canonical_json_bytes(output.value):
+            if read_graph_control(path) != replay_json_bytes(output.value, version=version):
                 raise ValueError(f"adaptor {adaptor.id} output does not match its recomputation")
         published = {
             path.name
@@ -376,17 +387,20 @@ def verify_adaptors(
 def _replay_context(
     request: CandidateRunRequest,
     initial: CandidateRunReceipt,
-    entries: Mapping[str, GraphNodeEvidence],
+    stored: Mapping[str, bytes],
 ) -> "JudgeAdaptorContext | None":
-    """Replay context with each recorded LLM adaptor's strategy evidence anchor."""
+    """Replay context with each recorded LLM adaptor's strategy evidence anchor.
+
+    ``stored`` holds the traced record bytes by adaptor id (``read_traced_record``):
+    the anchor names the judge evidence replayed, so it comes from attested bytes.
+    """
     from .adaptor_llm import llm_adaptors, replay_context
 
     anchors: dict[str, str] = {}
     for adaptor in llm_adaptors(request.preview.document.definition.adaptors):
-        path = entries[adaptor.id].record_path
-        if path is None:
+        if adaptor.id not in stored:
             continue
-        recorded = AdaptorRecord.model_validate_json(read_graph_control(Path(path)))
+        recorded = AdaptorRecord.model_validate_json(stored[adaptor.id])
         if recorded.strategy_evidence is not None:
             anchors[adaptor.id] = recorded.strategy_evidence.sha256
     return replay_context(request, initial, anchors)

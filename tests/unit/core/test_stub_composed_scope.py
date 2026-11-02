@@ -5,6 +5,7 @@ scope owner loses artifacts and accepts foreign/unbound scopes. These are
 runtime caller/opaque-codec properties, not schema declaration tests.
 """
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -12,9 +13,9 @@ import pytest
 
 from agent.skills.denoising_score_skill.wrapper import run_skill as score
 from agent.skills.inference_skill.wrapper import run_skill as infer
-from core.sandbox_executor import StubSandbox
+from core.stub_sandbox import StubSandbox
 from execute_tools.scope_artifact import EVAL_SCOPE_STEM, TRAINING_SCOPE_STEM, scope_artifact_path
-from execute_tools.task_data_path import ScopeBuildRequest
+from execute_tools.task_data_path import EvaluationReadRequest, ScopeBuildRequest
 from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
 pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile", "synthetic_physical_data_root")
@@ -32,6 +33,9 @@ PARAMS = {
 
 @pytest.fixture
 def composed(tmp_path):
+    from examples.quickstart.plugins._quickstart_task import write_data_dir
+
+    write_data_dir(tmp_path)
     composition = compose_run_task_bindings(str(MANIFEST))
     task = composition.task_data_path
     request = ScopeBuildRequest(
@@ -74,6 +78,20 @@ def test_composed_wrappers_preserve_synthetic_results_and_transport(
     assert inference["message"] == "stub_inference_ok"
     assert inference["process_startup_ms"] == inference["subprocess_wall_ms"] == 10.0
     assert inference["runtime_verification"] is None
+    payload = task.read_evaluation_payload(
+        EvaluationReadRequest(
+            deliverable_dir=sandbox.base_dir,
+            exp_id="scope_attempt",
+            run_name="scope_run",
+            model_type="synthetic_model",
+        )
+    )
+    assert sorted(payload.values()) == [0, 1]
+    provenance = json.loads(
+        (Path(sandbox.base_dir) / "pseudo_inference_scope_attempt_scope_run.json").read_text()
+    )
+    assert provenance["_pseudo_origin"] == "stub_sandbox"
+    assert provenance["inference"]["samples"] == 2
     # Pin the inference hop before scoring can write the same artifacts.
     for stem, scope in (
         (TRAINING_SCOPE_STEM, scopes.training),

@@ -3,6 +3,7 @@
 from collections.abc import Sequence
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
+from execute_tools.metric_order import MetricOrder
 
 
 def infrastructure_abort_reason(
@@ -18,3 +19,29 @@ def infrastructure_abort_reason(
         if getattr(output, "termination_reason", None) == "infrastructure_abort":
             return getattr(output, "status", None) or "infrastructure_abort"
     return None
+
+
+def target_reached(
+    incumbent: float | None, target: float | None, order: MetricOrder | None
+) -> bool:
+    """Compare the owner's valid incumbent, never unfiltered progress."""
+    return (
+        incumbent is not None
+        and target is not None
+        and order is not None
+        and order.is_at_least(incumbent, target)
+    )
+
+
+def workflow_stop_reason(
+    results: Sequence[HyperparamTuningOutput],
+    incumbent: float | None,
+    target: float | None,
+    order: MetricOrder | None,
+) -> str:
+    """Infrastructure failure takes precedence over scientific success."""
+    if infrastructure_abort_reason(results) is not None:
+        return "infrastructure_abort"
+    if target_reached(incumbent, target, order):
+        return "target_reached"
+    return "iterations_exhausted"

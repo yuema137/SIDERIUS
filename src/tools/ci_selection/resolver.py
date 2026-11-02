@@ -317,7 +317,7 @@ def select(changed_paths: list[str]) -> Selection:
     for changed in changed_paths:
         for trigger in mf.FULL_SUITE_TRIGGERS:
             if changed == trigger or changed.startswith(trigger):
-                reasons.append(f"{changed}: infrastructure/selector trigger ({trigger})")
+                reasons.append(f"{changed}: full-suite trigger ({trigger})")
         for hub in mf.HUBS:
             if changed == hub or changed.startswith(hub):
                 reasons.append(f"{changed}: declared hub ({hub}) — selecting would be a lie")

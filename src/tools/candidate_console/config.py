@@ -8,18 +8,21 @@ from tools.candidate_operations.host_ledger import HostScheduling, ledger_direct
 from tools.candidate_operations.models import OperationFailure
 
 from .config_errors import MissingConfigFile
-from .files import canonical, config_bytes, credential_values, token
+from .error_messages import console_error_message
+from .files import canonical, config_bytes, credential_values, require_owner_only_file, token
 from .models import ConsoleConfig
 from .settings_models import ResolvedConsole
 
 
-def validate_config(config: ConsoleConfig, *, workspace: Path | None = None) -> ConsoleConfig:
+def validate_config(
+    config: ConsoleConfig, *, workspace: Path | None = None, credential_metadata_only: bool = False
+) -> ConsoleConfig:
     """Validate inert facts; ``workspace`` adds its settings and library to protected paths."""
     from tools.candidate_prepare.admission import validate_read_only_exclusion
 
     from .package_mounts import check_package_mounts
     from .settings_file import SettingsInvalid, protected_paths
-    from .setups import SetupRegistry, SetupStore, check_setup_project
+    from .setups import SetupStore
 
     config = ConsoleConfig.model_validate_json(config.model_dump_json())
     store = config.operation_store
@@ -29,7 +32,7 @@ def validate_config(config: ConsoleConfig, *, workspace: Path | None = None) -> 
             raise ValueError("configured output roots must exist")
     # Every experiment setup (legacy editor_projects and registry entries) is read
     # through the one registry; an ID collision or unknown task fails here.
-    setup_projects = SetupRegistry(config, SetupStore.load(config, workspace)).projects()
+    SetupStore.load(config, workspace)
     for task in config.tasks:
         for root, allowed in (
             (task.preparation_root, store.preparation_roots),
@@ -89,12 +92,13 @@ def validate_config(config: ConsoleConfig, *, workspace: Path | None = None) -> 
             workspace != root and workspace.is_relative_to(root) for root in candidate_roots
         ):
             raise ValueError("recorded example workspace must be inside a candidate root")
-    for project in setup_projects:
-        check_setup_project(project, config)
     token(config.auth_token_file)
     if config.credential_file is not None:
         # Validate private file facts and JSON/dotenv shape, without selecting/printing values.
-        credential_values(config.credential_file)
+        if credential_metadata_only:
+            require_owner_only_file(config.credential_file)
+        else:
+            credential_values(config.credential_file)
     return config
 
 
@@ -102,17 +106,22 @@ def host_scheduling(config: ConsoleConfig) -> HostScheduling | None:
     """Load the configured host ledger once (B3-4c); ``None`` keeps every launch serial.
 
     The directory must already exist with owned mode 0700 (``ledger_directory``);
-    the budget file is read only through ``load_host_budget_file``. Either
-    failure stops the console from starting rather than launching unbudgeted.
+    the budget file must be a canonical absolute path like the ledger root and is
+    read only through ``load_host_budget_file``. Either failure stops the console
+    from starting rather than launching unbudgeted.
     """
     selection = config.host_ledger
     if selection is None:
         return None
     try:
         ledger_directory(selection.ledger_root)
-        budget = load_host_budget_file(Path(selection.budget_file).absolute())
+        # Canonical like the ledger root: never resolved against the console's cwd.
+        budget = load_host_budget_file(canonical(selection.budget_file))
     except (OperationFailure, HostBudgetFileError) as error:
-        raise ValueError(f"configured host ledger is unusable: {error}") from error
+        raise ValueError(
+            f"configured host ledger is unusable: {console_error_message(error)} "
+            "Check host_ledger.ledger_root and host_ledger.budget_file."
+        ) from None
     return HostScheduling(ledger_root=selection.ledger_root, budget=budget)
 
 
@@ -120,20 +129,28 @@ def load_config(path: str) -> ConsoleConfig:
     return validate_config(ConsoleConfig.model_validate_json(config_bytes(path)))
 
 
-def load_console(path: str) -> ResolvedConsole:
-    """Resolve omitted layout locations, then apply the unchanged ``validate_config``."""
+def load_console(path: str, *, credential_metadata_only: bool = False) -> ResolvedConsole:
+    """Resolve and validate; init checks credential metadata without reading values."""
     from .workspace import resolve_console
 
     resolved = resolve_console(config_bytes(path))
     context = replace(resolved.settings, console_path=canonical(path))
-    return validate_resolved(ResolvedConsole(resolved.config, context))
+    return validate_resolved(
+        ResolvedConsole(resolved.config, context), credential_metadata_only=credential_metadata_only
+    )
 
 
-def validate_resolved(resolved: ResolvedConsole) -> ResolvedConsole:
+def validate_resolved(
+    resolved: ResolvedConsole, *, credential_metadata_only: bool = False
+) -> ResolvedConsole:
     """``validate_config`` with workspace protection, then settings certification."""
     from .settings_file import validate_settings
 
-    config = validate_config(resolved.config, workspace=resolved.settings.workspace_root)
+    config = validate_config(
+        resolved.config,
+        workspace=resolved.settings.workspace_root,
+        credential_metadata_only=credential_metadata_only,
+    )
     resolved = ResolvedConsole(config, resolved.settings)
     validate_settings(resolved)
     return resolved

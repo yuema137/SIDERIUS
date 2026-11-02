@@ -6,6 +6,11 @@ the synchronous CLI use the same launch boundary. It requires Linux,
 [bubblewrap](../workspace_sandbox/README.md), an installed SIDERIUS environment,
 and an explicitly prepared native proposal seed.
 
+Read a saved node record with its native output model's `model_validate_json`.
+This restores typed non-finite values as well as reading older records. Raw JSON
+includes encoding metadata; details are in the
+[worker contract](candidate-worker-contract.md).
+
 To compare multiple implementations of one proposal, an advanced caller can select
 [the proposal-fanout profile](candidate-worker-contract.md#opt-in-proposal-fanout).
 Each implementation gets its own native files and validation. Prepare the explicit
@@ -13,6 +18,11 @@ declaration and storage inputs using that contract, then submit through the same
 [candidate operation interface](../candidate_operations/README.md). Terminal status
 includes the verified per-instance trace. This profile has no training, graph
 resume or visual graph editor.
+
+With [concurrent dispatch](candidate-worker-contract.md#concurrent-dispatch-b3-4b),
+independent branches can overlap. The verifier checks that each step started
+after its sources finished, including the source that chose a route. It refuses
+saved traces whose dispatch receipts contradict that order.
 
 To generate several independent proposal candidates in one run, code callers can
 select [proposal families](candidate-worker-contract.md#opt-in-independent-proposal-families)

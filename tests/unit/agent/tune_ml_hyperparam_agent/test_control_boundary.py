@@ -424,11 +424,24 @@ class TestResourceAdmissionSurface:
             for node in ast.walk(_tree())
             if isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
-            and node.func.id == "_handle_admission_refusal"
+            and node.func.id == "run_admitted_skill"
             for kw in node.keywords
             if kw.arg == "phase" and isinstance(kw.value, ast.Constant)
         )
         assert phases == ["inference", "training"]
+        shared = _fn("run_admitted_skill")
+        handlers = [
+            node
+            for node in ast.walk(shared)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "_handle_admission_refusal"
+        ]
+        assert len(handlers) == 1
+        assert any(
+            kw.arg == "phase" and isinstance(kw.value, ast.Name) and kw.value.id == "phase"
+            for kw in handlers[0].keywords
+        )
 
     def test_nobody_hand_assembles_an_equivalent_record(self):
         """The status string must appear only in the frozen constant and

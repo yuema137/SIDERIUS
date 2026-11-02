@@ -95,7 +95,7 @@
     const id = pending.payload.operation_id;
     $('native-chain-operation-id').textContent = 'Operation UUID: ' + id;
     $('native-chain-monitor').href = '#monitor/' + id;
-    try { localStorage.setItem('siderius.operation_id', id); } catch { /* URL remains available. */ }
+    session.rememberOperation(id);
     void submit();
   });
   $('native-chain-new').addEventListener('click', () => {

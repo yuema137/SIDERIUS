@@ -19,10 +19,20 @@ uses the public composition interface without changing framework source.
 
 Omitting `code_package` retains existing single-file loading and identities.
 For selected members, data-path, metric, model, loss, Health and other file
-consumers share one namespace. Runtime namespace isolation includes location;
-semantic identity excludes absolute paths and includes every listed member's
-relative name and content hash. Identical relocated packages have equal semantic
-identity but distinct Python classes in the same interpreter.
+consumers share one namespace. Semantic identity excludes absolute paths and
+includes every listed member's relative name and content hash.
+
+The runtime module namespace is `_siderius_task_<package digest>`, derived from
+content only, so the same package composes to the same `__module__` names from
+any checkout path or host. Within one interpreter, the first root loaded for a
+digest owns that name; each further root with identical content gets an ordinal
+suffix (`_1`, `_2`, ...) in first-load order, and a re-capture of an already
+loaded root reuses its name. Identical relocated packages therefore have equal
+semantic identity but distinct Python classes and their own `__file__` in the
+same interpreter. The suffix is process-local: it never enters semantic
+identity, and a spawned child that bootstraps one inherited package uses the
+unsuffixed name, so objects pickled from a suffixed copy cannot be unpickled by
+such a child.
 
 The parent executes captured bytes, not a later disk read. Children receive a
 sidecar naming locators and the original hashes; the sidecar is not a source

@@ -184,7 +184,6 @@ class TestLocalValidatedModel:
             pytest.param("max_rounds", 50, id="max_rounds"),
             pytest.param("file_index", 6, id="file_index"),
             pytest.param("llm_provider", "openai", id="llm_provider"),
-            pytest.param("is_trial", False, id="is_trial"),
             # V19 PR 1 (P1-C3): omitted incumbent → None (no incumbent);
             # coupling flag defaults OFF.
             pytest.param("current_run_best_formal_score", None, id="chain_incumbent_default_none"),
@@ -1039,3 +1038,54 @@ def test_workflow_constraint_transport_to_tuner(
     )
     assert result.constraint_context == context
     assert ("constraint_context" in result.model_dump()) is enabled
+
+
+@pytest.mark.parametrize("explicit", [None, True, False])
+def test_trial_mode_agrees_across_launch_entrypoints(
+    explicit, validator_output, proposal_output, storage, tmp_path
+):
+    """Omission used to silently switch API/protocol launches to single-file.
+
+    Reverting the default makes the protocol, schema and launch assertions fail;
+    the False case also catches truthiness-based fallback erasing caller intent.
+    """
+    from agent.schemas.hyperparam_tuning import DEFAULT_IS_TRIAL
+    from nodes.ml_hyperparameter_tune_agent.cli import build_agent_input
+    from nodes.ml_hyperparameter_tune_agent.cli import build_parser as build_tuner_parser
+    from tools.workflow_authoring.templates import DECLARED_LAUNCH_POLICY
+    from workflows.run_config import WorkflowLaunchConfig
+    from workflows.standard_cli import build_parser
+
+    expected = explicit is not False
+    kwargs = {} if explicit is None else {"is_trial": explicit}
+    flags = [] if explicit is None else ["--is_trial" if explicit else "--no-is_trial"]
+    assert DEFAULT_IS_TRIAL is True
+    assert DECLARED_LAUNCH_POLICY["is_trial"] is True
+    launch = WorkflowLaunchConfig(**kwargs)
+    assert launch.is_trial is expected
+    direct = HyperparamTuningInput(model_type="auto", storage=storage, **kwargs)
+    assert direct.is_trial is expected
+    protocol = local_validated_model(validator_output, proposal_output, storage, **kwargs)
+    assert protocol.is_trial is expected
+    cli = build_parser().parse_args(
+        [
+            "--workspace",
+            str(tmp_path),
+            "--run_name",
+            "trial_default",
+            "--start_iteration",
+            "1",
+            "--task_composition",
+            "task.yaml",
+            "--data_dir",
+            "data",
+            *flags,
+        ]
+    )
+    assert cli.is_trial is expected
+    parser = build_tuner_parser()
+    args = parser.parse_args(["--task_composition", "task.yaml", "--data_dir", "data", *flags])
+    standalone = build_agent_input(args, parser)
+    assert standalone.is_trial is expected
+    # Only an explicit positive node flag installs its historical portion bundle.
+    assert ("is_trial" in standalone.plan_overrides) is (explicit is True)

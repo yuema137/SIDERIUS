@@ -97,6 +97,8 @@ class TestTheOwnershipBoundary:
 #:   the caller. ``None`` keeps review disabled unless an enabled run supplies
 #:   an explicit task-owned config; the framework ships no scientific default.
 POST_REFACTOR_DEFAULT_CHANGES: dict[str, object] = {
+    # #1240: the tuner schema owns the generic run-level trial/formal default.
+    "is_trial": True,
     "trial_portion": None,
     "train_portion": None,
     "eval_portion": None,
@@ -108,6 +110,8 @@ POST_REFACTOR_DEFAULT_CHANGES: dict[str, object] = {
 #:   validator→tuner protocol. Default ``None`` = a qualified bypass grants
 #:   NO extension (load-bearing safety semantics).
 POST_REFACTOR_TRANSIT_ADDITIONS: dict[str, object] = {
+    "target_score_metric": None,
+    "score_units_metric": None,
     "disclose_execution_constraints": True,  # #726: explicit native disclosure.
     "runtime_watchdog_deadline_policy": "budget-ceiling-v1",
     "training_validation_portion": None,
@@ -149,6 +153,8 @@ POST_REFACTOR_TRANSIT_ADDITIONS: dict[str, object] = {
     "formal_training_scope_source": "operator",
     # Caller-configurable measurement window; None retains runtime defaults.
     "runtime_verification_max_wall_seconds": None,
+    # Optional slowdown floor; None preserves the verifier default and evidence.
+    "runtime_verification_pathological_min_unit_ms": None,
     # Data Analysis workflow integration (2026-09-15). Advice is transit-only
     # caller input and does not imply that the optional topology is enabled.
     "human_advice_analysis": None,

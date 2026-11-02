@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import os
+import time
 from pathlib import Path
 
 import numpy as np
@@ -378,7 +379,7 @@ def test_sandbox_unavailable_fails_closed_without_subprocess_fallback(
     monkeypatch.setattr(
         sandbox,
         "probe",
-        lambda: SandboxCapabilityReceipt(
+        lambda **_: SandboxCapabilityReceipt(
             available=False,
             protocol_id="siderius.generated-analysis-sandbox.v1",
             bubblewrap_path=None,
@@ -419,7 +420,7 @@ def test_source_mutation_after_planning_is_refused_before_execution(
     monkeypatch.setattr(
         sandbox,
         "probe",
-        lambda: SandboxCapabilityReceipt(
+        lambda **_: SandboxCapabilityReceipt(
             available=True,
             protocol_id="siderius.generated-analysis-sandbox.v1",
             bubblewrap_path="/not-executed/bwrap",
@@ -498,3 +499,133 @@ def analyze(inputs, parameters, output_directory):
         "python_seeded": True,
         "numpy_seeded": True,
     }
+
+
+#: Stands in for unshare+bwrap where the host forbids user namespaces. It runs
+#: the real ``probe()``/``execute()`` supervision: a capability probe (the
+#: command carries ``-c``) sleeps, then writes the probe file through its
+#: ``--bind <dir> /output`` mount; an execution becomes the controlled child.
+_ISOLATION_STAND_IN = """import os, signal, sys, time
+from pathlib import Path
+
+args = sys.argv[1:]
+cut = args.index("--")
+options, payload = args[:cut], args[cut + 1:]
+if "-c" in payload:
+    time.sleep({probe_delay_s!r})
+    Path(options[options.index("/output") - 1], "probe").write_text("ok")
+    raise SystemExit(0)
+if {ignores_sigterm!r}:
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    time.sleep(60)
+os.execv({sleep!r}, [{sleep!r}, "60"])
+"""
+
+
+def _stand_in_sandbox(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    probe_delay_s: float,
+    ignores_sigterm: bool = False,
+) -> AnalysisCodeSandbox:
+    import shutil
+    import sys
+
+    sleep = shutil.which("sleep")
+    assert sleep is not None
+    stand_in = tmp_path / "isolation_stand_in.py"
+    stand_in.write_text(
+        _ISOLATION_STAND_IN.format(
+            probe_delay_s=probe_delay_s, ignores_sigterm=ignores_sigterm, sleep=sleep
+        )
+    )
+    sandbox = AnalysisCodeSandbox()
+    # probe() checks that both tools resolve before it launches the command.
+    monkeypatch.setattr(sandbox, "_bubblewrap", "bwrap-stand-in")
+    monkeypatch.setattr(sandbox, "_unshare", "unshare-stand-in")
+    monkeypatch.setattr(sandbox, "_base_command", lambda: [sys.executable, str(stand_in)])
+    return sandbox
+
+
+def _execute_stand_in(sandbox: AnalysisCodeSandbox, tmp_path: Path, *, timeout_s: float):
+    program, _identity, source_path = _persist_program(
+        tmp_path, "def analyze(inputs, parameters, output_directory):\n    pass\n", keys=("x",)
+    )
+    output = tmp_path / "output"
+    output.mkdir()
+    return sandbox.execute(
+        program=program,
+        source_path=source_path,
+        materialization_paths={},
+        materialization_descriptors={},
+        parameters={},
+        output_directory=output,
+        control_directory=tmp_path / "control",
+        timeout_s=timeout_s,
+        max_host_memory_gb=1.0,
+        program_seed=PROGRAM_SEED,
+    )
+
+
+@pytest.mark.allow_real_subprocess
+@pytest.mark.parametrize(("ignores_sigterm", "bound_s"), [(False, 0.75), (True, 1.75)])
+def test_generated_program_stops_at_the_continuing_allocation_within_the_termination_bound(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    ignores_sigterm: bool,
+    bound_s: float,
+) -> None:
+    """#1447: probe, request publication and SIGTERM reaping are charged to the allocation.
+
+    The caller passes ``min(per_skill_timeout_s, remaining)`` before the
+    probe. A 0.5 s probe plus a 0.5 s publication stall, followed by the full
+    timeout from launch, or the 1 s grace waited out on a zombie leader,
+    overrun expiry by about 1-2 s. Enforcement leaves only the poll interval,
+    or the SIGTERM grace for a child that ignores SIGTERM.
+    """
+    from agent.data_analysis import analysis_code_sandbox as module
+    from core.execution_deadline import execution_deadline
+
+    sandbox = _stand_in_sandbox(
+        tmp_path, monkeypatch, probe_delay_s=0.5, ignores_sigterm=ignores_sigterm
+    )
+    publish = module.publish_bytes_write_once
+    published_at: list[float] = []
+
+    def stalled_publish(path: str, payload: bytes) -> None:
+        publish(path, payload)
+        time.sleep(0.5)
+        published_at.append(time.monotonic())
+
+    monkeypatch.setattr(module, "publish_bytes_write_once", stalled_publish)
+    with execution_deadline(1.5) as allocation:
+        receipt = _execute_stand_in(sandbox, tmp_path, timeout_s=1.5)
+        overrun_s = time.monotonic() - max(allocation.expires_at, *published_at)
+
+    assert receipt.status == "timed_out"
+    assert overrun_s < bound_s
+    assert receipt.worker_pid is not None
+    assert not process_group_alive(receipt.worker_pid)
+
+
+@pytest.mark.allow_real_subprocess
+def test_capability_probe_cannot_run_past_the_continuing_allocation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1447: a probe that outlives the allocation is cut at expiry, not at 10 s.
+
+    The timeout is reported as ``timed_out`` without launching generated code;
+    a probe cut by the allocation is not evidence that isolation is missing.
+    """
+    from core.execution_deadline import execution_deadline
+
+    sandbox = _stand_in_sandbox(tmp_path, monkeypatch, probe_delay_s=5.0)
+    with execution_deadline(1.0) as allocation:
+        receipt = _execute_stand_in(sandbox, tmp_path, timeout_s=1.0)
+        overrun_s = time.monotonic() - allocation.expires_at
+
+    assert overrun_s < 0.5
+    assert receipt.status == "timed_out"
+    assert receipt.worker_pid is None
+    assert not (tmp_path / "control" / "request.json").exists()

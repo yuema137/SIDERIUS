@@ -37,9 +37,9 @@ def _print_readiness(readiness: WorkspaceReadiness | None) -> None:
         print(f"Create missing workspace folders with: {readiness.init_command}", file=sys.stderr)
 
 
-def _load(path: str) -> ResolvedConsole | None:
+def _load(path: str, *, credential_metadata_only: bool = False) -> ResolvedConsole | None:
     try:
-        return load_console(path)
+        return load_console(path, credential_metadata_only=credential_metadata_only)
     except MissingSetting as error:
         print(f"Console configuration is incomplete: {error}.", file=sys.stderr)
     except SettingsInvalid as error:
@@ -205,7 +205,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.credential_file is not None:
             parser.error("--credential-file is for init only")
         config_path = args.config
-    resolved = _load(config_path)
+    resolved = _load(config_path, credential_metadata_only=args.command == "init")
     if resolved is None:
         return 2
     config = resolved.config

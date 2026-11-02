@@ -45,6 +45,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from core.record_encoding import decode_record
+
 #: Why a digest could not be used. ``ok`` carries a payload; the other two carry
 #: a ``detail`` describing the failure.
 DigestStatus = Literal["ok", "missing", "unreadable"]
@@ -149,7 +151,7 @@ def read_committed_digests(
             continue
         try:
             with open(path) as f:
-                payload = json.load(f)
+                payload = decode_record(json.load(f))
         except (OSError, json.JSONDecodeError) as e:
             reads.append(
                 DigestRead(iter_idx=iter_idx, path=path, status="unreadable", detail=str(e))

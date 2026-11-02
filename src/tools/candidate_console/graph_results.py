@@ -46,6 +46,11 @@ def _summary(output: HyperparamTuningOutput, output_path: Path) -> GraphRunSumma
         model_type=view.model_type,
         status=view.status,
         termination_reason=view.termination_reason,
+        admission_refusal_reason=(
+            output.environment_admission_refusal.reason
+            if output.environment_admission_refusal is not None
+            else None
+        ),
         started_at=view.started_at,
         finished_at=view.finished_at,
         completed_rounds=view.completed_rounds,
@@ -59,7 +64,7 @@ def _summary(output: HyperparamTuningOutput, output_path: Path) -> GraphRunSumma
     )
 
 
-def _verified_bodies(
+def verified_bodies(
     submission: CandidateOperation, receipt: CandidateRunReceipt
 ) -> tuple[CandidateRunReceipt, ...]:
     """Return body receipts in verified order; a loop re-uses ``verify_loop`` only."""
@@ -73,7 +78,7 @@ def _verified_bodies(
     except OperationFailure:
         raise
     except (OSError, ValueError) as error:
-        raise OperationFailure("integrity", "verified loop bodies are unavailable") from error
+        raise OperationFailure("integrity", "verified loop iterations are unavailable") from error
 
 
 def _body_result(iteration: int, tuning: GraphNodeEvidence) -> GraphBodyResult:
@@ -106,15 +111,32 @@ def tuner_outcome(summary: GraphRunSummary) -> str:
     """
     rounds = summary.completed_rounds
     counted = (
-        f"{rounds} completed round{'s' if rounds != 1 else ''} in "
+        f"{rounds} completed tuning round{'s' if rounds != 1 else ''} in "
         f"{summary.total_attempts} attempt{'s' if summary.total_attempts != 1 else ''}"
     )
-    ending = summary.termination_reason.replace("_", " ")
+    endings = {
+        "completed": "",
+        "aborted_fail_rounds": "Consecutive tuning rounds reached the failure limit.",
+        "aborted_by_gate": "A validity gate stopped tuning.",
+        "scope_violation": "A data scope violation stopped tuning.",
+        "infrastructure_abort": "An infrastructure or environment check stopped tuning.",
+    }
+    ending = endings.get(
+        summary.termination_reason,
+        f"Stop reason: {summary.termination_reason.replace('_', ' ')}.",
+    )
     if rounds == 0:
-        return f"No training round completed: {counted} (tuner status {summary.status}; ended by {ending})."
-    if summary.status == "completed":
-        return f"Completed: {counted} (ended by {ending})."
-    return f"Not completed (tuner status {summary.status}): {counted} (ended by {ending})."
+        result = f"No tuning round completed: {counted}."
+    elif summary.status == "completed":
+        result = f"Completed: {counted}."
+    else:
+        result = f"Tuning did not finish: {counted}."
+    refusal = summary.admission_refusal_reason
+    return " ".join(
+        part
+        for part in (result, ending, f"Training could not start: {refusal}" if refusal else "")
+        if part
+    )
 
 
 def _verified_record(path: str, expected_sha256: str) -> HyperparamTuningOutput:
@@ -158,7 +180,7 @@ def read_graph_results(config: ConsoleConfig, operation_id: UUID) -> GraphResult
     if not isinstance(submission, CandidateOperation):
         return unavailable
 
-    bodies = _verified_bodies(submission, receipt)
+    bodies = verified_bodies(submission, receipt)
     preview = submission.request.preview
     tuning_id = execution_families(preview.document.definition, preview.execution_profile).tuning
     if tuning_id is None:

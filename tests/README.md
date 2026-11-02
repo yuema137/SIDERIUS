@@ -6,7 +6,8 @@ integration seams, shared fixtures/helpers, and bounded manual diagnostics. The
 [integration map](integration/README.md) for cross-process or provider seams.
 
 See [fixtures](fixtures/README.md), [helpers](helpers/README.md),
-[manual](manual/README.md), and preserved [pseudo-data](pseudo_data/README.md)
+[browser witnesses](browser/README.md), [manual](manual/README.md), and preserved
+[pseudo-data](pseudo_data/README.md)
 for ownership and invocation boundaries.
 
 Each family map identifies the production owner, the defect its tests catch,

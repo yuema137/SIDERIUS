@@ -301,6 +301,10 @@ def test_resume_advice_composes_after_declared_advice_and_is_absent_without_it()
         ("c1 csi\x9b2J", None),
         ("bidi \u202eoverride", None),
         ("bom\ufeffinside", None),
+        ("\ufeffedge\ufeff", None),
+        ("می\u200cخواهم", "می\u200cخواهم"),  # noqa: RUF001 — Persian needs ZWNJ.
+        ("👩\u200d🔬", "👩\u200d🔬"),
+        ("\x1c\x85 advice \x1f", "advice"),
     ],
 )
 def test_operator_advice_is_trimmed_bounded_and_free_of_control_characters(raw, accepted):

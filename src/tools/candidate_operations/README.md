@@ -103,7 +103,7 @@ When `state` is `completed`, `receipt.status` says what the native step reported
 | `prepared` | Preparation captured the inputs; nothing ran |
 | `accepted` / `rejected` | Candidate validation passed / failed; no training implied |
 | `completed` | Train & tune returned; read scores and Health before trusting results |
-| `paused` / `stopped` | A research loop paused (resumable) or stopped (final) |
+| `paused` / `stopped` | A research loop paused (review before resuming) or stopped (final) |
 | `cancelled` | Stopped at once by `cancel` |
 | `failed` / `timed_out` / `interrupted` | The native step did not finish; read the native log |
 
@@ -119,6 +119,17 @@ shared host ledger queues runs across stores; see
 To stop a running candidate, see
 [Stop a running candidate now](#stop-a-running-candidate-now). Captured native
 continuation is limited to the explicit route below.
+
+Keep status readers and the console in the same container/PID namespace that
+launched the operation. Containers can give the same process different PID
+numbers, so a reader in another namespace cannot safely decide that it ended.
+That uncertainty blocks release of its slot and End of an abandoned loop.
+Older records without namespace information retain the previous same-namespace
+assumption, so they can still release capacity after an upgrade. They cannot
+detect readers in another namespace. New records whose namespace cannot be
+read stay unknown and cannot release capacity; see the
+[observation boundaries](candidate-operations-contract.md#host-reservation-ledger)
+for the compatibility rule.
 
 Use `--kind operation` for wrapper output. Logs and full native receipts are
 trusted local data and may contain sensitive task or plugin output. Byte cursors
@@ -251,7 +262,9 @@ the reservation back when its processes, including training, have ended.
    create it.
 2. Write a budget file for this host: each GPU's UUID, hardware and memory
    ceiling, plus host memory, CPU slots and the maximum number of concurrent
-   operations. The [budget format](../../core/runtime_control/scheduling.md#budget-intake-run-invariants-and-child-environment)
+   operations. Add `"max_queued_operations": 2` to allow up to two waiting
+   operations; omit it or use zero to refuse submissions that must wait.
+   Leave memory headroom for these waiting processes. The [budget format](../../core/runtime_control/scheduling.md#budget-intake-run-invariants-and-child-environment)
    lists every field. Nothing in it is guessed for you.
 3. Add a `resources` object to each candidate submission saying what that run
    needs, for example
@@ -261,8 +274,10 @@ the reservation back when its processes, including training, have ended.
    that is how the run receives the GPU it was given. The `vram_gib` you declare
    is what the ledger reserves. The run itself does not yet check that it stays
    within it, so declare at least the run's own VRAM budget. Only `candidate`
-   submissions are accepted with a budget; other kinds are refused with
-   `resources_required`.
+   submissions and research-loop resumes are accepted with a budget; other kinds
+   are refused with `resources_required`. A resume reuses its first run's
+   `resources`, or brings its own when that run had none (see
+   [Stop, pause or resume a research loop](#stop-pause-or-resume-a-research-loop)).
 4. Submit every candidate with the same ledger directory and budget file. The
    two flags always go together:
 
@@ -277,9 +292,9 @@ directory gains `placement.json`, which names the GPU it was given. If the budge
 is currently full, the submission returns `queued`: it waits its turn, in the
 order submissions arrived, and starts by itself once earlier runs end (status
 shows `queued` until then). To drop a waiting run, cancel it; it is removed from
-the queue without running. Each waiting run keeps a process of about 0.56 GiB of
-memory open while it waits, and nothing limits how many can wait, so do not
-queue more runs than the host's memory can hold. A run that could never fit is refused with
+the queue without running. Waiting processes defer PyTorch loading. Once the
+queue reaches `max_queued_operations`, submission returns `host_queue_full`
+without starting another process; retry when space becomes available. A run that could never fit is refused with
 `resource_refused`. Two runs sharing one GPU slow each other
 down, which can change what a time budget admits. So a `time_budgeted` run is only
 placed on a GPU no other run is using, and no run is placed beside it. If every
@@ -304,6 +319,13 @@ that needs more than the largest GPU (or more memory or CPU than the budget) is
 refused, with `parallel_unit_exceeds_capacity` and a message naming that node. Without a ledger, the block must also carry its own
 `budget`. The exact rules are in the
 [worker contract](../candidate_worker/candidate-worker-contract.md#parallel-dispatch).
+
+Before starting work, a placed child checks that its reservation is still held.
+If that check cannot acquire the ledger lock within 30 seconds, the operation
+ends without running and reports `host_reservation_busy`. This indicates lock
+contention; retry as a new operation after contention clears.
+`host_reservation_unconfirmed` means the reservation could not be verified for
+another reason, such as removal or an unreadable ledger.
 
 Only waiting runs poll the ledger. A finished run's reservation is returned the
 next time a waiting run polls or any submission uses the ledger. If a crash leaves a reservation behind,
@@ -429,6 +451,12 @@ browser console offers the same actions in Monitor.
    `completed`. If the request arrives during the last iteration, that iteration
    finishes and the run reports `completed`.
 
+   To end a loop that is already paused, use `stop-loop` with its paused operation
+   UUID. Completed results are kept, and the loop cannot resume afterward. This
+   can succeed even when Resume is unavailable, such as when unfinished files
+   occupy the next iteration's folder. The worker must have finished cleanly;
+   an active or uncertain successor still prevents End.
+
 2. To resume a paused loop, review it and save the resume request once:
 
    ```sh
@@ -444,6 +472,26 @@ browser console offers the same actions in Monitor.
    control characters other than line breaks and tabs. Windows (CRLF) and Unix (LF)
    line breaks both work. If the advice is refused,
    nothing is saved and the command exits with status 2.
+
+   **Resuming under a shared host ledger.** If you will submit with
+   `--host-ledger` and `--host-budget` (a
+   [shared host ledger](#share-one-gpu-budget-across-operations), where each run
+   reserves part of the host budget before it starts), check whether the loop's
+   first run had a `resources` object:
+
+   - It had one: add nothing. The resume reserves the same `resources`.
+   - It had none: write the resumed part's needs to a file, for example
+     `resources.json` containing
+     `{"gpu_count": 0, "host_memory_gib": 8.0, "cpu_slots": 2, "time_budgeted": false}`
+     (the format of step 3 there), and add `--resources-file resources.json`.
+     Each resume of such a loop needs its own file.
+
+   An invalid file saves nothing and exits with status 2
+   (`invalid_input_or_record`). Whether the declaration fits is checked at
+   `submit`: a missing one is refused with `resources_required`, one beside the
+   first run's own `resources` with `run_resources_conflict`, and one submitted
+   without `--host-ledger` with `host_ledger_missing`. After such a refusal, write a
+   new request file with a new `--output` name; the saved file cannot be changed.
 
 3. Make the same provider API keys available in this shell as for the original
    launch, then submit:

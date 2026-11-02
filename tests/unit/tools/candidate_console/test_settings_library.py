@@ -23,9 +23,9 @@ def _files(root: Path, kind: str) -> set[str]:
 @pytest.mark.parametrize(
     ("kind", "content", "message"),
     [
-        ("llm", '{"interpet": {}}', "Not an LLM profile: llm_config: unknown configuration keys"),
-        ("advice", '{"propse": "x"}', "'propse'"),
-        ("advice", "{}", "carries no recognised advice key"),
+        ("llm", '{"interpet": {}}', "Not an LLM profile: Invalid value."),
+        ("advice", '{"propse": "x"}', "recognised keys"),
+        ("advice", "{}", "recognised keys"),
     ],
 )
 def test_invalid_uploads_are_refused_before_any_write(kind, content, message, workspace):

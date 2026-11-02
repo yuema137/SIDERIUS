@@ -664,3 +664,14 @@ proposal, managed storage, training settings when present, and the same resolved
 workflow files used by other reusable graph profiles. Fixed workflows and profiles
 with no declaration remain unchanged. Graph results continue to use `GraphTrace`;
 this profile does not populate the fixed `training_output` receipt field.
+
+### Parent diagnostics
+
+The ordinary and reusable preparation parents log caught exceptions with a full
+traceback through Python server logging before retaining the existing receipt
+error. Operation-child stderr is captured in the private operation log; failures
+escaping preparation admission are also logged by that child. Direct callers use
+their configured logging handler (stderr by default). Logging does not create or
+claim output directories, follow a replaced control directory, or change receipt
+bytes/identity. The console projects failed receipt errors into fixed categories;
+it does not echo those raw diagnostics into status or automatic cause summaries.

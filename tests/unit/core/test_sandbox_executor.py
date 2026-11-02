@@ -924,14 +924,15 @@ class TestBothSandboxesHonourTheDeviceIdentityContract:
 
     def test_the_stub_accepts_and_exposes_what_the_caller_passed(self, tmp_path):
         """MUTATION TARGET: accepting the argument and dropping it."""
-        from core.sandbox_executor import StubSandbox
+        from core.stub_sandbox import StubSandbox
 
         sandbox = StubSandbox(run_name="t", workspace=str(tmp_path), device_identity=self.IDENTITY)
         assert sandbox.device_identity == self.IDENTITY
 
     def test_both_sandboxes_expose_the_same_attribute(self, tmp_path):
         """The contract is shared, so a caller cannot care which it got."""
-        from core.sandbox_executor import StubSandbox, TidmadSandbox
+        from core.sandbox_executor import TidmadSandbox
+        from core.stub_sandbox import StubSandbox
 
         stub = StubSandbox(run_name="t", workspace=str(tmp_path), device_identity=self.IDENTITY)
         real = TidmadSandbox(run_name="t", workspace=str(tmp_path), device_identity=self.IDENTITY)
@@ -939,7 +940,8 @@ class TestBothSandboxesHonourTheDeviceIdentityContract:
 
     def test_absent_identity_stays_none_on_both(self, tmp_path):
         """A gap is not a default device — neither sandbox may invent one."""
-        from core.sandbox_executor import StubSandbox, TidmadSandbox
+        from core.sandbox_executor import TidmadSandbox
+        from core.stub_sandbox import StubSandbox
 
         assert StubSandbox(run_name="t", workspace=str(tmp_path)).device_identity is None
         assert TidmadSandbox(run_name="t", workspace=str(tmp_path)).device_identity is None

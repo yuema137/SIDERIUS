@@ -122,9 +122,10 @@ def estimate_proposal_time(
                     ``MODEL_REGISTRY``.
         model_config / train_config / loss_config: The draft's raw config
                     dicts. Must at least contain ``segmentation_size`` /
-                    ``batch_size`` / ``epochs`` / ``loss_type`` — missing
-                    keys fall back to the per-phase estimator defaults
-                    (which are safe but may produce low-fidelity numbers).
+                    ``batch_size`` / ``epochs`` / ``loss_type``. Temporal
+                    segmentation_size must be supplied or declared by the
+                    model config class; absence raises a typed unavailable
+                    error. Other missing keys use per-phase defaults.
         num_params: Exact or estimated parameter count of the draft. The
                     static formula is ``num_params × seg × bs × 6e-10`` so
                     order-of-magnitude accuracy is sufficient for gate-
@@ -158,6 +159,9 @@ def estimate_proposal_time(
         derive blocking behavior from it.
 
     Raises:
+        SegmentationDimensionUnavailableError: No temporal segmentation_size
+                    is supplied or declared; advisory callers should record
+                    the reason and skip the estimate.
         ValueError: ``num_params`` ≤ 0 or ``time_budget_minutes`` ≤ 0.
                     Silent fail-open to ``factor=0.0`` would defeat the
                     whole gate.

@@ -85,8 +85,8 @@ AUTHORED_LITERAL = 10_000
 class _ScopeRecorder:
     """A composed task that records the request it is asked to build from.
 
-    Only the scope capability is real; nothing here materializes data, which
-    is what keeps this a unit test of the AUTHORING and not of TIDMAD.
+    The scope capability and a cheap sized dataset support planning. No row
+    is read, keeping this a unit test of AUTHORING rather than of TIDMAD.
     """
 
     task_data_path_id = "c12p_b11_recorder"
@@ -94,8 +94,9 @@ class _ScopeRecorder:
     def __init__(self):
         self.requests: list = []
 
-    def training_dataset(self, scope, params):  # pragma: no cover
-        raise AssertionError("this test never materializes")
+    def training_dataset(self, scope, params):
+        # Planning now checks cardinality before issuing a resource probe.
+        return range(1024)
 
     def validation_dataset(self, scope, params):  # pragma: no cover
         raise AssertionError("this test never materializes")
@@ -242,7 +243,7 @@ def _bindings(agent_input, configs_dir, data_path=None) -> RunBindings:
         resolved_bypass_formal_threshold=None,
         hardware_context=None,
         device_identity=None,
-        time_data_dir=None,
+        time_data_dir=str(configs_dir),
         anchor_map_data=None,
         reference_scores=None,
         started_at=0.0,

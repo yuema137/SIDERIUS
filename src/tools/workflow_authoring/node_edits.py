@@ -24,13 +24,14 @@ from workflows.definition import (
 )
 from workflows.definition.catalog import PROTOCOLS
 from workflows.definition.draft import BindingPatch, DraftProblem, WorkflowDraft, inspect_draft
-from workflows.definition.source import WorkflowSourceError, render_workflow_source
+from workflows.definition.source import WorkflowSourceError
 from workflows.definition.source_edits import (
     SourceEditError,
     insert_external,
     insert_node,
     remove_nodes,
 )
+from workflows.definition.source_updates import update_workflow_source
 
 from .models import (
     AddNodeProposal,
@@ -391,7 +392,7 @@ def apply_node_drafts(proposal: NodeDraftsProposal) -> tuple[str, NodeEditSummar
     """Return proposed source for every pending addition, or refuse before rendering.
 
     Without existing-content edits the anchor bytes stay and each addition is a
-    targeted insertion; otherwise the combined document is rendered canonically.
+    targeted insertion; otherwise the combined document preserves untouched source literals.
     The caller re-parses the result with the declaration validator.
     """
     base, projected = _projection(proposal)
@@ -433,8 +434,10 @@ def apply_node_drafts(proposal: NodeDraftsProposal) -> tuple[str, NodeEditSummar
             raise NodeEditRefusal("node_edit", str(error)) from error
         kept = "all other source bytes are unchanged."
     elif remaining is not None:
-        source = render_workflow_source(_deleted(base, proposal, remaining))
-        kept = "the other edits of this draft are rendered as canonical source."
+        source = update_workflow_source(
+            proposal.source, _deleted(base, proposal, remaining), browser_numbers=True
+        )
+        kept = "untouched source literals are preserved."
     else:
         payload = base.model_dump(mode="json")
         payload["definition"]["externals"].extend(
@@ -461,8 +464,8 @@ def apply_node_drafts(proposal: NodeDraftsProposal) -> tuple[str, NodeEditSummar
                 "\n".join(inspection.diagnostics),
                 inspection.problems,
             )
-        source = render_workflow_source(inspection.document)
-        kept = "the other edits of this draft are rendered as canonical source."
+        source = update_workflow_source(proposal.source, inspection.document, browser_numbers=True)
+        kept = "untouched source literals are preserved."
     added = tuple(item.node for item in proposal.nodes)
     parts = [f"{len(added)} node(s) ({', '.join(added)}) with layout positions"] if added else []
 

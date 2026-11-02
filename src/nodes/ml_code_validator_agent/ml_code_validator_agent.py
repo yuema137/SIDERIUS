@@ -79,6 +79,7 @@ from core.probe_seeds import (
     require_probe_seed,
     standalone_probe_seed,
 )
+from core.record_encoding import record_json
 from core.run_seed_lock import run_seed_argument
 from core.subprocess_env import subprocess_env
 from core.training_seeds import SeedContext
@@ -1090,7 +1091,7 @@ class MLCodeValidatorAgent:
         os.makedirs(workspace, exist_ok=True)
         path = os.path.join(workspace, f"validation_{run_name}.json")
         with open(path, "w") as f:
-            json.dump(out.model_dump(), f, indent=2)
+            f.write(record_json(out, indent=2).decode())
 
 
 # ---------------------------------------------------------------------------

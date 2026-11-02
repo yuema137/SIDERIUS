@@ -1,35 +1,10 @@
-"""F-12e-G2 — a diverged training run's own record must survive the storage boundary.
+"""Legacy null-projected divergence records must remain readable (#1111).
 
-The defect this module owns is a WRITER/READER CONTRADICTION across
-persistence, not a schema opinion:
-
-* WRITER — ``execute_tools/scoring_utils.py::coerce_nonfinite_to_none`` is
-  applied to every record in ``core/sandbox_executor.py``
-  (``LocalRecorder.save_record``) and replaces every non-finite float with
-  JSON ``null``. That is correct and stays: RFC-8259 has no NaN/Infinity.
-* READER — ``ExperimentRecord.loss_history`` and
-  ``TrainingHistory.train_objective`` / ``validation_objective`` declared
-  ``list[float]``, an ELEMENT type that forbids exactly what the writer
-  produces.
-
-The trainer emits ``float("nan")`` by construction on a diverged epoch
-(``execute_tools/train_engine_sandbox.py`` — ``np.mean`` over an empty batch
-list, and a diverged criterion), so ONE bad epoch was enough to make
-``HyperparamTuningOutput.model_validate`` raise in
-``nodes/ml_hyperparameter_tune_agent/records.py``, drop the run to the
-degraded ``status="failed"`` partial output with no ``best_denoising_score``,
-and thereby sever the iteration-to-iteration restore chain
-(``run_one_iteration.py`` writes ``status="no_records"``; ``core/resume.py``
-skips absorption and never appends to ``committed_iters``).
-
-**Why an in-memory test could not catch this.**
-``tests/unit/execute_tools/test_step07a_c1_training_history.py`` already
-asserts at two places that the schema accepts ``float("nan")`` /
-``float("inf")``. Both are true and both stay green through the defect,
-because neither crosses ``coerce_nonfinite_to_none`` + ``json.dump`` +
-re-validate. The value the schema was asked to accept is not the value that
-comes back off disk. Every test here therefore drives the REAL
-``LocalRecorder``.
+Before the versioned encoding, LocalRecorder replaced every non-finite float
+with null. Archived records still carry that image, including null positions
+inside objective histories. Preserve the original regression witnesses for
+schema absorption, diagnosis and resume; new-write losslessness is covered by
+test_record_encoding.py and native worker record tests.
 """
 
 from __future__ import annotations
@@ -95,18 +70,19 @@ def _diverged_record(**overrides) -> dict:
 
 
 def _persist(tmp_path, record: dict) -> list[dict]:
-    """Push one record through the REAL recorder and read the summary back.
+    """Read an archived null-projected summary through the current recorder.
 
-    This is the hop the in-memory tests skip: ``save_record`` applies
-    ``coerce_nonfinite_to_none`` and ``json.dump``; ``get_summary`` re-reads
-    the file. What comes back is the storage image, not the input.
+    New writers use versioned lossless records (#1111). These fixtures retain
+    the historical null image to protect compatibility with existing runs.
     """
     recorder = LocalRecorder(
         record_dir=str(tmp_path / "records"),
         summary_file=str(tmp_path / "summary.json"),
         run_name="g2run",
     )
-    recorder.save_record(copy.deepcopy(record))
+    (tmp_path / "summary.json").write_text(
+        json.dumps([coerce_nonfinite_to_none(copy.deepcopy(record))])
+    )
     return recorder.get_summary()
 
 
@@ -131,15 +107,8 @@ def _output_dict(all_records: list[dict]) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def test_the_recorder_writes_none_where_the_objective_was_non_finite(tmp_path):
-    """Pins the WRITER half of the contradiction, so the reader tests below
-    are not arguing with a hypothetical.
-
-    Fails if ``coerce_nonfinite_to_none`` stops reaching the objective series
-    (e.g. someone makes the coercion shallow, or moves it off
-    ``save_record``) — at which point the on-disk record would carry a bare
-    ``NaN`` token and break every ``JSON.parse`` consumer instead.
-    """
+def test_the_recorder_reads_legacy_null_objective_positions(tmp_path):
+    """Archived missing values must remain missing, never be guessed into floats."""
     summary = _persist(tmp_path, _diverged_record())
     assert summary[0]["loss_history"] == [3.0, 2.0, None]
     assert summary[0]["final_loss"] is None

@@ -215,7 +215,11 @@ def test_live_subprocess_route_checks_status_before_results_and_health():
     )
     source = inspect.getsource(execution._run_local_evaluation_phase)
     run_skill = source.index('_runtime._run_skill("denoising_score_skill"')
-    require_success = source.index("_require_successful_scoring_result(score_res)")
-    unpack_results = source.index('_child_results = score_res.get("results"')
+    adoption = source.index(
+        "adopt_child_score(bindings, score_res, _require_successful_scoring_result)"
+    )
     health = source.index("apply_round_health(")
-    assert run_skill < require_success < unpack_results < health
+    assert run_skill < adoption < health
+    transport = importlib.import_module("nodes.ml_hyperparameter_tune_agent.scoring_transport")
+    helper = inspect.getsource(transport.adopt_child_score)
+    assert helper.index("require_success(score)") < helper.index("return ChildScoreFacts(")

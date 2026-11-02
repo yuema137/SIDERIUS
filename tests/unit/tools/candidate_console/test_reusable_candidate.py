@@ -652,3 +652,114 @@ def test_review_projects_prepared_training_and_task_locks(
     assert review.facts.training.workflow_parameter_rules.model_dump()["rules"][
         "train_config.lr_schedule"
     ] == {"exact": None}
+
+
+@pytest.mark.parametrize(
+    "contract", ["proposal.input", "optional.task-composition-ref", "native-training.settings"]
+)
+def test_capture_review_missing_observation_is_bounded_refusal(captured, monkeypatch, contract):
+    """Missing captured inputs must refuse review instead of leaking StopIteration as HTTP 500."""
+    adapter, project, choice, _ = captured
+    selected = adapter.select(project.project_id, choice)
+    task, inspected, operation = adapter._operation(project.project_id, selected, uuid4())
+    definition = operation.request.preview.document.definition
+    binding = definition.externals[0].model_copy(update={"contract": contract})
+    definition = definition.model_copy(update={"externals": (binding,)})
+    document = operation.request.preview.document.model_copy(update={"definition": definition})
+    preview = operation.request.preview.model_copy(update={"document": document})
+    request = operation.request.model_copy(update={"preview": preview, "files": ()})
+    monkeypatch.setattr(
+        adapter,
+        "_operation",
+        lambda *args: (task, inspected, operation.model_copy(update={"request": request})),
+    )
+    with pytest.raises(OperationFailure) as refused:
+        adapter.review(project.project_id, selected)
+    assert refused.value.detail.code == "reusable_preparation"
+    assert refused.value.detail.message == "captured review input missing"
+
+
+@pytest.mark.parametrize(
+    "contracts",
+    [
+        ("proposal.input", "proposal.input"),
+        ("optional.task-composition-ref", "optional.task-composition-ref"),
+        ("proposal.input", "optional.task-composition-ref"),
+        ("optional.task-composition-ref", "proposal.input"),
+        ("native-training.settings", "native-training.settings"),
+    ],
+)
+@pytest.mark.parametrize("values", ["equal", "different", "both_null", "first_null", "second_null"])
+def test_capture_review_compares_repeated_fact_sources(captured, tmp_path, contracts, values):
+    """Family proposal inputs may repeat equal rules, but conflicts must never overwrite them."""
+    from tools.candidate_console.capture_facts import capture_facts
+    from tools.workflow_preview.models import FileObservation
+
+    adapter, project, choice, _ = captured
+    selected = adapter.select(project.project_id, choice)
+    _, _, operation = adapter._operation(project.project_id, selected, uuid4())
+    definition = operation.request.preview.document.definition
+    proposal_binding = next(b for b in definition.externals if b.contract == "proposal.input")
+    proposal_file = next(
+        f for f in operation.request.files if f.reference == f"external.{proposal_binding.id}"
+    )
+    proposal = json.loads(Path(proposal_file.path).read_bytes())
+    reference = proposal["task_composition_ref"]
+    assert reference is not None
+    bindings, observations = [], []
+    for index, contract in enumerate(contracts):
+        binding = proposal_binding.model_copy(update={"id": f"source{index}", "contract": contract})
+        null_rules = (
+            values == "both_null"
+            or (values == "first_null" and index == 0)
+            or (values == "second_null" and index == 1)
+        )
+        limit = 64 if values == "different" and index == 1 else 32
+        reference["parameter_rules"] = (
+            None if null_rules else {"rules": {"train_config.batch_size": {"exact": limit}}}
+        )
+        if contract == "proposal.input":
+            content = proposal
+        elif contract == "optional.task-composition-ref":
+            content = reference
+        else:
+            content = {
+                "launch": {
+                    "max_rounds": limit,
+                    "workflow_parameter_rules": reference["parameter_rules"],
+                }
+            }
+        payload = json.dumps(content).encode()
+        path = tmp_path / f"source{index}.json"
+        path.write_bytes(payload)
+        bindings.append(binding)
+        observations.append(
+            FileObservation(
+                reference=f"external.{binding.id}",
+                path=str(path),
+                sha256=hashlib.sha256(payload).hexdigest(),
+                size_bytes=len(payload),
+            )
+        )
+    definition = definition.model_copy(update={"externals": tuple(bindings)})
+    document = operation.request.preview.document.model_copy(update={"definition": definition})
+    preview = operation.request.preview.model_copy(update={"document": document})
+    request = operation.request.model_copy(
+        update={"preview": preview, "files": tuple(observations)}
+    )
+    field = "training" if contracts[0] == "native-training.settings" else "rules"
+    if values in {"equal", "both_null"}:
+        facts = capture_facts(request)
+        rules = facts.task_parameter_rules
+        if field == "training":
+            assert facts.training is not None
+            assert facts.training.max_rounds == 32
+            rules = facts.training.workflow_parameter_rules
+        assert (None if rules is None else rules.model_dump()) == (
+            None if values == "both_null" else {"rules": {"train_config.batch_size": {"exact": 32}}}
+        )
+    else:
+        with pytest.raises(OperationFailure) as refused:
+            capture_facts(request)
+        assert refused.value.detail.code == "reusable_preparation"
+        assert refused.value.detail.message == f"conflicting captured review {field} bindings"

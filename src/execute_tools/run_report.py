@@ -214,9 +214,9 @@ class ObjectiveHistory(BaseModel):
     train_objective: list[float | None] = Field(
         description=(
             "R2, one value per completed epoch. An ELEMENT is None where that "
-            "epoch's objective was non-finite and the record crossed the storage "
-            "boundary — `scoring_utils.coerce_nonfinite_to_none` writes JSON null "
-            "for NaN/inf, and `TrainingHistory` declares the same tolerant element "
+            "epoch's objective was non-finite and a legacy record crossed the "
+            "storage boundary — before #1111 `scoring_utils.coerce_nonfinite_to_none` "
+            "wrote JSON null for NaN/inf, and `TrainingHistory` declares the same tolerant element "
             "type since #299. The projection MIRRORS that shape rather than "
             "narrowing it: positions are preserved, so `epochs_completed == "
             "len(train_objective)` still holds and a diverged epoch renders as a "
@@ -883,9 +883,10 @@ _SCORED_STATUSES = frozenset({"success"})
 def _finite(value: float | None) -> float | None:
     """``None`` for a missing or non-finite value.
 
-    ``coerce_nonfinite_to_none`` already maps the scorer's ``-inf`` sentinel to
-    JSON null at the storage boundary, but an in-memory output has not been
-    through it, so both spellings of "no signal" arrive here.
+    Legacy outputs carry the scorer's ``-inf`` sentinel as JSON null (the
+    pre-#1111/#1316 ``coerce_nonfinite_to_none`` projection); current records
+    and in-memory outputs keep the float, so both spellings of "no signal"
+    arrive here.
     """
     if value is None:
         return None

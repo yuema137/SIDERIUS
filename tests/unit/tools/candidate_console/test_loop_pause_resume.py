@@ -343,6 +343,58 @@ def test_repeated_resume_request_replays_before_credential_reads(console_config,
     assert submitted == [(existing, {}), (existing, {})]
 
 
+@pytest.mark.parametrize("lookup_failure", [False, True])
+def test_resume_credential_refusal_rechecks_concurrent_admission(
+    console_config, monkeypatch, lookup_failure
+):
+    """An admission during credential reading must replay or fail closed, never unlock."""
+    request_id, predecessor = uuid4(), uuid4()
+    admitted = False
+    submitted = []
+
+    def lookup(*_):
+        if not admitted:
+            return None
+        if lookup_failure:
+            raise OperationFailure("integrity", "unreadable concurrent record")
+        return CandidateLoopResumeOperation(
+            request_id=request_id,
+            request=CandidateLoopResumeRequest(
+                predecessor_operation_id=predecessor, expected_receipt_digest=DIGEST
+            ),
+        )
+
+    def read_credentials(*_):
+        nonlocal admitted
+        admitted = True
+        raise OperationFailure("credentials", "credentials changed during admission")
+
+    def submit(store, submission, launch_environment, **_options):
+        submitted.append((submission.request_id, launch_environment))
+        return _handle(submission.request_id, "existing")
+
+    monkeypatch.setattr(SERVICE + "lookup_operation_request", lookup)
+    monkeypatch.setattr(SERVICE + "loop_root_operation", lambda *_: _root())
+    monkeypatch.setattr(SERVICE + "credentials", read_credentials)
+    monkeypatch.setattr(SERVICE + "submit_operation", submit)
+    response = client(console_config).post(
+        "/api/loop-resumes",
+        json={
+            "request_id": str(request_id),
+            "predecessor_operation_id": str(predecessor),
+            "expected_receipt_digest": DIGEST,
+        },
+    )
+    if lookup_failure:
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "integrity"
+        assert not submitted
+    else:
+        assert response.status_code == 202, response.text
+        assert response.json()["observation"] == "existing"
+        assert submitted == [(request_id, {})]
+
+
 @pytest.mark.parametrize(
     ("kind", "receipt", "successor", "advice", "expected_loop"),
     (
@@ -374,6 +426,8 @@ def test_status_projects_resume_segment_bound_and_successor(
     """Fails if a resume segment loses its root bound (hiding Stop/Pause), the
     successor link is dropped or breaks the strict status view, a segment's Resume advice
     is not shown, or an advice-free segment's status gains an ``operator_advice`` key."""
+    # This test isolates loop controls; verified outcome receipts are covered in test_outcomes.
+    monkeypatch.setattr("tools.candidate_console.service.outcome_evidence", lambda *args: None)
     operation_id = uuid4()
     monkeypatch.setattr(SERVICE + "operation_admitted", lambda config, value: True)
     monkeypatch.setattr(SERVICE + "loop_control_requests", lambda config, value: (False, False))

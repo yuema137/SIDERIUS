@@ -34,12 +34,12 @@ Frozen semantics this module carries:
   ``absent``.
 * Non-finite objective values are EVIDENCE (a diverged run), not a schema
   error; only the lengths must agree.
-* That evidence must SURVIVE the storage boundary. Every record is written
-  through :func:`execute_tools.scoring_utils.coerce_nonfinite_to_none`
-  (``sandbox_executor.LocalRecorder.save_record``), which replaces every
-  non-finite float with JSON ``null`` — RFC-8259 has no NaN/Infinity token.
-  So the STORAGE IMAGE of a diverged objective is a ``None`` ELEMENT, and
-  the objective series accept it: ``list[float | None]``. Positions are
+* That evidence must SURVIVE the storage boundary. New records keep it as a
+  float through ``core.record_encoding`` (``LocalRecorder.save_record``).
+  Records written before #1111 passed through
+  :func:`execute_tools.scoring_utils.coerce_nonfinite_to_none`, whose
+  STORAGE IMAGE of a diverged objective is a ``None`` ELEMENT, so the
+  objective series still accept it: ``list[float | None]``. Positions are
   preserved, so ``epochs_completed == len(train_objective)`` and the
   R2/R3 length agreement are unaffected. A strict ``list[float]`` here made
   re-validation of a diverged run's own record raise, which discarded the

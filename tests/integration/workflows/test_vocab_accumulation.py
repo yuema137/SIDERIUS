@@ -50,6 +50,7 @@ from agent.schemas.interpretation import (
     PREDICTION_SEMANTICS_SIGNSAFE_V2 as V2,
 )
 from agent.schemas.interpretation import InterpretationInput, InterpretationOutput, ModelRunSummary
+from agent.schemas.prediction_reference import ObservedPredictionReference
 from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import local_full_context
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.result_interpretation_agent import ResultInterpretationAgent
@@ -57,7 +58,9 @@ from tests.helpers.metric_fixtures import shipped_spec
 
 # Reuse seed summaries and proposal fixtures defined in the interpretation node test
 from tests.integration.nodes.test_result_interpretation_agent import (
-    _PREVIOUS_PROPOSAL_REFUTED,
+    _PREVIOUS_PROPOSAL_REFUTED as _LEGACY_PROPOSAL_REFUTED,
+)
+from tests.integration.nodes.test_result_interpretation_agent import (
     _SEED_PUNET,
     _SEED_WAVENET,
 )
@@ -65,6 +68,20 @@ from tests.integration.nodes.test_result_interpretation_agent import (
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
 pytestmark = pytest.mark.dual_mode
+
+
+def _observed_reference(value: float) -> dict[str, object]:
+    """Supply independently observed proposal-time evidence for these scenarios."""
+    metric = shipped_spec()
+    return ObservedPredictionReference(
+        metric_id=metric.id, direction=metric.direction, value=value
+    ).model_dump(mode="json")
+
+
+_PREVIOUS_PROPOSAL_REFUTED = {
+    **_LEGACY_PROPOSAL_REFUTED,
+    "observed_prediction_reference": _observed_reference(5.576),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -103,6 +120,7 @@ _SPECTRAL_NET_SUMMARY = ModelRunSummary(
 # Previous proposal for iteration 2: spectral_net, predicted to beat SOTA by a margin.
 # threshold_for_refutation=5.9, actual=6.1 → CONFIRMED (6.1 > 5.9).
 _PREVIOUS_PROPOSAL_ITER2 = {
+    "observed_prediction_reference": _observed_reference(5.576),
     "model_name": "spectral_net",
     "falsifiable_prediction": {
         "metric": "denoising_score",
@@ -333,6 +351,7 @@ _PROMO_CANDIDATE = {
 
 # Iter 1 previous-proposal: attn_wavenet (REFUTED — actual=-1.509, predicted=6.5)
 _PROMO_PROPOSAL_ITER0 = {
+    "observed_prediction_reference": _observed_reference(5.576),
     "model_name": "attn_wavenet",
     "falsifiable_prediction": {
         "metric": "denoising_score",
@@ -356,6 +375,7 @@ _PROMO_PROPOSAL_ITER0 = {
 
 # Iter 2 previous-proposal: spectral_net (CONFIRMED — actual=6.1, predicted=6.0)
 _PROMO_PROPOSAL_ITER1 = {
+    "observed_prediction_reference": _observed_reference(5.576),
     "model_name": "spectral_net",
     "falsifiable_prediction": {
         "metric": "denoising_score",
@@ -379,6 +399,7 @@ _PROMO_PROPOSAL_ITER1 = {
 
 # Iter 3 previous-proposal: wavelet_net (CONFIRMED — actual=6.3, predicted=6.2)
 _PROMO_PROPOSAL_ITER2 = {
+    "observed_prediction_reference": _observed_reference(6.1),
     "model_name": "wavelet_net",
     "falsifiable_prediction": {
         "metric": "denoising_score",
@@ -622,6 +643,7 @@ def test_vocab_candidate_promotion_across_three_iterations(tmp_path, request):
 
 
 @pytest.mark.dual_mode
+@pytest.mark.usefixtures("synthetic_dataset_profile")
 def test_vocab_discoveries_appear_in_proposal_prompt(tmp_path, request):
     """H.3 — Discoveries from interpretation round N reach the proposal agent's
     Stage 1 user prompt in round N+1.
@@ -833,6 +855,7 @@ def test_vocab_discoveries_appear_in_proposal_prompt(tmp_path, request):
 
 # Proposals include proposed_vocab_links so we can verify E.7 tracking.
 _E4_PROPOSAL_REFUTED = {
+    "observed_prediction_reference": _observed_reference(5.576),
     "model_name": "attn_wavenet",
     "falsifiable_prediction": {
         "metric": "denoising_score",
@@ -862,6 +885,7 @@ _E4_PROPOSAL_REFUTED = {
 }
 
 _E4_PROPOSAL_CONFIRMED = {
+    "observed_prediction_reference": _observed_reference(5.576),
     "model_name": "spectral_net",
     "falsifiable_prediction": {
         "metric": "denoising_score",

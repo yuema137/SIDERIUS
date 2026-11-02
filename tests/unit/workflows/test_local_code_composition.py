@@ -135,8 +135,8 @@ def test_single_file_composition_and_effective_health_match_base_receipt(
     """Independent hashes pin the composed package and explicit probe semantics.
 
     The composition receipt includes the example source identity, including its
-    explicit output-artifact inventory. Adding that inventory changes the
-    composition identity without changing the effective Health configuration;
+    explicit output-artifact inventory and #1342 sampling-seed refusal. Those
+    source changes alter identity without changing effective Health configuration;
     the independently frozen Health receipt below therefore stays unchanged.
     """
     from core.generated_library import bind_generated_library_to_workspace
@@ -159,7 +159,7 @@ def test_single_file_composition_and_effective_health_match_base_receipt(
                 str(REPO_ROOT / "configs/task_composition/synthetic_masked_regression.yaml")
             )
             assert legacy_fingerprints == [
-                "85cbe5fc86397839cb858e841a2a80afc984a4abfe31f00ad98db5bd46b2165f"
+                "e429f8d71015cc97649f7c61b0f76ebf1d1af75f30b78a3d4813a87e6ba8f233"
             ]
             assert composition.semantic_fingerprint != legacy_fingerprints[0]
             with bind_run_task_composition(composition, physical_data_root=str(tmp_path)):

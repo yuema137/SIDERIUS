@@ -335,25 +335,26 @@ non-finite numbers at their owners (`NumericRange`, `ParameterRule`), so no such
 value reaches transport.
 Ingress may write such a value as a string (for example `"-inf"`).
 
-Every other candidate-worker JSON write declares its artifact class through
-`record_json.artifact_json` (issue #1046), and the class picks one existing
-owner; there is no third encoding:
+Candidate-worker record writes use `record_json.artifact_json(kind="record")`,
+which delegates to the versioned strict encoding in
+[`core/record_encoding.py`](../../core/record_encoding.py). The
+[core contract](../../core/core-contract.md#versioned-non-finite-record-json-issue-1111)
+owns metadata, typed float paths, legacy decoding and identity effects.
+Unknown artifact classes raise `ValueError`.
 
-- `record`: files that people and the dashboard read, namely captured node
-  records such as `run_output_<run_name>.json` and the request/receipt control
-  documents. These use the storage owner
-  `execute_tools.scoring_utils.coerce_nonfinite_to_none`: strict JSON, with
-  inf/NaN written as `null`, exactly as the native tuner writes `run_output`.
-- `internal`: documents a later worker phase rereads and compares, namely node
-  inputs, the proposal seed, fan-out payloads and the graph tuning input. These
-  use the unit-transport JSON-constant encoding
-  (`unit_transport.constants_json`), so an inf/NaN value survives the reread.
+`kind="internal"` names documents a later phase rereads: `request.json`, node
+inputs, proposal seed, fan-out payloads and graph tuning input. These retain
+`unit_transport.constants_json`. Control receipts use the same versioned record owner, with the existing
+bounded control encoder enforcing its byte limit. Whether a value may be non-finite remains with its
+schema; encoding does not grant admission to invalid inputs.
 
-`capture_record` compares an existing native record with the returned output
-after projecting the output through the same storage owner. A `-inf` no-signal
-sentinel or a NaN therefore no longer reads as "native record disagrees", and
-the in-memory output, with `-inf` intact, is what the worker passes on.
-Whether a value may be nonfinite stays with its owner (issue #1012).
+`capture_record` preserves native bytes, comparing new records through the
+shared lossless encoding (NaN-safe, with infinity sign preserved). Legacy
+unversioned records are compared with their old null projection; the in-memory
+output remains intact. New native records are decoded by their owning output
+schema. Adaptor readback dispatches on the recorded `encoding_version`, absent
+only for legacy records, and recomputes both record and emitted-output bytes
+under that version. No historical receipt or artifact is rewritten.
 
 Passed validation returns typed in-memory outputs to training. Missing model
 or loss sources refuse before construction/staging. The shared construction
@@ -932,6 +933,31 @@ its declared source and `stage_model_source` copies nothing, so no bytes are
 compared; under the selection profile a staged copy then contradicts the record and
 is refused. An unreadable staged or model file is a `ValueError` ("tuner staged
 model ..."), never an incidental `OSError`.
+
+**Record reads after the digest check (#1407).** The trace's `record_sha256`
+check (`record_digest`) proves a native record at one instant. Every later parse of
+a node record in `graph_evidence` goes through `read_traced_record(entry)`, which
+re-hashes the exact bytes it returns against `entry.record_sha256` and raises
+`ValueError("graph native record mismatch")` otherwise: the validation verdict,
+the judged-branch implementation and validation records (`verify_judged_branches`),
+the trained proposal, validation and tuner records (`verify_graph_training`), the
+staged implementation and the interpretation record. A record replaced between the
+digest check and a parse is therefore refused, never parsed. `bounded=True` (the
+default) keeps the 4 MiB `read_graph_control` limit where the read already had it;
+the `verify_graph_training` and interpretation reads stay unbounded as before. Both read
+without following a final symlink, as `record_digest` does.
+The same owner serves the other readers of traced records. `verify_adaptors` reads
+each adaptor record once through `read_traced_record` (bounded) and uses those bytes
+both for the LLM COMBINE strategy-evidence anchor (`_replay_context`) and for the
+byte comparison with the recomputation, so a record and judge evidence swapped
+together after the digest check are refused (#1476). The loop consumers of a
+verified body (`loop_evidence.advance_body` and `summarize_tried_bodies`,
+`loop_judge._body_projection`, `loop_stop.project_body_score`) read the
+interpretation, proposal and tuning records through
+`read_traced_record(entry, bounded=False)`, so chain history, the tried-body summary,
+stop-judge facts and the stop score never parse bytes the trace does not attest
+(#1477). Witnesses: `test_literature_judged.py::test_an_adaptor_record_swapped_after_its_digest_check_is_refused`,
+`test_finite_loop.py::test_loop_consumers_refuse_a_body_record_swapped_after_verification`.
 Witness: `tests/unit/tools/candidate_worker/test_adaptor_selection.py` (second
 branch trained when the first is rejected; all rejected; declared and reversed
 binding order over execution order; tampered record/output/closure; extra output
@@ -1120,7 +1146,7 @@ either literature shape. Proposal diagnostics are per node
 | --- | --- |
 | `native-literature-collection/v1` (S2) | ≥ 1 external reviews; one adaptor with one `literature.output` port binding every review result exactly once, `collect/v1` + `all/v1` + `single/v1`; exactly one proposal using `literature-collection-to-proposal(reviews=AdaptorSource(<adaptor>), proposal_input=<external seed>)`; its complete branches |
 | `native-literature-judged/v1` (B6-8a) | ≥ 1 external reviews; one adaptor with one `literature.output` port (`max_items` declared) binding every review exactly once, an LLM COMBINE kind (`fanout.literature_judged_candidate`; any other profile refuses an LLM COMBINE with `LLM_COMBINE_NOT_ADMITTED`), `single/v1` or `per-item/v1(M)`; one proposal per output through `literature-to-proposal(output=AdaptorSource(<adaptor>[, index=i]), proposal_input=<external seed>)` (no index for `single/v1`, indices `0..M-1` each once); `admit_llm_strategy` admits the kind and the deterministic validation table admits a declared `Fallback.combine` with the same SELECT/DISTRIBUTE; one complete family per proposal. See "LLM COMBINE literature profile" |
-| `native-proposal-judged/v1` (B6-8b) | ≥ 2 external proposals; one adaptor with one `proposal.output` port (`max_items` declared) binding every proposal result exactly once, an LLM COMBINE kind, `single/v1` or `per-item/v1(M)`; one branch per output: an implementation `proposal-to-implementation(output=AdaptorSource(<adaptor>[, index=i]), storage)` and exactly one validation reading it (`implementation-to-validation`, or `proposed-implementation-to-validation` whose `proposal` is the same adaptor output); no other node, tuner, loop or route (`definition/proposal_judged.py`). See "LLM COMBINE literature profile" for the executor; a judged branch's proposal value is the adaptor output it reads (`adaptor_phase.judged_proposal`) and its seed (task facts, constraints) is the seed of the proposal that output cites first; every proposal seed is reconciled against every branch's protocol externals before any effect. A synthesized `proposal.output` (`judge-merge`, `primary-advisors`, debate synthesize) gets its system `candidate_id` at the adaptor boundary, `agent.schemas.proposal.mint_candidate_id(CombinedItem.value_sha256)` (the proposer's mint owner; deterministic, so replay reproduces it; the author still leaves it unset), so the validation join's identity check holds unchanged. The worker stamps `ImplementorInput.consumed_input_sha256 = inputs.consumed_input_sha256(seed, proposal)` for judged-branch implementations only (the node echoes it into `ImplementorOutput`; absent and omitted elsewhere), and `graph_evidence.verify_judged_branches` recomputes it from the verified adaptor value and the owner's persisted seed: a branch that ran on another output or another owner's seed is refused |
+| `native-proposal-judged/v1` (B6-8b) | ≥ 2 external proposals; one adaptor with one `proposal.output` port (`max_items` declared) binding every proposal result exactly once, an LLM COMBINE kind, `single/v1` or `per-item/v1(M)`; one branch per output: an implementation `proposal-to-implementation(output=AdaptorSource(<adaptor>[, index=i]), storage)` and exactly one validation reading it (`implementation-to-validation`, or `proposed-implementation-to-validation` whose `proposal` is the same adaptor output); no other node, tuner, loop or route (`definition/proposal_judged.py`). See "LLM COMBINE literature profile" for the executor; a judged branch's proposal value is the adaptor output it reads (`adaptor_phase.judged_proposal`) and its seed (task facts, constraints) is the seed of the proposal that output cites first; every proposal seed is reconciled against every branch's protocol externals before any effect. A synthesized `proposal.output` (`judge-merge`, `primary-advisors`, debate synthesize) gets its system `candidate_id` at the adaptor boundary, `agent.schemas.proposal.mint_candidate_id(CombinedItem.value_sha256)` (the proposer's mint owner; deterministic, so replay reproduces it; the author still leaves it unset), so the validation join's identity check holds unchanged. The worker stamps `ImplementorInput.consumed_input_sha256 = inputs.consumed_input_sha256(seed, proposal, version=ENCODING_VERSION)` and `consumed_input_encoding = "siderius.nonfinite/v1"` for judged-branch implementations only (the node echoes both into `ImplementorOutput`, on generation and Branch B reuse; absent and omitted elsewhere), and `graph_evidence.verify_judged_branches` recomputes the digest under the recorded `consumed_input_encoding` from the verified adaptor value and the owner's persisted seed: a branch that ran on another output or another owner's seed is refused. The v1 pre-image uses `core.record_encoding.model_record_value`, so `inf`/`-inf`/`NaN`/`None` inside `Any` fields (`baseline_config`, `custom_loss_spec.config_fields`, seed `best_config`, `model_knowledge_cache`, `model_selection.params`, rule `exact`/`allowed`) have distinct identities (#1326). An absent encoding (records written before #1326) replays the historical `model_dump(mode="json")` projection, in which those values were already null; finite inputs have the same digest under both, and the writer never selects the historical form. Unknown encodings refuse |
 | `native-literature-split/v1` (S3) | exactly one external review; one adaptor with one `literature.output` port bound to it and `split-items/v1(field="findings", count=M, on_short)` after any COMBINE/SELECT pair the declaration validation table admits (S3 is `field-rank/v1(confidence, descending)` + `top-k/v1(k)`); exactly M proposals, each `literature-to-proposal(output=AdaptorSource(<adaptor>, index=i), proposal_input=<external seed>)`, indices `0..M-1` each bound once; one complete family per proposal |
 
 **LLM COMBINE literature profile** (`native-literature-judged/v1`, B6-8a;
@@ -1441,8 +1467,11 @@ native writer lease it verifies the immutable predecessor/successor binding, rej
 a partial next slot, and reconstructs ChainState through the same native completed
 history fold before dispatching N+1. Captured inputs and original external identities
 must still match; changing workflow source or configuration requires a new run.
-Historical paused receipts can coexist with later bodies only through the exact
-verified successor binding. There is no general partial-record acceptance switch.
+A paused receipt verifies its completed iterations independently of whether the next
+iteration slot is unused. Unbound files in that next slot are never accepted as results:
+Resume review and dispatch refuse them, while End can close the verified pause.
+Historical resumed work still requires the exact verified successor binding. There is
+no general partial-record acceptance switch.
 
 Resume does not recover failed, stopped, interrupted, timed-out or uncertain runs.
 It does not change the declared loop limit or scientific history policy. The existing
@@ -1528,7 +1557,7 @@ deterministic conditions, then the judge (whose "stop" verdict takes its own
 absent (`stop_reason` keeps meaning "completed before the limit"; the model refuses
 both, and requires `input_request.reason.iteration == attempted_iterations`). Like a
 stop, it is decided before any pending Stop/Pause is read, so no operator Pause
-marker (`pause.json`) exists or is needed. The next body slot stays unused.
+marker (`pause.json`) exists or is needed. The next iteration slot stays unused.
 
 Input anchor. `input_anchor` is the last earlier boundary where a `request_input`
 decision fired (0 = none); it is derived by replay (`derive_stop`), never persisted,
@@ -1545,9 +1574,25 @@ threshold met there never asks separately.
 
 Summary. `InputRequestSummary(iteration, final_iteration, metric_id, direction,
 incumbent, incumbent_iteration, non_improving_bodies, input_anchor,
-bodies_since_input)` is O(1) and deterministic (`incumbent_fold`), so the receipt
-stays within `bounded_terminal`. Per-body results come from the existing graph
-results view; no LLM summary is written.
+bodies_since_input, what_was_tried=())` is bounded and deterministic. The numeric
+fold remains `incumbent_fold`. `loop_evidence.summarize_tried_bodies` projects the
+latest 20 completed iterations of the execution segment (after the preceding Resume,
+including one following an operator Pause), in ascending iteration order. Each
+`TriedBody` contains `iteration`, proposed `model_name` (first 128 characters),
+receipt `validation_passed` (including null), `best_valid_score` (the tuning
+record's best valid formal score, including null), reconciled `metric_id` and
+`direction`, and `stop_reason`. The latter is the tuning `termination_reason`
+unless it is `completed`, in which case it is null; the outer loop's pause reason
+remains `input_request.reason`. Only verified proposal/tuning records and body
+receipts supply these facts. No provider is called. Longer segments retain their
+latest 20 entries; complete results remain in the graph results view.
+
+Empty `what_was_tried` is omitted from serialization, preserving old summary
+bytes. Readback verifies every populated projection exactly; absent/empty legacy
+projections compare the original summary fields without rewriting receipts.
+`review-loop-resume` exposes the list in its JSON
+`receipt.loop_trace.input_request.summary.what_was_tried`; the Monitor pause card
+renders the same facts as text, including the retained entry count.
 
 Readback. `derive_stop` returns `LoopDerivation(stop_reason, verdicts,
 input_requests, input_anchor)`: every re-derived `request_input` boundary with its
@@ -1575,7 +1620,8 @@ request digests of loops without `request_input` are unchanged.
 
 A Resume may carry operator advice: untrusted text, typed `loop_models.OperatorAdvice`
 (surrounding whitespace removed; 1..4000 characters; no `Cc`/`Cf` (control or format, e.g. C1, bidi overrides, BOM) characters except
-newline and tab). It is not a reviewed captured input: root captured inputs stay
+newline, tab, ZWNJ (U+200C), and ZWJ (U+200D)). Joiners preserve multilingual words
+and emoji; bidi formatting and BOM remain refused. It is not a reviewed captured input: root captured inputs stay
 unchanged, and the advice travels in the operations request and in the immutable
 `LoopContinuation.operator_advice` (omitted when absent, so advice-free bindings keep
 their bytes). `LoopContinuation.resume_advice()` gives
@@ -1910,7 +1956,11 @@ them. For the first ready node:
   `subprocess_env(cuda_visible_devices=placement.cuda_visible_devices)` (slot
   UUID, or `""` for a CPU unit, which hides every GPU) and
   `PYTEST_ADDOPTS` gaining `-p no:cacheprovider` (concurrent validators share no
-  `.pytest_cache`; serial pytest commands are unchanged). Queued: the loop waits
+  `.pytest_cache`; serial pytest commands are unchanged). A unit that cannot
+  start (publishing its invocation, `prepare_child`'s `LocalCodeError`, a
+  `Popen` `OSError`) fails alone, as in the serial path: `failed`, a `raised`
+  receipt carrying its placement, its routes decided, and running units drain
+  (#1108). Queued: the loop waits
   for a running unit to finish. Strict FIFO: nothing overtakes the first ready
   unit (decision B3-Q4).
 Before each readiness step the loop collects every unit that has already exited,
@@ -1937,30 +1987,70 @@ published write-once as `parallel_budget.json` in its control directory.
 
 Trace v2 verifier (`parallel_evidence.drained_entries`, the one parallel-v1
 check `verify_graph_trace` calls). `scheduling="parallel-v1"` must equal
-`request.parallel` being set; a serial trace returns no drained entries. For a
+`request.parallel` being set; a serial trace returns `None`. For a
 parallel trace: (e) `parallel_budget.json` must have the digest of the run's
 admitted budget (`parallel.budget`, or the `run_budget()` of the host grant of
 the segment that ran the iteration); (d) a receipt exists exactly for every
-dispatched entry (a unit with an outcome; an adaptor readiness did not block)
-and names it; (b) a placement exists exactly for a declared unit, names it and
+dispatched entry (a unit or adaptor whose state is in
+`graph_models.DISPATCHED_STATES`) and names it; (b) a placement exists exactly for a declared unit, names it and
 the budget, and an undeclared unit overlapped no other unit; (c) the exit agrees
 with the state (`returned` for an outcome with a record, `raised` or
 `process_failed` for a failure without one; adaptors `raised` iff failed);
 (a) start and end events are one permutation of 1..2n, and a queue mark precedes
 its start; (f) each placement, re-planned with `plan_dispatch` beside the
 placements running when it started, is placed on the slot it recorded; and no
-entry starts after the first failed entry ended.
-`replay_readiness(..., drained=...)` then accepts a dispatched node where the
-serial replay would close it as blocked only if its own sources permit it.
-Serial traces verify exactly as before.
+entry starts after the first failed entry ended. It returns a
+`graph_evidence.DrainWindow` (`ended`: the `ended_event` of every dispatched
+entry; `failure_end`: the `ended_event` of the first failed entry, `None`
+without a failure). Before returning, `_check_causality` requires each receipt's
+`started_event` to be strictly greater than every source's `ended_event`,
+including route control edges and every fan-in source. It reuses
+`graph_evidence.settled_sources_end` and this same `DrainWindow.ended` mapping;
+for sources closed without dispatch it follows their predecessors to the latest
+recorded end. Thus a skipped route arm consumed by an adaptor needs no invented
+receipt, but its deciding source must have ended. Violations raise `ValueError`
+(`started before its sources ended`). `graph_models.DISPATCHED_STATES`
+(`succeeded`, `rejected`, `failed`) is the one definition of "dispatched" for
+units and adaptors, used by the receipt check (`parallel_evidence._dispatched`),
+the readiness replay (`graph_evidence._replay_step`) and the adaptor entry
+check (#1454). An executed adaptor never ends `skipped`: `execute_adaptor`
+closes it with `AdaptorOutcome.status`, whose type is exactly those three
+states, or `failed` on an exception, and readiness closes an undispatched
+adaptor only as `blocked`/`dependency_not_successful`. A `skipped` adaptor
+entry is therefore refused: with a receipt by (d), without one by the
+readiness replay. `test_parallel_causality.py` guards both facts and runs the
+real dispatcher to each reachable adaptor state.
+Serial verification and serialized trace/digest bytes are unchanged.
+
+`replay_readiness(..., drained=window)` replays a parallel trace without the
+declaration-order failure stop, because parallel dispatch follows completion
+order: a later-declared unit can fail while an earlier-declared sibling is
+still running, and then a node the serial order would dispatch next (for
+example `check0` after `build0`) is never dispatched (#1386). Per step: a node
+readiness dispatches must be recorded dispatched (its receipt already proves it
+started before the failure ended; readiness proves its sources permitted it);
+a node readiness closes must carry that closure. When `failure_end` is set, any
+entry may instead carry the drain closure `blocked`/`dependency_not_successful`,
+whatever the serial order would have done next; and a `skipped` closure is
+accepted only if every source (through sources closed without dispatch) ended
+before `failure_end`, since a closure decided after the failure was collected
+is `blocked`. Still refused: a `blocked` entry in a parallel trace without a
+failure, a dispatched entry whose own source failed or that lies in a
+non-selected arm, a selected arm recorded `skipped`, and a skip decided after
+the failure. Serial traces (`drained=None`) verify exactly as before.
 
 Cancellation. SIGTERM during parallel dispatch raises `UnitTerminated` in the
 worker (`unit_processes.TermGate`). Any exit from the loop with units running
 (that signal, an exception, `SystemExit`/`KeyboardInterrupt` re-raised from a
 unit) terminates every running unit's process group (`terminate_observed_group`,
-TERM, 1 s grace, KILL) before propagating. SIGTERM is held, then delivered,
+TERM, 1 s grace, KILL) before propagating. A `terminate` that raises for one
+unit does not stop the cleanup: every other group is still terminated, then the
+first error propagates. SIGTERM is held, then delivered,
 around the spawn-and-register of a unit (so a signal cannot orphan a unit not
-yet registered) and during that cleanup (so a second signal cannot abort it). An outer timeout or operator cancel kills the sandbox; every unit
+yet registered) and during that cleanup (so a second signal cannot abort it).
+A held signal is delivered when the outermost held block exits, however it
+exits: an exception leaving the block is chained as the `__cause__` of the
+`UnitTerminated`, so a failing cleanup never drops the termination (#1108). An outer timeout or operator cancel kills the sandbox; every unit
 is in its PID namespace and ends with it. Stop and Pause keep body-boundary
 meaning: the active body, including queued units, finishes (decision B3-Q5).
 
@@ -1977,5 +2067,35 @@ otherwise.
 
 Tests: `tests/unit/tools/candidate_worker/test_parallel_dispatch.py` (serial
 golden in any completion order, slot never exceeded, drain + forged receipt,
-SIGTERM kills real unit groups), `test_parallel_lock.py`,
+a later-declared failure draining an earlier-declared unit,
+SIGTERM kills real unit groups, a unit that cannot start fails alone, a held
+signal survives an exceptional exit, one failing termination), `test_readiness.py`
+(parallel replay: drain closures accepted, closures the drain cannot produce refused),
+`test_parallel_lock.py`, `test_parallel_causality.py` (direct, route-control and
+fan-in forgeries and traversal through a skipped route arm; 24 default dispatcher
+representatives, with all 288 failure/hold-vector/unit combinations opt-in; see
+`tests/unit/tools/candidate_worker/parallel-causality-testing.md` for equivalence
+classes and mutation witnesses),
 `tests/unit/agent/test_token_unit.py`.
+
+
+### Loop admission refusal owner
+
+`loop_models.admit_loop` returns `None` or a `LoopAdmissionRefusal` with
+reason `profile`, `shape` or `feedback`. Messages are fixed, path-free text;
+`require_loop` raises that refusal for existing effect and evidence boundaries.
+Operations must render this typed reason instead of inferring a policy from the
+request after catching an arbitrary `ValueError`.
+
+## Formula selection binding
+
+Worker graph and loop admission use the composed effective selection metric.
+Every formula metric threshold, including thresholds in unvisited branches and
+adaptors, must explicitly name that metric before dispatch. Captured interpretation
+and tuning evidence must reconcile to the same effective spec. Raw component
+threshold targets are refused; source metric values remain Health inputs.
+`score_units_metric` is a supported launch field: under formula selection a fresh
+training document with `degenerate_penalty_score` must set it to the effective id
+(the same `admit_evaluation_settings` rule as the direct workflow). The
+[evaluation contract](../../execute_tools/evaluation-contract.md#deterministic-selection-runtime)
+owns the schema, generated id and refusal rules.

@@ -8,6 +8,8 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,7 +20,6 @@ from core.runtime_control.gpu_execution_policy import GpuExecutionPolicy
 from core.runtime_control.inference_startup import (
     InferenceStartup,
     InferenceStartupMessage,
-    InferenceStartupRequest,
     load_and_wait_for_authorization,
     publish_message,
     read_message,
@@ -26,6 +27,7 @@ from core.runtime_control.inference_startup import (
 from core.runtime_control.measurement_allowance import MeasurementAllowance
 from core.runtime_control.observed_subprocess import supervise_process
 from core.training_seeds import SeedContext
+from tests.helpers.inference_startup import OFFLINE_IO_BUDGET_SECONDS, startup_fixture
 from tests.unit.core.test_checkpoint_inference_measurement import bound_spec
 from tests.unit.core.test_gpu_runtime_protection import Clock, policy
 
@@ -39,11 +41,11 @@ def no_optimizer_updates(monkeypatch):
         monkeypatch.setattr(optimizer, "step", forbidden)
 
 
-def execution_policy():
+def execution_policy(*, slow_storage: bool = False):
     return GpuExecutionPolicy(
-        phase_measurement_budget_seconds=60.0,
+        phase_measurement_budget_seconds=OFFLINE_IO_BUDGET_SECONDS if slow_storage else 60.0,
         worker_rss_limit_bytes=1024**3,
-        startup_ack_timeout_seconds=2.0,
+        startup_ack_timeout_seconds=OFFLINE_IO_BUDGET_SECONDS if slow_storage else 2.0,
         startup_receipt_limit_bytes=1024**2,
         protection=policy(),
     )
@@ -68,33 +70,6 @@ def test_shared_allowance_excludes_execution_and_does_not_reset():
     with pytest.raises(RuntimeError, match="no measurement"):
         allowance.finish("duplicate")
     assert [r.spent_seconds for r in allowance.receipts] == [20, 41]
-
-
-def startup_fixture(tmp_path, spec, *, clock=None, child_pid=1234):
-    clock = clock or time.monotonic
-    directory = tmp_path / "startup"
-    directory.mkdir()
-    request = InferenceStartupRequest(
-        nonce="attempt",
-        spec=spec,
-        deadline_at=clock() + 10,
-        ack_timeout_seconds=1.0,
-        poll_seconds=0.01,
-        receipt_limit_bytes=1024**2,
-    )
-    path = directory / "request.json"
-    publish_message(path, request, request.receipt_limit_bytes)
-    publications = []
-    startup = InferenceStartup(
-        path, request, rss_limit_bytes=1024**3, on_publication=publications.append, clock=clock
-    )
-    message = InferenceStartupMessage(
-        nonce=request.nonce,
-        child_pid=child_pid,
-        reference=spec.inference_checkpoint,
-        binding_sha256=spec.inference_binding.request_sha256,
-    )
-    return startup, message, publications
 
 
 def test_startup_publication_then_consumption_has_one_charge(tmp_path, bound_spec):
@@ -255,6 +230,9 @@ publish('loaded.json')
 while not (root / 'authorized.json').exists(): time.sleep(.005)
 if mode == 'no-ack': time.sleep(10)
 publish('consumed.json')
+if len(sys.argv) > 3:
+    with open(sys.argv[3], 'rb') as barrier:
+        assert barrier.read(1) == b'1'
 (root / 'forward-marker').write_text('authorized')
 print('child completed')
 """
@@ -274,7 +252,7 @@ def test_real_child_handshake_owns_group_and_records_consumption(tmp_path, bound
         observer=obs,
         control=obs,
         startup=startup,
-        deadline_provider=(lambda: (2.0, "test")) if watchdog else None,
+        deadline_provider=(lambda: (OFFLINE_IO_BUDGET_SECONDS, "test")) if watchdog else None,
     )
     assert result.completed.stdout.strip() == "child completed"
     assert startup.receipt.loaded == startup.receipt.consumed
@@ -400,7 +378,7 @@ def test_native_adapter_preserves_ordinary_call_and_selected_typed_lifecycle(mon
     assert len(calls) == 1
 
 
-def selected_state(spec, phase):
+def selected_state(spec, phase, *, slow_storage: bool = False):
     """Supply typed completed measurement facts; no GPU work is performed."""
     from core.runtime_control.gpu_execution_evidence import AttemptGpuExecution, PreparedGpuPhase
     from core.runtime_control.inference_measurement_assessment import InferenceMeasurementAssessment
@@ -427,8 +405,13 @@ def selected_state(spec, phase):
     assessment_type = (
         TrainingMeasurementAssessment if phase == "training" else InferenceMeasurementAssessment
     )
-    selected = execution_policy()
-    state = AttemptGpuExecution("attempt", "exp-a", selected, MeasurementAllowance(60.0))
+    selected = execution_policy(slow_storage=slow_storage)
+    state = AttemptGpuExecution(
+        "attempt",
+        "exp-a",
+        selected,
+        MeasurementAllowance(selected.phase_measurement_budget_seconds),
+    )
     state.phases[phase] = PreparedGpuPhase(
         attempt_token="attempt",
         spec=spec,
@@ -440,6 +423,66 @@ def selected_state(spec, phase):
         ),
     )
     return state
+
+
+@contextmanager
+def observed_child_barrier(gate: Path, observer, monkeypatch) -> Iterator[None]:
+    """Keep synthetic children alive until the observer commits a live sample."""
+    with gate.open("r+b", buffering=0) as barrier, monkeypatch.context() as patch:
+        released = False
+        expired = False
+        release_lock = threading.Lock()
+        actual_check = observer.check_control
+
+        def expire_barrier():
+            nonlocal released, expired
+            with release_lock:
+                if not released:
+                    expired = True
+                    barrier.write(b"1")
+                    released = True
+
+        # This bounds a broken test handshake; runtime policies stay unchanged.
+        timer = threading.Timer(OFFLINE_IO_BUDGET_SECONDS, expire_barrier)
+
+        def release_after_observation():
+            nonlocal released
+            decision = actual_check()
+            with release_lock:
+                if not released and observer.protection_receipt().valid_live_samples:
+                    barrier.write(b"1")
+                    released = True
+                    timer.cancel()
+            return decision
+
+        patch.setattr(observer, "check_control", release_after_observation)
+        timer.start()
+        try:
+            yield
+        finally:
+            timer.cancel()
+            timer.join()
+            if expired:
+                pytest.fail("GPU observation barrier exhausted the offline I/O budget")
+
+
+def inject_wiring_clocks(monkeypatch) -> None:
+    """Wiring witnesses use logical time; deadline refusal has separate witnesses."""
+    from core.runtime_control import native_gpu_execution as native
+
+    actual_observer = native.GpuPhaseObserver
+    actual_startup = native.InferenceStartup
+
+    def observer(*args, **kwargs):
+        anchor = kwargs["initial_observation"].query_completed_at
+        return actual_observer(*args, **kwargs, clock=lambda: anchor)
+
+    def startup(*args, **kwargs):
+        anchor = time.monotonic()
+        return actual_startup(*args, **kwargs, clock=lambda: anchor)
+
+    monkeypatch.setattr(native, "GpuPhaseObserver", observer)
+    monkeypatch.setattr(native, "InferenceStartup", startup)
 
 
 @pytest.mark.parametrize("phase", ["training", "inference"])
@@ -458,6 +501,7 @@ def test_actual_native_launch_and_terminal_receipt(
     from tests.unit.core.test_gpu_runtime_protection import DEVICE, snapshot
     from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
+    inject_wiring_clocks(monkeypatch)
     composition = compose_run_task_bindings("configs/task_composition/quickstart.yaml")
     with bind_run_task_composition(composition, physical_data_root=str(tmp_path)):
         sandbox = executor.TidmadSandbox(
@@ -472,7 +516,7 @@ def test_actual_native_launch_and_terminal_receipt(
         from ml_models.plugin_loader import PLUGIN_OUTPUT_TYPE_REGISTRY
 
         monkeypatch.setitem(PLUGIN_OUTPUT_TYPE_REGISTRY, bound_spec.request.model_type, "regressor")
-        state = selected_state(bound_spec, phase)
+        state = selected_state(bound_spec, phase, slow_storage=True)
         sandbox.gpu_execution = state
         # Validation/source freshness has separate direct witnesses below; this
         # matrix exercises the four actual process branches and terminal owner.
@@ -497,57 +541,20 @@ def test_actual_native_launch_and_terminal_receipt(
                     str(sentinel),
                     str(gate),
                 ]
-                observer = state.current_observer
-                actual_check = observer.check_control
-                # A sampler return precedes the second liveness check. Release
-                # only after the real observer has committed a live sample.
-                with gate.open("r+b", buffering=0) as barrier, monkeypatch.context() as patch:
-                    released = False
-                    expired = False
-                    release_lock = threading.Lock()
-
-                    def expire_barrier():
-                        nonlocal released, expired
-                        with release_lock:
-                            if not released:
-                                expired = True
-                                barrier.write(b"1")
-                                released = True
-
-                    # Bound a broken observation handshake without sleep polling.
-                    timer = threading.Timer(60.0, expire_barrier)
-
-                    def release_after_observation():
-                        nonlocal released
-                        decision = actual_check()
-                        with release_lock:
-                            if not released and observer.protection_receipt().valid_live_samples:
-                                barrier.write(b"1")
-                                released = True
-                                timer.cancel()
-                        return decision
-
-                    patch.setattr(observer, "check_control", release_after_observation)
-                    timer.start()
-                    try:
-                        return actual_supervise(replacement, **kwargs)
-                    finally:
-                        timer.cancel()
-                        timer.join()
-                        if expired:
-                            pytest.fail(
-                                "GPU observation barrier was not released within 60 seconds"
-                            )
             else:
                 assert "--inference_startup_json" in cmd
                 path = Path(cmd[cmd.index("--inference_startup_json") + 1])
                 replacement = [sys.executable, "-c", _CHILD_HANDSHAKE, str(path.parent), "ok"]
-            return actual_supervise(replacement, **kwargs)
+                gate = tmp_path / "gpu-observed.fifo"
+                os.mkfifo(gate)
+                replacement.append(str(gate))
+            with observed_child_barrier(gate, state.current_observer, monkeypatch):
+                return actual_supervise(replacement, **kwargs)
 
         monkeypatch.setattr(native, "supervise_subprocess", scientific_child)
         scopes = SimpleNamespace(training=object(), evaluation=object())
         runtime = {
-            "operator_budget_seconds": 10.0,
+            "operator_budget_seconds": OFFLINE_IO_BUDGET_SECONDS,
             "watchdog": {"enabled": watchdog, "poll_seconds": 0.01, "grace_seconds": 0.1},
         }
         if phase == "training":
@@ -584,6 +591,7 @@ def test_actual_native_launch_and_terminal_receipt(
         assert receipt.protection.binding.effective_ceiling_gib == 1.5
         assert receipt.lifecycle.group_cleanup.final.status == "absent"
         assert receipt.lifecycle.child_reaped
+        assert receipt.protection.valid_live_samples > 0
         assert receipt.measurement_segments[-1].outcome in {"training authorized", "authorized"}
         if phase == "inference":
             assert receipt.startup.loaded == receipt.startup.consumed
@@ -613,8 +621,9 @@ def test_selected_current_admission_distinguishes_gap_from_capacity(
     )
     monkeypatch.setattr(native, "sample", lambda *a: current)
     refusal = native.admit_phase(sandbox, "training")
-    assert refusal["status"] == (
-        "skipped_resource_admission" if fault == "capacity" else "aborted_infrastructure"
+    assert refusal["status"] == "skipped_resource_admission"
+    assert state.current_admission.refusal_kind == (
+        "resource" if fault == "capacity" else "environment"
     )
     assert state.current_observer is None
 
@@ -817,7 +826,9 @@ def test_inference_dispatch_binds_actual_cpu_checkpoint_and_current_batch(
         },
         expected_custom_loss_snapshot=None,
     )
-    monkeypatch.setattr(gpu, "build_task_probe_data", lambda **kw: bound_spec.task_probe_data)
+    monkeypatch.setattr(
+        gpu, "build_attempt_task_probe_data", lambda **kw: bound_spec.task_probe_data
+    )
     monkeypatch.setattr(gpu, "candidate_evaluation_executor", lambda: None)
     seen = []
 
@@ -911,3 +922,56 @@ def test_authorization_refuses_changed_control_or_late_publication(
             startup.check(message.child_pid)
         assert startup.receipt.published_at == startup.request.deadline_at
     assert startup.receipt.error is not None
+
+
+@pytest.mark.parametrize("watchdog", [False, True])
+def test_native_inference_waits_for_observation_after_consumption(
+    tmp_path, bound_spec, monkeypatch, watchdog
+):
+    """The child must survive even when its ACK precedes the first GPU sample."""
+    from core.runtime_control.gpu_observer import GpuPhaseObserver
+
+    consumed = threading.Event()
+    actual_loop = GpuPhaseObserver._loop
+    actual_check = InferenceStartup.check
+
+    def delayed_loop(observer, child_pid):
+        if not consumed.wait(5.0):
+            observer.abort_control("test never observed inference consumption")
+            return
+        actual_loop(observer, child_pid)
+
+    def check(startup, child_pid, *, terminal=False):
+        actual_check(startup, child_pid, terminal=terminal)
+        if startup.receipt.consumed is not None:
+            consumed.set()
+
+    monkeypatch.setattr(GpuPhaseObserver, "_loop", delayed_loop)
+    monkeypatch.setattr(InferenceStartup, "check", check)
+    test_actual_native_launch_and_terminal_receipt(
+        tmp_path,
+        bound_spec,
+        monkeypatch,
+        "inference",
+        "formal",
+        "enforce_resource_limits",
+        watchdog,
+    )
+    assert consumed.is_set()
+
+
+def test_native_wiring_survives_scheduling_stall_before_launch(tmp_path, bound_spec, monkeypatch):
+    """Host scheduling must not age synthetic GPU facts in the wiring matrix."""
+    from core.runtime_control import native_gpu_execution as native
+
+    actual_supervise = native.supervise_subprocess
+
+    def delayed_launch(*args, **kwargs):
+        # Exceeds the fixture's one-second sample-age limit without changing it.
+        time.sleep(1.1)
+        return actual_supervise(*args, **kwargs)
+
+    monkeypatch.setattr(native, "supervise_subprocess", delayed_launch)
+    test_actual_native_launch_and_terminal_receipt(
+        tmp_path, bound_spec, monkeypatch, "inference", "formal", "enforce_resource_limits", False
+    )

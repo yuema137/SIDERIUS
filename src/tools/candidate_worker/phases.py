@@ -9,6 +9,7 @@ from agent.schemas.validator import ValidatorOutput
 from core.durable_io import publish_bytes_write_once
 from core.generated_artifact_name import validate_generated_artifact_name
 from core.probe_seeds import probe_seed_context
+from core.record_encoding import ENCODING_VERSION
 from core.training_seeds import SeedContext
 from nodes.ml_code_validator_agent.ml_code_validator_agent import MLCodeValidatorAgent
 from nodes.ml_model_implementor.ml_model_implementor import MLModelImplementor
@@ -110,7 +111,12 @@ def run_implementation(
     )
     if _judged_branch(request, context.node_id):
         implementation = implementation.model_copy(
-            update={"consumed_input_sha256": consumed_input_sha256(seed, proposal)}
+            update={
+                "consumed_input_sha256": consumed_input_sha256(
+                    seed, proposal, version=ENCODING_VERSION
+                ),
+                "consumed_input_encoding": ENCODING_VERSION,
+            }
         )
     implementor = MLModelImplementor(
         **config.get("implement"), probe_seed=context_probe_seed(context, initial)

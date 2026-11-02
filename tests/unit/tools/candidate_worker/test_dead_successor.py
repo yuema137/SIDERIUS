@@ -80,6 +80,7 @@ def test_dead_successor_can_end_without_reusing_reservation(
                 operation_id=next_id,
                 request_digest=record.request_digest,
                 boot_id="fixture-boot",
+                pid_namespace_inode=Path("/proc/self/ns/pid").stat().st_ino,
                 pid=fake_pid,
                 start_ticks=100,
             ),
@@ -118,6 +119,20 @@ def test_dead_successor_can_end_without_reusing_reservation(
     assert predecessor.successor_operation_id == next_id
     assert predecessor.receipt_digest == review.receipt_digest
 
+    # Another namespace (or failed namespace capture) cannot authorize admission or End.
+    for namespace in (0, Path("/proc/self/ns/pid").stat().st_ino + 1):
+        publish(
+            identity_path,
+            identity.model_copy(update={"pid_namespace_inode": namespace}),
+            replace=True,
+        )
+        assert read_operation(config, next_id).state == "unknown"
+        assert not releasable(config, next_id)
+        with pytest.raises(OperationFailure) as refused:
+            request_loop_stop(config, first_id)
+        assert refused.value.detail.code == "loop_end"
+    publish(identity_path, identity, replace=True)
+
     # A surviving or unobservable session prevents release and End, even with a dead leader.
     for members in (1, None):
         with monkeypatch.context() as patch:
@@ -127,8 +142,9 @@ def test_dead_successor_can_end_without_reusing_reservation(
             )
             assert not releasable(config, next_id)
             assert read_operation(config, first_id).reason == "native_terminal"
-            with pytest.raises(OperationFailure, match="already has a successor"):
+            with pytest.raises(OperationFailure, match=r"successor.*End loop") as refused:
                 request_loop_stop(config, first_id)
+            assert refused.value.detail.code == "loop_end"
 
     # An unrelated live sandbox remains a writer after the operation wrapper dies.
     sandbox = identity.model_copy(update={"pid": 2000000001})
@@ -136,8 +152,9 @@ def test_dead_successor_can_end_without_reusing_reservation(
     with monkeypatch.context() as patch:
         patch.setattr(process, "_stat", lambda pid: ("S", 100) if pid == sandbox.pid else stat(pid))
         assert not releasable(config, next_id)
-        with pytest.raises(OperationFailure, match="already has a successor"):
+        with pytest.raises(OperationFailure, match=r"successor.*End loop") as refused:
             request_loop_stop(config, first_id)
+        assert refused.value.detail.code == "loop_end"
     (identity_path.parent / "sandbox.json").unlink()
 
     # Unobservable wrapper identity remains unknown; it never authorizes recovery.
@@ -152,6 +169,12 @@ def test_dead_successor_can_end_without_reusing_reservation(
         assert read_operation(config, next_id).state == "unknown"
         assert not releasable(config, next_id)
 
+    # Legacy markers retain admission and End behavior after an upgrade.
+    publish(
+        identity_path,
+        identity.model_copy(update={"pid_namespace_inode": None}),
+        replace=True,
+    )
     # No native evidence is rewritten, and a partial next body is never re-executed.
     assert review.receipt is not None
     control = Path(review.receipt.workspace) / "candidate_run"

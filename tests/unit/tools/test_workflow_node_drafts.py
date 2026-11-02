@@ -188,7 +188,7 @@ def test_external_input_catalog_explains_every_socket_contract():
     assert interpretation.managed
     assert "cold" not in interpretation.summary
     assert interpretation.managed_summary is not None
-    assert "first round starts cold" in interpretation.managed_summary
+    assert "first iteration starts cold" in interpretation.managed_summary
     assert "training results" in interpretation.managed_summary
     assert all(entry.managed_summary is None for entry in entries.values() if not entry.managed)
     assert entries["storage"].managed and not entries["literature.input"].managed

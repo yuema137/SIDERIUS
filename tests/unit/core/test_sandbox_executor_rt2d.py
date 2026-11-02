@@ -17,7 +17,8 @@ from pathlib import Path
 import pytest
 
 from core.runtime_control.session import RuntimeVerificationSession
-from core.sandbox_executor import StubSandbox, TidmadSandbox
+from core.sandbox_executor import TidmadSandbox
+from core.stub_sandbox import StubSandbox
 from execute_tools.data_paths import bind_physical_data_root
 from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 

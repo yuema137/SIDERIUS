@@ -203,7 +203,8 @@ def test_allowlisted_files_are_certified_by_their_owners(workspace, tmp_path, mo
         advice_files=[{"id": "notes", "label": "Notes", "file": str(advice)}],
     )
     code, err = _main(monkeypatch, capsys, "check", "--config", str(_console(workspace)))
-    assert code == 2 and "advice_files notes" in err and "'propse'" in err
+    assert code == 2 and "advice_files notes" in err and "recognised keys" in err
+    assert "propse" not in err
     assert str(tmp_path) not in err
 
 

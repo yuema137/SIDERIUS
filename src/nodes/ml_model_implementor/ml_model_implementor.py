@@ -61,6 +61,7 @@ from core.capability_registry import (
 from core.generated_artifact_name import validate_generated_artifact_name
 from core.hardware_context import HardwareContext
 from core.probe_seeds import probe_process_seeds, require_probe_seed, standalone_probe_seed
+from core.record_encoding import decode_record, record_json
 from core.run_seed_lock import run_seed_argument
 from core.training_seeds import SeedContext
 from nodes.llm_settings import IMPLEMENT, node_bridge_kwargs
@@ -2173,6 +2174,7 @@ class MLModelImplementor:
                 candidate_id=inp.candidate_id,
                 model_type=branch_b_model_name,
                 consumed_input_sha256=inp.consumed_input_sha256,
+                consumed_input_encoding=inp.consumed_input_encoding,
                 description_file_path=os.path.abspath(existing_desc_path),
                 model_file_path=os.path.abspath(existing_path),
                 test_file_path="",  # no test re-emitted on Branch B reuse
@@ -2351,6 +2353,7 @@ class MLModelImplementor:
             candidate_id=inp.candidate_id,
             model_type=inp.model_name,
             consumed_input_sha256=inp.consumed_input_sha256,
+            consumed_input_encoding=inp.consumed_input_encoding,
             description_file_path=os.path.abspath(desc_path),
             model_file_path=model_file_path,
             test_file_path=test_file_path,
@@ -2378,7 +2381,7 @@ class MLModelImplementor:
             os.makedirs(workspace, exist_ok=True)
             out_path = os.path.join(workspace, f"implementor_{run_name}.json")
             with open(out_path, "w", encoding="utf-8") as f:
-                f.write(output.model_dump_json(indent=4))
+                f.write(record_json(output, indent=4).decode())
             print(f"✅ Output record → {out_path}")
 
         return output
@@ -2415,7 +2418,7 @@ def main():
             f"Proposal file not found: {proposal_path}\nRun ml_model_proposal_agent first."
         )
     with open(proposal_path, encoding="utf-8") as f:
-        proposal = json.load(f)
+        proposal = decode_record(json.load(f))
 
     agent_input = ImplementorInput(
         model_name=proposal["model_name"],

@@ -35,6 +35,7 @@ _NATIVE_TYPES: Mapping[str, tuple[str, str, _Shape]] = MappingProxyType(
         "validation.output": ("agent.schemas.validator", "ValidatorOutput", "value"),
         "tuning.output": ("agent.schemas.hyperparam_tuning", "HyperparamTuningOutput", "value"),
         "optional.text": ("builtins", "str", "value"),
+        "optional.advice-text": ("builtins", "str", "value"),
         "optional.expert-advice": ("agent.schemas.hyperparam_tuning", "ExpertAdviceInput", "value"),
         "optional.expert-context": ("agent.schemas.proposal", "ExpertContextItem", "list"),
     }

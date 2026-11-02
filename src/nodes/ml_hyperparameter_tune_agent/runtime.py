@@ -22,17 +22,17 @@ from importlib import import_module as _import_module
 from pathlib import Path
 from typing import Any
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import TypeAdapter
 
 from agent.schemas.hyperparam_tuning import ExperimentPlan, HyperparamTuningInput
 from agent.schemas.ordering import OrderingObservation, OrderingRefusalPhase, ResolvedOrdering
 from agent.skills.evaluate_vram_skill.evidence import preflight_memory_fields
 from agent.skills.evaluate_vram_skill.probe_budgets import InconclusivePreflight
 from core.record_role import observed_attempt_role
-from core.runtime_control.admission import AdmissionDecision, AdmissionReason
 from core.runtime_control.records import AdmissionRecord
 from core.runtime_control.session import RuntimeControlPolicy, WatchdogConfig
 from core.sandbox_executor import TidmadSandbox
+from core.stub_sandbox import StubSandbox
 from nodes.ml_hyperparameter_tune_agent.policy import (
     _latest_trial_inference_marginal,
     resolve_round_trial_mode,
@@ -131,31 +131,6 @@ def _time_skip_memory_extra(time_check: dict, plan) -> dict:
     return extra
 
 
-def normalize_training_admission_refusal(status: dict) -> AdmissionDecision:
-    """Normalize once for both the refusal record and the training stop decision.
-
-    Preserve recognized reason codes even when the full decision cannot validate.
-    Missing/unknown codes become policy_unavailable; retain raw evidence for diagnosis.
-    """
-    raw = status.get("admission") or {}
-    admission = dict(raw) if isinstance(raw, dict) else {}
-    admission["reason_code"] = admission.get("reason_code") or "policy_unavailable"
-    try:
-        return AdmissionDecision.model_validate(admission)
-    except ValidationError:
-        try:
-            reason_code = TypeAdapter(AdmissionReason).validate_python(admission["reason_code"])
-        except ValidationError:
-            reason_code = "policy_unavailable"
-        return AdmissionDecision(
-            admitted=False,
-            reason_code=reason_code,
-            requirement_source="unavailable",
-            reason=str(status.get("message") or "The environment refused the training phase."),
-            evidence={"invalid_admission": raw},
-        )
-
-
 def _handle_admission_refusal(
     status: dict,
     *,
@@ -181,7 +156,8 @@ def _handle_admission_refusal(
     The refusal is an infrastructure condition. It consumes the attempt
     slot — planning, pre-flight and admission really ran — but it is not
     a candidate failure, produces no negative planner evidence, updates
-    no incumbent, and triggers no retry. Those five properties are
+    no incumbent. The shared phase_admission owner decides bounded sampling
+    retries before emitting the final refusal here. These properties are
     separable, and collapsing any of them is how an environment problem
     becomes a scientific conclusion about a model.
 
@@ -275,7 +251,11 @@ def _handle_prephase_gpu_measurement(
     governs, and reimplementing any of that here would put O-7's accounting
     in the one scope where it is hardest to see.
 
-    **Three applicability rules, none of them a feature flag.**
+    **Applicability rules, none of them a feature flag.**
+
+    *Synthetic execution never measures a GPU.* A `StubSandbox` may retain
+    the host device identity for provenance; that identity does not turn
+    synthetic execution into a real candidate workload.
 
     *Trial rounds are not measured.* O-7 governs formal execution, and a
     trial round's admission posture already proceeds while recording what it
@@ -318,7 +298,7 @@ def _handle_prephase_gpu_measurement(
     The task projection is opaque to this coordinator. Dataset vocabulary and
     materialization remain owned by the bound TaskDataPath implementation.
     """
-    if is_trial:
+    if is_trial or isinstance(sandbox, StubSandbox):
         return PrephaseOutcome.PROCEED
 
     # TYPE-checked, not merely present. `getattr(sandbox, "device_identity",
@@ -1062,6 +1042,7 @@ def _resolve_task_scope_guardrail_steps(
     train_cfg: dict,
     train_portion: float | None,
     max_samples: int | None,
+    resolved_training_rows: int | None = None,
 ) -> int | None:
     """The §5 step count for an attempt whose scope its TASK built (B7).
 
@@ -1099,6 +1080,8 @@ def _resolve_task_scope_guardrail_steps(
         train_cfg: the plan's training config.
         train_portion: the round's per-epoch subsample fraction.
         max_samples: the validation-envelope row ceiling, or ``None``.
+        resolved_training_rows: count retained by this attempt's planning;
+            reuse it without constructing the selected dataset again.
 
     Returns:
         The resolved optimizer-step count, or ``None`` when this attempt has
@@ -1131,6 +1114,7 @@ def _resolve_task_scope_guardrail_steps(
             epochs=resolve_train_field(train_cfg, "epochs", safety_margin=1),
             max_samples=max_samples,
             drop_last=resolve_training_drop_last(train_cfg),
+            resolved_rows=resolved_training_rows,
         ).unit_count
     except Exception as exc:
         from core.local_code.failure import raise_if_code_package_failure
@@ -1151,6 +1135,7 @@ def _resolve_guardrail_steps(
     *,
     task_scopes=None,
     data_dir: str | None = None,
+    resolved_training_rows: int | None = None,
 ) -> int | None:
     """Resolved step count for the §5 guardrails. Best-effort: a
     resolver failure returns None (the guardrail is defense-in-depth —
@@ -1187,6 +1172,7 @@ def _resolve_guardrail_steps(
             train_cfg=train_cfg,
             train_portion=train_portion,
             max_samples=max_samples,
+            resolved_training_rows=resolved_training_rows,
         )
     try:
         from agent.skills.training_skill.estimator import (
@@ -1526,6 +1512,11 @@ def _build_runtime_policy(
         policy["verification"] = {
             "max_wall_ms": verification_window_seconds * 1000.0,
         }
+    verification_floor_ms = getattr(
+        agent_input, "runtime_verification_pathological_min_unit_ms", None
+    )
+    if verification_floor_ms is not None:
+        policy.setdefault("verification", {})["pathological_min_unit_ms"] = verification_floor_ms
     if (
         agent_input.runtime_watchdog_enabled
         and policy["watchdog"]["deadline_policy"] == "budget-ceiling-v1"
@@ -1555,6 +1546,7 @@ def _check_and_record_guardrail_skip(
     dataset_profile,
     task_scopes=None,
     data_dir: str | None = None,
+    resolved_training_rows: int | None = None,
 ) -> bool:
     """Run the §5 guardrails; on violation save the planner-visible
     record and return True (the attempt loop `continue`s). Single call
@@ -1581,6 +1573,7 @@ def _check_and_record_guardrail_skip(
         max_samples=agent_input.validation_max_train_samples,
         task_scopes=task_scopes,
         data_dir=data_dir,
+        resolved_training_rows=resolved_training_rows,
     )
     violations = _evaluate_step_guardrails(
         n_steps=n_steps,

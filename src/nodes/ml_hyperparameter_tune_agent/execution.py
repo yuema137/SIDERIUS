@@ -42,8 +42,7 @@ from agent.schemas.training_diagnosis import derive_training_diagnosis
 from agent.skills.evaluate_vram_skill.preflight_adapter import run_production_preflight
 from core.layout import checkout_root
 from core.record_role import AttemptRole, observed_attempt_role
-from core.runtime_control.admission import RESOURCE_REJECTIONS
-from core.training_seeds import TrainingSeedPlan
+from core.stub_sandbox import StubSandbox
 from execute_tools.dataset_config import (
     ScopeViolationError,
 )
@@ -56,10 +55,10 @@ from execute_tools.evaluation_metric import (
     MetricResult,
     NotScoreableResult,
 )
-from execute_tools.health_checks.config import default_health_policy_path
 from execute_tools.health_checks.schemas import (
     PerSampleEvidence,
 )
+from execute_tools.metric_order import finite_score
 from execute_tools.scoring_helpers import (
     build_score_table,
     file_vector_to_log_space,
@@ -78,6 +77,7 @@ from nodes.ml_hyperparameter_tune_agent.contracts import (
 )
 from nodes.ml_hyperparameter_tune_agent.external_evaluation import run_external_evaluation
 from nodes.ml_hyperparameter_tune_agent.output_retention import finalize_attempt_outputs
+from nodes.ml_hyperparameter_tune_agent.phase_admission import run_admitted_skill
 from nodes.ml_hyperparameter_tune_agent.policy import (
     ScoringRoute,
     _apply_degeneracy_reaction,
@@ -88,7 +88,7 @@ from nodes.ml_hyperparameter_tune_agent.policy import (
     resolve_measured_time_budget,
     resolve_scoring_route,
 )
-from nodes.ml_hyperparameter_tune_agent.probe_data import build_task_probe_data
+from nodes.ml_hyperparameter_tune_agent.probe_data import build_attempt_task_probe_data
 from nodes.ml_hyperparameter_tune_agent.records import (
     _build_denoised_filename,
     _build_execution_failure_record,
@@ -98,7 +98,6 @@ from nodes.ml_hyperparameter_tune_agent.records import (
 )
 from nodes.ml_hyperparameter_tune_agent.round_health import (
     apply_round_health,
-    build_evaluation_payload_fn,
     build_target_path_fn,
 )
 from nodes.ml_hyperparameter_tune_agent.runtime import (
@@ -107,7 +106,6 @@ from nodes.ml_hyperparameter_tune_agent.runtime import (
     _build_admission_policy,
     _build_runtime_policy,
     _check_and_record_guardrail_skip,
-    _handle_admission_refusal,
     _handle_in_subprocess_rejection,
     _handle_prephase_gpu_measurement,
     _raise_if_evidence_channel_failure,
@@ -119,6 +117,7 @@ from nodes.ml_hyperparameter_tune_agent.runtime import (
     apply_forecast_time_authority,
     is_evidence_refusal,
 )
+from nodes.ml_hyperparameter_tune_agent.scoring_transport import adopt_child_score, health_arguments
 
 # `_emit_record` is the node's ONE record-emission point, called from four
 # modules. Same reasoning as `_runtime._run_skill`: resolve it through its
@@ -386,6 +385,7 @@ def run_admission_preflight(
         # is exactly what the §AB.3 transport repaired.
         task_scopes=prepared.task_scopes,
         data_dir=time_data_dir,
+        resolved_training_rows=prepared.resolved_training_rows,
     ):
         return AdmissionOutcome.next_attempt()
 
@@ -428,15 +428,15 @@ def run_admission_preflight(
     # exactly how the original defect would return, on the
     # exception paths nobody watches.
     # See docs/design/v20_priorities/pr_a_isolated_preflight_wiring.md
-    task_probe_data = build_task_probe_data(
+    task_probe_data = build_attempt_task_probe_data(
         task_composition_ref=agent_input.task_composition_ref,
         task_scopes=prepared.task_scopes,
         data_dir=time_data_dir,
-        epoch_seed=TrainingSeedPlan(trial_config.seed_context).epoch(0).subsample,
-        train_portion=trial_config.train_portion,
+        trial_config=trial_config,
         max_samples=agent_input.validation_max_train_samples,
     )
     resource_check = run_production_preflight(
+        pseudo_training=isinstance(sandbox, StubSandbox),
         model_type=active_params["model_type"],
         model_config=active_params["model_config"],
         train_config=active_params["train_config"],
@@ -970,36 +970,15 @@ def run_training(
     stage.name = "training"
     print("\n[Step 1/3] Training...")
     t0 = time.time()
-    train_status = _runtime._run_skill("training_skill", sandbox, **active_params)
+    train_status, admission_refusal = run_admitted_skill(
+        bindings, prepared, identity, phase="training"
+    )
     train_time = round(time.time() - t0, 1)
     _raise_if_wall_clock_timeout(train_status, sandbox, run_name)
     _raise_if_evidence_channel_failure(train_status, sandbox, run_name)
-    admission_refusal = None
+    if admission_refusal is not None:
+        return TrainingOutcome.end_round(environment_admission_refusal=admission_refusal)
     if train_status.get("status") == _records.RESOURCE_ADMISSION_STATUS:
-        admission_refusal = _runtime.normalize_training_admission_refusal(train_status)
-        train_status = {**train_status, "admission": admission_refusal.model_dump(mode="json")}
-    if _handle_admission_refusal(
-        train_status,
-        ordering=prepared.ordering,
-        phase="training",
-        sandbox=sandbox,
-        exp_id=exp_id,
-        model_type=model_type,
-        file_index=file_index,
-        record_params=record_params,
-        expert_advice_str=expert_advice_str,
-        hypothesis=hypothesis,
-        round_index=round_index,
-        attempt_in_round=attempt_in_round,
-        candidate_id=agent_input.candidate_id,
-        experiment_arm=agent_input.experiment_arm,
-        is_trial=prepared.plan.is_trial,
-    ):
-        if (
-            admission_refusal is not None
-            and admission_refusal.reason_code not in RESOURCE_REJECTIONS
-        ):
-            return TrainingOutcome.end_round(environment_admission_refusal=admission_refusal)
         return TrainingOutcome.next_attempt()
     if _handle_in_subprocess_rejection(
         train_status,
@@ -1255,27 +1234,15 @@ def _run_local_evaluation_phase(
     stage.name = "inference"
     print("[Step 2/3] Inference...")
     t0 = time.time()
-    inf_status = _runtime._run_skill("inference_skill", sandbox, **active_params)
+    inf_status, admission_refusal = run_admitted_skill(
+        bindings, prepared, identity, phase="inference"
+    )
     inference_time = round(time.time() - t0, 1)
     _raise_if_wall_clock_timeout(inf_status, sandbox, run_name)
     _raise_if_evidence_channel_failure(inf_status, sandbox, run_name)
-    if _handle_admission_refusal(
-        inf_status,
-        ordering=prepared.ordering,
-        phase="inference",
-        sandbox=sandbox,
-        exp_id=exp_id,
-        model_type=model_type,
-        file_index=file_index,
-        record_params=record_params,
-        expert_advice_str=expert_advice_str,
-        hypothesis=hypothesis,
-        round_index=round_index,
-        attempt_in_round=attempt_in_round,
-        candidate_id=agent_input.candidate_id,
-        experiment_arm=agent_input.experiment_arm,
-        is_trial=prepared.plan.is_trial,
-    ):
+    if admission_refusal is not None:
+        return AttemptExecution.end_round(environment_admission_refusal=admission_refusal)
+    if inf_status.get("status") == _records.RESOURCE_ADMISSION_STATUS:
         return AttemptExecution.next_attempt()
     # Step 11 C2 (F-11-1) — same authority as the training branch.
     if _records.is_execution_failure(inf_status):
@@ -1384,7 +1351,9 @@ def _run_local_evaluation_phase(
     try:
         if _scoring_route is ScoringRoute.ANCHOR_NORMALIZED:
             # Anchor-normalized scoring (both trial and formal modes).
-            # Trial: sparse SampleSet. Formal: full SampleSet (all 20 × 200).
+            # Scored on the round's evaluation SampleSet: the plan's
+            # eval_portion on Trial rounds, formal_eval_portion (default
+            # 1.0, snapshot strategy) on Formal rounds.
             # Step 06 — PRODUCTION SCORING through the
             # metric handle: scoreability first, then the
             # frozen TIDMAD arithmetic. A refused
@@ -1470,28 +1439,13 @@ def _run_local_evaluation_phase(
             #   ATTEMPTED for a trial round, so this branch is also where
             #   every un-composed FORMAL round has always gone. The old
             #   comment named a condition the code never tested.
-            score_res = _runtime._run_skill("denoising_score_skill", sandbox, **active_params)
-            _require_successful_scoring_result(score_res)
-            # F2 — carry the same three round facts the anchor route
-            # produces in-process, so the round-boundary gate evaluation
-            # below is genuinely route-independent rather than an anchor
-            # branch with a second entrance.
             #
-            # `per_sample_evidence` is TRANSPORTED, never inferred. The
-            # child sets `file_vector` from `MetricResult.per_sample`,
-            # which is `None` exactly when the metric declares no
-            # per-sample concept — so D18's mapping applies verbatim. A
-            # payload that omits the key entirely has stated NOTHING, and
-            # absence must not be read as `scalar_only`: that is the
-            # distinction `PerSampleEvidence.UNDECLARED` exists to keep.
-            _child_results = score_res.get("results", {}) or {}
-            final_scalar = _child_results.get("denoising_score")
-            file_vector = list(_child_results.get("file_vector") or [])
-            per_sample_evidence = (
-                PerSampleEvidence.for_per_sample(_child_results.get("file_vector"))
-                if "file_vector" in _child_results
-                else PerSampleEvidence.UNDECLARED
-            )
+            # Status, formula evidence and per-sample transport are adopted
+            # by `scoring_transport.adopt_child_score`.
+            score_res = _runtime._run_skill("denoising_score_skill", sandbox, **active_params)
+            child = adopt_child_score(bindings, score_res, _require_successful_scoring_result)
+            final_scalar, file_vector = child.scalar, child.file_vector
+            per_sample_evidence = child.per_sample
     except ScopeViolationError as e:
         # DataScope DS5 — non-retryable: terminate the run
         # (must precede the generic handler below, which
@@ -1554,35 +1508,15 @@ def _run_local_evaluation_phase(
     # Evaluate, merge score-validity and stamp the verdict are one
     # responsibility and therefore one call; the boundary owns them, this
     # function keeps sequencing. Full rationale, and the deliberately
-    # unpersisted `evaluated` residual, in `round_health`.
+    # unpersisted `evaluated` residual, in `round_health`. Under formula
+    # selection, `round_health` hands task checks the SOURCE values
+    # (`evaluation_child.source_health_inputs`), never the utility.
     apply_round_health(
         score_res,
         merge_score_validity=_merge_score_validity_failure,
-        enabled=agent_input.health_gate_enabled,
-        round_index=round_index,
-        config_path=agent_input.health_checks_config,
-        production_config_path=default_health_policy_path(),
-        task_health_binding=(
-            agent_input.task_composition_ref.task_health_binding
-            if agent_input.task_composition_ref is not None
-            else None
-        ),
+        **health_arguments(bindings, prepared, identity, _denoised_fn),
         healthgate_mode=agent_input.healthgate_mode,
         result_authority=agent_input.result_authority,
-        model_name=model_type,
-        run_name=run_name,
-        exp_id=exp_id,
-        models_dir=(
-            sandbox.dirs.get("models") if isinstance(getattr(sandbox, "dirs", None), dict) else None
-        ),
-        denoised_filename_fn=_denoised_fn,
-        evaluation_payload_fn=build_evaluation_payload_fn(
-            task_data_path=bindings.run_task_data_path,
-            deliverable_dir=sandbox.base_dir,
-            exp_id=exp_id,
-            run_name=run_name,
-            model_type=model_type,
-        ),
         target_path_fn=_target_fn,
         file_vector=file_vector,
         denoising_score=final_scalar,
@@ -1766,7 +1700,7 @@ def run_inference_scoring_health(
         if (
             reference_scores is not None
             and _sc_fv is not None
-            and _sc_scalar is not None
+            and finite_score(_sc_scalar)
             and not _is_degenerate_formal
         ):
             try:

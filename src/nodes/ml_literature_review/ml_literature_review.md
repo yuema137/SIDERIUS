@@ -1,5 +1,15 @@
 # MLLiteratureReviewAgent
 
+
+## Structured evaluation prompt context
+
+Search decisions and synthesis receive the shared block. Paper extraction is excluded so published facts are not rewritten to match the task preferences.
+
+The run-scoped composition supplies this context through the shared append path.
+Absence adds no bytes and never enters the new boundary under historical profiles.
+The [evaluation contract](../../execute_tools/evaluation-contract.md#evaluation-prompt-rendering)
+owns formatting, profile admission and runtime capability distinctions.
+
 ## Live output names
 
 When `storage.local` exists, `run()` and the independent `_write_output()`
@@ -80,7 +90,10 @@ dataset profile, normalized model-I/O contract, task description and metric.
 binder requires an explicit physical data root; literature review does not train
 or score those data. The workspace is selected before importing composition/plugin
 dependencies, and the task binding stays active through input validation and
-`run()`, then unwinds even if the run raises. The module
+`run()`, then unwinds even if the run raises. The cold-script regression checks
+workspace binding on every composition import and records the first uncached
+import as the startup event; cached helper imports are permitted. It also requires
+actual synthesis prompt transport and persisted output, with network disabled. The module
 form `python -m nodes.ml_literature_review.ml_literature_review ...` is
 equivalent; the short package form does not work because the package rebind
 has no `__path__` for a `__main__` lookup.
@@ -301,3 +314,12 @@ recommendations through the shared disclosure. Paper extraction and its cached
 source facts remain independent of current-run limits: a published method must
 not be rewritten merely because this run cannot execute it. See the
 [disclosure contract](../../../docs/agent-reference/mechanisms/constraint-disclosure.md).
+
+### Native output record encoding
+
+The native output writer delegates to `core.record_encoding` for versioned
+strict JSON, preserving typed non-finite floats. Load with the output schema's
+`model_validate_json`; legacy unversioned records remain supported. The
+[core contract](../../core/core-contract.md#versioned-non-finite-record-json-issue-1111)
+owns metadata, legacy projection and digest impact. Legacy records may contain null where a float was non-finite. New native output
+and `LocalRecorder` writes preserve that float through the versioned encoding.

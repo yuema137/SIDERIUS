@@ -106,12 +106,24 @@ when inputs change or credentials disappear. Store lock/directories may already
 exist on refusal; no new operation record, worker or native workspace is claimed.
 The existing environment filter remains the forwarding authority.
 
-Fresh-preview refusals retain code `candidate_preflight`. For a `ValueError` on
-an authored loop whose execution profile is not `native-interpretation-candidate/v1`,
-the message is `research loops require the native-interpretation-candidate profile`.
-This fixed message is selected from validated request fields, never exception text
-or raw input. `OSError` and other `ValueError` refusals retain
-`candidate inputs or routes changed; review again`.
+Fresh-preview refusals retain code `candidate_preflight`. The worker's
+`admit_loop` returns `LoopAdmissionRefusal | None`; `require_loop` raises a
+returned refusal at preflight, execution and evidence boundaries. Submission renders
+only that typed exception's safe fixed message, without rechecking the profile:
+- `profile`: research loops require the native-interpretation-candidate profile.
+- `shape`: research loops require a native interpretation-to-tuning iteration;
+  review the workflow nodes and connections.
+- `feedback`: research loop feedback must connect native tuning to interpretation;
+  review the workflow connections.
+
+Other `OSError` and `ValueError` refusals retain
+`candidate inputs or routes changed; review again`; arbitrary exception text is
+never forwarded. Reusable preparation preflight failures use `reusable_preflight`
+and direct the operator to check the task manifest, data root, LLM configuration and
+selected paths before reviewing again. Native-chain admission failures use
+`native_chain_admission` and direct the operator to check the capture, launch
+settings, input paths and required environment bindings. These generic boundaries
+do not claim a particular input changed or expose raw exception payloads.
 
 ## Run seed (issue #983)
 
@@ -186,8 +198,8 @@ Owners: `seed_admission.py` (`admission_seed`, `require_root_seed`,
 tools.candidate_operations.child`, no shell, stdin DEVNULL, stdout/stderr to
 exclusive private `operation.log`, close_fds=True and start_new_session=True.
 There are no pipes owned by the submitting process. The child writes its boot
-ID/PID/start-ticks identity before entering native invocation. Runtime binding
-compares interpreter path/resolved target, environment prefix, source root and
+ID, PID, PID namespace inode and start ticks before entering native invocation.
+Runtime binding compares interpreter path/resolved target, environment prefix, source root and
 observed Git revision. These facts do not pin a clean tree or arbitrary plugin
 imports against changes; selected-file identities retain their native limitations.
 
@@ -282,8 +294,10 @@ co-tenant, and its admission is observe-only by default.
 Admission, before the claim (each refusal is an `OperationFailure` with this
 code and leaves no claim, reservation or child):
 
-1. not a `candidate` submission with `resources` (every other kind, including
-   `candidate_loop_resume` and native chains): `resources_required`;
+1. no reservation: a `candidate` without `resources`, any other kind except
+   `candidate_loop_resume` (native chains, preparations), or a
+   `candidate_loop_resume` that `loop_resume_resources` refuses (below):
+   `resources_required` (or that function's `run_resources_conflict`);
 2. ledger location (above): `path`; then the lock (`ledger_busy`); then
    `ledger.json` must parse as this revision's `HostLedgerState`, else
    `ledger_format`: the file is unreadable by this revision (written by an
@@ -299,7 +313,12 @@ code and leaves no claim, reservation or child):
    CPU-only declaration that binds device nodes (`request.devices`):
    `placement_unreachable`;
 6. `plan_dispatch` refusal (cannot fit even an idle budget):
-   `resource_refused` with its `escalated to operator` reasons. Otherwise the
+   `resource_refused` with its `escalated to operator` reasons. For a parallel
+   run every envelope quantity is clamped to the budget but never below the
+   run's own `resources` declaration, and a unit that fits no slot alone was
+   already refused `parallel_unit_exceeds_capacity`; so this refusal can only
+   mean that declaration exceeds the idle budget, and its message says so
+   ("the run's resources declaration exceeds this host budget ..."). Otherwise the
    ledger is first promoted (below), then this unit is planned behind every
    remaining waiter, `plan_dispatch((*queued, unit), reservations, budget,
    on_refusal="continue")`: it is placed only when every earlier waiter is
@@ -313,8 +332,9 @@ code and leaves no claim, reservation or child):
    reason names the contention. `host_capacity` is no longer returned.
 
 Placement and spawn. After the claim the reservation (or queue entry) is
-written (process unbound, so a crash fails closed). A placed unit's `Placement`
-is published write-once as `operations/<UUID>/placement.json`; a queued unit
+written (process unbound, so a crash fails closed). A placed unit publishes
+write-once `operations/<UUID>/host_reservation.json` (`HostReservationTicket`:
+`ledger_root`), then its `Placement` as `operations/<UUID>/placement.json`; a queued unit
 publishes `operations/<UUID>/queued.json` instead (below). For a GPU unit the launch mapping is
 overlaid before every later name check and the child environment: the slot UUID
 replaces any inherited `CUDA_VISIBLE_DEVICES` (the sandbox sees the slot as
@@ -323,8 +343,37 @@ identity is read from `/proc` while it is unreaped (its PID cannot be reused)
 and bound. A `Popen` `OSError` removes the reservation and publishes
 `spawn_failure.json` as before, so a failed operation directory may hold both
 `placement.json` and `spawn_failure.json`; the placement then names a
-reservation that no longer exists. Any other failure after the write keeps the
-reservation unbound.
+reservation that no longer exists. If publication of `host_reservation.json`,
+`placement.json`, `host_grant.json` or `queued.json` fails or is interrupted,
+`LedgerSlot.reserve` removes its own entry under the still-held admission lock
+and re-raises before spawn. The claim, any already-published files and the
+ordinal counter remain durable; no automatic retry occurs. Cleanup failure
+propagates and conservatively retains the entry. A failure while binding an
+already-spawned child retains the entry for the existing liveness machinery.
+
+Placed-child confirmation (#1108). The submitter holds the ledger lock from
+writing the entry until it has bound the child or removed the entry. A directly
+placed operation child (it sees `placement.json` and no `queued.json`), right
+after publishing `process.json` and checking its runtime binding and before any
+reusable verification or native dispatch, calls `host_queue.confirm_reservation`:
+under the ledger lock it requires a reservation with its `operation_id`,
+`request_digest` and the published `placement`. It and queued `_poll` share
+`_held_reservation` for reservation lookup; confirmation additionally checks the
+request digest and exact published placement. Absent or unreadable, the child publishes
+`Completion(outcome="pre_dispatch_failure", reason="host_reservation_unconfirmed")`
+and never runs. A lock timeout (`OperationFailure.detail.code="ledger_busy"`)
+in this confirmation stage instead publishes `reason="host_reservation_busy"`,
+so operators can distinguish contention from an unconfirmed reservation. Both
+fail closed. The existing `LEDGER_LOCK_WAIT_SECONDS` (30 s) remains unchanged;
+there is no added retry or silent extension of runtime deadlines. This closes
+two windows with one rule: a `KeyboardInterrupt`
+inside `Popen` after the fork (the submitter removes the entry, but the child
+already exists in its own session), and a submitter killed after `Popen`
+returned but before the child published `process.json` (the sweep releases the
+entry on the submitter's positive exit). Once `process.json` exists the sweep
+sees a live child and keeps the entry, so a confirmed reservation stays held.
+A queued child needs no separate step: each `_poll` already reads its own entry
+under the lock, and a missing one ends it with `host_queue_failed`.
 
 Sandbox identity. A placed operation's child (it sees `placement.json`) passes
 `on_sandbox_spawn` to `launch_candidate`, which publishes the bwrap process
@@ -353,28 +402,56 @@ never sees the sandbox.
   `ProcessIdentity`, omitted on entries written before it existed). When no
   child identity exists at all (none bound, no `process.json`), the entry is
   released once that submitter has positively exited: it was killed between
-  writing the entry and spawning or binding a child, so no child exists for it
-  and the entry would otherwise hold capacity, or the head of the queue,
-  forever. An interrupted spawn that does not kill the submitter (any
+  writing the entry and spawning or binding a child. A child may already exist
+  without having published itself; after a sweep removes its entry, confirmation
+  prevents it from running. Otherwise the abandoned entry would hold capacity,
+  or the head of the queue, forever. An interrupted spawn that does not kill the submitter (any
   non-`OSError`, such as `KeyboardInterrupt`) removes the entry itself before
-  re-raising. With no identity and no recorded or exited submitter, a
+  re-raising; a child already forked then fails its confirmation (above) and
+  never runs. With no identity and no recorded or exited submitter, a
   mismatched published identity, or any unreadable record, the entry is kept
   (no exception).
 - Operator, `release_reservation` (CLI `release-reservation --host-ledger DIR
   --operation-id UUID`), for a stuck reservation. It refuses `not_reserved`,
   `session_live` (the child or sandbox leader alive, or any member in A or B),
-  `liveness_unobservable` (a leader unknown with its session unreadable), or
+  `liveness_unobservable` (a leader unknown with its session unreadable, or
+  an unbound entry with an unknown recorded submitter), or
   `integrity` (a published identity names another operation). Otherwise it
   releases, including an unbound reservation whose child never published an
-  identity, on the operator's word.
+  identity when evidence is observable and no child or sandbox session appears live.
 
-Known caveats (not covered by the evidence above):
+Known caveats and observation boundaries (also apply to admission release and End):
+
+- PID namespace: new `ProcessIdentity.pid_namespace_inode` values record the inode
+  of `/proc/self/ns/pid` in the process capturing the identity. If capture cannot
+  read that inode, it records `0`, an explicit unknown value that never matches,
+  even after access recovers. `process.observe` first checks the boot ID; a
+  different boot proves exit. On the same boot, a recorded namespace mismatch
+  returns `unknown` (`pid_namespace_mismatch`); a recorded `0` or unreadable
+  reader namespace returns `unknown` (`pid_namespace_unobservable`).
+  No PID stat or session scan can prove death in these cases.
+  `host_liveness.session_evidence` returns an unknown leader and `members=None`,
+  so automatic ledger sweeps, operator release, operation-store admission
+  release and End of an abandoned successor cannot release it. Unbound entries
+  with an unknown submitter also refuse operator release. Reopen from the
+  original PID namespace to observe records with a captured inode.
+- Compatibility: old ledger/process markers without the field remain readable
+  with `None` and retain the pre-field assumption that reader and writer share
+  a PID namespace. PID and session observations can still establish exit and
+  authorize admission release, ledger release and End without a reboot or
+  migration. This preserves upgrade behavior but cannot detect cross-namespace
+  readers of legacy records: keep those readers in the original namespace.
+  New records always carry a captured inode or explicit `0`; failed capture
+  affects only that record. A completed receipt alone does not prove exit.
+- Serial operations have no published sandbox identity and rely on
+  `--die-with-parent`; the bwrap startup window below therefore also limits
+  admission release and End for serial operations.
 
 - Submitter window: if the submitter is killed after `Popen` returned but
   before the child published `process.json` (its first action), the entry is
-  released while that child starts. A queued child then finds its entry gone
-  and ends without running (`host_queue_failed`); a placed child would run
-  unaccounted until it exits.
+  released while that child starts. The child then finds its entry gone and
+  ends without running: a queued child with `host_queue_failed`, a placed one
+  with `host_reservation_unconfirmed` (placed-child confirmation, above).
 
 - bwrap startup window: `--die-with-parent` takes effect only once bwrap has
   set its parent-death signal during startup. If the operation child dies in
@@ -411,12 +488,21 @@ to the slot UUID (for a GPU unit) and continues as a placed operation
 (`sandbox.json`, release). Submissions also promote: admission promotes the
 swept ledger before planning the new unit.
 
-Waiting cost (known limit). Each waiting child is a full operation child that
-has already imported the operation stack: about 0.56 GiB resident while idle
-(review measurement, 2026-10-28). That memory is not counted in any reservation,
-and the queue has no length cap, so many queued submissions can exhaust host
-memory before any of them runs. Tracked in #1073 (lazy imports in the waiting
-child and/or a queue cap).
+Waiting cost and bound. Native-chain hardware review imports its environment
+inspection only when `review()` runs; importing the operation child/queue does
+not import PyTorch. Waiters still have Python, schema and control-stack overhead,
+which is not included in placed reservations. Operators must leave memory headroom.
+`HostBudget.max_queued_operations` is a strict nonnegative integer, default zero
+(no waiting). Set it explicitly in the shared budget file to permit a bounded
+number of waiting children. After sweep and FIFO promotion, admission refuses a
+new queued decision with `host_queue_full` when the remaining queue is at the
+limit, before claim or spawn. Immediately placeable operations remain accepted.
+The check and insertion share the ledger lock across stores. Cancelled/dead
+waiters free space through the existing queue/liveness owners. This bounds
+waiting entries, not running reservations or in-process worker ready queues.
+Nonzero limits participate in the budget digest; zero is omitted to retain
+existing zero-wait budget bytes. Changing a limit with live entries requires
+draining the ledger first (`budget_mismatch`).
 
 Snapshot. While `queued.json` exists without `placement.json` and the child is
 alive, `read_operation` reports `state="queued"`, `reason="host_queued"`;
@@ -440,12 +526,53 @@ holds the budget digest: while one exists a different budget is refused
 `budget_mismatch`.
 
 Loop resume. A `candidate_loop_resume` under a ledger reserves with its root
-candidate's `resources` and launch request (timeout, environment names,
-devices), placed or queued like a candidate; a root without `resources` still
-refuses `resources_required`. A placed segment publishes `sandbox.json` like a
-candidate. A resume submitted without a ledger whose root ran placed (the root's
-operation directory holds `placement.json`) refuses `host_ledger_required`
-before any claim: it would otherwise run unaccounted beside placed runs.
+candidate's launch request (timeout, environment names, devices) and the
+reservation `host_admission.loop_resume_resources(root, request.resources,
+ledger=...)` returns, placed or queued like a candidate (#1385). That function
+is the one rule, also called by the console's Resume review:
+
+| Ledger | Root `resources` | `CandidateLoopResumeRequest.resources` | Result |
+| --- | --- | --- | --- |
+| yes | declared | absent | the root's declaration |
+| yes | declared | present (even equal) | `run_resources_conflict` (one authority) |
+| yes | absent | present | the request's declaration |
+| yes | absent | absent | `resources_required` |
+| no | any | present | `host_ledger_missing` (it would be ignored) |
+| no | any | absent | serial, unchanged |
+
+Under a ledger a root whose request carries `parallel.budget` refuses
+`parallel_budget` first (the same `_require_ledger_parallel` rule `host_slot` applies
+to every placed run), so the console review refuses it too.
+
+Equal values: the console's candidate path (`candidate_console.service._merged`,
+via `with_run_resources`) accepts a supplied value equal to one the reviewed
+operation already carries and refuses only a different one, under the same
+`run_resources_conflict` code. That merge is idempotent on a single
+`CandidateOperation`, whose stored `resources` field is the one value either way.
+A resume's supplied value instead becomes a separate `CandidateLoopResumeRequest`
+field beside the root's: accepting an equal copy would leave two declarations of
+one reservation (two authorities that could later diverge) and give the same
+resume two request digests. So a resume refuses any supplied value when the root
+declares one.
+
+`CandidateLoopResumeRequest.resources: OperationResources | None` is omitted when
+absent, so existing resume requests keep their bytes and request digest; when
+present it is part of the request digest, so reusing a request ID with other
+resources is a `conflict`. A predecessor segment's declaration is never
+inherited: each resume of an undeclared root supplies its own. Waiting resumes
+consume the same `max_queued_operations` allowance; a full or disabled queue
+refuses `host_queue_full`. A placed segment publishes `sandbox.json` like a
+candidate. A resume submitted without a ledger refuses `host_ledger_required`
+before any claim when any record of its loop (the predecessor, every earlier
+segment and the root, `loop_resume.loop_chain`) ran placed (its operation
+directory holds `placement.json`): it would otherwise run unaccounted beside
+placed runs. All of these refusals precede the claim. Witnesses:
+`test_operation_scheduler.py` (`test_loop_resume_reserves_with_one_declaration_authority`,
+`test_a_supplied_resume_declaration_is_what_the_ledger_places`,
+`test_a_serial_resume_of_a_ledger_placed_loop_is_refused`,
+`test_a_resume_without_resources_keeps_its_pre_1385_bytes_and_digest`) and
+`candidate_worker/test_loop_resume.py::test_an_undeclared_root_resumes_placed_with_its_own_resources`
+(real serial root, placed first and second segments).
 
 Operation receipt. The child's `Completion` carries `host_placement`
 (`HostPlacementEvidence`: the published `placement`, the operation child
@@ -496,10 +623,13 @@ It binds and observes the process identity before reading completion/spawn-failu
 markers. A completion published immediately before the observed wrapper exit
 therefore participates in that same read, including an `unknown` completion that
 must keep admission blocked.
-Linux process observation compares boot ID, PID and `/proc/PID/stat` start ticks.
-Readers and operation processes must share the same host PID namespace. PID
-reuse and zombies establish original-process exit within that namespace. Unreadable/malformed
-identity is unknown. Presence only describes the wrapper, not provider progress.
+Linux process observation compares boot ID, PID namespace inode, PID and
+`/proc/PID/stat` start ticks. On the same boot, the reader must match the recorded
+namespace before PID reuse, absence or zombies establish exit. Recorded unknown,
+mismatched or unreadable namespace evidence is unknown; legacy missing fields
+retain the same-namespace assumption; see the Host reservation ledger
+observation boundaries above. Unreadable/malformed process identity is unknown.
+Presence only describes the wrapper, not provider progress.
 No persisted monotonic clock or elapsed-time timeout inference exists.
 
 A submission handle may say `starting` (or `queued` for a host-ledger waiter);
@@ -1214,13 +1344,19 @@ changes after review refuse the new operation rather than changing its meaning.
 
 `request_loop_stop(config, operation_id)` is an operation-bound graceful request
 for the candidate worker's declared finite loop, including an exited, verified paused
-tail. For a paused receipt it calls `review_locked(..., ending=True)` under the
-same store lock as Resume admission: clean supervision and bound completion are
-required. An existing successor is allowed only when `loop_recovery.failed_successor`
+tail. For a paused receipt it calls `review_end_locked` under the same store lock
+as Resume admission. The shared `_paused_boundary` verifies completed evidence,
+exited process, clean supervision and bound completion. End has its own eligibility:
+it does not require a recorded seed for future execution or an unused next iteration
+slot. Resume retains those requirements. End refusals use `loop_end`; shared
+boundary messages contain only the reason, because the console supplies the action
+prefix. Resume retains its existing messages. Identity failures retain their integrity codes. An existing successor is allowed only when `loop_recovery.failed_successor`
 verifies that it is the selected predecessor's bound resume operation, has no
 completion or native receipt, and its wrapper and sandbox sessions have ended.
-This ending-only path permits a partial next body; it neither promotes that body
+This ending-only path permits a partial next iteration; it neither promotes that iteration
 to a result nor authorizes re-execution. Live, unknown or corrupt successors refuse.
+A continued predecessor directs the operator to open its successor: Stop the active
+successor or use End loop there if it is paused.
 It preserves the paused receipt and writes only the run-wide Stop marker; a stale
 Resume review cannot admit after Stop wins the lock. It reuses the store lock,
 configured-root admission, saved request/run identity checks and current process
@@ -1247,12 +1383,14 @@ that receipt, the wrapper is observably exited, and recorded native supervision
 proves clean process-group shutdown. Missing/unknown lifecycle evidence, a reached
 finite limit, a met stop condition (a `completed` receipt with `loop_trace.stop_reason`),
 a root Stop or an existing successor refuses with `loop_resume`. A
-partial next body already invalidates the paused readback, so the review finds no
+partial next iteration already invalidates the paused readback, so the review finds no
 verified paused segment. The review constructs no process and reads no credentials.
 
 Submit `CandidateLoopResumeOperation(request_id=..., request=CandidateLoopResumeRequest(
 predecessor_operation_id=..., expected_receipt_digest=review.receipt_digest,
-operator_advice=None))` through `submit_operation`. `operator_advice` is optional
+operator_advice=None))` through `submit_operation`; under a host ledger a loop whose
+root declared no `resources` also sets `resources` (see
+[Host reservation ledger](#host-reservation-ledger), "Loop resume"). `operator_advice` is optional
 untrusted text for the resumed segment's proposals (the worker's `OperatorAdvice`:
 surrounding whitespace removed, 1..4000 characters, no `Cc`/`Cf` (control or format) characters except
 newline and tab; invalid advice refuses at validation). It is omitted when absent, so
@@ -1283,9 +1421,12 @@ native receipt projects `state="operation_failed", reason="loop_process_exited"`
 only when both its wrapper exit and ended wrapper/sandbox sessions are verified.
 Wrapper exit with live or unobservable sessions stays `state="unknown",
 reason="loop_process_exiting"`; it is not a terminal failure.
-`process.observe` binds boot ID and PID start ticks: absent PIDs on an observable
-`/proc`, reused PIDs, zombies/dead processes and a different boot prove exit;
-unreadable identities stay unknown. Marker integrity and native receipt validation
+`process.observe` binds boot ID, PID namespace inode and PID start ticks. In a
+matching recorded namespace, absent PIDs on an observable `/proc`, reused PIDs
+and zombies/dead processes prove exit; a different boot independently proves
+exit. Recorded unknown, mismatched or unreadable namespace identities stay
+unknown; legacy missing fields retain the same-namespace assumption (see Known
+caveats above). Marker integrity and native receipt validation
 still precede this projection; no completion or scientific receipt is fabricated.
 Both failure projection and release require `host_liveness.reservation_evidence`
 to prove that the wrapper session and any published sandbox session ended;
@@ -1342,13 +1483,23 @@ admission, refusals and idempotency are the owner's:
 | `stop-loop` | `request_loop_stop(config, operation_id)` | `LoopStop` marker (requested) |
 | `pause-loop` | `request_loop_pause(config, operation_id)` | `LoopPause` marker (requested) |
 | `review-loop-resume` | `review_loop_resume(config, operation_id)` | paused `OperationSnapshot` with `receipt_digest` |
-| `write-loop-resume ... --output FILE [--advice-file TEXT_FILE]` | review, then construct the request below | the saved `CandidateLoopResumeOperation` |
+| `write-loop-resume ... --output FILE [--advice-file TEXT_FILE] [--resources-file JSON_FILE]` | review, then construct the request below | the saved `CandidateLoopResumeOperation` |
+
+For a condition input pause, `review-loop-resume` includes the worker-owned
+`receipt.loop_trace.input_request.summary.what_was_tried` when populated. Its
+bounded per-iteration projection and legacy omission behavior are defined in the
+worker contract's "Condition input pause" section; the CLI prints it unchanged.
 
 `--advice-file` reads UTF-8 operator advice into `operator_advice`. Invalid advice
 (non-UTF-8, empty after trimming, over 4000 characters, control or format
 characters; CRLF line breaks are first normalized to LF, a lone CR is refused) exits 2
 with `invalid_input_or_record`. It never echoes the text, and nothing is reviewed or
-written. `write-loop-resume` reviews the paused segment and creates `FILE` once; an existing
+written. `--resources-file` reads one `OperationResources` JSON object into
+`resources` (for a loop whose root declared none, submitted with `--host-ledger`);
+an invalid declaration likewise exits 2 with `invalid_input_or_record` before any
+review or write. Whether the declaration applies is decided at `submit` by
+`loop_resume_resources`, so a file whose declaration admission refuses is
+replaced by writing a new `--output` file (a new request ID). `write-loop-resume` reviews the paused segment and creates `FILE` once; an existing
 file refuses with `output_exists` and is left unchanged, so a retry after a lost
 response submits the same request ID. It does not launch. Launch is the ordinary
 `submit --store-config FILE --request FILE`, which reads the launching process
@@ -1401,3 +1552,27 @@ is introduced; the console's Pause/Resume controls only call these functions.
 Offline tests separate operation and worker processes, exercise real native
 body/evidence construction with provider/training doubles, and cover required
 lifecycle/admission refusals; they are not paper qualification.
+
+### Non-loop abandonment and busy diagnostics
+
+For `prepare`, `prepare_reusable`, and non-loop `candidate`, `_read_record` applies
+the same no-completion/no-native-receipt recovery as authored loops. Verified
+wrapper exit plus `loop_recovery.sessions_ended` (delegating to
+`host_liveness.reservation_evidence`) projects `operation_failed` with
+`operation_process_exited`. Live or unobservable sessions instead project `unknown`
+with `operation_process_exiting`. `releasable` independently rechecks the same
+session evidence before admission releases the claim. No second liveness rule,
+new receipt, redispatch, namespace assumption, or scientific result is introduced.
+Existing completion records, including unresolved outcomes, retain precedence.
+Native-chain continuations keep their existing recovery owner.
+
+`require_available` attaches `OperationError.blocking_operation_id` to its `busy`
+refusal. This optional UUID names the actual scanned blocking claim, including a
+claim created before `active.json` publication; consumers need not parse exception
+text or guess from an active pointer. Other errors omit the field.
+
+A non-canonical operation directory is an `integrity` refusal whose diagnostic
+names the directory exactly as found; it does not attach a normalized UUID that
+would link to a different path. Cancel uses `terminal` for both loop and non-loop
+verified dead operations (`operation_failed`); unresolved writer sessions remain
+`not_running`. Neither case records a cancellation intent.

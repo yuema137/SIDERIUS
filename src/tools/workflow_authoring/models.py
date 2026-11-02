@@ -1,10 +1,21 @@
 """Bounded authoring requests and projections of the existing declaration."""
 
+import json
 import unicodedata
 from pathlib import Path
-from typing import Annotated, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, computed_field, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationInfo,
+    computed_field,
+    model_validator,
+)
 
 from workflows.definition import (
     ArgumentBinding,
@@ -18,6 +29,7 @@ from workflows.definition.contract_names import ContractKind, contract_name
 from workflows.definition.draft import BindingPatch, DraftInspection, DraftProblem, WorkflowDraft
 from workflows.definition.models import Identifier, Source
 from workflows.definition.source import SourceDiagnostic
+from workflows.definition.source_updates import restore_browser_values
 
 from .task_models import TaskReferenceAcceptance, TaskReferenceReview, TaskReferenceUpdateProposal
 from .training import TrainingInspector
@@ -44,6 +56,34 @@ def _bounded_source(value: str) -> str:
 
 
 BoundedSource = Annotated[str, AfterValidator(_bounded_source)]
+
+
+_DOCUMENT = TypeAdapter(AuthoredWorkflowDocument)
+
+
+def _browser_document(value: Any, info: ValidationInfo) -> Any:
+    source = (info.data or {}).get("source")
+    if isinstance(value, dict):
+        restored = restore_browser_values(source, value) if isinstance(source, str) else value
+        return _DOCUMENT.validate_json(json.dumps(restored))
+    return value
+
+
+def _browser_draft(value: Any, info: ValidationInfo) -> Any:
+    source = (info.data or {}).get("source")
+    if isinstance(value, dict):
+        if isinstance(source, str) and "base_document" in value:
+            value = {
+                **value,
+                "base_document": restore_browser_values(source, value["base_document"]),
+            }
+        return WorkflowDraft.model_validate_json(json.dumps(value))
+    return value
+
+
+# Source must precede these fields so ValidationInfo sees its bounded, validated value.
+BrowserDocument = Annotated[AuthoredWorkflowDocument, BeforeValidator(_browser_document)]
+BrowserDraft = Annotated[WorkflowDraft, BeforeValidator(_browser_draft)]
 
 
 class SourceProposal(Model):
@@ -143,8 +183,8 @@ class NodeDraftsProposal(Model):
     insertion: every anchor byte (comments, formatting) stays and only the new
     externals, nodes, positions and constructor imports are added. ``document``
     carries edits of the existing content (moves, inspector, loop) and
-    ``bindings`` patch existing sockets; either one renders the combined
-    document canonically, exactly like a document or binding-draft proposal.
+    ``bindings`` patch existing sockets; the combined document preserves
+    untouched literals from ``source`` just like a document proposal.
     Pending nodes may read each other, new externals and existing results.
     """
 
@@ -152,7 +192,7 @@ class NodeDraftsProposal(Model):
     source: BoundedSource
     nodes: tuple[PendingNode, ...] = ()
     externals: tuple[NewExternal, ...] = ()
-    document: AuthoredWorkflowDocument | None = None
+    document: BrowserDocument | None = None
     bindings: tuple[BindingPatch, ...] = ()
     # Anchor nodes deleted in the draft. Deletion always succeeds in the draft: inputs that
     # read a deleted node become "not connected" problems, a deleted loop feedback module
@@ -204,17 +244,20 @@ class NodeEditSummary(Model):
 
 class DocumentProposal(Model):
     kind: Literal["document"]
-    document: AuthoredWorkflowDocument
+    source: BoundedSource | None = None
+    document: BrowserDocument
 
 
 class DraftProposal(Model):
     kind: Literal["draft"]
-    draft: WorkflowDraft
+    source: BoundedSource | None = None
+    draft: BrowserDraft
 
 
 class DraftRequest(Model):
     expected_sha256: Digest
-    draft: WorkflowDraft
+    source: BoundedSource | None = None
+    draft: BrowserDraft
 
 
 class DraftView(Model):

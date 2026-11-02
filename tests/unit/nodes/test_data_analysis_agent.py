@@ -37,6 +37,10 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
 from nodes.data_analysis_agent import DataAnalysisAgent
 from nodes.data_analysis_agent.data_analysis_agent import _SkillSelection
+from tests.helpers.data_analysis_resources import (
+    REAL_PIPELINE_BUDGET_SECONDS,
+    REAL_WORKER_TIMEOUT_SECONDS,
+)
 
 
 class _Capability:
@@ -337,7 +341,7 @@ class _GeneratedProgramBridge(_Bridge):
                 ],
                 "expected_artifacts": [],
                 "resource_request": {
-                    "wall_time_s": 4.0,
+                    "wall_time_s": self.inp.resource_envelope.per_skill_timeout_s,
                     "max_host_memory_gb": 1.0,
                     "max_artifact_count": 0,
                     "max_artifact_bytes": 0,
@@ -586,7 +590,12 @@ class _GeneratedSkillReuseBridge(_Bridge):
         raise AssertionError(label)
 
 
-def _input(tmp_path: Path) -> DataAnalysisInput:
+def _input(
+    tmp_path: Path,
+    *,
+    wall_time_budget_s: float = REAL_PIPELINE_BUDGET_SECONDS,
+    per_skill_timeout_s: float = REAL_WORKER_TIMEOUT_SECONDS,
+) -> DataAnalysisInput:
     scope = ArtifactIntrinsicScope(split_id="validation", description="Validation data")
     asset = AnalysisAsset(
         asset_id="dataset",
@@ -633,8 +642,8 @@ def _input(tmp_path: Path) -> DataAnalysisInput:
             "split_rules": [{"split_id": "validation", "data_visible": True}],
         },
         resource_envelope={
-            "wall_time_budget_s": 15,
-            "per_skill_timeout_s": 5,
+            "wall_time_budget_s": wall_time_budget_s,
+            "per_skill_timeout_s": per_skill_timeout_s,
             "preferred_device": "cpu",
         },
         allowed_skill_packs=builtin_pack_refs("core-analysis"),
@@ -824,6 +833,59 @@ def test_generated_program_is_persisted_before_plan_and_certified_as_evidence(
         "data_analysis.plan",
         "data_analysis.synthesis",
     ]
+
+
+def test_sandbox_probe_cannot_outlive_the_continuing_allocation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1447: the pre-materialization probe is bounded by the allocation.
+
+    A probe that hangs until its timeout used to run its fixed 10 s past a
+    3 s allocation and then report missing isolation. It is now cut at expiry
+    and the invocation records ``timed_out`` without materializing data.
+    """
+    import time
+
+    from agent.data_analysis.analysis_code_sandbox import SandboxCapabilityReceipt
+    from core.execution_deadline import ExecutionDeadlineExceeded
+
+    probe_timeouts: list[float] = []
+
+    def hanging_probe(self, *, timeout_s: float = 10.0) -> SandboxCapabilityReceipt:
+        probe_timeouts.append(timeout_s)
+        time.sleep(timeout_s)
+        return SandboxCapabilityReceipt(
+            available=False,
+            protocol_id="siderius.generated-analysis-sandbox.v1",
+            bubblewrap_path=None,
+            unshare_path=None,
+            reason="TimeoutExpired",
+        )
+
+    monkeypatch.setattr(AnalysisCodeSandbox, "probe", hanging_probe)
+    analysis_input = _input(tmp_path, wall_time_budget_s=3.0, per_skill_timeout_s=2.0)
+    agent = DataAnalysisAgent(
+        run_seed=11,
+        task_analysis_capability=_Capability(),
+        bridge_factory=lambda **_kwargs: _GeneratedProgramBridge(analysis_input=analysis_input),
+        provider="test",
+        model_id="fake",
+    )
+
+    started = time.monotonic()
+    with pytest.raises(ExecutionDeadlineExceeded):
+        agent.run(analysis_input)
+    elapsed_s = time.monotonic() - started
+
+    assert elapsed_s < 3.5
+    assert len(probe_timeouts) == 1 and probe_timeouts[0] < 3.0
+    root = tmp_path / "data_analysis" / "standalone" / "request"
+    (result,) = [
+        json.loads(line) for line in (root / "skill_results.jsonl").read_text().splitlines()
+    ]
+    assert result["status"] == "timed_out"
+    assert result["failure"]["failure_type"] == "timed_out"
+    assert result["failure"]["materialization_occurred"] is False
 
 
 @pytest.mark.allow_real_subprocess
@@ -1290,7 +1352,7 @@ def test_analysis_deadline_includes_llm_stages_and_refuses_late_report(
 
     now = [0.0]
     monkeypatch.setattr("core.execution_deadline.time.monotonic", lambda: now[0])
-    inp = _input(tmp_path)
+    inp = _input(tmp_path, wall_time_budget_s=15.0, per_skill_timeout_s=5.0)
 
     class SlowBridge(_Bridge):
         def generate(self, system, user, *, label):

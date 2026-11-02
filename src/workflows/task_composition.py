@@ -114,9 +114,16 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from agent.schemas.task_config import ForwardContract
     from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
     from execute_tools.dataset_config import DatasetProfile
-    from execute_tools.evaluation_metric import EvaluationMetric, RunMetric, ScoreabilityContract
+    from execute_tools.evaluation_metric import (
+        EvaluationMetric,
+        MetricSpec,
+        RunMetric,
+        ScoreabilityContract,
+    )
+    from execute_tools.evaluation_results import SelectionBinding
     from execute_tools.health_checks._composition import TaskHealthBinding
     from execute_tools.task_data_path import TaskDataPath
+    from workflows.evaluation_composition import ResolvedEvaluation
 
 _MODULE_NAME_PREFIX = "siderius_task_composition_plugin_"
 """Prefix for per-plugin ``sys.modules`` names.
@@ -134,6 +141,7 @@ _MANIFEST_KEYS = frozenset(
         "task_data_path",
         "dataset_profile",
         "metric",
+        "evaluation",
         "secondary_metrics",
         "task_health",
         "interpretation_blocks",
@@ -254,6 +262,21 @@ class RunTaskComposition:
     forward_contract: ForwardContract
     semantic_fingerprint: str
     provenance: CompositionProvenance
+
+    @property
+    def selection_binding(self) -> SelectionBinding | None:
+        from workflows.evaluation_selection import selection_binding
+
+        return selection_binding(self)
+
+    @property
+    def selection_metric_spec(self) -> MetricSpec:
+        """Effective ranking declaration; the source metric remains executable."""
+        from workflows.evaluation_selection import effective_metric_spec
+
+        return effective_metric_spec(self.metric.spec, self.evaluation)
+
+    evaluation: ResolvedEvaluation | None = None
     code_package: CapturedCodePackage | None = None
     deliverable_naming: Any = None
     """The run's DECLARED deliverable naming, or ``None`` for the shipped one.
@@ -1917,6 +1940,7 @@ def build_task_composition_ref(task_composition: Any) -> TaskCompositionRef | No
 
     objective = getattr(task_composition, "objective", None)
     return TaskCompositionRef(
+        selection_binding=getattr(task_composition, "selection_binding", None),
         model_probe_context=model_probe_context_for(task_composition),
         semantic_fingerprint=task_composition.semantic_fingerprint,
         task_data_path_id=type(task_composition.task_data_path).task_data_path_id,
@@ -2156,6 +2180,7 @@ def compute_semantic_fingerprint(
     prompt_renderer_identity: PromptRenderingIdentity | None = None,
     preflight_estimator_identity: PreflightEstimatorIdentity | None = None,
     inference_preflight: InferencePreflightPolicy | None = None,
+    evaluation_identity: dict[str, Any] | None = None,
 ) -> str:
     """sha256 over the composition's SEMANTIC content, and nothing else.
 
@@ -2300,6 +2325,8 @@ def compute_semantic_fingerprint(
         payload["observable_declarations"] = observable_declarations
     if data_analysis is not None:
         payload["data_analysis"] = data_analysis.canonical_identity()
+    if evaluation_identity is not None:
+        payload["evaluation"] = evaluation_identity
     return hashlib.sha256(_canonical(payload).encode("utf-8")).hexdigest()
 
 
@@ -2383,7 +2410,19 @@ def compose_observables_from_manifest(manifest_path: str):
 
 
 def compose_metric_from_manifest(manifest_path: str) -> EvaluationMetric:
+    """The run's PRIMARY metric; see :func:`compose_scoring_child_bindings`."""
+    return compose_scoring_child_bindings(manifest_path)[0]
+
+
+def compose_scoring_child_bindings(
+    manifest_path: str,
+) -> tuple[EvaluationMetric, RunTaskComposition | None]:
     """The run's PRIMARY metric, composed from its manifest. Step 11 C5.
+
+    Returns the metric and, ONLY when the manifest declares ``evaluation``,
+    the one full composition the child needs for deterministic selection
+    (#1294). An absent-evaluation child composes the metric section alone,
+    exactly as before; it never pays for a full plugin/code-package load.
 
     The child-process counterpart of the metric half of
     :func:`compose_run_task_bindings`, and deliberately **only** that half:
@@ -2414,17 +2453,25 @@ def compose_metric_from_manifest(manifest_path: str) -> EvaluationMetric:
     """
     resolved_manifest = os.path.abspath(manifest_path)
     raw = _read_manifest(resolved_manifest)
-    with composition_package(raw.get("code_package"), os.path.dirname(resolved_manifest)):
-        metric, _declaration, _plugin = _compose_metric(
-            _section(raw, "metric", resolved_manifest), os.path.dirname(resolved_manifest)
-        )
+    composition: RunTaskComposition | None = None
+    if "evaluation" in raw:
+        from workflows.evaluation_composition import require_evaluation_runtime
+
+        composition = compose_run_task_bindings(manifest_path)
+        require_evaluation_runtime(composition.evaluation)
+        metric = composition.metric
+    else:
+        with composition_package(raw.get("code_package"), os.path.dirname(resolved_manifest)):
+            metric, _declaration, _plugin = _compose_metric(
+                _section(raw, "metric", resolved_manifest), os.path.dirname(resolved_manifest)
+            )
     from execute_tools.evaluation_metric import EvaluationMetric
 
     if not isinstance(metric, EvaluationMetric):
         raise TaskCompositionError(
             "this metric requires complete candidate evaluation, not the local scoring child"
         )
-    return metric
+    return metric, composition
 
 
 def _load_declared_dataset_profile(
@@ -2838,6 +2885,12 @@ def _compose_resolved_task_bindings(
     judge_task, judge_paths = _compose_judge_task(raw, manifest_dir)
     source_paths.update(judge_paths)
 
+    from workflows.evaluation_composition import compose_evaluation
+
+    evaluation = compose_evaluation(
+        raw, manifest_dir, {m.spec.id: m.spec for m in (metric, *secondary_metrics)}, judge_task
+    )
+
     from workflows.data_analysis_composition import compose_workflow_data_analysis
 
     try:
@@ -2859,46 +2912,11 @@ def _compose_resolved_task_bindings(
     if data_analysis is not None:
         source_paths["data_analysis"] = data_analysis.config_path
 
-    from execute_tools.deliverable_spec import task_names_its_own_deliverables
-    from execute_tools.task_data_path import registered_content_identity
+    from workflows.task_composition_identity import validate_composed_source_identity
 
-    # arXiv #268 (the paper's discussion (13): "a fail-open default
-    # inconsistent with the rest of the manifest's semantics; reported here
-    # as a defect under repair" — this is the repair). A COMPOSED manifest
-    # must either declare its indexed `deliverable:` naming or bind an
-    # implementation that names its artifacts itself (module-level
-    # `deliverable_name`, the F-A4-1 capability). Omission by a task with
-    # NEITHER used to resolve the anchor task's shipped template silently —
-    # the one manifest key whose omission took a default instead of refusing.
-    # The legacy un-composed path is untouched (it is the anchor task's own
-    # regime); every shipped composed manifest now satisfies one of the two
-    # legal shapes.
-    if deliverable_naming is None and not task_names_its_own_deliverables(impl):
-        raise TaskCompositionError(
-            f"manifest {resolved_manifest!r} declares no 'deliverable:' section and its "
-            f"task_data_path {impl.task_data_path_id!r} does not name its own artifacts "
-            "(no module-level deliverable_name). Omission used to resolve the anchor "
-            "task's indexed template silently — a fail-open default the manifest's "
-            "omission-vs-named-absence semantics forbid (arXiv #268). Declare "
-            "'deliverable:' explicitly, or implement deliverable_name beside the "
-            "task_data_path implementation."
-        )
-
-    # arXiv #255 — fail closed, never omit: by this line the implementation
-    # has been RESOLVED, so its registration capture must exist. An absent
-    # capture means the registration lifecycle broke; silently omitting the
-    # content key would ship a fingerprint without the pin (the quiet
-    # weakening the review criterion forbids), and recomputing from the file
-    # here would be F-12bc-7 one layer up. Refuse and say why.
-    impl_content_identity = registered_content_identity(impl.task_data_path_id)
-    if impl_content_identity is None:
-        raise TaskCompositionError(
-            f"task_data_path {impl.task_data_path_id!r} resolved but has no "
-            "registration-captured content identity; the fingerprint cannot "
-            "pin the implementation's bytes. This is a registration-lifecycle "
-            "defect, not a configuration error — refusing rather than "
-            "composing an unpinned fingerprint (arXiv #255)."
-        )
+    impl_content_identity = validate_composed_source_identity(
+        impl, deliverable_naming, resolved_manifest
+    )
 
     inference_preflight = InferencePreflightPolicy.model_validate(
         raw.get("inference_preflight", {})
@@ -2954,9 +2972,11 @@ def _compose_resolved_task_bindings(
         prompt_renderer_identity=prompt_renderer_identity,
         preflight_estimator_identity=preflight_estimator_identity,
         inference_preflight=inference_preflight,
+        evaluation_identity=evaluation.canonical_identity if evaluation is not None else None,
     )
 
     return RunTaskComposition(
+        evaluation=evaluation,
         task_data_path=impl,
         dataset_profile=profile,
         metric=metric,
@@ -2972,7 +2992,7 @@ def _compose_resolved_task_bindings(
         provenance=CompositionProvenance(
             manifest_path=resolved_manifest,
             source_paths=source_paths,
-            plugins=tuple(plugins),
+            plugins=tuple(plugins) + (evaluation.plugins if evaluation is not None else ()),
         ),
         secondary_metrics=secondary_metrics,
         deliverable_naming=deliverable_naming,
@@ -3161,11 +3181,18 @@ def bind_run_task_composition(
             "a task composition is required; the framework does not select a scientific task"
         )
 
+    from agent.evaluation_context import bind_evaluation_prompt_context
     from execute_tools.data_paths import bind_physical_data_root
     from execute_tools.dataset_config import bind_dataset_profile
     from execute_tools.evaluation_metric import bind_run_metric, bind_run_secondary_metrics
     from execute_tools.task_data_path import bind_task_data_path
+    from workflows.evaluation_composition import require_evaluation_runtime
     from workflows.task_config import bind_task_config
+
+    require_evaluation_runtime(composition.evaluation)
+    from workflows.evaluation_admission import require_formula_route
+
+    require_formula_route(composition)
 
     if not physical_data_root:
         raise CompositionDataRootMissing(
@@ -3223,6 +3250,11 @@ def bind_run_task_composition(
         stack.enter_context(bind_run_secondary_metrics(composition.secondary_metrics))
         stack.enter_context(bind_task_config(composition.task_config_values()))
         stack.enter_context(
+            bind_evaluation_prompt_context(
+                composition.evaluation, composition.metric.spec, composition.judge_task
+            )
+        )
+        stack.enter_context(
             bind_prompt_profile(
                 composition.prompt_renderer, expected=composition.prompt_renderer_identity
             )
@@ -3254,6 +3286,7 @@ def verify_composition_is_bound(composition: RunTaskComposition | None) -> None:
     if composition is None:
         return
 
+    from agent.evaluation_context import active_evaluation_prompt_context
     from execute_tools.data_paths import active_physical_data_root
     from execute_tools.dataset_config import (
         DatasetProfileBindingError,
@@ -3267,6 +3300,10 @@ def verify_composition_is_bound(composition: RunTaskComposition | None) -> None:
     from workflows.task_config import resolve_bound_task_config
 
     unbound: list[str] = []
+    evaluation_context = active_evaluation_prompt_context()
+    expected_evaluation = composition.evaluation.sha256 if composition.evaluation else None
+    if (evaluation_context.identity if evaluation_context else None) != expected_evaluation:
+        unbound.append("evaluation")
     if active_inference_preflight_policy() != composition.inference_preflight:
         unbound.append("inference_preflight")
     if active_preflight_identity() != composition.preflight_estimator_identity:

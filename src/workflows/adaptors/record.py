@@ -9,6 +9,7 @@ from typing import Literal
 from pydantic import Field
 
 from core.canonical_json import canonical_sha256
+from core.record_encoding import ENCODING_VERSION, EncodingVersion
 from execute_tools.evaluation_metric import MetricDirection
 from workflows.definition.adaptor_strategies import DistributeStrategy, SelectStrategy
 from workflows.definition.llm_strategies import AdaptorCombine
@@ -46,6 +47,9 @@ class StrategyEvidenceRef(AdaptorModel):
 
 
 class AdaptorRecord(AdaptorModel):
+    encoding_version: EncodingVersion | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     schema_version: Literal["siderius.adaptor-record/v1"] = "siderius.adaptor-record/v1"
     adaptor_id: str = Field(min_length=1)
     iteration: int = Field(gt=0)
@@ -84,6 +88,7 @@ def build_adaptor_record(
     }
     ranking = outcome.ranking
     return AdaptorRecord(
+        encoding_version=ENCODING_VERSION,
         adaptor_id=adaptor_id,
         iteration=iteration,
         strategies=(combine.kind, select.kind, distribute.kind),

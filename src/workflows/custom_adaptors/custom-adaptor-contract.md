@@ -41,7 +41,7 @@ by `load_adaptor(path)`, which validates and then captures `members` once throug
 Role rules (validated at load, diagnostic `manifest_invalid`):
 
 - `combine`: `output.contract` ∈ `CUSTOM_EMITTABLE` (B6-D3 = B):
-  `optional.expert-context`, `optional.expert-advice`, `optional.text`,
+  `optional.expert-context`, `optional.expert-advice`, `optional.text`, `optional.advice-text`,
   `proposal.output`, `literature.output`. `validation.output`, `tuning.output`,
   `interpretation.output`, every capability input, storage, constraint context,
   parameter rules and task references are refused: metric/score, Health,
@@ -77,7 +77,7 @@ def adapt(inputs: AdaptorInputs, params: P | None, ctx: AdaptorContext) -> ...
 
 Types in `interface.py`. `inputs` is a read-only mapping port name →
 `tuple[CustomInputItem, ...]`; `CustomInputItem.index` is the declared position
-and `.value` the validated native model (or `str` for `optional.text`, a list
+and `.value` the validated native model (or `str` for `optional.text` or `optional.advice-text`, a list
 of `ExpertContextItem` for `optional.expert-context`). `params` is the
 validated `parameters_model` instance or `None`. `AdaptorContext` exposes
 `adaptor_id`, `llm=None` and `log(str)` (child log). The framework passes no
@@ -109,7 +109,7 @@ several rules.
 | `optional.expert-context` | `[].source` stamp; `[].kind` ≠ `human`, ≠ `findings` (chain-mode union only) |
 | `proposal.output` | `candidate_id`, `observed_prediction_reference`, `preflight_estimated_minutes`, `preflight_factor` unset; `proposed_discoveries[]` vocabulary rules |
 | `literature.output` | `agent_card.agent_name` and `run_name` stamp; `agent_card.trust_level` ≠ `hard_limit` (constraint authority); `findings[]` as expert-context items; `new_vocab_candidates[]` vocabulary rules; `search_decisions` unset |
-| `optional.text`, `optional.expert-advice` | none (no field can carry provenance; see B6-6 acceptance below) |
+| `optional.text`, `optional.advice-text`, `optional.expert-advice` | none (no field can carry provenance; see B6-6 acceptance below) |
 
 Vocabulary rules: `origin` stamp, `proposed_by_run` and `seen_in_runs` unset,
 `tier` ≠ `canonical`. A test checks that every path names a real native field.
@@ -249,7 +249,7 @@ with `[<reason>] <message>` on stderr and nothing on stdout; `OSError` maps to
 
 - Match both `identity_sha256` and `manifest_sha256` against the admission record.
 - Carry the adaptor provenance label (`adaptor:<id>@<identity[:12]>`) for
-  `optional.text` and `optional.expert-advice` outputs in the adaptor record and
+  `optional.text`, `optional.advice-text` and `optional.expert-advice` outputs in the adaptor record and
   wherever the value is rendered, since neither contract has a field for it.
 - Mint `ProposalOutput.candidate_id` for custom proposals; apply the run's
   sandbox policy and resource-ceiling owner to the child.

@@ -79,6 +79,49 @@ def test_moved_asset_and_rename_retain_their_consumers():
     assert resolve_selection(REPO_ROOT, renamed).files
 
 
+@pytest.mark.parametrize(
+    "changed",
+    [
+        "examples/synthetic_masked_regression/plugins/_masked_task.py",
+        "examples/synthetic_masked_regression/modular/composition.yaml",
+        "examples/task_templates/csv_classification/plugins/_csv_task.py",
+        "examples/task_templates/csv_classification/declared/task_health.yaml",
+        "examples/console_bundle/setup/setup.json",
+        "examples/console_bundle/fetch_data.py",
+        "examples/console_bundle/README.md",
+        "examples/quickstart/plugins/_quickstart_task.py",
+        "configs/task_composition/synthetic_masked_regression.yaml",
+        "configs/task_composition/quickstart.yaml",
+        "tests/fixtures/step10_p1/fourth_task/plugins/band_coverage_metric.py",
+        "tests/fixtures/step10_p1/fourth_task/composition.yaml",
+        "tests/fixtures/step10_p1/fourth_task/declared/task_health.yaml",
+        "tests/fixtures/step10_p1/davis/composition.yaml",
+        "tests/fixtures/step10_p1/davis/task_config.yaml",
+        "tests/fixtures/step10_p1/pets/composition.yaml",
+        "tests/fixtures/step10_p1/tidmad/composition.yaml",
+    ],
+)
+def test_composition_inputs_include_cross_area_identity_consumers(changed: str) -> None:
+    """Manifest/plugin and directory identities escape Python import edges.
+
+    Reverting the input triggers narrows these paths to incomplete owners.
+    Check the harness expansion too: FULL must actually include the composition
+    fingerprint regression, even when a cheap document shares the diff.
+    """
+    from tools.ci.selection import resolve_selection
+
+    assert (REPO_ROOT / changed).is_file()
+    result = select([changed, "README.md"])
+    assert result.full_suite, result.describe()
+    assert any(changed in reason and "trigger" in reason for reason in result.reasons)
+    expanded = resolve_selection(REPO_ROOT, [changed, "README.md"])
+    assert expanded.full_suite, expanded.reason
+    assert "tests/unit/workflows/test_local_code_composition.py" in expanded.files
+    assert "tests/unit/workflows/test_step10_p1_c4_extension_proof.py" in expanded.files
+    assert "tests/unit/workflows/test_arxiv_255_impl_content_fingerprint.py" in expanded.files
+    assert "tests/unit/workflows/test_step12_pr12e_c4_registration_identity.py" in expanded.files
+
+
 class TestTheModelIsFailClosed:
     """The one property that makes an unadopted selector safe to keep."""
 

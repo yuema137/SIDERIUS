@@ -1,6 +1,6 @@
 # Framework examples
 
-[`workflow_declarations/`](workflow_declarations/) holds ready-made `workflow.py`
+[`workflow_declarations/`](workflow_declarations/README.md) holds ready-made `workflow.py`
 starting points for the
 [workflow route](../docs/getting-started/README.md#write-and-run-a-workflow-declaration).
 Copy one into your project as `workflow.py`:
@@ -8,7 +8,13 @@ Copy one into your project as `workflow.py`:
 - `reusable_training.py` runs Propose → Implement → Validate → Train & tune once.
 - `managed_reusable_candidate.py` stops after validation.
 
-The other two files are not starting points for your own run:
+For the two-step Quickstart scenario, follow the
+[workflow examples README](workflow_declarations/README.md):
+`literature_debate_judged.py` writes run A's concrete judged-literature request,
+and `research_loop_request_input.py` supplies run B's reusable loop, with the
+reviewed findings carried in `proposal_advice`.
+
+Two smaller examples serve different purposes:
 `reusable_candidate.py` (which also reads a literal `context.json` input) is
 for authoring and resolution only, not for preparation, and
 `native_training.py` is a script that writes an older concrete four-stage

@@ -4,9 +4,10 @@ Full payload equality catches dropped/swapped forwarding that schema validation
 cannot detect. Expectations were captured from run_workflow before extraction;
 only the pytest temporary root is normalized. The source-derived composition
 fingerprint is checked separately against the real binding and persisted lock.
-Planner assembly and verifier source digests are likewise checked against their
-current declared owners and persisted lock; frozen baseline digests stay pinned.
-Every other payload field is compared exactly. This checks input forwarding,
+Planner content is pinned to reviewed bytes; planner assembly and verifier source
+digests are checked against their declared owners and persisted lock. Frozen baseline digests stay pinned.
+The intentional #1240 run-mode default change is checked separately from the
+archived False default. Every other payload field is compared exactly. This checks input forwarding,
 not equivalence of live model outputs or scientific artifacts. Node effects use
 existing seams.
 """
@@ -218,6 +219,11 @@ def test_production_tuner_input_matches_pre_extraction_oracle(
     actual = workflow_env["tune"].return_value.run.call_args.args[0]
     payload = json.loads(json.dumps(actual.model_dump(mode="json")).replace(str(tmp_path), "<TMP>"))
     expected = json.loads((ORACLE / f"{case}.json").read_text())
+    if case in ("omitted", "empty"):
+        # #1240 deliberately replaces the historical single-file default.
+        # Keep the captured oracle intact and verify the new default in transit.
+        assert expected.pop("is_trial") is False
+        assert payload.pop("is_trial") is True
     actual_fingerprint = payload["task_composition_ref"].pop("semantic_fingerprint")
     baseline_fingerprint = expected["task_composition_ref"].pop("semantic_fingerprint")
     assert (
@@ -236,6 +242,19 @@ def test_production_tuner_input_matches_pre_extraction_oracle(
     current_planner = planner_strategy.resolve_planner_strategy("native-timing-v1")
     assert actual_planner_assembly == current_planner.identity.assembly_sha256
     assert actual.expected_planner_strategy == current_planner.identity
+    # The content hash changed because #1111 decodes persisted history before
+    # rendering, combined with #1314 retaining condensed inactive-rule receipts
+    # and #1322 retaining resolution_events with a superseded-proposal label.
+    # #1289 then reworded the mode-choice step (Formal is not full-data).
+    # #1472 labels the reflector's Data Volume Context portions by round mode
+    # and source (prompts.py is part of the fingerprinted planner content).
+    # #1496 discloses validation_max_portion clamps in that same block.
+    # Preserve the archived oracle and pin the reviewed new bytes.
+    baseline_content = expected["expected_planner_strategy"].pop("content_sha256")
+    assert baseline_content == "73b7df9cad19e398695f057ef322e3ad01d07e1d3e0a6c0f85e918d06594c562"
+    assert payload["expected_planner_strategy"].pop("content_sha256") == (
+        "6dc83ad5cbb0f4d51adf68bdbee08cb574de1c7a17fa9463663edd53415e12ad"
+    )
     # Issue #983 — the workflow generates a run seed per run (a seed-owned
     # path); the oracle predates it. Keep its bytes and check the forwarded
     # value against the persisted lock below.

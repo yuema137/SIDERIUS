@@ -13,10 +13,9 @@ behind a guard that would then look like it was working. So the
 requirement carries its provenance, and in formal mode a
 non-authoritative provenance is refused rather than used.
 
-**What it deliberately does not do.** It does not obtain, validate or
-promote a measurement — that is PR C's responsibility (D-B5), and a
-second measurement authority is the shape of defect this whole document
-was opened about. It does not know what a peer is (D-B1): occupancy is
+**What it deliberately does not do.** It consumes measurements supplied
+by the measurement pipeline rather than obtaining or promoting them itself.
+It does not identify peer jobs: occupancy is
 split into ours and everything else, measured, with no cross-process
 registry. It does not retry, wait, or reschedule.
 """
@@ -38,6 +37,7 @@ from core.runtime_control.pair_admission import (
     gib_from_mib,
     resolve_gpu_ceiling,
 )
+from core.runtime_control.process_visibility import ProcessVisibility
 
 #: How a run treats an unproven situation. Not a severity — two
 #: different postures with different obligations (§B-C4 2b).
@@ -92,8 +92,9 @@ RESOURCE_REJECTIONS: frozenset[str] = frozenset({"insufficient_headroom"})
 #: `device_identity_mismatch` compares the requirement's measured UUID
 #: with the current occupancy UUID. Physical device indices are not identity.
 AdmissionDetail = Literal[
-    # under measurement_unavailable
+    # under measurement_unavailable or environment_headroom_unproven
     "sampler_error",
+    # under measurement_unavailable
     "telemetry_unavailable",
     "device_identity_mismatch",
     "inconsistent_accounting",
@@ -113,6 +114,7 @@ _DETAIL_FOR_REASON: dict[str, frozenset[str]] = {
         }
     ),
     "policy_unavailable": frozenset({"invalid_admission_mode"}),
+    "environment_headroom_unproven": frozenset({"sampler_error"}),
 }
 
 #: The only accepted postures. `diagnostic` is deliberately NOT accepted:
@@ -166,6 +168,20 @@ ACCEPTED_ENFORCEMENT: frozenset[str] = frozenset(
 )
 
 
+class AdmissionExecutionConditions(BaseModel):
+    """Effective admission evidence, including delegation to ordinary phase policy.
+
+    Unlike the launch declaration in process_visibility, this record describes
+    the route actually taken after accounting and requirement checks.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    process_visibility: ProcessVisibility | None = None
+    headroom_policy: Literal["require_conservative_bound"]
+    refusal_enforcement: Literal["all_phase_modes", "phase_policy"]
+
+
 def stops_phase(
     enforcement: str, reason_code: str | None, *, evidence: Mapping[str, Any] | None = None
 ) -> bool:
@@ -194,12 +210,17 @@ def stops_phase(
     # Explicit isolation conditions precede the ordinary observation policy.
     if reason_code == "environment_headroom_unproven":
         return True
-    conditions = (evidence or {}).get("effective_execution_conditions")
+    raw_conditions = (evidence or {}).get("effective_execution_conditions")
+    conditions = (
+        AdmissionExecutionConditions.model_validate(raw_conditions)
+        if raw_conditions is not None
+        else None
+    )
     if (
         reason_code == "insufficient_headroom"
-        and isinstance(conditions, Mapping)
-        and conditions.get("process_visibility") == "namespace_limited"
-        and conditions.get("refusal_enforcement") == "all_phase_modes"
+        and conditions is not None
+        and conditions.process_visibility == "namespace_limited"
+        and conditions.refusal_enforcement == "all_phase_modes"
     ):
         return True
     if enforcement == "enforce":
@@ -304,8 +325,8 @@ class AdmissionDecision(BaseModel):
     #: `None` exactly when admitted. Enforced, so a refusal cannot be
     #: recorded without saying what refused it.
     reason_code: AdmissionReason | None = None
-    #: Set only under `measurement_unavailable`, naming how the
-    #: measurement failed.
+    #: Names how measurement failed; sampler_error also accompanies an
+    #: isolated environment_headroom_unproven refusal.
     detail: AdmissionDetail | None = None
     #: Which tier of the §2a priority order answered — or `unavailable`
     #: when nothing did, which trial mode records rather than hides.
@@ -314,6 +335,19 @@ class AdmissionDecision(BaseModel):
     #: Every figure used, so the decision is auditable rather than
     #: asserted. Absent keys mean the quantity was unavailable.
     evidence: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def refusal_kind(self) -> Literal["resource", "transient_sampling", "environment"]:
+        """Recovery classification; enforcement still decides whether to stop a phase.
+
+        Only a failed sampler call is retryable without changing the candidate.
+        Missing telemetry, invalid accounting and missing policy require repair.
+        """
+        if self.reason_code in RESOURCE_REJECTIONS:
+            return "resource"
+        if self.detail == "sampler_error":
+            return "transient_sampling"
+        return "environment"
 
     @model_validator(mode="after")
     def _a_refusal_must_say_why(self) -> AdmissionDecision:
@@ -377,6 +411,7 @@ def evaluate_gpu_admission(
     sampling_error: str | None = None,
     requirement_ownership: GpuRequirementOwnership | None = None,
     requirement_error: str | None = None,
+    require_evidence: bool = False,
 ) -> AdmissionDecision:
     """Decide whether to start a GPU phase, from measured occupancy.
 
@@ -390,6 +425,8 @@ def evaluate_gpu_admission(
         requirement_ownership: original ended-worker evidence and measured UUID.
             Absence never implies that a figure describes an additional worker.
         requirement_error: validation gap retained by the typed entry reader.
+        require_evidence: protected native execution requires usable evidence even
+            in trial mode; retain the actual mode in decision evidence.
         mode: `formal` demonstrates safety before proceeding; `trial`
             proceeds and records what it could not prove.
             Typed as `str` and validated **here**, so an unrecognised
@@ -422,6 +459,7 @@ def evaluate_gpu_admission(
             sampling_error=sampling_error,
             requirement_ownership=requirement_ownership,
             requirement_error=requirement_error,
+            require_evidence=require_evidence,
         )
 
     return evaluate_ordinary_gpu_admission(
@@ -434,6 +472,7 @@ def evaluate_gpu_admission(
         sampling_error=sampling_error,
         requirement_ownership=requirement_ownership,
         requirement_error=requirement_error,
+        require_evidence=require_evidence,
     )
 
 
@@ -448,6 +487,7 @@ def evaluate_ordinary_gpu_admission(
     sampling_error: str | None = None,
     requirement_ownership: GpuRequirementOwnership | None = None,
     requirement_error: str | None = None,
+    require_evidence: bool = False,
 ) -> AdmissionDecision:
     """Apply ordinary phase posture after the visibility routing decision."""
 
@@ -466,13 +506,16 @@ def evaluate_ordinary_gpu_admission(
             detail="invalid_admission_mode",
         )
 
+    evidence_required = mode == "formal" or require_evidence
+    if isinstance(snapshot, GpuAccountingSnapshot) and snapshot.query_failure is not None:
+        sampling_error = f"nvidia-smi query failed: {snapshot.query_failure.value}"
     if sampling_error is not None:
         # No reading was obtained. This is deliberately not a caller-side
         # `return None`: swallowing it there would make formal mode fail
         # OPEN exactly when it is supposed to protect, which is the
         # fail-open posture this commit exists to remove.
         failed = {"mode": mode, "sampling_error": sampling_error}
-        if mode == "formal":
+        if evidence_required:
             return _refuse(
                 "measurement_unavailable",
                 f"device occupancy could not be sampled ({sampling_error}), so no "
@@ -516,7 +559,7 @@ def evaluate_ordinary_gpu_admission(
 
     # --- telemetry ---------------------------------------------------
     if not telemetry or total_mib is None or used_mib is None or other_mib is None:
-        if mode == "formal":
+        if evidence_required:
             return _refuse(
                 "measurement_unavailable",
                 "device occupancy could not be measured, so safety has not been "
@@ -601,13 +644,12 @@ def evaluate_ordinary_gpu_admission(
         # is telling us a reader cannot either.
         authoritative_requirement = float(requirement_mib)
     if authoritative_requirement is None:
-        if mode == "formal":
+        if evidence_required:
             return _refuse(
                 "policy_unavailable",
-                "device occupancy was measured, but no applicable authoritative "
-                "requirement for this candidate exists, and a predicted estimate "
-                "is not a resource fact; producing one is PR C's responsibility "
-                "(D-B5)",
+                "device occupancy was measured, but no applicable measured GPU "
+                "memory requirement is available for this phase; a predicted "
+                "estimate cannot establish the required memory",
                 source="unavailable",
                 evidence=evidence,
             )
@@ -633,7 +675,7 @@ def evaluate_ordinary_gpu_admission(
         ownership_issue = ownership_issue or requirement_ownership.applicability_refusal(snapshot)
     if ownership_issue is not None:
         evidence["requirement_error"] = ownership_issue
-        if mode == "formal":
+        if evidence_required:
             return _refuse(
                 "policy_unavailable", ownership_issue, source="unavailable", evidence=evidence
             )

@@ -67,10 +67,12 @@ PLAIN_TEXT = "The sky is blue with scattered clouds."
 def _chat_response(content: str) -> MagicMock:
     """Build a mock OpenAI chat completion response."""
     msg = MagicMock()
+    msg.refusal = None
     msg.content = content
     msg.tool_calls = None
     choice = MagicMock()
     choice.message = msg
+    choice.finish_reason = "stop"
     response = MagicMock()
     response.choices = [choice]
     return response
@@ -82,11 +84,14 @@ def _tool_call_response(name: str, arguments: dict, call_id: str = "call_abc123"
     tc.function.name = name
     tc.function.arguments = json.dumps(arguments)
     tc.id = call_id
+    tc.type = "function"
     msg = MagicMock()
     msg.tool_calls = [tc]
+    msg.refusal = None
     msg.content = None
     choice = MagicMock()
     choice.message = msg
+    choice.finish_reason = "stop"
     response = MagicMock()
     response.choices = [choice]
     return response
@@ -109,7 +114,17 @@ class TestInit:
             bridge.generate_text(SYSTEM_PROMPT, USER_PROMPT, label="test.text")
             assert client.chat.completions.create.call_args.kwargs["reasoning_effort"] == "medium"
             client.chat.completions.create.return_value = _tool_call_response("done", {})
-            bridge.tool_call(SYSTEM_PROMPT, USER_PROMPT, [], label="test.tool")
+            bridge.tool_call(
+                SYSTEM_PROMPT,
+                USER_PROMPT,
+                [
+                    {
+                        "type": "function",
+                        "function": {"name": "done", "parameters": {"type": "object"}},
+                    }
+                ],
+                label="test.tool",
+            )
             assert client.chat.completions.create.call_args.kwargs["reasoning_effort"] == "medium"
 
     def test_reflector_can_use_independent_effort_without_affecting_main(self):

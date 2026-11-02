@@ -1,6 +1,7 @@
 """Fresh envelope ownership, offline preparation and receipt-last publication."""
 
 import hashlib
+import logging
 import os
 import stat
 from pathlib import Path
@@ -176,6 +177,7 @@ def prepare_reusable_candidate(
             update={"status": "interrupted", "error": "preparation interrupted"}
         )
     except Exception as error:
+        logging.getLogger(__name__).exception("Preparation parent failed")
         native = native.model_copy(
             update={"status": "failed", "error": f"{type(error).__name__}: {error}"}
         )

@@ -31,13 +31,19 @@ Authorities mirrored:
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, Sequence, Sized
 
 from core.runtime_control.phases import RuntimePhase
 from core.runtime_control.workload import ResolvedPhaseWorkload
 from execute_tools.dataset_config import (
     DatasetProfile,
     tidmad_topology,
+)
+from execute_tools.task_data_path import (
+    EpochSamplingParams,
+    TaskDataPath,
+    TrainingScopeError,
+    active_task_data_path,
 )
 from execute_tools.training_batches import optimizer_steps_for_rows
 
@@ -128,6 +134,30 @@ def resolve_training_workload(
 ROW_COUNT_EPOCH_SEED = 0
 
 
+def resolve_task_training_rows(
+    training_scope: object,
+    sampling: EpochSamplingParams,
+    *,
+    data_path: TaskDataPath | None = None,
+) -> int:
+    """Count one task-materialized dataset; construction may eagerly read samples.
+
+    Planning retains only the count, not the dataset. Its caller must carry the
+    result through the same attempt so guardrails do not repeat this I/O.
+    """
+    bound = data_path if data_path is not None else active_task_data_path()
+    if bound is None:
+        raise ValueError(
+            "a task-owned training scope was supplied but no task data path is "
+            "bound, so its row count cannot be declared by the implementation "
+            "that built it."
+        )
+    dataset = bound.training_dataset(training_scope, sampling)
+    if not isinstance(dataset, Sized):
+        raise TrainingScopeError("Training row counting requires a sized training dataset")
+    return len(dataset)
+
+
 def resolve_task_scope_training_workload(
     training_scope: object,
     *,
@@ -137,6 +167,7 @@ def resolve_task_scope_training_workload(
     epochs: int,
     max_samples: int | None = None,
     drop_last: bool = True,
+    resolved_rows: int | None = None,
 ) -> ResolvedPhaseWorkload:
     """:func:`resolve_training_workload`'s TASK-NEUTRAL sibling (C12-P / B7).
 
@@ -169,10 +200,11 @@ def resolve_task_scope_training_workload(
     so the count is the executed one rather than a framework re-derivation of
     it. Re-applying them here would price the subsample twice.
 
-    **What this costs** — the same trade ``validation_rows_argv`` documents:
-    the parent materializes the dataset object, so an implementation whose
-    construction touches its rows pays that I/O here. That is the price of
-    asking the other side of the boundary instead of guessing.
+    With ``resolved_rows``, this consumes the same attempt's already-counted
+    selection without constructing another dataset. Without it, the shared
+    ``resolve_task_training_rows`` owner constructs the dataset using the
+    existing row-count seed. Construction may eagerly read samples and incur
+    substantial I/O; it is not a metadata-only operation.
 
     Args:
         training_scope: the task's OPAQUE training scope for this attempt.
@@ -182,6 +214,8 @@ def resolve_task_scope_training_workload(
         train_portion: per-epoch subsample fraction, or ``None``.
         epochs: the epoch count the attempt will run.
         max_samples: the validation-envelope row ceiling, or ``None``.
+        resolved_rows: row count already resolved for this attempt's sampling;
+            ``None`` materializes once through the shared counting owner.
 
     Returns:
         The optimizer-step workload, in the same shape and unit as
@@ -197,39 +231,17 @@ def resolve_task_scope_training_workload(
     if epochs < 0:
         raise ValueError(f"epochs must be non-negative; got {epochs!r}.")
 
-    from execute_tools.task_data_path import (
-        EpochSamplingParams,
-        active_task_data_path,
-    )
-
-    # `active_task_data_path`, never `resolve_bound_task_data_path`: the
-    # legacy fallback would hand back the TIDMAD compatibility implementation
-    # and price a contrast task's scope against TIDMAD's data path. The
-    # caller establishes PRESENCE (it holds the acquired scope); this asks
-    # only for the implementation that presence implies.
-    bound = active_task_data_path()
-    if bound is None:
-        raise ValueError(
-            "a task-owned training scope was supplied but no task data path is "
-            "bound, so its row count cannot be declared by the implementation "
-            "that built it."
+    samples_per_epoch = resolved_rows
+    if samples_per_epoch is None:
+        samples_per_epoch = resolve_task_training_rows(
+            training_scope,
+            EpochSamplingParams(
+                data_dir=data_dir,
+                epoch_seed=ROW_COUNT_EPOCH_SEED,
+                train_portion=train_portion,
+                max_samples=max_samples,
+            ),
         )
-    # This path only counts rows: `len(dataset)` of a portion/ceiling draw
-    # does not depend on which rows the seed picks. The explicit seed lets a
-    # task that refuses an absent seed (only entry boundaries generate seeds)
-    # be priced instead of failing, and keeps this materialization
-    # deterministic; it is the same fixed value the time-measurement warmup
-    # uses (`evaluate_time_skill/wrapper.py`).
-    dataset = bound.training_dataset(
-        training_scope,
-        EpochSamplingParams(
-            data_dir=data_dir,
-            epoch_seed=ROW_COUNT_EPOCH_SEED,
-            train_portion=train_portion,
-            max_samples=max_samples,
-        ),
-    )
-    samples_per_epoch = len(dataset)  # type: ignore[arg-type]
     steps_per_epoch = optimizer_steps_for_rows(samples_per_epoch, batch_size, drop_last=drop_last)
     total_steps = steps_per_epoch * epochs
 

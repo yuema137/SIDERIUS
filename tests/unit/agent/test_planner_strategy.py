@@ -198,11 +198,34 @@ def test_conditional_provider_system_text_reaches_final_request(monkeypatch):
 # the bound parallel unit (agent.token_unit). Serial rows are byte-identical, but
 # the bridge source is part of the planner assembly, so workspace resume across
 # this change is refused (previous assembly 7bc6513b...).
+# Deliberately moved by #1111: prompt entry points decode persisted history.
+# Finite text is unchanged; non-finite evidence no longer leaks storage strings.
+# Combined with #1314's retention of inactive-rule receipts in condensed history.
+# Deliberately moved by #1322: planner history retains resolution_events and
+# labels a superseded proposal (previous content b11d3c2f..., assembly 79bb612d...).
+# Deliberately moved by #910 / PR #1457: bridge single-tool admission and its
+# shared transport owner change assembly bytes, not planner content_sha256.
+# Resume with the previous 2c170d92... assembly remains refused; freeze batches
+# must requalify the new assembly instead of rewriting archived workspace pins.
+# Deliberately moved by #1289: the planner's mode-choice step names the run's
+# configured Formal scopes instead of "a full formal evaluation" (previous
+# content ec2b0c06..., assembly 19e97084...).
+# Deliberately moved by #1403: StubLLMBridge derives pseudo proposal semantics
+# from the bound contract through agent.stub_model; planner content is
+# unchanged (previous assembly bb5eaf83...).
+# Deliberately moved by #1472: the reflector's Data Volume Context (prompts.py)
+# names the round mode and the knob that set each executed portion, so a Formal
+# round no longer shows formal_portion as trial_portion (previous content
+# 8e373ea3..., assembly 35069313...).
+# Deliberately moved by #1496: the reflector's Data Volume Context (prompts.py,
+# llm_bridge.py) discloses portions validation_max_portion capped below their
+# source and names it as the binding knob; planner prompt bytes are unchanged
+# (previous content 4f99e7be..., assembly 55576b32...).
 NATIVE_PLANNER_IDENTITY_PIN = {
     "name": "native-timing-v1",
     "version": "1",
-    "content_sha256": "73b7df9cad19e398695f057ef322e3ad01d07e1d3e0a6c0f85e918d06594c562",
-    "assembly_sha256": "535247aae36ff96838bf652f16e4e422c12013acb7fec365b0db3d2c3eb75d55",
+    "content_sha256": "6dc83ad5cbb0f4d51adf68bdbee08cb574de1c7a17fa9463663edd53415e12ad",
+    "assembly_sha256": "d512b2949b4a3c273ed5b1cd4722a99f6522bd36bb2a5e3d217579be11d4abe4",
 }
 
 

@@ -33,8 +33,9 @@ from .record_json import artifact_json
 def publish(
     path: Path, value: CandidateRunRequest | CandidateRunReceipt, *, bounded: bool = False
 ) -> None:
+    kind = "internal" if isinstance(value, CandidateRunRequest) else "record"
     payload = (
-        encode_control(value) if bounded else artifact_json(value, kind="record", indent=2) + b"\n"
+        encode_control(value) if bounded else artifact_json(value, kind=kind, indent=2) + b"\n"
     )
     publish_bytes_write_once(str(path), payload)
 

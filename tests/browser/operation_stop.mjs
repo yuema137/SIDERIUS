@@ -4,31 +4,20 @@ import {spawn} from 'node:child_process';
 import {createRequire} from 'node:module';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 import {tmpdir} from 'node:os';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[name], `Set ${name}`);
 const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.workflow_editor_server'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
 let errors = ''; server.stderr.on('data', chunk => {errors += chunk;});
-const lines = createInterface({input: server.stdout});
 const running = '33333333-3333-4333-8333-333333333333';
 const loop = '44444444-4444-4444-8444-444444444444';
 const finished = '55555555-5555-4555-8555-555555555555';
 const preparing = '66666666-6666-4666-8666-666666666666';
 let browser;
 try {
-  const metadata = await new Promise((accept, reject) => {
-    const timer = setTimeout(() => reject(new Error(`Server startup timeout: ${errors}`)), 15000);
-    lines.on('line', line => {
-      try {
-        const value = JSON.parse(line);
-        if (!value.origin || !value.token) return;
-        clearTimeout(timer); lines.close(); accept(value);
-      } catch { /* Native plugin registration may write one informational line first. */ }
-    });
-    server.once('exit', code => {clearTimeout(timer); reject(new Error(`Server ${code}: ${errors}`));});
-  });
+  const metadata = await waitForMetadata(server, {timeoutMs: 15000});
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
   const page = await browser.newPage(), posts = [], faults = [], dialogs = [];
@@ -137,7 +126,7 @@ try {
 
   // A running loop: Stop run hides the boundary Stop/Pause controls; the cancelled loop reads as not resumable.
   await page.evaluate(value => { location.hash = 'slow-control/' + value; }, loop);
-  await page.locator('#loop-state').filter({hasText: 'Research loop: up to 3 bodies.'}).waitFor();
+  await page.locator('#loop-state').filter({hasText: 'Research loop: up to 3 iterations.'}).waitFor();
   await stop.waitFor({state: 'visible'});
   assert.ok(await page.locator('#loop-pause').isVisible());
   await stop.click();
@@ -151,5 +140,5 @@ try {
   console.log('PASS: Stop run follows the server cancellable flag, states its consequences before confirming, posts once, reads "Stopping" until the cancelled receipt, then says what is kept; a failed poll prefixes "Last observed:"; a cancelled loop hides boundary controls and reads as not resumable.');
 } finally {
   if (browser) await browser.close();
-  server.kill('SIGTERM'); lines.close();
+  server.kill('SIGTERM');
 }

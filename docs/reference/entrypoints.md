@@ -338,7 +338,9 @@ loudly by name when the file is missing.
 
 The workflow itself, runnable directly. Accepts `--task_composition`,
 `--run_name`, `--max_iterations` (default `1`), `--max_rounds` (default `10`),
-`--max_proposal_attempts` (default `3`), `--target_score`, LLM routing flags and
+`--max_proposal_attempts` (default `3`), `--target_score` (stop when the Health-valid
+formal chain incumbent meets the target in the metric direction, checked before
+each iteration including the first after resume), LLM routing flags and
 advice flags.
 It has no `--run_seed`: `run_workflow` adopts the workspace lock's `run_seed`
 or generates and locks a new one.
@@ -488,3 +490,13 @@ keeps the actual instance edges; prepared review lists independent instances
 executed serially. Direct version-1 native requests remain supported. Both routes
 use the same native executor and independent operation/HTTP observation; neither
 aggregates, ranks or promises distinct scientific proposals.
+
+### Formula evaluation thresholds
+
+On the exploration Python CLI, formula selection requires
+`--target_score_metric <generated effective metric id>` when `--target_score` is
+set. Shared tuner/chain launch controls use `--score_units_metric <effective id>`
+to explicitly bind active skip/bypass margins or a numerical degeneration penalty.
+These flags do not change absent-evaluation defaults. The
+[evaluation runtime contract](../../src/execute_tools/evaluation-contract.md#deterministic-selection-runtime)
+owns supported routes, id inspection and raw-target refusal.

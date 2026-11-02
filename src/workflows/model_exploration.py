@@ -16,7 +16,7 @@ Iterative model exploration loop:
 
 Stop conditions (whichever comes first):
   - max_iterations reached (successful iterations = validated + tuned)
-  - target_score achieved (best_denoising_score >= target)
+  - target_score achieved (Health-valid formal incumbent meets target)
 
 Single-pass mode is max_iterations=1 (the default).
 
@@ -75,6 +75,7 @@ import psutil as _psutil
 import yaml
 
 from core.generated_artifact_name import validate_generated_artifact_name
+from workflows.evaluation_selection import selection_metric
 from workflows.proposal_pipeline import get_reasoning_pipeline as _get_reasoning_pipeline
 
 if TYPE_CHECKING:
@@ -217,7 +218,7 @@ from workflows.task_settings import (
 from workflows.task_settings import (
     resolve_analysis_binding as _resolve_analysis_binding,
 )
-from workflows.termination import infrastructure_abort_reason
+from workflows.termination import infrastructure_abort_reason, target_reached, workflow_stop_reason
 from workflows.training_startup import prepare_training_run, workflow_lock_identity
 from workflows.training_startup import (
     resolve_tuner_health_config_source as resolve_tuner_health_config_source,
@@ -744,7 +745,9 @@ def _build_lit_review_input(
 
 def _declared_metric_spec(composition: RunTaskComposition | None) -> MetricSpec | None:
     """Project a declared composition identity without deriving a metric or direction."""
-    return composition.metric.spec if composition is not None else None
+    return (
+        selection_metric(composition, composition.metric.spec) if composition is not None else None
+    )
 
 
 class _OncePerRunNotice:
@@ -1586,7 +1589,7 @@ def run_workflow(
         max_iterations: Number of successful iterations (validated + tuned).
         max_rounds: Tuning budget per iteration.
         max_proposal_attempts: Max propose→implement→validate retries per iteration.
-        target_score: Optional early stop — halt if best score >= target.
+        target_score: Optional early stop — halt if the Health-valid formal incumbent meets target.
         file_index: Training/validation file index (ignored when is_trial=True).
         llm_config: Per-node LLM configuration. If None, use the complete
             default workflow profile. See WorkflowLLMConfig.default for details.
@@ -1623,8 +1626,9 @@ def run_workflow(
             HyperparamTuningInput (tuner's per-round gate). None = trial gate
             disabled. See docs/resource_estimator_implement.md §2.7.2 / Phase I.
         formal_time_budget_minutes: Same as above, but for formal-mode rounds
-            (plan.is_trial=False). Sized independently because formal runs
-            use the full dataset and are 50-100x longer.
+            (plan.is_trial=False). Sized independently because formal rounds
+            train on formal_portion (default 0.1) and score on
+            formal_eval_portion (default 1.0), not the trial workload.
         gpu_admission_measurement_source: V20 B-G3. Reference naming
             where an authoritative GPU measurement would resolve
             from. Never a figure. Unresolved before PR C, so formal
@@ -1677,6 +1681,9 @@ def run_workflow(
     # doing it. An un-composed run is a no-op here.
     verify_composition_is_bound(task_composition)
 
+    from workflows.evaluation_admission import admit_evaluation_settings
+
+    admit_evaluation_settings(task_composition, launch)
     from execute_tools.evaluation_execution import candidate_evaluation_executor
     from execute_tools.model_output_retention import require_local_output_inventory
 
@@ -2137,10 +2144,9 @@ def run_workflow(
     # Step 10 P2a C1 — run-scoped so the Q-10-2 unrankable notice is printed
     # once for the whole run rather than once per iteration.
     _metric_identity_notice = _OncePerRunNotice()
-    # `_iter_order` is bound per iteration by the fold below; predeclared so
-    # the early-stop check reads a defined name even if an iteration exits
-    # before reaching the fold.
-    _iter_order: MetricOrder | None = None
+    # Seed reconciliation supplies direction for the restored-incumbent check;
+    # completed iterations refresh it through the existing history fold.
+    _iter_order = MetricOrder(seed_metric_spec) if seed_metric_spec is not None else None
 
     # Chain mode runs each iter as its own subprocess with max_iterations=1 and
     # an externally-supplied start_iteration. The loop variable becomes the
@@ -2149,6 +2155,9 @@ def run_workflow(
     # in nodes.result_interpretation_agent stamps on every row. Without this
     # offset, every chain iter would log iteration=1 (V8 Domain 3 bug).
     for iteration in range(launch.start_iteration, launch.start_iteration + launch.max_iterations):
+        # Check restored evidence before creating an iteration or invoking nodes.
+        if target_reached(state.chain_formal_incumbent_reference, launch.target_score, _iter_order):
+            break
         iter_dir = os.path.join(bindings.run_dir, f"iteration_{iteration:03d}")
         os.makedirs(iter_dir, exist_ok=True)
 
@@ -2912,7 +2921,7 @@ def run_workflow(
             required_gate_ids=_run_required_gate_ids,
             run_metric_spec=run_metric_spec,
             bound_metric_spec=(
-                bindings.task_composition.metric.spec
+                selection_metric(bindings.task_composition, bindings.task_composition.metric.spec)
                 if bindings.task_composition is not None
                 else None
             ),
@@ -2936,7 +2945,7 @@ def run_workflow(
 
         print(
             f"\n  [{iteration}] Complete: {proposal.model_name} "
-            f"best_score={tune_output.best_denoising_score}"
+            f"best trial/formal score (Health-unfiltered)={tune_output.best_denoising_score}"
         )
 
         # Fix 4 — parent-process memory probe at iteration exit. Fires
@@ -2975,25 +2984,13 @@ def run_workflow(
             iter_idx=iteration, phase="post_gc", workspace=bindings.workspace, scope="workflow"
         )
 
-        # Step 10 P2a C1 — "reached the target" means AT LEAST AS GOOD AS the
-        # target on the metric's own axis, which under a minimised metric is
-        # `<=`. `_iter_order` is this iteration's reconciled order; when it is
-        # None nothing was ranked, `best_score_overall` was never advanced, and
-        # the guard below short-circuits on it — an unranked run never stops
-        # early on an assumed direction.
-        if (
-            launch.target_score is not None
-            and state.best_score_overall is not None
-            and _iter_order is not None
-            and _iter_order.is_at_least(state.best_score_overall, launch.target_score)
-        ):
-            print(
-                f"\n  Target score {launch.target_score} reached "
-                f"(best={state.best_score_overall}). Stopping early."
-            )
-            break
-
     # --- Final summary ---
+    stop_reason = workflow_stop_reason(
+        state.iteration_results,
+        state.chain_formal_incumbent_reference,
+        launch.target_score,
+        _iter_order,
+    )
     finished_at = time.strftime("%Y-%m-%d %H:%M:%S")
     print(f"\n{'=' * 60}")
     aborted = infrastructure_abort_reason(state.iteration_results) is not None
@@ -3001,9 +2998,14 @@ def run_workflow(
     print(f"  Started     : {started_at}")
     print(f"  Finished    : {finished_at}")
     print(f"  Iterations  : {len(state.iteration_results)}/{launch.max_iterations}")
-    print(f"  Best overall: {state.best_score_overall}")
+    print(f"  Best formal (unfiltered, this execution): {state.best_score_overall}")
+    print(f"  Best formal (Health-valid, chain): {state.chain_formal_incumbent_reference}")
+    print(f"  Stop reason: {stop_reason}")
     for i, result in enumerate(state.iteration_results, 1):
-        print(f"    Iteration {i}: {result.model_type} score={result.best_denoising_score}")
+        print(
+            f"    Iteration {i}: {result.model_type} "
+            f"best trial/formal score (Health-unfiltered)={result.best_denoising_score}"
+        )
     print(f"{'=' * 60}\n")
 
     _save_workflow_summary(
@@ -3013,6 +3015,8 @@ def run_workflow(
         finished_at,
         state.iteration_results,
         state.best_score_overall,
+        state.chain_formal_incumbent_reference,
+        stop_reason,
     )
 
     return state.iteration_results
@@ -3025,29 +3029,35 @@ def _save_workflow_summary(
     finished_at: str,
     iteration_results: list[HyperparamTuningOutput],
     best_score_overall: float | None,
+    best_valid_formal_score: float | None,
+    stop_reason: str,
 ):
     """Save a JSON summary of the full workflow run."""
     aborted = infrastructure_abort_reason(iteration_results) is not None
     summary = {
         "workflow": "model_exploration",
         "run_name": run_name,
-        "status": "completed" if iteration_results and not aborted else "failed",
+        "status": "completed"
+        if (iteration_results or stop_reason == "target_reached") and not aborted
+        else "failed",
+        "termination_reason": stop_reason,
+        "best_valid_formal_score": best_valid_formal_score,
         "started_at": started_at,
         "finished_at": finished_at,
         "total_iterations": len(iteration_results),
         "best_score_overall": best_score_overall,
+        "best_score_overall_basis": "unfiltered_formal_current_execution",
         "iterations": [
             {
                 "model_type": r.model_type,
                 "best_score": r.best_denoising_score,
+                "best_score_basis": "health_unfiltered_trial_and_formal",
                 "completed_rounds": r.completed_rounds,
                 "status": r.status,
             }
             for r in iteration_results
         ],
     }
-    if aborted:
-        summary["termination_reason"] = "infrastructure_abort"
     path = os.path.join(workspace, f"workflow_{run_name}.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=4)
@@ -3116,10 +3126,13 @@ def main():
         help="Max propose→implement→validate retries per iteration (default: 3).",
     )
     parser.add_argument(
+        "--target_score_metric", help="Explicit effective metric id for --target_score."
+    )
+    parser.add_argument(
         "--target_score",
         type=float,
         default=None,
-        help="Optional early stop: halt if best score >= target.",
+        help="Optional early stop: Health-valid formal incumbent meets target in metric direction.",
     )
     parser.add_argument(
         "--file_index",
@@ -3242,6 +3255,7 @@ def main():
                 max_rounds=args.max_rounds,
                 max_proposal_attempts=args.max_proposal_attempts,
                 target_score=args.target_score,
+                target_score_metric=args.target_score_metric,
                 file_index=args.file_index,
                 human_advice_interpret=args.advice_interpret,
                 human_advice_analysis=args.advice_analysis,

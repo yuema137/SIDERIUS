@@ -220,6 +220,8 @@ def _make_input(tmp_path, max_rounds=1, expert_advice="", model_type="punet"):
     # fail-rounds). Tests that need different budgets should construct
     # ``HyperparamTuningInput`` directly.
     return HyperparamTuningInput(
+        # This fixture exercises legacy single-file attempts, not trial scheduling.
+        is_trial=False,
         run_seed=TEST_RUN_SEED,
         planner_strategy="native-timing-v1",
         model_type=model_type,
@@ -749,6 +751,42 @@ class TestDynamicTrialFormal:
         assert output.status == "completed"
         # Final round forced formal — record should NOT have is_trial=True
         assert saved_records[0].get("is_trial", False) is False
+
+    @pytest.mark.parametrize("score", [float("-inf"), float("nan")], ids=str)
+    def test_nonfinite_trial_score_retires_uncertified_original(
+        self, agent_and_mocks, tmp_path, score
+    ):
+        """Defect: a trial round whose score is non-finite pins its failed weights.
+
+        Trial scores are never rewritten by the formal degeneracy penalty, and
+        scorer transport now keeps -inf/NaN instead of null (#1316). With the
+        ``scored`` test back at ``is not None`` the attempt counts as scored, the
+        uncertified original is retained and the retention assertions below fail.
+        """
+        agent, mock_brain, mock_sandbox, saved_records = agent_and_mocks
+        stub_scoring(mock_sandbox, [score] * 20, score)
+        mock_brain.plan.return_value = FAKE_PLAN_WITH_TRIAL
+        models = tmp_path / "cached_models"
+        models.mkdir()
+        original = training_checkpoint_path(models, "punet", "punet_test_run_001")
+        original.write_bytes(b"failed trial weights")
+        inp = _make_trial_input(tmp_path, max_rounds=2, is_trial=True)
+        inp.force_formal_round = False
+        agent.run(inp)
+
+        assert saved_records[0]["exp_id"] == "punet_test_run_001"
+        assert saved_records[0]["is_trial"] is True
+        # No per-file comparison table is rendered for a round without a usable score.
+        assert saved_records[0].get("score_table") is None
+        receipts = [
+            json.loads(line)
+            for line in (tmp_path / "training_checkpoint_retention_receipts.jsonl")
+            .read_text()
+            .splitlines()
+        ]
+        first = [item for item in receipts if item["exp_id"] == "punet_test_run_001"]
+        assert first[-1]["status"] == "retired", first
+        assert not original.exists()
 
     def test_trial_allowed_false_forces_formal(self, agent_and_mocks, tmp_path):
         """is_trial=False on input → all rounds formal, LLM's is_trial ignored."""

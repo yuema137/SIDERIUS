@@ -440,8 +440,15 @@ def test_preview_refuses_a_routed_document_before_reading_files(tmp_path):
         observe_bindings(request, read_file=never_read)
 
 
-# Pinned on base 69a9d81a before route support: (canonical source sha256, declaration digest).
+# Pinned canonical source sha256 and declaration digest. #1200 deliberately
+# re-pins the two training examples for explicit full Formal training scope
+# (and two tuning rounds in reusable_training); other base identities stay fixed.
 EXAMPLE_IDENTITIES = {
+    # Added with the input-gated Quickstart scenario; retain the authored loop on round-trip.
+    "research_loop_request_input.py": (
+        "c2b52b189d0a813c6d17002e77d096a923b380b4e889c9156856ccfd1135bda0",
+        "a8f6a7723292175588b325a81a2a552b6f0baf42b1ea95ff6710f83a0a5f9162",
+    ),
     "managed_reusable_candidate.py": (
         "16e814a81d1a139c9fa566186d46c16b118978e1ac3fdf420a612e23be681994",
         "7586a72ae6e6c6f61c1f494ebcf80888ad9a09142cd218d752883f3f8099fab9",
@@ -453,8 +460,8 @@ EXAMPLE_IDENTITIES = {
     # Re-pinned deliberately: the example declares is_trial true (trial/formal mode),
     # since single_file mode cannot train its non-TIDMAD quickstart task.
     "reusable_training.py": (
-        "5ae0645d827c1aa46ed1f411bee68ce886cd2a998738792fdfb0c46b3fe7a38d",
-        "0a77806bd04d7897c8bc2c09bb33702e91f5ed0afb21ddd8123207e65baaef3d",
+        "4989cf7cfd6a3dd9b0a14efd3d865a2069a293321e086c7c899b621ea2722038",
+        "7e56377df43ec15151a35f3af7b567e5057a8933f07dd530f975ae81307d904a",
     ),
 }
 

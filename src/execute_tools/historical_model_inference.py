@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import shutil
-import signal
 import subprocess
 import sys
 import time
@@ -18,6 +17,7 @@ from agent.data_analysis.historical_inference_worker_protocol import (
     HistoricalInferenceWorkerRequest,
     HistoricalInferenceWorkerResponse,
 )
+from agent.data_analysis.process_termination import SUPERVISION_POLL_S, terminate_process_group
 from agent.schemas.data_analysis.assets import MaterializedAnalysisView
 from agent.schemas.data_analysis.common import (
     CertifiedArtifactRef,
@@ -35,7 +35,7 @@ from agent.schemas.data_analysis.trained_model import ModelInferenceReceipt, Mod
 from agent.schemas.data_analysis.view_formats import NUMERIC_ARRAY_V1
 from core.campaign_identity import validate_path_component
 from core.durable_io import publish_bytes_write_once
-from core.runtime_control.process_group import process_group_alive, signal_group, tree_rss_bytes
+from core.runtime_control.process_group import process_group_alive, tree_rss_bytes
 from core.subprocess_env import subprocess_env
 
 
@@ -102,20 +102,6 @@ class ApprovedModelPluginResolver(Protocol):
     """Resolve only an operator-approved plugin identity, never an artifact path."""
 
     def resolve_model_plugin(self, identity: ModelPluginIdentity) -> Path: ...
-
-
-def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
-    signal_group(process.pid, signal.SIGTERM)
-    deadline = time.monotonic() + 1.0
-    while process_group_alive(process.pid) and time.monotonic() < deadline:
-        time.sleep(0.02)
-    if process_group_alive(process.pid):
-        signal_group(process.pid, signal.SIGKILL)
-    try:
-        process.wait(timeout=1.0)
-    except subprocess.TimeoutExpired:
-        signal_group(process.pid, signal.SIGKILL)
-        process.wait()
 
 
 class LocalPytorchHistoricalModelInferenceCapability:
@@ -445,13 +431,13 @@ class LocalPytorchHistoricalModelInferenceCapability:
                 timed_out = time.monotonic() - started >= timeout
                 memory_exceeded = memory_ceiling is not None and peak_rss > memory_ceiling
                 if not timed_out and not memory_exceeded:
-                    time.sleep(0.02)
+                    time.sleep(SUPERVISION_POLL_S)
             if (timed_out or memory_exceeded) and process.poll() is None:
-                _terminate_process_group(process)
+                terminate_process_group(process)
             elif process.poll() is None:
                 process.wait()
             elif process_group_alive(process.pid):
-                _terminate_process_group(process)
+                terminate_process_group(process)
             returncode = process.wait()
             peak_rss = max(peak_rss, tree_rss_bytes(process.pid))
         elapsed = max(0.0, time.monotonic() - started)

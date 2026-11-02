@@ -347,7 +347,7 @@ openai_tiered_v1.json        -&gt; [&#x27;deepseek-v4-pro&#x27;, &#x27;gpt-5.4&#
 </div>
 <h2>8. Create a workspace and compose the run</h2>
 <p><code>compose_run_task_bindings(manifest)</code> is what the chain launcher runs before anything else: it resolves every declared family <strong>fail-closed</strong> (a missing file, a misspelled key, a plugin that raises, an id mismatch — each refuses by name; nothing ever falls back to TIDMAD) and pins a <strong>semantic fingerprint</strong> over the resolved values and plugin content hashes. That fingerprint goes into the workspace's <code>run_invariants_lock.json</code>: edit a plugin and a resume of the old workspace refuses, because it would no longer be the same scientific run.</p>
-<div class="cell"><div class="cell-label">In [7]</div>
+<div class="cell"><div class="cell-label">Isolated Python execution: 2026-11-02T00:14:07+00:00 (source c8beb30b3cb4)</div>
 <pre class="code">from workflows.task_composition import compose_run_task_bindings
 
 SHIPPED_MANIFEST = REPO_ROOT / &quot;configs&quot; / &quot;task_composition&quot; / &quot;quickstart.yaml&quot;
@@ -362,14 +362,16 @@ print(&quot;semantic fingerprint:&quot;, composition.semantic_fingerprint[:16], 
 for ref in composition.provenance.plugins:
     print(&quot;  plugin pinned:&quot;, ref.configured_ref.rsplit(&quot;/&quot;, 1)[-1], ref.content_sha256[:12], &quot;…&quot;)
 </pre>
-<pre class="out">task_data_path_id : quickstart_tabular
+<pre class="out">[PluginLoader] Loaded plugin: &#x27;dilated_mlp_regressor&#x27; from dilated_mlp_regressor.py
+[PluginLoader] Loaded plugin: &#x27;residual_topk_jk_gcn_regressor&#x27; from residual_topk_jk_gcn_regressor.py
+task_data_path_id : quickstart_tabular
 metric            : accuracy (higher is better)
 partitions        : 4
 health family     : explicit_none  (a NAMED absence, never TIDMAD&#x27;s)
 deliverable naming: quickstart_predictions_*.json
 model plugins     : (&#x27;quickstart_reference_mlp&#x27;,) from the pack&#x27;s plugins/ dir
-semantic fingerprint: 1330d3991a98c48b …
-  plugin pinned: _quickstart_task.py efe279577fc9 …
+semantic fingerprint: b1c916f8fc5e53b3 …
+  plugin pinned: _quickstart_task.py 7ade2b7b290e …
   plugin pinned: _quickstart_metrics.py e36fd102dc7e …
   plugin pinned: quickstart_reference_mlp.py 60fde910197c …
 </pre>
@@ -381,6 +383,7 @@ semantic fingerprint: 1330d3991a98c48b …
 <p>Witnessed mechanically, end to end: the SHIPPED manifest composed fail-closed; the cold-start propose → implement → validate ladder passed a generated model through the CONTRACT-AWARE validator (the generated-pytest geometry gap this pack's first live run exposed is fixed in the landed source — every probe surface of that ladder now renders from the task's <code>model_io</code>); the tuner leg ran 15 planned attempts with typed structured-failure records; and one attempt performed REAL TRAINING on the pack's data (cross-entropy, epoch losses below, checkpoint saved) with both pack plugins loaded inside the training and inference children.</p>
 <p>Two honest limits, both visible below. That attempt's inference then failed at THIS PACK's own deliverable codec — the codec predated the landed positional-pairing convention (seam C/B7) — batch item A, since FIXED in this pack with a mutation-proven regression test. The remaining attempts were refused by the resource probe whenever the planner chose the legacy focal-loss family, which is geometry-incompatible with a <code>[B,2]</code>-logit contract — batch item B, a FLAGGED framework seam (loss eligibility is not contract-filtered for composed tasks), outside this pack. The iteration therefore closed <code>no_records</code>, honestly: no scored result exists and none is claimed.</p>
 <p>Also visible: composed-run hygiene ("Reference scores: NOT LOADED — this run is COMPOSED"), the task-owned scope path ("no SampleSet is built for a task that declares no physical partition geometry"), and the TIDMAD-physical GPU probe declaring itself NOT APPLICABLE to a task that declares no TIDMAD topology. Composed runs still fire <strong>zero health gates</strong> (the A1 debt), so a passing run makes no health-enforcement claim.</p>
+<p>For new runs, use <code>--max_rounds 2 --formal_portion 1.0</code>: the small dataset uses its full training scope and the first round may be Trial before the required final Formal round. This recommendation does not describe the archived run below.</p>
 <div class="cell"><div class="cell-label">In [12]</div>
 <pre class="code">%%bash
 # Executed 2026-08-25 as the operator-authorized bounded witness — swapping ONE

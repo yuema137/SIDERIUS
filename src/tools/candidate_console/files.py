@@ -1,7 +1,10 @@
 """Bounded private operator files; no browser-supplied paths."""
 
+import fcntl
 import os
 import stat
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from pydantic import TypeAdapter
@@ -34,11 +37,61 @@ def open_directory(path: Path) -> int:
     return directory
 
 
+@contextmanager
+def private_file_lock(path: Path) -> Iterator[None]:
+    """Serialize cooperating CAS writers on a stable sibling inode, never the replaced file.
+
+    The lock is owned mode 0600, opened through no-follow parents and never unlinked.
+    Manual editors must participate in this protocol to share its exclusion guarantee.
+    """
+    directory = open_directory(canonical(str(path.parent)))
+    try:
+        descriptor = os.open(
+            "." + path.name + ".lock",
+            os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
+            0o600,
+            dir_fd=directory,
+        )
+    finally:
+        os.close(directory)
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.getuid()
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+            or metadata.st_nlink != 1
+        ):
+            raise OperationFailure(
+                "configuration", "configuration lock requires an owned private file"
+            )
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(descriptor)
+
+
 def write_all(descriptor: int, payload: bytes) -> None:
     """Write every byte; ``os.write`` may return a short count."""
     view = memoryview(payload)
     while view:
         view = view[os.write(descriptor, view) :]
+
+
+def write_once(directory: int, name: str, payload: bytes) -> None:
+    """Create a private file once under a trusted directory descriptor.
+
+    ``name`` is a caller-validated single filename; existing entries are refused.
+    """
+    descriptor = os.open(
+        name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory
+    )
+    try:
+        os.fchmod(descriptor, 0o600)
+        write_all(descriptor, payload)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def _file_bytes(value: str, *, owner_only: bool) -> bytes:

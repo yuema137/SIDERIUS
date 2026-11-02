@@ -14,8 +14,14 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from pydantic import ValidationError
 
-from core.runtime_control.admission import GpuAdmissionPolicy, evaluate_gpu_admission
+from core.runtime_control.admission import (
+    AdmissionExecutionConditions,
+    GpuAdmissionPolicy,
+    evaluate_gpu_admission,
+    stops_phase,
+)
 from core.runtime_control.calibration_policy import classify_contention_window
 from core.runtime_control.gpu_accounting import (
     DeviceIdentity,
@@ -459,7 +465,8 @@ def test_actual_tuner_factory_call_transports_validated_hardware_fact(
     from datetime import UTC, datetime
 
     from core.hardware_context import HardwareContext
-    from core.sandbox_executor import StubSandbox, TidmadSandbox, _admission_refusal
+    from core.sandbox_executor import TidmadSandbox, _admission_refusal
+    from core.stub_sandbox import StubSandbox
 
     monkeypatch.setenv(PROCESS_VISIBILITY_ENV, "namespace_limited")
     hardware = HardwareContext(
@@ -548,9 +555,12 @@ def test_coherent_accounting_routes_to_ordinary_admission_but_gaps_stop(monkeypa
     initial = evaluate_gpu_admission(**options)
     assert initial.admitted
     assert initial.evidence["process_visibility"] == "namespace_limited"
-    assert (
-        initial.evidence["effective_execution_conditions"]["refusal_enforcement"] == "phase_policy"
+    conditions = AdmissionExecutionConditions.model_validate(
+        initial.evidence["effective_execution_conditions"]
     )
+    assert conditions.refusal_enforcement == "phase_policy"
+    assert conditions.process_visibility == "namespace_limited"
+    assert conditions.model_dump(mode="json") == initial.evidence["effective_execution_conditions"]
     if gap == "unavailable":
         options["snapshot"] = GpuAccountingSnapshot(
             device=DEVICE, telemetry_available=False, process_visibility="namespace_limited"
@@ -570,6 +580,19 @@ def test_coherent_accounting_routes_to_ordinary_admission_but_gaps_stop(monkeypa
     decision = evaluate_gpu_admission(**options)
     assert not decision.admitted
     assert decision.reason_code == "environment_headroom_unproven"
+
+
+@pytest.mark.parametrize("delegated", [False, True])
+@pytest.mark.parametrize("enforcement", ["observe_only", "enforce", "enforce_resource_limits"])
+def test_stops_phase_rejects_corrupt_recorded_conditions(delegated, enforcement):
+    """A real admission record must not authorize execution through unvalidated keys."""
+    decision = decide(
+        **({"requirement_mib": None, "requirement_provenance": None} if delegated else {})
+    )
+    evidence = json.loads(decision.model_dump_json())["evidence"]
+    evidence["effective_execution_conditions"]["headroom_policy"] = "unknown_policy"
+    with pytest.raises(ValidationError, match="headroom_policy"):
+        stops_phase(enforcement, decision.reason_code, evidence=evidence)
 
 
 @pytest.mark.parametrize("phase", ["training", "inference"])

@@ -638,9 +638,12 @@ def test_native_run_output_with_nonfinite_scores_is_not_a_disagreement(
     assert receipt.status == "completed", receipt.error
     (path,) = Path(receipt.workspace).rglob("run_output_*.json")
     raw = path.read_text()
-    assert "Infinity" not in raw and "NaN" not in raw
+    import math
+
+    json.loads(raw, parse_constant=lambda token: pytest.fail(f"bare constant: {token}"))
     saved = training.HyperparamTuningOutput.model_validate_json(raw)
-    assert saved.best_denoising_score is None and saved.best_formal_denoising_score is None
+    assert saved.best_denoising_score == float("-inf")
+    assert math.isnan(saved.best_formal_denoising_score)
     result = decode_transport(
         NodeUnitResult,
         read_graph_control(Path(receipt.workspace) / "candidate_run/units/train/result.json"),
@@ -648,3 +651,66 @@ def test_native_run_output_with_nonfinite_scores_is_not_a_disagreement(
     assert result.output is not None
     returned = decode_transport(training.HyperparamTuningOutput, result.output.encode())
     assert returned.best_denoising_score == float("-inf")
+
+
+def swap_after(monkeypatch, module, name: str, path: Path, forged: bytes) -> list[Path]:
+    """Replace ``path`` with ``forged`` right after ``module.name`` checked it (#1407).
+
+    Models a writer racing the verifier: the trace digest (or a hashed read)
+    proved the file, and the bytes change before a later read parses them. The
+    returned list records the swap, so a test proves its window was exercised.
+    """
+    real = getattr(module, name)
+    swapped: list[Path] = []
+
+    def checked_then_swapped(*args, **kwargs):
+        result = real(*args, **kwargs)
+        if not swapped and any(
+            str(path) in (arg, getattr(arg, "record_path", None)) for arg in args
+        ):
+            path.write_bytes(forged)
+            swapped.append(path)
+        return result
+
+    monkeypatch.setattr(module, name, checked_then_swapped)
+    return swapped
+
+
+@pytest.mark.parametrize(
+    ("node", "after", "field", "value"),
+    [
+        ("propose", "record_digest", "motivation", "forged motivation"),
+        ("validate", "_check_validation_verdict", "test_output", "forged log"),
+        ("train", "record_digest", "best_valid_formal_denoising_score", 1.0e9),
+    ],
+)
+def test_training_readback_refuses_a_record_swapped_after_its_digest_check(
+    prepared, training_runner, monkeypatch, node, after, field, value
+):
+    """#1407: ``verify_graph_training`` re-read the proposal, validation and tuner
+    records after the trace's ``record_sha256`` check without re-hashing them, so
+    a record replaced in that window (here a forged score or narrative that keeps
+    the identity fields training checks) was parsed and accepted. Each read must
+    re-hash the bytes it parses; without that ``pytest.raises`` fails."""
+    from tools.candidate_worker import graph_evidence
+
+    request = graph_training_request(prepared)
+    receipt = launch_candidate(request)
+    assert receipt.status == "completed", receipt.error
+    parent = initial(request).model_copy(update={"run_id": receipt.run_id})
+    verify_graph_trace(request, parent, receipt)
+    entries = {item.node_id: item for item in receipt.graph_trace.nodes}
+    validation = next(key for key, item in entries.items() if item.capability == "validation")
+    path = Path(entries[validation if node == "validate" else node].record_path)
+    raw = json.loads(path.read_bytes())
+    assert field in raw and raw[field] != value
+    swapped = swap_after(
+        monkeypatch,
+        graph_evidence,
+        after,
+        path,
+        json.dumps({**raw, field: value}, indent=2).encode(),
+    )
+    with pytest.raises(ValueError, match="graph native record mismatch"):
+        verify_graph_trace(request, parent, receipt)
+    assert swapped == [path]

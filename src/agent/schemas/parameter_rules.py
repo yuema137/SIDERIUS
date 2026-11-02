@@ -3,7 +3,8 @@
 Rules are keyed by dotted paths into :class:`ExperimentPlan`.  An omitted
 path remains agent-controlled.  ``exact`` replaces the authored value; the
 other rule kinds validate the authored value without choosing one for the
-agent.
+agent. Loss-field constraints apply only while active for the selected loss;
+inactive attempt rules are disclosed and recorded, while fixed dead rules fail.
 
 Predicate declarations name a registered callable.  Configuration never
 contains executable Python expressions: raw lambdas are neither reproducible
@@ -122,7 +123,7 @@ def _validate_fixed_rule_path(path: str, parts: list[str], rules: Iterable[Param
 
 def _validate_model_rule_paths(
     resolved: dict[str, Any],
-    declarations: tuple[tuple[str, ParameterRules], ...],
+    declarations: tuple[tuple[Literal["task", "workflow"], ParameterRules], ...],
     executed_model_type: Any,
     *,
     defer_unknown_model: bool,
@@ -231,6 +232,38 @@ def validate_model_parameter_rules(
         defer_missing_non_exact=True,
         defer_unknown_model=False,
     )
+
+
+def _validate_active_loss_rule_targets(
+    rule_sets: Iterable[ParameterRules], *, loss_type: Any = None
+) -> None:
+    """Reject constraints on inactive fields, even exact null/false declarations.
+
+    A fixed rule takes precedence over the authored type. Without one, callers
+    supply the effective type (or defer by leaving it unknown).
+    """
+    from ml_models.models_format_sandbox import LossConfig
+
+    declarations = tuple(rule_sets)
+    for rules in declarations:
+        rule = rules.rules.get("loss_config.loss_type")
+        if rule is not None:
+            if rule.kind == "exact":
+                loss_type = rule.exact
+                break
+            if rule.allowed is not None and len(rule.allowed) == 1:
+                loss_type = rule.allowed[0]
+    if not isinstance(loss_type, str):
+        return
+    inactive = LossConfig.inactive_parameter_values(loss_type)
+    for rules in declarations:
+        for path in rules.rules:
+            if path.startswith("loss_config.") and path.split(".", 1)[1] in inactive:
+                raise ParameterRuleError(
+                    f"dead parameter rule for {path!r} targets an inactive field for "
+                    f"loss_type={loss_type!r}; LossConfig nullifies this field. "
+                    "Remove the rule or select a loss type that consumes the field."
+                )
 
 
 def _validate_parameter_path(path: str, rules: Iterable[ParameterRule]) -> None:
@@ -397,6 +430,17 @@ class ParameterRule(BaseModel):
         return {self.kind: serialized[self.kind]}
 
 
+class InactiveParameterRule(BaseModel):
+    """A declared constraint not applied because this attempt's loss nullifies it."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    path: str
+    owner: Literal["task", "workflow"]
+    loss_type: str
+    rule: ParameterRule
+    reason: Literal["inactive_for_selected_loss"] = "inactive_for_selected_loss"
+
+
 class ParameterRules(BaseModel):
     """A closed, immutable set of dotted-path parameter constraints."""
 
@@ -415,6 +459,7 @@ class ParameterRules(BaseModel):
     def validate_paths(self) -> ParameterRules:
         for path, rule in self.rules.items():
             _validate_parameter_path(path, (rule,))
+        _validate_active_loss_rule_targets((self,))
         return self
 
 
@@ -484,25 +529,73 @@ def apply_parameter_rules(
 ) -> Any:
     """Apply exact locks and validate every task/workflow constraint.
 
-    Task and workflow declarations are peers at enforcement time: all rules
-    must hold.  A workflow may therefore narrow a task constraint but cannot
+    Task and workflow declarations are peers: all active rules must hold.
+    Inactive loss rules produce receipts instead of restricting loss choice.  A workflow may therefore narrow a task constraint but cannot
     overwrite or bypass it. ``executed_model_type`` defaults to the plan's
     top-level ``model_type``.
     """
     from agent.schemas.hyperparam_tuning import ExperimentPlan
 
+    inactive: list[InactiveParameterRule] = []
     document = resolve_parameter_rule_document(
         plan.model_dump(by_alias=True),
+        inactive_rules=inactive,
         task_rules=task_rules,
         workflow_rules=workflow_rules,
         executed_model_type=executed_model_type,
     )
     try:
+        document["inactive_parameter_rules"] = inactive
         return ExperimentPlan.model_validate(document)
     except Exception as exc:
         raise ParameterRuleError(
             f"parameter rules produced an invalid effective ExperimentPlan: {exc}"
         ) from exc
+
+
+def _inactive_loss_paths(
+    document: Mapping[str, Any],
+    declarations: tuple[tuple[Literal["task", "workflow"], ParameterRules], ...],
+    defer_missing: bool,
+) -> dict[str, str]:
+    """Select activity using exact type locks before any conditional field rule."""
+    from ml_models.models_format_sandbox import LossConfig
+
+    loss = document.get("loss_config")
+    loss_type = loss.get("loss_type") if isinstance(loss, Mapping) else None
+    for _, rules in declarations:
+        rule = rules.rules.get("loss_config.loss_type")
+        if rule is not None and rule.kind == "exact":
+            loss_type = rule.exact
+    if loss_type is None and not defer_missing:
+        loss_type = LossConfig.model_fields["loss_type"].default
+    if not isinstance(loss_type, str):
+        return {}
+    return {
+        f"loss_config.{field}": loss_type
+        for field in LossConfig.inactive_parameter_values(loss_type)
+    }
+
+
+def _disclose_inactive_rules(
+    path: str,
+    loss_type: str,
+    declarations: tuple[tuple[Literal["task", "workflow"], ParameterRules], ...],
+    receipts: list[InactiveParameterRule] | None,
+) -> None:
+    """Record and log skipped constraints without changing the planner's loss choice."""
+    for owner, rules in declarations:
+        if path not in rules.rules:
+            continue
+        receipt = InactiveParameterRule(
+            path=path, owner=owner, loss_type=loss_type, rule=rules.rules[path]
+        )
+        if receipts is not None:
+            receipts.append(receipt)
+        print(
+            f"[parameter_rules] {owner} {path} inactive for this attempt "
+            f"(loss_type={loss_type!r}); rule not applied"
+        )
 
 
 def resolve_parameter_rule_document(
@@ -513,6 +606,7 @@ def resolve_parameter_rule_document(
     defer_missing_non_exact: bool = False,
     defer_unknown_model: bool = False,
     executed_model_type: str | None = None,
+    inactive_rules: list[InactiveParameterRule] | None = None,
 ) -> dict[str, Any]:
     """Resolve the same typed rules on a plan or proposal baseline mapping.
 
@@ -526,7 +620,7 @@ def resolve_parameter_rule_document(
     will run (``force_model``, the plan's ``model_type``, or a proposal's
     model name); it defaults to the document's top-level ``model_type``.
     """
-    declarations = (
+    declarations: tuple[tuple[Literal["task", "workflow"], ParameterRules], ...] = (
         ("task", task_rules or ParameterRules()),
         ("workflow", workflow_rules or ParameterRules()),
     )
@@ -538,6 +632,8 @@ def resolve_parameter_rule_document(
         for path, rule in rules.rules.items():
             rules_by_path.setdefault(path, []).append(rule)
     paths = set(rules_by_path)
+    _validate_active_loss_rule_targets(rules for _, rules in declarations)
+    inactive_paths = _inactive_loss_paths(resolved, declarations, defer_missing_non_exact)
     for path, path_rules in rules_by_path.items():
         _validate_parameter_path(path, path_rules)
     if executed_model_type is None:
@@ -549,6 +645,9 @@ def resolve_parameter_rule_document(
         defer_unknown_model=defer_unknown_model,
     )
     for path in sorted(paths):
+        if path in inactive_paths:
+            _disclose_inactive_rules(path, inactive_paths[path], declarations, inactive_rules)
+            continue
         exact_values = [
             rule.exact
             for _, rules in declarations
@@ -581,6 +680,9 @@ def validate_parameter_rule_ownership(
     workflow_rules: ParameterRules | None,
 ) -> None:
     """Keep task-owned objectives from competing with loss parameter rules."""
+    _validate_active_loss_rule_targets(
+        rules for rules in (task_rules, workflow_rules) if rules is not None
+    )
     if not objective_declared:
         return
     if any(

@@ -51,6 +51,7 @@ from .loop_stop import (
 if TYPE_CHECKING:
     from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
 
+    from .graph_models import GraphNodeEvidence
     from .models import CandidateRunReceipt, CandidateRunRequest
 
 #: Deterministic excerpt bound; equals ``StopJudgeRequest``'s per-excerpt limit.
@@ -129,11 +130,9 @@ def mark_skipped_stop_judge(initial: "CandidateRunReceipt", value: StopEvaluatio
     )
 
 
-def _record(body: "CandidateRunReceipt", node_id: str) -> Path:
+def _entry(body: "CandidateRunReceipt", node_id: str) -> "GraphNodeEvidence":
     assert body.graph_trace is not None and body.status == "completed"
-    path = next(item for item in body.graph_trace.nodes if item.node_id == node_id).record_path
-    assert path is not None
-    return Path(path)
+    return next(item for item in body.graph_trace.nodes if item.node_id == node_id)
 
 
 def _body_health(
@@ -175,19 +174,26 @@ def _body_projection(
     from agent.schemas.interpretation import InterpretationOutput
     from workflows.definition.fanout import execution_families
 
+    from .graph_evidence import read_traced_record
+
     shape = execution_families(
         request.preview.document.definition, request.preview.execution_profile
     )
     assert shape.interpretation is not None and shape.tuning is not None
-    tuning_path = _record(body, shape.tuning)
-    tuning = HyperparamTuningOutput.model_validate_json(tuning_path.read_bytes())
+    # Judge facts read the traced bytes, re-hashed after verification (#1477).
+    tuning_entry = _entry(body, shape.tuning)
+    tuning = HyperparamTuningOutput.model_validate_json(
+        read_traced_record(tuning_entry, bounded=False)
+    )
+    assert tuning_entry.record_path is not None
+    tuning_path = Path(tuning_entry.record_path)
     facts = JudgeBodyFacts(
         iteration=score.iteration,
         value=score.valid_formal,
         rank=rank,
         health=_body_health(initial.workspace, score, tuning, tuning_path),
     )
-    payload = _record(body, shape.interpretation.interpretation).read_bytes()
+    payload = read_traced_record(_entry(body, shape.interpretation.interpretation), bounded=False)
     interpretation = InterpretationOutput.model_validate_json(payload)
     return (
         facts,

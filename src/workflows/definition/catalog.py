@@ -48,6 +48,7 @@ CONTRACTS = MappingProxyType(
         "interpretation.input": "agent.schemas.interpretation.InterpretationInput",
         "interpretation.output": "agent.schemas.interpretation.InterpretationOutput",
         "optional.text": "str | None",
+        "optional.advice-text": "str | None",
         "optional.expert-advice": "agent.schemas.hyperparam_tuning.ExpertAdviceInput | None",
         "optional.expert-context": "list[agent.schemas.proposal.ExpertContextItem] | None",
         "optional.parameter-rules": "agent.schemas.parameter_rules.ParameterRules | None",
@@ -147,7 +148,7 @@ PROTOCOLS = MappingProxyType(
                 ArgumentContract("llm_provider", "llm-provider", False),
                 ArgumentContract("llm_model_id", "optional.model-id", False),
                 ArgumentContract("constraint_context", "optional.constraint-context", False),
-                ArgumentContract("human_advice", "optional.text", False),
+                ArgumentContract("human_advice", "optional.advice-text", False),
             ),
         ),
         "implementation-to-validation": ProtocolContract(
@@ -173,6 +174,7 @@ CUSTOM_EMITTABLE = frozenset(
         "optional.expert-context",
         "optional.expert-advice",
         "optional.text",
+        "optional.advice-text",
         "proposal.output",
         "literature.output",
     }
@@ -206,6 +208,7 @@ PROTECTED_FIELDS = MappingProxyType(
         "optional.expert-context": _context_item_rules("[]."),
         "optional.expert-advice": (),
         "optional.text": (),
+        "optional.advice-text": (),
         "proposal.output": (
             ProtectedField("candidate_id", "unset"),
             ProtectedField("observed_prediction_reference", "unset"),

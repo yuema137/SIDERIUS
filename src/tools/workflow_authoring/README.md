@@ -48,8 +48,10 @@ whether referenced manifests, data or plugins exist.
    adding nodes. Click **Save** to validate the graph; a save row opens (with
    Settings › Show advanced tools it also shows the exact generated Python diff).
    After inspector edits, press **Save** (then **Cancel**) first to update
-   the Python panel before typing source changes. Inspector changes can rewrite formatting and
-   comments; the diff shows that rewrite. The **Research loop** section of Selection adds or
+   the Python panel before typing source changes. Inspector changes preserve
+   values you did not edit, including their Python spelling. Adding or removing
+   items can change surrounding formatting; review the diff. The **Research loop**
+   section of Selection adds or
    removes the research loop, its iteration limit and stop conditions; a loop your
    coding agent wrote in `workflow.py` appears there, and the diff shows the
    resulting Python.
@@ -74,6 +76,18 @@ Use trusted local project directories. A lost connection leaves a save unconfirm
 until you inspect disk again. See the [authoring contract](authoring-contract.md)
 for exact limits, refusals and concurrency behavior.
 
+## Advice and data-folder ports
+
+The Validate node's **Advice text** port accepts free-text guidance, such as
+"Check the held-out split." **Data folder** accepts the path to your task data.
+These ports cannot share a connection even though both values are strings.
+
+If an older `workflow.py` supplies Validate's `human_advice` through an external
+binding or custom adaptor, change that binding's contract from `optional.text`
+to `optional.advice-text`, including the connected adaptor ports and output.
+Keep data-folder bindings as `optional.text`. Review the updated declaration
+before saving; see the [compatibility reference](../../workflows/definition/contract-names.md#compatibility-for-authored-validation-advice).
+
 ## View a hand-written workflow.py without changing it
 
 To only look at the file as a canvas of nodes and their ports, complete steps
@@ -81,8 +95,10 @@ To only look at the file as a canvas of nodes and their ports, complete steps
 
 Caveats:
 
-- The editor is read-write. **Save** rewrites `workflow.py` from the editor's
-  canonical form, which can change formatting and comments. Before you save, keep
+- The editor is read-write. **Save** applies your reviewed changes to `workflow.py`.
+  Untouched values retain their exact spelling, including `2.0`, numeric notation
+  and string escapes. Editing an existing `2.0` to `3` saves `3.0`; use the
+  Python source editor to deliberately change the numeric type. Before you save, keep
   a copy or commit the file to version control. Version history keeps recovery
   copies of the previous and proposed bytes, but `workflow.py` stays authoritative,
   so these copies are not a substitute for version control.

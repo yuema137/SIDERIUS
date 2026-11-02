@@ -12,7 +12,12 @@ from workflows.definition import (
     ReusableWorkflowDocument,
 )
 from workflows.definition.fanout import execution_families
-from workflows.definition.models import DeclarationModel
+from workflows.definition.models import (
+    NATIVE_INTERPRETATION_PROFILE,
+    NATIVE_LITERATURE_PROFILE,
+    NATIVE_PROPOSAL_FAMILIES_PROFILE,
+    DeclarationModel,
+)
 
 
 class StorageRecord(DeclarationModel):
@@ -49,14 +54,16 @@ def graph_storage_filenames(document: ReusableWorkflowDocument) -> tuple[str, ..
 
 
 def proposal_filename(profile: str | None, owner: str) -> str:
-    return f"proposal.{owner}.json" if profile == "native-proposal-families/v1" else "proposal.json"
+    return (
+        f"proposal.{owner}.json" if profile == NATIVE_PROPOSAL_FAMILIES_PROFILE else "proposal.json"
+    )
 
 
 def proposal_receipt_path(document: ReusableWorkflowDocument, output: Path) -> str | None:
     """The explicit family profile has an indexed inventory, no singular proposal."""
     return (
         None
-        if document.execution_profile == "native-proposal-families/v1"
+        if document.execution_profile == NATIVE_PROPOSAL_FAMILIES_PROFILE
         else str(output / "proposal.json")
     )
 
@@ -83,7 +90,7 @@ def graph_proposal_bindings(document: ReusableWorkflowDocument) -> dict[str, str
 
 def graph_literature_bindings(document: ReusableWorkflowDocument) -> dict[str, str]:
     """The admitted review owns its one generated native input."""
-    if document.execution_profile != "native-literature-candidate/v1":
+    if document.execution_profile != NATIVE_LITERATURE_PROFILE:
         return {}
     edge = execution_families(document.definition, document.execution_profile).literature
     assert edge is not None
@@ -118,7 +125,7 @@ def graph_storage_bindings(document: ReusableWorkflowDocument) -> dict[str, str]
 
 def interpretation_external_bindings(document: ReusableWorkflowDocument) -> dict[str, str]:
     """Name managed protocol payloads generated from the existing native preparation."""
-    if document.execution_profile != "native-interpretation-candidate/v1":
+    if document.execution_profile != NATIVE_INTERPRETATION_PROFILE:
         return {}
     shape = execution_families(document.definition, document.execution_profile)
     assert shape.interpretation is not None

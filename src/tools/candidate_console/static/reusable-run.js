@@ -6,13 +6,13 @@
   const session = window.consoleSession, coordinator = window.reusableIntents;
   const stopControl = window.operationStop.mount('capture-stop');
   const profileDescriptions = {
-    'native-proposal-families/v1': ' Independent proposal instances executed serially.',
-    'native-literature-candidate/v1': ' Native literature review feeds one proposal, implementation and validation.',
-    'native-interpretation-candidate/v1': ' Native interpretation feeds one proposal, implementation, validation and tuning.',
+    [window.executionProfiles.nativeProposalFamilies]: ' Independent proposal instances executed serially.',
+    [window.executionProfiles.nativeLiterature]: ' Native literature review feeds one proposal, implementation and validation.',
+    [window.executionProfiles.nativeInterpretation]: ' Native interpretation feeds one proposal, implementation, validation and tuning.',
   };
   // The reviewed request's authored loop bound decides how many bodies a launch may run.
   function researchLoop(value) {
-    if (!value.loop) return 'Research loop: none (one workflow body).';
+    if (!value.loop) return 'Research loop: none (one workflow iteration).';
     const capability = id => window.editorCapabilityPresentation.label(value.nodes.find(item => item[0] === id)?.[1]);
     const edge = value.loop.feedback;
     const conditions = value.loop.stop_conditions || [];
@@ -22,8 +22,8 @@
   }
   function stopCondition(condition) {
     if (condition.kind === 'metric_threshold') return `${condition.metric_id} reaches ${condition.threshold} (task metric direction)`;
-    if (condition.kind === 'no_improvement') return `${condition.completed_bodies} completed bod${condition.completed_bodies === 1 ? 'y' : 'ies'} pass${condition.completed_bodies === 1 ? 'es' : ''} without improvement`;
-    if (condition.kind === 'judge') return `a language-model judge decides to stop ("${condition.criterion}"), first after ${condition.min_completed_bodies} completed bod${condition.min_completed_bodies === 1 ? 'y' : 'ies'}; a failed judge call ${condition.on_failure === 'continue' ? 'is recorded as an abstention' : 'ends the loop as failed'}`;
+    if (condition.kind === 'no_improvement') return `${condition.completed_bodies} completed iteration${condition.completed_bodies === 1 ? '' : 's'} pass${condition.completed_bodies === 1 ? 'es' : ''} without improvement`;
+    if (condition.kind === 'judge') return `a language-model judge decides to stop ("${condition.criterion}"), first after ${condition.min_completed_bodies} completed iteration${condition.min_completed_bodies === 1 ? '' : 's'}; a failed judge call ${condition.on_failure === 'continue' ? 'is recorded as an abstention' : 'ends the loop as failed'}`;
     return `unsupported condition ${condition.kind}`;
   }
   let editor = window.workflowEditor.state, generation = 0, selected = null, review = null;
@@ -122,7 +122,7 @@
     for (const [label, key] of [['Proposal advice', 'proposal_advice'], ['Implementation advice', 'implementation_advice'], ['Validation advice', 'validation_advice']]) line(label, value[key] || 'none');
     const training = value.facts?.training;
     if (training) {
-      line('Tuning rounds per body', training.max_rounds);
+      line('Tuning rounds per iteration', training.max_rounds);
       line('Health mode', ({observe_only: 'Record only', blocking: 'Block on failure'})[training.healthgate_mode] || 'Not declared');
       for (const phase of ['trial', 'formal']) {
         const budget = training[`${phase}_time_budget_minutes`];
@@ -197,7 +197,7 @@
     if (error.code === 'unknown_operation') {
       if (evidence()?.confirming) return 'This console has no record of this run yet. Checking once more before offering Forget…';
       return evidence()?.forgettable
-        ? 'This console still has no record of this run after Retry. Nothing is running for it here: forget it to start another run.'
+        ? 'This console still has no record of this run after sending the request. Nothing is running for it here: forget it to start another run.'
         : 'This console has no record of this run. Retry sends the same launch again; it never starts a second run.';
     }
     if (error.unreachable) return 'Can\'t check: the server is unreachable. Retrying…';

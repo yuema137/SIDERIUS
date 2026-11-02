@@ -129,11 +129,16 @@ def _summary(
 @pytest.mark.parametrize(
     ("status", "rounds", "termination", "expected"),
     [
-        ("partial", 0, "aborted_fail_rounds", "No training round completed: 0 completed rounds"),
+        (
+            "partial",
+            0,
+            "aborted_fail_rounds",
+            "No tuning round completed: 0 completed tuning rounds",
+        ),
         # Even a record that says completed with no round must not read as a success.
-        ("completed", 0, "completed", "No training round completed:"),
-        ("partial", 2, "wall_clock_budget", "Not completed (tuner status partial): 2 completed"),
-        ("completed", 1, "max_rounds", "Completed: 1 completed round in 9 attempts"),
+        ("completed", 0, "completed", "No tuning round completed:"),
+        ("partial", 2, "wall_clock_budget", "Tuning did not finish: 2 completed"),
+        ("completed", 1, "max_rounds", "Completed: 1 completed tuning round in 9 attempts"),
     ],
 )
 def test_body_outcome_comes_from_the_tuner_record_not_the_node_state(
@@ -160,6 +165,57 @@ def test_body_outcome_comes_from_the_tuner_record_not_the_node_state(
     )
     body = graph_results._body_result(iteration=1, tuning=tuning)
     assert body.outcome is not None and body.outcome.startswith(expected)
-    assert termination.replace("_", " ") in body.outcome
+    assert "ended by" not in body.outcome
     if rounds == 0:
         assert "Completed" not in body.outcome and "succeeded" not in body.outcome
+
+
+@pytest.mark.parametrize(
+    ("termination", "ending"),
+    [
+        ("completed", ""),
+        ("aborted_fail_rounds", "Consecutive tuning rounds reached the failure limit."),
+        ("aborted_by_gate", "A validity gate stopped tuning."),
+        ("scope_violation", "A data scope violation stopped tuning."),
+        ("infrastructure_abort", "An infrastructure or environment check stopped tuning."),
+    ],
+)
+def test_tuner_ending_and_refusal_are_plain_sentences(termination, ending):
+    from tools.candidate_console.graph_results import tuner_outcome
+
+    summary = _summary("completed", 1, termination)
+    expected = "Completed: 1 completed tuning round in 9 attempts."
+    assert tuner_outcome(summary) == expected + (" " + ending if ending else "")
+    refused = summary.model_copy(
+        update={"completed_rounds": 0, "admission_refusal_reason": "GPU evidence is unavailable."}
+    )
+    assert tuner_outcome(refused).endswith("Training could not start: GPU evidence is unavailable.")
+
+
+def test_summary_preserves_native_admission_refusal(tmp_path):
+    from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
+    from core.runtime_control.admission import AdmissionDecision
+    from tools.candidate_console.graph_results import _summary as project_summary
+
+    output = HyperparamTuningOutput(
+        file_index=0,
+        completed_rounds=0,
+        total_attempts=0,
+        run_name="refused",
+        model_type="test",
+        status="failed",
+        termination_reason="infrastructure_abort",
+        started_at="start",
+        finished_at="end",
+        environment_admission_refusal=AdmissionDecision(
+            admitted=False,
+            reason_code="insufficient_headroom",
+            reason="GPU evidence is unavailable.",
+            requirement_source="test",
+            evidence={},
+        ),
+    )
+    assert (
+        project_summary(output, tmp_path / "output.json").admission_refusal_reason
+        == "GPU evidence is unavailable."
+    )

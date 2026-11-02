@@ -9,7 +9,7 @@ import {createServer} from 'node:net';
 import {tmpdir} from 'node:os';
 import {dirname, resolve, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 import {chooseFirstConfiguredTask} from './console_task_choice.mjs';
 import {showAllConsoleSections} from './console_view_flags.mjs';
 const checkout = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -32,8 +32,7 @@ const origin = `http://127.0.0.1:${probe.address().port}`; await new Promise(res
 let browser, server, provider, metadata;
 try {
   provider = start('provider', root);
-  const lines = createInterface({input: provider.stdout});
-  const endpoint = await new Promise(resolve => lines.once('line', line => resolve(JSON.parse(line).endpoint))); lines.close();
+  const {endpoint} = await waitForMetadata(provider);
   metadata = JSON.parse((await completed(start('setup', root, '--origin', origin, '--endpoint', endpoint, '--captures-count', '1', '--training'))).trim().split('\n').at(-1));
   server = start('serve', root);
   async function ready() { await until(async () => { try {return (await fetch(origin + '/')).ok;} catch {return false;} }); }
@@ -62,7 +61,7 @@ try {
   await page.locator('#editor-training-settings').evaluate(el => { el.open = true; });
   const rounds = page.locator('[data-training="max_rounds"]');
   assert.equal(await rounds.count(), 1, 'Tuning rounds control must be exposed');
-  assert.match(await page.locator('[data-training-field="max_rounds"]').textContent(), /Tuning rounds per body/);
+  assert.match(await page.locator('[data-training-field="max_rounds"]').textContent(), /Tuning rounds per iteration/);
   assert.equal(await rounds.inputValue(), '10');
   assert.equal(await page.locator('[data-training-mode="max_rounds"]').inputValue(), 'unset');
   assert.ok(!(await readFile(metadata.source, 'utf8')).includes("'max_rounds'"));
@@ -70,7 +69,7 @@ try {
   await page.locator('#capture-earlier').evaluate(el => {el.open = true;});
   await page.locator('#capture-task').selectOption('synthetic');
   await open(metadata.captures[0]);
-  assert.match(await page.locator('#capture-summary').textContent(), /Tuning rounds per body: 10/);
+  assert.match(await page.locator('#capture-summary').textContent(), /Tuning rounds per iteration: 10/);
 
   await page.locator('nav a[href="#workflow"]').click();
   await page.locator('[data-training-mode="max_rounds"]').selectOption('supplied');
@@ -93,7 +92,7 @@ try {
   const review = await (await responsePromise).json();
   assert.equal(review.facts.training.max_rounds, 3);
   await page.locator('#capture-status').filter({hasText: 'Reviewed.'}).waitFor();
-  assert.match(await page.locator('#capture-summary').textContent(), /Tuning rounds per body: 3/);
+  assert.match(await page.locator('#capture-summary').textContent(), /Tuning rounds per iteration: 3/);
   // Preparation polling may precede creation of this exact operation record.
   const operationId = await page.locator('#new-run-operation-id').textContent();
   const operationUrl = `${origin}/api/operations/${operationId}`;

@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 import uvicorn
 
+from tests.browser.fixture_metadata import emit_metadata
 from tests.helpers.reusable_fanout import reusable_families, reusable_fanout
 from tests.integration.tools.test_changed_task_candidate import changed_candidate
 from tests.unit.tools.candidate_console.conftest import console_config
@@ -60,21 +61,18 @@ def main():
                 "browser_origin": origin,
             }
         )
-        print(
-            json.dumps(
-                {
-                    "origin": origin,
-                    "token": Path(config.auth_token_file).read_text(),
-                    "source": str(author.project.source_file),
-                    "profile": profile,
-                    "prepare_request": preparation.model_dump(mode="json"),
-                    "saved_binding": targets[0].binding.model_dump(mode="json"),
-                    "binding": targets[1].binding.model_dump(mode="json"),
-                    "training": training,
-                    "plugin": str(targets[1].manifest.parent / "plugins/_quickstart_task.py"),
-                }
-            ),
-            flush=True,
+        emit_metadata(
+            {
+                "origin": origin,
+                "token": Path(config.auth_token_file).read_text(),
+                "source": str(author.project.source_file),
+                "profile": profile,
+                "prepare_request": preparation.model_dump(mode="json"),
+                "saved_binding": targets[0].binding.model_dump(mode="json"),
+                "binding": targets[1].binding.model_dump(mode="json"),
+                "training": training,
+                "plugin": str(targets[1].manifest.parent / "plugins/_quickstart_task.py"),
+            }
         )
         uvicorn.run(
             create_app(config),

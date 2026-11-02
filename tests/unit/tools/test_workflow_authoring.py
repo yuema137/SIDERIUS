@@ -426,6 +426,7 @@ def test_training_inspector_save_preserves_advanced_rules_and_presence(tmp_path)
     assert controls["trial_max_epochs"].state == "unset"
     assert controls["max_rounds"].effective == 10
     assert controls["max_rounds"].state == "unset"
+    assert controls["max_rounds"].help.minimum == 1
     assert view.document.training_settings == supplied
     document = view.document.model_copy(deep=True)
     document.training_settings["launch"]["trial_max_epochs"] = 3
@@ -542,8 +543,8 @@ def test_bound_save_refuses_including_pin_removal(editor, current_bound, propose
 
 
 def test_review_reports_comments_the_checked_bytes_remove(editor):
-    """Fails if a structured edit's re-render silently drops hand-written comments (red-team
-    S-1), or if repeated comment texts are counted once (a set would hide the second loss)."""
+    """Fails if structured edits drop comments or explicit source removals lose their warning.
+    Repeated comment texts must be counted separately (red-team S-1)."""
     from tools.workflow_authoring.models import DocumentProposal
 
     commented = "# my note\n# repeated\n" + SOURCE + "# repeated\n"
@@ -556,7 +557,8 @@ def test_review_reports_comments_the_checked_bytes_remove(editor):
             proposal=DocumentProposal(kind="document", document=base.document),
         )
     )
-    assert rendered.removed_comments == ("# my note", "# repeated", "# repeated")
+    assert rendered.source == commented
+    assert rendered.removed_comments == ()
     one_kept = "# repeated\n" + SOURCE.replace("old.json", "new.json")
     partial = editor.review(
         ReviewRequest(
@@ -635,3 +637,26 @@ def test_open_failures_name_the_reason_and_the_path(editor):
     with pytest.raises(AuthoringError) as missing:
         editor.read()
     assert missing.value.code == "not_found" and str(path) in str(missing.value)
+
+
+def test_validation_advice_catalog_is_not_a_data_folder():
+    """Catch shared primitive contracts mislabelling advice and offering data paths."""
+    from tools.workflow_authoring.external_inputs import external_input_catalog
+    from tools.workflow_authoring.options import node_catalog
+
+    routes = {item.protocol: item for item in node_catalog().entries if item.protocol}
+    validation = routes["proposed-implementation-to-validation"]
+    advice = next(item.contract for item in validation.arguments if item.name == "human_advice")
+    proposal = routes["interpretation-to-proposal"]
+    folder = next(item.contract for item in proposal.arguments if item.name == "data_dir")
+    assert advice.model_dump(mode="json")["name"] == "Advice text"
+    assert advice.id == "optional.advice-text"
+    assert advice.kind == "setting"
+    assert folder.name == "Data folder"
+    assert folder.id == "optional.text"
+    assert advice.id != folder.id
+    external = next(
+        item for item in external_input_catalog().entries if item.contract.id == advice.id
+    )
+    assert not external.managed
+    assert "advice" in external.summary.lower()

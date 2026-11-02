@@ -59,6 +59,7 @@ KNOWN_AUTHORITIES: frozenset[str] = frozenset(
         "parameter_rules",
         "partial_scope_strategy_normalization",
         "max_epochs_bound",
+        "training_scope_batch_fit",
         "forced_model_type",
         "resolved_round_workload",
         "unattributed",
@@ -75,6 +76,7 @@ AUTHORITY_DESCRIPTIONS: dict[str, str] = {
     "parameter_rules": "task/workflow-declared parameter rules",
     "partial_scope_strategy_normalization": "partial data scope normalization",
     "max_epochs_bound": "--max_epochs bound",
+    "training_scope_batch_fit": "training batch fitted to the resolved role scope",
     "forced_model_type": "forced model type",
     "resolved_round_workload": "resolved round workload (persisted TrialConfig)",
     "unattributed": "resolved after the plan was authored (step not registered)",
@@ -100,7 +102,14 @@ class ResolutionEvent(BaseModel):
         )
     )
     proposed: str = Field(description="The value as the planner AUTHORED it, rendered as text.")
-    executed: str = Field(description="The value the run ACTUALLY executed with, rendered as text.")
+    executed: str = Field(
+        description=(
+            "The resolved value supplied for execution, rendered as text, or "
+            "explanatory text when the key was omitted from the resolved "
+            "configuration. Omission text does not infer downstream defaults "
+            "or establish that execution occurred."
+        )
+    )
     authority: str = Field(
         description=(
             "Which resolution step overruled the authored value. One of "
@@ -108,6 +117,17 @@ class ResolutionEvent(BaseModel):
             "change but no registered step claimed it."
         )
     )
+
+
+class TrainingBatchFit(BaseModel):
+    """An actual scope-driven adjustment, even when it restores the authored value."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    role: str = Field(min_length=1)
+    requested_batch_size: int = Field(gt=0)
+    resolved_batch_size: int = Field(gt=0)
+    available_samples: int = Field(gt=0)
 
 
 class ExecutionProvenance(BaseModel):
@@ -119,6 +139,10 @@ class ExecutionProvenance(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+    training_batch_fit: TrainingBatchFit | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     events: tuple[ResolutionEvent, ...] = Field(
         default=(),

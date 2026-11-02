@@ -720,12 +720,7 @@ def _notebook_section_headings() -> list[str]:
 
 
 def test_notebook_html_readme_and_command_stay_in_sync() -> None:
-    """Defect caught: the three renderings of one tutorial drift — the
-    hand-authored HTML stops mirroring the notebook's section sequence, or
-    the README's copy-paste launch command stops being the SAME command the
-    notebook's launch cell shows (the 12e §V.2 principle: the command a user
-    copies is the command the pack pins). Fails by naming the missing
-    heading / token."""
+    """Keep current advice aligned while preserving the recorded one-round witness."""
     headings = _notebook_section_headings()
     assert len(headings) >= 14, f"notebook lost sections: {headings}"
     html = (PACK / "quickstart.html").read_text(encoding="utf-8")
@@ -744,9 +739,33 @@ def test_notebook_html_readme_and_command_stay_in_sync() -> None:
         "--healthgate_mode blocking",
         "--result_authority diagnostic",
         "--num_iterations 1",
-        "--max_rounds 1",
+        "--max_rounds 2",
+        "--formal_portion 1.0",
     ):
         assert token in readme, f"README launch command lost {token!r}"
         assert token in notebook_text, f"notebook launch cell lost {token!r}"
+        assert token in html, f"HTML launch command lost {token!r}"
+    notebook = json.loads(notebook_text)
+    witness = next(
+        cell
+        for cell in notebook["cells"]
+        if cell["cell_type"] == "code" and "# Executed 2026-08-25" in "".join(cell["source"])
+    )
+    recorded_command = "".join(witness["source"])
+    html_witness = re.search(
+        r'<pre class="code">%%bash\n# Executed 2026-08-25.*?</pre>', html, re.S
+    )
+    assert html_witness is not None
+    for recorded in (recorded_command, html_witness.group()):
+        assert "--max_rounds 1" in recorded
+        assert "--max_rounds 2" not in recorded
+        assert "--formal_portion" not in recorded
+    assert "for 1 rounds" in "".join(witness["outputs"][0]["text"])
+    advice = "--max_rounds 2 --formal_portion 1.0"
+    assert any(
+        cell["cell_type"] == "markdown" and advice in "".join(cell["source"])
+        for cell in notebook["cells"]
+    )
+    assert f"<code>{advice}</code>" in html
     command = re.search(r"```bash\n[^`]*bash scripts/launch/run_chain\.sh[^`]+```", readme)
     assert command, "README carries no bash launch command block"

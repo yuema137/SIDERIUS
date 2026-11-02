@@ -304,3 +304,16 @@ arithmetic/rendering providers; native behavior does not infer historical mode.
 ### Independent output geometry
 
 Generic synthetic targets are resolved from fixed output dimensions and input-bound symbols through `model_output_geometry.resolve_output_shape`. Unbound independent output symbols or dynamic output axes raise `ProbeConstructionError`; no segmentation-size guess is permitted. Tasks requiring these geometries supply both task-owned input and target samples through the existing real-sample path. This changes neither their target semantics nor the resource budget.
+
+### Pseudo training admission
+
+`run_production_preflight(pseudo_training=True)` resolves the no-execution-envelope
+decision through `core.pseudo_admission` before hardware snapshot construction or
+worker launch. It returns `status=success`, `feasible=True` and
+`preflight_outcome=PSEUDO_NO_EXECUTION_ENVELOPE`, with the explicit decision and
+three optional role declarations in `pseudo_admission`; the same payload is
+persisted under `preflight_workers/<label>.json`. No host ceiling is required.
+Optional overrides are validated by the existing core ceiling parser and recorded,
+not enforced by the stub. Malformed overrides raise `MalformedCeilingOverride`.
+The default `False` preserves the real isolated GPU probe, including its result
+mapping, budget resolution and inference-refusal verification.

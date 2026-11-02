@@ -53,10 +53,12 @@ def _usage(prompt: int, completion: int, total: int) -> SimpleNamespace:
 def _chat_response(content: str, usage=None) -> MagicMock:
     """Build a mock chat.completions.create return value."""
     msg = MagicMock()
+    msg.refusal = None
     msg.content = content
     msg.tool_calls = None
     choice = MagicMock()
     choice.message = msg
+    choice.finish_reason = "stop"
     response = MagicMock()
     response.choices = [choice]
     # SimpleNamespace-style usage so getattr() works as in production.
@@ -69,11 +71,14 @@ def _tool_response(name: str, args: dict, usage=None) -> MagicMock:
     tc.function.name = name
     tc.function.arguments = json.dumps(args)
     tc.id = "call_abc123"
+    tc.type = "function"
     msg = MagicMock()
+    msg.refusal = None
     msg.tool_calls = [tc]
     msg.content = None
     choice = MagicMock()
     choice.message = msg
+    choice.finish_reason = "stop"
     response = MagicMock()
     response.choices = [choice]
     response.usage = usage
@@ -279,10 +284,12 @@ def test_tool_call_writes_row_then_raises_when_no_tool_call(tmp_path):
     API charged for the tokens — telemetry must still record it."""
     bridge = _make_bridge_with_path(tmp_path)
     msg = MagicMock()
+    msg.refusal = None
     msg.tool_calls = None
     msg.content = "I refuse to call a tool."
     choice = MagicMock()
     choice.message = msg
+    choice.finish_reason = "stop"
     response = MagicMock()
     response.choices = [choice]
     response.usage = _usage(8, 4, 12)

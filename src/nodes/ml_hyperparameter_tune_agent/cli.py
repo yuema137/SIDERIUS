@@ -18,7 +18,7 @@ import warnings
 from typing import get_args
 
 from agent.llm_settings import DEFAULT_LLM_PROVIDER, default_model_for_provider
-from agent.schemas.hyperparam_tuning import HyperparamTuningInput
+from agent.schemas.hyperparam_tuning import DEFAULT_IS_TRIAL, HyperparamTuningInput
 from agent.schemas.ordering import parse_file_order_cli
 from core.run_seed_lock import run_seed_argument
 from core.runtime_control.watchdog_policy import RuntimeWatchdogDeadlinePolicy
@@ -38,6 +38,9 @@ def build_parser() -> argparse.ArgumentParser:
     from ml_models.models_sandbox import MODEL_REGISTRY
 
     parser = argparse.ArgumentParser(description="TIDMAD Autonomous Agent Kernel")
+    parser.add_argument(
+        "--score_units_metric", help="Effective metric id for active score-unit settings."
+    )
 
     parser.add_argument(
         "--provider",
@@ -153,8 +156,10 @@ def build_parser() -> argparse.ArgumentParser:
     # Trial mode arguments
     parser.add_argument(
         "--is_trial",
-        action="store_true",
-        help="Enable trial-explore mode with multi-file sparse sampling.",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Trial/formal mode is enabled by default. Explicit --is_trial also pins trial portions; "
+        "--no-is_trial selects legacy single-file mode.",
     )
     parser.add_argument(
         "--trial_strategy",
@@ -586,6 +591,13 @@ def build_parser() -> argparse.ArgumentParser:
         "Omit to preserve the verifier default.",
     )
     parser.add_argument(
+        "--runtime_verification_pathological_min_unit_ms",
+        type=float,
+        default=None,
+        help="Slowdown floor in observation wall-time milliseconds (finite, nonnegative). "
+        "Omit to preserve 100 ms; 0 disables the absolute floor for historical reproduction.",
+    )
+    parser.add_argument(
         "--enable_chain_incumbent_formal_gates",
         action="store_true",
         help="V19 PR 1: consumption-only switch. When set, the two "
@@ -685,6 +697,7 @@ def build_agent_input(
         "seed_plugin_path": args.seed_plugin_path,
         "file_index": args.file_index,
         "max_rounds": args.max_rounds,
+        "score_units_metric": getattr(args, "score_units_metric", None),
         "health_checks_config": args.health_checks_config,
         # DS5c — DataScope + HealthGate subsystem. from_cli parses "4-9" /
         # "4,5,6,7,8,9" / mixed; schema + validate_runtime_config do the rest.
@@ -718,7 +731,7 @@ def build_agent_input(
         "cleanup_denoised": args.cleanup_denoised,
         "retain_model_outputs": getattr(args, "retain_model_outputs", False),
         "retain_training_checkpoints": getattr(args, "retain_training_checkpoints", False),
-        "is_trial": args.is_trial,
+        "is_trial": DEFAULT_IS_TRIAL if args.is_trial is None else args.is_trial,
         # V19 PR 1 — consumption-only coupling switch (default OFF).
         "enable_chain_incumbent_formal_gates": args.enable_chain_incumbent_formal_gates,
     }
@@ -813,6 +826,9 @@ def build_agent_input(
     input_dict["runtime_formal_safety_factor"] = args.runtime_formal_safety_factor
     input_dict["runtime_watchdog_floor_seconds"] = args.runtime_watchdog_floor_seconds
     input_dict["runtime_verification_max_wall_seconds"] = args.runtime_verification_max_wall_seconds
+    input_dict["runtime_verification_pathological_min_unit_ms"] = (
+        args.runtime_verification_pathological_min_unit_ms
+    )
 
     # Step 12 / PR-12d D8a. `run_composition` is the SAME object `main()`
     # binds around `.run()` — passed in rather than re-composed here, so

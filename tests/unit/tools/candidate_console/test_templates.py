@@ -75,16 +75,11 @@ def test_template_keeps_project_task_and_passes_preparation_roles(template_id):
 
 @pytest.mark.parametrize("template_id", TEMPLATE_IDS)
 def test_template_shapes_carry_no_scientific_values(template_id):
-    """Fails if a template ships advice, output-type restrictions or training values,
-    which would become an implicit scientific default for every task. The one declared
-    pair is the launch policy (blocking, scientific): without it every template run
-    fails at training admission (L-1); blocking lets the task's own blocking checks
-    invalidate (an observe-only run is refused when the task declares any), and
-    scientific lets Health-valid results be the authoritative score (diagnostic
-    excludes every result). The one
-    declared mode is trial/formal (``is_trial``, the command line's default): without it
-    a composed non-TIDMAD task is refused at Run review because single-file mode cannot
-    train it."""
+    """Keep scientific advice unset while declaring the user-task launch choices.
+
+    Full Formal scope and two tuning rounds are explicit, editable template values;
+    they must not become implicit native defaults or invent task semantics.
+    """
     shape = template_document(template_id)
     options = shape.preparation_options
     assert (options.proposal_advice, options.implementation_advice, options.validation_advice) == (
@@ -98,6 +93,8 @@ def test_template_shapes_carry_no_scientific_values(template_id):
             "healthgate_mode": "blocking",
             "result_authority": "scientific",
             "is_trial": True,
+            "formal_portion": 1.0,
+            "max_rounds": 2,
         }
     }
     assert shape.task_binding is None
@@ -141,6 +138,8 @@ def test_advice_targets_render_into_their_owning_fields():
             "healthgate_mode": "blocking",
             "result_authority": "scientific",
             "is_trial": True,
+            "formal_portion": 1.0,
+            "max_rounds": 2,
             "human_advice_tune": "advice for tuning",
         }
     }
@@ -250,3 +249,25 @@ def test_training_inspector_projects_required_policy_choices():
     assert all(item.required for item in policy.values())
     unset = shape.model_copy(update={"training_settings": {}})
     assert [item.value for item in training_inspector(unset).policy] == [None, None]
+
+
+def test_template_training_help_explains_role_scope_and_default_reset():
+    """The inspector must explain why Trial can be absent and 10% means training.
+
+    Tests the real schema-to-inspector projection, including authored versus
+    native defaults; a placeholder/no-description schema fails these assertions.
+    """
+    from tools.workflow_authoring.training import training_inspector
+
+    controls = {c.name: c for c in training_inspector(template_document("single-step")).controls}
+    assert controls["formal_portion"].effective == 1.0
+    assert controls["formal_portion"].help.schema_default == 0.1
+    assert controls["formal_portion"].help.description is not None
+    assert controls["max_rounds"].help.description is not None
+    assert controls["is_trial"].help.description is not None
+    assert "1,077" in controls["formal_portion"].help.description
+    assert "formal_eval_portion" in controls["formal_portion"].help.description
+    assert "resetting to Default" in controls["formal_portion"].help.description
+    assert "max_rounds=1" in controls["max_rounds"].help.description
+    assert "each iteration" in controls["max_rounds"].help.description
+    assert "only to rounds" in controls["is_trial"].help.description

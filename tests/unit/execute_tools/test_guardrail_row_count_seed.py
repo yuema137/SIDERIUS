@@ -108,12 +108,15 @@ def _masked_data(root: Path) -> str:
     ids=["quickstart", "synthetic_masked_regression"],
 )
 @pytest.mark.parametrize(("train_portion", "max_samples"), [(0.5, None), (1.0, 10), (None, None)])
+@pytest.mark.parametrize("epoch_seed", [0, 17, 2**63 - 1])
 def test_existing_examples_price_the_same_step_count(
-    tmp_path: Path, manifest, write_data, training_rows, train_portion, max_samples
+    tmp_path: Path, manifest, write_data, training_rows, train_portion, max_samples, epoch_seed
 ) -> None:
     """Defect: the explicit seed changes the count for a task whose count does
-    not depend on it. The expected count is derived from the known training
-    row counts, and also equals the count of a seedless materialization."""
+    not depend on it. The expected count comes from known training row counts.
+    Compare it with materializations at zero and distinct 63-bit-compatible
+    seeds: seeds change selected rows, not their count. A seedless reference
+    is invalid when subsampling because examples now refuse absent seeds."""
     data_dir = write_data(tmp_path / "data")
     with run_registration_scope():
         composition = compose_run_task_bindings(
@@ -130,15 +133,18 @@ def test_existing_examples_price_the_same_step_count(
                 epochs=2,
                 max_samples=max_samples,
             )
-            seedless = len(
+            materialized_rows = len(
                 path.training_dataset(
                     scope,
                     EpochSamplingParams(
-                        data_dir=data_dir, train_portion=train_portion, max_samples=max_samples
+                        data_dir=data_dir,
+                        epoch_seed=epoch_seed,
+                        train_portion=train_portion,
+                        max_samples=max_samples,
                     ),
                 )
             )
     rows = training_rows if train_portion is None else math.floor(training_rows * train_portion)
     rows = rows if max_samples is None else min(rows, max_samples)
-    assert workload.detail["samples_per_epoch"] == rows == seedless
+    assert workload.detail["samples_per_epoch"] == rows == materialized_rows
     assert workload.unit_count == optimizer_steps_for_rows(rows, 8, drop_last=True) * 2

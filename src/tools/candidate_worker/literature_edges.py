@@ -1,7 +1,7 @@
 """The declared literature -> proposal edges: one protocol owner for worker and verifier.
 
 ``proposal_input`` applies the catalogued protocol of one proposal to its typed
-literature value: the review result (``native-literature-candidate/v1``), the
+literature value: the review result (``NATIVE_LITERATURE_PROFILE``), the
 ``collect/v1`` collection (``literature-collection-to-proposal``) or one
 ``split-items/v1`` output (``literature-to-proposal``). Unit dispatch and
 ``verify_literature_evidence`` call it over the same typed values, so the

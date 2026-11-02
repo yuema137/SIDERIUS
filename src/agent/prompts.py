@@ -23,11 +23,17 @@ from agent.prompt_templates.tuner.rendering import (
     render_execution_provenance_block,
     render_metric_identity_line,
     render_planner_dynamics_block,
+    render_reflector_data_volume_portions,
     render_reflector_dynamics_block,
 )
 from agent.prompt_templates.tuner.runtime_evidence import render_training_epoch_evidence
 from agent.prompt_templates.tuner.timing_context import render_timing_context
-from agent.schemas.planner_timing import PlannerTimingContext
+from agent.schemas.planner_timing import (
+    PlannerTimingContext,
+    RoleTimingContext,
+    ValidationPortionClamp,
+)
+from core.record_encoding import decode_record
 
 # Step 07 PR 07b (P2) — collapse advice about a health check the run does not
 # actually run would tell the planner to look for a signal it can never
@@ -752,6 +758,11 @@ context for later resolution, role applicability and additional constraints.
 
 _CONDENSED_KEYS = frozenset(
     {
+        "inactive_parameter_rules",
+        # #1322 — the effective values that replaced authored ones. Without
+        # it a condensed entry kept the proposal prose and dropped `params`,
+        # so an overridden hypothesis read as what the attempt requested.
+        "resolution_events",
         "exp_id",
         "status",
         "model_type",
@@ -819,16 +830,84 @@ _PLANNER_HIDDEN_RECORD_KEYS = frozenset(
 )
 
 
-def _planner_visible(rec: dict) -> dict:
-    """``rec`` without the keys the planner must not see.
+#: #1322 — label beside a hypothesis whose record carries ``resolution_events``.
+#: The authored prose is history and stays verbatim; the label states that it
+#: no longer describes the resolved request. ``status`` (not this label) says
+#: whether that request ran or succeeded.
+SUPERSEDED_PROPOSAL_LABEL = (
+    "Superseded proposal: resolution_events lists the effective (executed) values "
+    "that replaced proposed ones; status says whether that request ran."
+)
 
-    Returns ``rec`` ITSELF when it carries none of them (a pre-Step-06 record
-    keeps its identity in the verbatim window, exactly as before) and a
-    shallow copy without them otherwise. Never mutates the input.
+
+#: #1322 — condensed entries keep each event's ``proposed``/``executed`` text
+#: up to this many characters. Values are pre-rendered reprs, and list-valued
+#: fields (``target_files``, file orders) grow with the task's file count, so an
+#: uncapped copy per condensed record would make the prompt grow as records x
+#: files. The verbatim window and persisted records keep the full text.
+CONDENSED_EVENT_VALUE_CHARS = 120
+_CONDENSED_EVENT_HEAD_CHARS = 60
+_CONDENSED_EVENT_TAIL_CHARS = 20
+
+
+def _bounded_event_value(text: str) -> str:
+    """Deterministic head/tail summary of one long rendered event value."""
+    if len(text) <= CONDENSED_EVENT_VALUE_CHARS:
+        return text
+    return (
+        f"{text[:_CONDENSED_EVENT_HEAD_CHARS]} … ({len(text)} chars; full value in the "
+        f"persisted record) … {text[-_CONDENSED_EVENT_TAIL_CHARS:]}"
+    )
+
+
+def _condensed_resolution_events(events: list) -> list:
+    """``events`` with long ``proposed``/``executed`` texts bounded; never mutates."""
+    bounded = []
+    for event in events:
+        if isinstance(event, dict):
+            event = {
+                k: _bounded_event_value(v)
+                if k in ("proposed", "executed") and isinstance(v, str)
+                else v
+                for k, v in event.items()
+            }
+        bounded.append(event)
+    return bounded
+
+
+def _label_superseded_proposal(rec: dict, memory: dict) -> dict:
+    """``memory`` with the supersession label after ``hypothesis`` when overruled.
+
+    Reads only the persisted ``resolution_events`` receipt (the tracker's
+    final events); it never re-derives resolution. Returns ``memory`` ITSELF
+    when there is nothing to label, so unaffected records keep their bytes.
     """
-    if not (_PLANNER_HIDDEN_RECORD_KEYS & rec.keys()):
+    if not rec.get("resolution_events") or "hypothesis" not in memory:
+        return memory
+    labelled: dict = {}
+    for key, value in memory.items():
+        labelled[key] = value
+        if key == "hypothesis":
+            labelled["hypothesis_provenance"] = SUPERSEDED_PROPOSAL_LABEL
+    return labelled
+
+
+def _planner_visible(rec: dict) -> dict:
+    """``rec`` as the planner's verbatim window shows it.
+
+    Drops the keys the planner must not see and labels a superseded
+    proposal. Returns ``rec`` ITSELF when neither applies (a pre-Step-06
+    record keeps its identity in the verbatim window, exactly as before) and
+    a shallow copy otherwise. Never mutates the input.
+    """
+    memory = rec.get("memory")
+    labelled = _label_superseded_proposal(rec, memory) if isinstance(memory, dict) else memory
+    if not (_PLANNER_HIDDEN_RECORD_KEYS & rec.keys()) and labelled is memory:
         return rec
-    return {k: v for k, v in rec.items() if k not in _PLANNER_HIDDEN_RECORD_KEYS}
+    visible = {k: v for k, v in rec.items() if k not in _PLANNER_HIDDEN_RECORD_KEYS}
+    if labelled is not memory:
+        visible["memory"] = labelled
+    return visible
 
 
 #: How many most-recent records the planner sees VERBATIM. One symbol, because
@@ -852,7 +931,9 @@ def _truncate_memory_history(
         New list (non-destructive). Recent records are unchanged apart from
         the Step-06 record-only payload keys, which are never rendered
         (``_PLANNER_HIDDEN_RECORD_KEYS``); older records are condensed to
-        identity + score + hypothesis/conclusion.
+        identity + score + resolution receipts + hypothesis/conclusion. In
+        both, a hypothesis whose record carries ``resolution_events`` is
+        labelled a superseded proposal (#1322).
     """
     if len(records) <= full_window:
         return [_planner_visible(rec) for rec in records]
@@ -872,9 +953,13 @@ def _truncate_memory_history(
         # a record would be serialised one way inside the window and another
         # way outside it.
         entry = {k: rec[k] for k in rec if k in _CONDENSED_KEYS}
+        if entry.get("resolution_events"):
+            entry["resolution_events"] = _condensed_resolution_events(entry["resolution_events"])
         memory = rec.get("memory", {})
         if memory:
-            entry["memory"] = {k: memory[k] for k in memory if k in _CONDENSED_MEMORY_KEYS}
+            entry["memory"] = _label_superseded_proposal(
+                rec, {k: memory[k] for k in memory if k in _CONDENSED_MEMORY_KEYS}
+            )
         condensed.append(entry)
 
     return condensed + [_planner_visible(rec) for rec in records[cutoff:]]
@@ -968,6 +1053,9 @@ def get_planner_user_prompt(
             means "no prior data" — typically round 1 before any pre-flight
             has run. See §10.3 / §10.11.
     """
+    # History may arrive from an external raw summary reader. Decode before
+    # either JSON rendering or typed diagnosis; storage tags are never prompt data.
+    memory_history = decode_record(memory_history)
     windowed = _truncate_memory_history(memory_history) if memory_history else []
     history_context = (
         json.dumps(windowed, indent=2) if windowed else "No previous experiments recorded."
@@ -1260,7 +1348,8 @@ def get_planner_user_prompt(
      in the supplied run configuration; reason within the disclosed controls.
 2. **Follow Expert Advice**: Prioritize the direction suggested by the human expert.
 3. **Formulate Hypothesis**: Predict the outcome of this new trial.{model_constraint}
-4. **Choose Trial or Formal Mode**: Decide whether to run a fast trial or a full formal evaluation.
+4. **Choose Trial or Formal Mode**: Decide whether to run a fast trial or a formal round on the
+   run's configured Formal training and evaluation scopes (not necessarily the full data).
 5. **Propose Parameters**: Provide the JSON configuration for the next run.
 
 ### OUTPUT FORMAT (Strict JSON):
@@ -1290,6 +1379,8 @@ def get_reflector_user_prompt(
     training_diagnosis=None,
     metric_spec=None,
     execution_provenance=None,
+    round_workload: RoleTimingContext | None = None,
+    validation_clamps: tuple[ValidationPortionClamp, ...] = (),
 ):
     """
     Constructs the prompt for the Reflector to summarize findings into Memory.
@@ -1304,6 +1395,15 @@ def get_reflector_user_prompt(
         best_same_loss_final_loss - float or None: best (lowest) final_loss among experiments
                                    with the same loss_type as this one (None if first of its type)
         current_loss_type     - str: loss_type used in this experiment
+
+    round_workload (optional RoleTimingContext): the round's mode and workload
+    sources; labels the executed trial_portion / eval_portion in the Data Volume
+    Context with the knob that set them (issue #1472).
+
+    validation_clamps (tuple of ValidationPortionClamp): the executed portions
+    validation_max_portion reduced below their source value; disclosed in the
+    Data Volume Context so a capped portion is not attributed to its source
+    knob (issue #1496). Empty renders no clamp text.
     """
     # Step 07 PR 07b (P3) — the CURRENT attempt's dynamics, rendered from the
     # TrainingDiagnosis 07a derived. The reflector receives the diagnosis and
@@ -1349,6 +1449,12 @@ def get_reflector_user_prompt(
             f"  is_more_efficient     : {c.get('is_more_efficient', 'N/A')}  "
             f"(True = score within {EFFICIENCY_BAND_PCT}% of best AND fewer params or epochs)"
         )
+        # Issue #1472 — the executed portions are labelled and advised by the
+        # round's workload sources, so a Formal round never reads its
+        # operator-set formal_portion as the planner's trial_portion.
+        data_volume_portions = render_reflector_data_volume_portions(
+            c, round_workload, validation_clamps
+        )
         context_block = f"""
 ### Comparison Context (use this to judge the result):
   baseline_score        : {c.get("baseline_score", "N/A")}
@@ -1370,11 +1476,10 @@ def get_reflector_user_prompt(
   training_psd_segments : {c.get("training_psd_segments", "N/A")}  (PSD segments used for training)
   eval_psd_segments     : {c.get("eval_psd_segments", "N/A")}  (PSD segments used for scoring)
   baseline_psd_segments : {c.get("baseline_psd_segments", "N/A")}  (baseline trained on this many)
-  trial_portion         : {c.get("trial_portion", "N/A")}
-  eval_portion          : {c.get("eval_portion", "N/A")}
-  ⚠ If training_psd_segments << baseline_psd_segments, poor scores may be from
-     insufficient data, NOT bad hyperparameters. Recommend increasing trial_portion.
+{data_volume_portions}
 """
+
+    actual_results = decode_record(actual_results)
 
     return f"""
 ### Experiment Outcome for {exp_id}:

@@ -58,3 +58,9 @@ merge with the existing seeded synthetic scores, and saved records retain
 Before scope artifact writes, pseudo execution requires `exp_id` to pass the
 existing `validate_generated_artifact_name` component rule. Calls with no
 training scope retain the legacy pseudo API without an `exp_id` path check.
+
+Formula selection is computed in the native scoring child after source metrics,
+never by the skill's caller or an LLM. `denoising_score` and `metric_result` carry the
+effective selection scalar/identity; `evaluation_result` carries typed source and
+component evidence. A required-component refusal exits through the existing scoring
+failure path. See the [evaluation contract](../../../execute_tools/evaluation-contract.md#deterministic-selection-runtime).

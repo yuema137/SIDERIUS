@@ -17,7 +17,7 @@ const window = {
   confirm: () => true, dispatchEvent() {}
 };
 const context = {window, document: {getElementById: element}, localStorage: {removeItem() {}}, CustomEvent: class {}};
-for (const name of ['operation-outcome.js', 'loop-control.js']) {
+for (const name of ['editor-capability-presentation.js', 'operation-outcome.js', 'loop-control.js']) {
   runInNewContext(readFileSync(new URL(`../../src/tools/candidate_console/static/${name}`, import.meta.url), 'utf8'), context);
 }
 const paused = {

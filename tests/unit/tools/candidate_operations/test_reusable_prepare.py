@@ -237,3 +237,53 @@ def test_missing_top_after_exit_is_unknown_and_blocks_admission(intent, monkeypa
     )
     with pytest.raises(OperationFailure, match="unresolved"):
         submit_operation(config, next_request, launch_environment={})
+
+
+def test_dead_reusable_prepare_releases_for_new_intent(intent, monkeypatch):
+    """The reusable preparation kind must share ordinary dead-writer recovery."""
+    from tools.candidate_operations.files import publish
+    from tools.candidate_operations.process import current_identity
+    from tools.candidate_operations.store import operation_path
+
+    config, submission, expected = intent
+    monkeypatch.setattr("tools.candidate_operations.submit.spawn", lambda *a: None)
+    submit_operation(config, submission, expected_reusable_inputs=expected, launch_environment={})
+    record = load_record(config, submission.request_id)
+    identity = current_identity(record)
+    publish(operation_path(config, submission.request_id) / "process.json", identity)
+    monkeypatch.setattr(
+        "tools.candidate_operations.process._stat", lambda pid: ("Z", identity.start_ticks)
+    )
+    monkeypatch.setattr("tools.candidate_operations.host_liveness.session_members", lambda pid: 0)
+    assert read_operation(config, submission.request_id).reason == "operation_process_exited"
+    next_submission = submission.model_copy(update={"request_id": uuid4()})
+    next_expected = expected.model_copy(
+        update={"request_digest": operation_request_digest(next_submission)}
+    )
+    handle = submit_operation(
+        config, next_submission, expected_reusable_inputs=next_expected, launch_environment={}
+    )
+    assert handle.operation_id == next_submission.request_id
+
+
+@pytest.mark.parametrize("error_type", [OSError, ValueError])
+def test_preflight_refusal_explains_checks_without_echoing_inputs(intent, monkeypatch, error_type):
+    """#1244: preflight failure must give useful checks without claiming inputs changed."""
+    from unittest.mock import Mock
+
+    config, submission, _ = intent
+    monkeypatch.setattr(
+        "tools.candidate_operations.submit.preflight_reusable_candidate",
+        Mock(side_effect=error_type("secret-sentinel")),
+    )
+    spawn = Mock()
+    monkeypatch.setattr("tools.candidate_operations.submit.spawn", spawn)
+    with pytest.raises(OperationFailure) as refused:
+        submit_operation(config, submission, launch_environment={})
+    assert refused.value.detail.code == "reusable_preflight"
+    assert refused.value.detail.message == (
+        "reusable preparation preflight failed; check the task manifest, data root, "
+        "LLM configuration and selected paths, then review again"
+    )
+    spawn.assert_not_called()
+    assert not (Path(config.state_root) / "operations" / str(submission.request_id)).exists()

@@ -123,6 +123,22 @@ requires separate integration and experiment-owned historical configuration.
 
 ## Authored loop
 
+`models.py` owns the native profile types and runtime values:
+
+| Transparent Literal alias | Final runtime constant |
+| --- | --- |
+| `NativeInterpretationProfile` | `NATIVE_INTERPRETATION_PROFILE` |
+| `NativeLiteratureProfile` | `NATIVE_LITERATURE_PROFILE` |
+| `NativeProposalFamiliesProfile` | `NATIVE_PROPOSAL_FAMILIES_PROFILE` |
+| `NativeProposalFanoutProfile` | `NATIVE_PROPOSAL_FANOUT_PROFILE` |
+
+Python consumers reuse these names, including Literal unions. Plain assignment
+aliases preserve inline JSON Schema enums, member order and serialized bytes in
+validation and serialization modes. The console serves the profiles its JavaScript
+consumes through `/execution-profiles.js` before those browser consumers load.
+The ownership and served-byte guards live in
+`tests/unit/tools/candidate_console/test_profile_assets.py`.
+
 `WorkflowDefinition.loop` and `ReusableWorkflowDefinition.loop` optionally carry
 `AuthoredLoop(final_iteration, feedback, stop_conditions=())`. `final_iteration`
 is a positive body count; it is a ceiling, not a budget or a promise that every
@@ -170,6 +186,16 @@ conditions are unchanged. Execution semantics, `stop`-before-`request_input`
 precedence, the input anchor and readback belong to the candidate-worker contract
 ("Deterministic stop conditions", "Judge stop condition" and "Condition input
 pause").
+
+### Formula threshold admission
+
+When evaluation selection is a formula, `metric_threshold`, `MetricAtLeast` and
+metric `threshold/v1` declarations name the generated effective metric id.
+Worker admission checks every declaration before dispatch, including unvisited
+branches. A source metric id is not an implicit unit conversion; raw component
+targets are unsupported. See the
+[evaluation contract](../../execute_tools/evaluation-contract.md#deterministic-selection-runtime)
+for the owning rule and effective id inspection.
 
 ## Route declarations
 
@@ -424,7 +450,11 @@ diagnostics. These are converter limits, not document-schema limits. Parsing
 runs in process and does not provide hostile-input memory/time isolation.
 
 `WorkflowSourceError` carries a nonempty tuple of frozen `SourceDiagnostic`
-models. Codes are `syntax`, `unsupported`, `limit` or `validation`. Optional
+models. Codes are `syntax`, `unsupported`, `limit`, `validation` or
+`trial_override_schedule`. The last code preserves the native typed refusal for
+Trial overrides discarded by a forced-Formal single tuning round; the
+`validation_code` allowlist maps all other native error types to `validation`.
+The console uses the same allowlist for direct request validation. Optional
 `line`/`end_line` are one-based; `column`/`end_column` are zero-based UTF-8 byte
 offsets, with exclusive end positions. Missing whole-input spans are `None`.
 Validation points to the enclosing failing constructor and, where available,
@@ -626,3 +656,30 @@ declaration identity. Settings participate in external-binding identity and cann
 be changed by a task-reference-only update. See the
 [preparation contract](../../tools/candidate_prepare/candidate-prepare-contract.md#reusable-native-literature-candidate)
 for the exact controls, child-composition trust boundary and resource restrictions.
+
+## Targeted document updates
+
+`source_updates.update_workflow_source(source, document, browser_numbers=False)`
+patches an existing restricted declaration and re-parses the result. It shares
+UTF-8 spans/import insertion with `source_edits` and literal rendering with
+`source.py`. Unchanged literal spans retain exact bytes; collection members are
+matched by declaration identity where available, otherwise by position. Changed
+containers can change surrounding formatting, but retained values are recursive.
+`browser_numbers=True` preserves source numbers whose binary64 projections are
+equal, avoiding JSON float/int, signed-zero and large-integer losses. Changed
+integer inputs preserve an existing float type (`2.0` to `3` saves `3.0`) via
+`_browser_scalar`, shared with pre-admission restoration. Exact source
+proposals are required for distinctions the browser cannot represent. Canonical
+rendering remains the owner for new documents and declaration identity.
+`restore_browser_values(source, value)` performs the same numeric comparison over
+JSON-shaped data before typed model admission; it restores overflowed integers
+from null as well as rounded integers and floats. Authoring models own invoking
+it with bounded source and revalidating its result through the native schema.
+Already-canonical inputs remain canonical after patching, using retained source
+values and the existing renderer; new generation and identity rules are unchanged.
+
+Draft inspection validation diagnostics retain native validator messages and
+located `DraftProblem` guidance, without Pydantic input snapshots (`input_value`
+or `input_type`). `draft.inspect_draft` owns this projection, shared by the editor
+draft, review and combined-node draft routes. Validation and declaration identity
+are unchanged.

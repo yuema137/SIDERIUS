@@ -87,7 +87,7 @@ class ReservationEvidence(PreviewModel):
 
     @property
     def unobservable(self) -> bool:
-        return any(part.unobservable for part in self.parts())
+        return self.submitter == "unknown" or any(part.unobservable for part in self.parts())
 
 
 def session_evidence(identity: ProcessIdentity, *, may_be_hidden: bool = False) -> SessionEvidence:
@@ -95,6 +95,12 @@ def session_evidence(identity: ProcessIdentity, *, may_be_hidden: bool = False) 
     observation = observe(identity)
     if observation.reason == "different_boot":
         return SessionEvidence(leader="exited", members=0)
+    if observation.reason in {
+        "pid_namespace_unobservable",
+        "pid_namespace_mismatch",
+    }:
+        # Session IDs are namespace-local too; scanning here could permit manual release.
+        return SessionEvidence(leader="unknown", members=None)
     leader = observation.status
     if may_be_hidden and observation.reason == "pid_absent":
         leader = "unknown"

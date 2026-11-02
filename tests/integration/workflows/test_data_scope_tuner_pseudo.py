@@ -39,10 +39,12 @@ from execute_tools.health_checks.schemas import (
     PersistedHealthGateResult,
 )
 from execute_tools.task_data_path import (
+    EpochSamplingParams,
     EvaluationReadRequest,
     ScopeBuildRequest,
     TaskHealthCoverageError,
 )
+from execute_tools.workload_resolvers import resolve_task_training_rows
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from nodes.ml_hyperparameter_tune_agent.health_coverage import validate_attempt_health_coverage
 from tests.fixtures.tuner_composed_task import TunerComposedTask
@@ -51,6 +53,25 @@ from tests.helpers.recording_sandbox import RecordingSandbox
 from tests.helpers.run_seed import TEST_RUN_SEED
 from tests.helpers.tuner_composed_effects import composed_tuner_effects
 from tests.helpers.tuner_composed_fixture import composed_run
+
+
+@pytest.mark.parametrize(
+    ("portion", "ceiling", "expected"),
+    [(None, None, 24), (0.5, None, 12), (0.01, None, 1), (0.5, 5, 5)],
+)
+def test_fixture_training_rows_support_planning_only(portion, ceiling, expected):
+    """Real row resolution counts sampled scope rows; sample reads still fail."""
+    task = TunerComposedTask()
+    scope = task.build_training_scope(
+        ScopeBuildRequest(round_kind="trial", portion=1, selection_strategy="anchors")
+    )
+    scope = task.deserialize_scope(task.serialize_scope(scope))
+    sampling = EpochSamplingParams(
+        data_dir="unused", epoch_seed=7, train_portion=portion, max_samples=ceiling
+    )
+    assert resolve_task_training_rows(scope, sampling, data_path=task) == expected
+    with pytest.raises(AssertionError, match="must not read training samples"):
+        task.training_dataset(scope, sampling)[0]
 
 
 @pytest.mark.parametrize("round_kind", ["trial", "formal"])

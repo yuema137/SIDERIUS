@@ -51,6 +51,7 @@ from typing import Annotated, Literal
 from pydantic import Field, TypeAdapter, ValidationError
 
 from agent.schemas.hyperparam_tuning import (
+    DEFAULT_IS_TRIAL,
     HealthGateMode,
     HyperparamTuningInput,
     ResultAuthority,
@@ -82,9 +83,8 @@ FiniteTargetScore = Annotated[float, Field(allow_inf_nan=False)]
 class WorkflowLaunchConfig:
     """Immutable launch/execution configuration for one exploration run.
 
-    Field order and defaults mirror ``run_workflow``'s original signature
-    exactly, grouped by the sink each value is forwarded to, so a reader can see
-    where every value goes.
+    Fields are grouped by their downstream sink. Run-level trial mode derives
+    from the tuner schema owner, including when constructed directly from Python.
     """
 
     source_paths: list[str] | None = None
@@ -93,9 +93,22 @@ class WorkflowLaunchConfig:
     source_run_name: str | None = None
     max_iterations: int = 1
     start_iteration: int = 1
-    max_rounds: int = 10
+    max_rounds: Annotated[
+        int,
+        Field(
+            ge=1,
+            description=(
+                "Tuning rounds per iteration. With force_formal_round enabled (the default), "
+                "the last tuning round of each iteration is forced Formal: max_rounds=1 "
+                "never runs Trial. Use at least 2 to allow Trial before Formal; the planner "
+                "may still choose Formal earlier. Final iteration controls the outer loop."
+            ),
+        ),
+    ] = 10
     max_proposal_attempts: int = 3
     target_score: FiniteTargetScore | None = None
+    target_score_metric: str | None = None
+    score_units_metric: str | None = None
     file_index: int = 6
     healthgate_mode: HealthGateMode | None = None
     result_authority: ResultAuthority | None = None
@@ -110,7 +123,17 @@ class WorkflowLaunchConfig:
     human_advice_validate: str | None = None
     human_advice_tune: str | None = None
     human_advice_mindset: str | None = None
-    is_trial: bool = False
+    is_trial: Annotated[
+        bool,
+        Field(
+            description=(
+                "Allow Trial and Formal tuning rounds. This does not require Trial: with "
+                "force_formal_round enabled, the last tuning round is Formal. Trial budgets "
+                "and epoch ceilings apply only to rounds that actually run as Trial. "
+                "Off selects legacy single-file mode, which requires a compatible dataset topology."
+            )
+        ),
+    ] = DEFAULT_IS_TRIAL
     # Lane F2 (campaign-portion authority, 2026-08-26) — TRI-STATE: a TYPED
     # value is EXPERIMENT_FIXED (merged into the plan_overrides lock by
     # `frozen_portion_overrides`, so trial planning cannot silently override
@@ -175,7 +198,21 @@ class WorkflowLaunchConfig:
     vram_preflight_host_memory_limit_gb: float | None = None
     formal_strategy: StrategyMode = "snapshot"
     formal_training_scope_source: Literal["operator", "agent"] = "operator"
-    formal_portion: float = 0.1
+    formal_portion: Annotated[
+        float,
+        Field(
+            description=(
+                "Fraction of the declared training scope used in Formal mode when "
+                "formal_training_scope_source is operator (the default). 0.1 means 10%, "
+                "not full-data training; 1.0 selects the whole training scope. For 1,077 "
+                "CSV training rows, 0.1 selects about 108 rows: about 3 full batches per "
+                "epoch at batch size 32 (a retained partial batch adds a step). "
+                "formal_train_portion further limits each epoch; formal_eval_portion "
+                "separately controls evaluation. Templates explicitly choose 1.0; "
+                "resetting to Default restores the framework's 0.1."
+            )
+        ),
+    ] = 0.1
     formal_train_portion: float = 1.0
     formal_eval_portion: float = 1.0
     force_formal_round: bool = True
@@ -195,6 +232,9 @@ class WorkflowLaunchConfig:
     runtime_watchdog_safety_factor: float | None = None
     runtime_watchdog_floor_seconds: float = 60.0
     runtime_verification_max_wall_seconds: float | None = None
+    runtime_verification_pathological_min_unit_ms: float | None = field(
+        default=None, metadata={"omit_if_none": True}
+    )
     exploration_mode: ExplorationMode = "auto"
     minimum_boldness: float = 0.05
     n_candidates: int | None = None
@@ -382,6 +422,7 @@ def _launch_owners() -> dict[str, _LaunchOwner]:
         "ResearchPolicy.minimum_boldness",
         ResearchPolicy.model_fields["minimum_boldness"].rebuild_annotation(),
     )
+    owners["target_score_metric"] = _owner("WorkflowLaunchConfig.target_score_metric", str | None)
     owners["target_score"] = _owner("WorkflowLaunchConfig.target_score", FiniteTargetScore | None)
     return owners
 

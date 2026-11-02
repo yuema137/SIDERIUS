@@ -73,7 +73,10 @@ def render_shards(package: Path) -> dict[str, bytes]:
 def _read_bundle(package: Path) -> VerifiedBundle:
     from tools.candidate_console.example_bundle import BundleRefused, read_bundle
 
-    package = package.absolute()
+    try:
+        package = package.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise FetchRefused("--package must resolve to an existing task/ folder") from None
     if package.name != "task":
         raise FetchRefused("--package must name the task/ folder in an unpacked bundle")
     try:
@@ -133,8 +136,7 @@ def _existing(directory: int, name: str) -> bytes | None:
 
 def write_shards(workspace: Path, task_id: str, shards: dict[str, bytes]) -> Path:
     """Create ``data/<task_id>/`` privately and write each shard write-once."""
-    from tools.candidate_console.files import open_directory
-    from tools.candidate_console.settings_export import _write_once
+    from tools.candidate_console.files import open_directory, write_once
     from tools.candidate_console.workspace import WorkspaceRefused, ensure_owned_directory
 
     if not workspace.is_absolute() or os.path.normpath(workspace) != str(workspace):
@@ -156,7 +158,7 @@ def write_shards(workspace: Path, task_id: str, shards: dict[str, bytes]) -> Pat
         for name, payload in sorted(shards.items()):
             current = _existing(opened[2], name)
             if current is None:
-                _write_once(opened[2], name, payload)
+                write_once(opened[2], name, payload)
                 print(f"wrote {target / name}")
             elif current == payload:
                 print(f"kept {target / name} (already identical)")
@@ -180,6 +182,7 @@ def main(argv: list[str] | None = None) -> int:
     args = cli.parse_args(argv)
     try:
         bundle = _read_bundle(Path(args.package))
+        print(f"Using task package: {bundle.root / 'task'}", flush=True)
         task_id = args.task_id or bundle.task.task_id
         target = write_shards(Path(args.workspace), task_id, _render_verified_shards(bundle))
     except FetchRefused as error:

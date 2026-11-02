@@ -127,7 +127,7 @@
     viewport.dataset.outsideCards = String(outside.length);
     const zoom = host.querySelector('.circuit-zoom'); if (zoom) zoom.textContent = `${Math.round(view.scale * 100)} %`;
     note.textContent = outside.length
-      ? `${outside.length} of ${cards.length} modules are partly outside the view. Scroll the canvas or use Fit to view.`
+      ? `${outside.length} of ${cards.length} modules are partly outside the view. Scroll the canvas to reach them. Fit keeps text at 75% or larger; if the graph is too large, it shows the selected or first module.`
       : `All ${cards.length} modules are in view.`;
     // Edge shadows mark each side that still has content to scroll to.
     const shadows = [];
@@ -142,6 +142,15 @@
     const world = host.querySelector('.circuit-world');
     world.style.transform = scale === 1 ? '' : `scale(${scale})`;
     sizeWorld(); updateVisibility();
+  }
+  // Centre a normal card; for a card taller/wider than the viewport, keep its heading
+  // and leading edge reachable rather than centring on an invisible middle section.
+  function frameModule(viewport) {
+    const heading = host.querySelector('.editor-node[aria-pressed="true"]') || host.querySelector('.editor-node');
+    const card = heading?.closest('.circuit-card');
+    if (!card) return;
+    viewport.scrollLeft = card.offsetLeft * view.scale - Math.max(0, (viewport.clientWidth - card.offsetWidth * view.scale) / 2);
+    viewport.scrollTop = card.offsetTop * view.scale - Math.max(0, (viewport.clientHeight - card.offsetHeight * view.scale) / 2);
   }
   // Fit the whole graph into the canvas: the union of every card's box plus FIT_PAD on each side,
   // scrolled to that box's origin (view only; never below the legibility floor FIT_MIN).
@@ -161,7 +170,9 @@
     const available = {width: viewport.clientWidth - 2, height: (Number.isFinite(max) ? max : viewport.clientHeight) - 2};
     const scale = geometry.fitScale(content, available, FIT_MIN);
     applyScale(scale);
-    viewport.scrollLeft = origin.x * scale; viewport.scrollTop = origin.y * scale; updateVisibility();
+    viewport.scrollLeft = origin.x * scale; viewport.scrollTop = origin.y * scale;
+    if (content.width * scale > viewport.clientWidth || content.height * scale > viewport.clientHeight) frameModule(viewport);
+    updateVisibility();
   }
   function draw() {
     if (!host) return;
@@ -316,6 +327,16 @@
     tidy.disabled = !value.document || !value.enabled || value.allowMove === false;
     const note = element('p', '', parent, 'circuit-view-note'); note.setAttribute('aria-live', 'polite');
   }
+  // Fallback placement follows actual card dimensions, including hidden-to-visible
+  // transitions and expanded details. Stored coordinates remain the author's choice.
+  function placeCards(cards) {
+    const saved = new Map(projection.document.positions.map(p => [p.node, p]));
+    const size = {width: Math.max(0, ...cards.map(card => card.offsetWidth)), height: Math.max(0, ...cards.map(card => card.offsetHeight))};
+    const placed = geometry.place(projection.document.definition.nodes, saved, size, CARD_GAP);
+    for (const card of cards) card._position = placed.get(card.dataset.node);
+    const ox = 60 - Math.min(0, ...cards.map(card => card._position.x)), oy = 60 - Math.min(0, ...cards.map(card => card._position.y));
+    for (const card of cards) { card.style.left = card._position.x + ox + 'px'; card.style.top = card._position.y + oy + 'px'; }
+  }
   function render(container, value, callbacks) {
     const focus = refocus || (container.contains(document.activeElement) ? document.activeElement.id : null); refocus = null;
     const key = `${value.viewKey ?? ''}|${(value.document?.definition.nodes || []).map(node => node.id).join(',')}`;
@@ -323,6 +344,7 @@
     if (view.key !== key) view = {key, scale: 1, fitPending: true, scroll: null, expanded: new Set(), adapters: new Set()};
     else if (previous && !view.fitPending) view.scroll = {left: previous.scrollLeft, top: previous.scrollTop};
     window.editorCircuitWalk?.stop();
+    cardObserver.disconnect();
     host = container; projection = value; actions = callbacks; cancel(false); selectedWire = null; host.replaceChildren();
     const message = element('p', 'Select a module to see its inputs. Drag from an output to a highlighted input to connect them.', host, 'circuit-message');
     message.setAttribute('role', 'status');
@@ -337,7 +359,6 @@
     viewObserver.disconnect(); viewObserver.observe(viewport);
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('role', 'group'); svg.setAttribute('aria-label', 'Workflow connections'); world.append(svg);
     if (!value.document) return;
-    const saved = new Map(value.document.positions.map(p => [p.node, p]));
     const cards = [];
     // A move persists every displayed position, so later sources never mix stored and fallback layouts.
     const layout = (moved, x, y) => cards.map(card => card.dataset.node === moved ? {node: moved, x, y} : {node: card.dataset.node, ...card._position});
@@ -433,12 +454,8 @@
       contracts.adapter(card, node.id, value.inventory, view.adapters, () => { if (projection === value) draw(); });
       cards.push(card);
     }
-    // Card size comes from the rendered cards (editor.css owns it), never a copied constant.
-    const size = {width: Math.max(0, ...cards.map(card => card.offsetWidth)), height: Math.max(0, ...cards.map(card => card.offsetHeight))};
-    const placed = geometry.place(value.document.definition.nodes, saved, size, CARD_GAP);
-    for (const card of cards) card._position = placed.get(card.dataset.node);
-    const ox = 60 - Math.min(0, ...cards.map(card => card._position.x)), oy = 60 - Math.min(0, ...cards.map(card => card._position.y));
-    for (const card of cards) { card.style.left = card._position.x + ox + 'px'; card.style.top = card._position.y + oy + 'px'; }
+    placeCards(cards);
+    for (const card of cards) cardObserver.observe(card, {box: 'border-box'});
     world.style.transform = view.scale === 1 ? '' : `scale(${view.scale})`;
     sizeWorld();
     setEnabled(value.enabled, value.selectable ?? value.enabled); draw();
@@ -504,12 +521,20 @@
     const path = document.createElementNS(svg.namespaceURI, 'path'); path.classList.add('circuit-pending');
     path.setAttribute('d', geometry.path([start, {x: (start.x + end.x) / 2, y: start.y}, {x: (start.x + end.x) / 2, y: end.y}, end])); svg.append(path);
   });
+  const cardObserver = new ResizeObserver(() => {
+    if (!projection?.document || drag) return;
+    const cards = [...host.querySelectorAll('.circuit-card')];
+    if (!cards.some(card => card.offsetWidth && card.offsetHeight)) return;
+    placeCards(cards); draw();
+  });
   new ResizeObserver(() => { if (projection?.document) draw(); }).observe(document.body);
   // Settings flags change card content (mapping details, chips): re-place the cards.
   window.addEventListener('ui-settings-change', () => { if (host && projection) render(host, projection, actions); });
   // A canvas rendered while hidden (zero width) fits once it is first laid out.
   const viewObserver = new ResizeObserver(() => {
-    if (!projection?.document) return;
+    if (!projection?.document || !host.querySelector('.circuit-viewport').clientWidth) return;
+    // Fit must see the visible dimensions before it chooses a scale or scroll target.
+    if (!drag) placeCards([...host.querySelectorAll('.circuit-card')]);
     if (view.fitPending) fit(); else updateVisibility();
   });
   // "Skip to canvas" (index.html): the selected module, else the first, else the canvas itself.
