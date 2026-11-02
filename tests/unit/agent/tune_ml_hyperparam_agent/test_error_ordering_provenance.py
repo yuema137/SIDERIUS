@@ -188,7 +188,12 @@ def test_phase_failures_preserve_selection_and_existing_payload(
     assert phase in dispatched
     assert saved[0]["status"] == f"error_{phase.removesuffix('_skill')}{suffix}"
     assert_selected(saved[0])
-    assert {key: saved[0][key] for key in before[0]} == before[0]
+    # #1322: the emission seam promotes the record-only resolution receipt out
+    # of params; everything else the builder wrote is persisted unchanged.
+    builder = deepcopy(before[0])
+    receipt = builder["params"].pop("resolution_events")
+    assert saved[0]["resolution_events"] == receipt
+    assert {key: saved[0][key] for key in builder} == builder
     assert not (_FIELDS & before[0].keys()), "builder must not duplicate mapping"
 
 
