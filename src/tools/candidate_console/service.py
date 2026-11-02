@@ -584,7 +584,19 @@ class CandidateConsole:
             root = loop_root_operation(store, selection.predecessor_operation_id)
             if root is None:
                 raise OperationFailure("kind", "operation is not an authored loop")
-            environment = credentials(self.config.credential_file, root.request.environment_names)
+            try:
+                environment = credentials(
+                    self.config.credential_file, root.request.environment_names
+                )
+            except OperationFailure as error:
+                # Another submitter may have admitted this UUID during the credential read.
+                # Replay through the owner (which still checks the exact request binding);
+                # an unreadable record must retain its fail-closed error, not unlock advice.
+                if (
+                    error.detail.code != "credentials"
+                    or lookup_operation_request(store, selection.request_id) is None
+                ):
+                    raise
         return self.submit(submission, launch_environment=environment)
 
     def graph_results(self, operation_id: UUID) -> GraphResultsView:

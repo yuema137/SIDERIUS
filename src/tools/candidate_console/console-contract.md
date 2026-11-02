@@ -1199,7 +1199,10 @@ the owner's `conflict`. If the request UUID is
 already admitted it replays with an empty environment before any root or credential
 read, so a retry after an unconfirmed outcome returns the same operation. Otherwise
 the root's `environment_names` are read from the configured `credential_file` with
-the same `credentials` helper as Launch. Under a host ledger a loop whose root
+the same `credentials` helper as Launch. If that helper refuses, the console checks
+the UUID again: an admission during the credential read replays through the owner;
+an absent record retains the credentials refusal, and an unreadable record fails
+closed with its own error. Under a host ledger a loop whose root
 declared no `resources` is reviewed and resumed with the segment's reservation
 (see "Loop resume reservation" under Host reservation ledger). Refusals on both
 routes: `loop_resume`
@@ -1264,11 +1267,19 @@ first use only when no store-scoped record exists. A retry reuses the record, an
 record is released once status shows the successor. After a review,
 `#loop-resume-advice` (a textarea, `maxlength=4000`) is
 shown. It is prefilled with the retained record's advice when one exists, otherwise
-with this paused segment's own `operator_advice`. The first Resume attempt trims the
-text and fixes it: the retained record stores the request UUID together with
+with this paused segment's own `operator_advice`. The first Resume attempt trims
+using Python `str.strip` whitespace (including U+001C–001F and U+0085, excluding
+BOM), matching `OperatorAdvice`, and fixes it: the retained record stores the request UUID together with
 `operator_advice` (omitted when empty), and the textarea becomes read-only, so a
-retry is byte-identical. Only a 422 (refused before admission) clears the record and
-unlocks the textarea. Empty advice sends no `operator_advice` key. A 409 clears the review.
+retry is byte-identical. Pre-admission refusals listed below clear the record and
+unlock the textarea. Other 409 errors clear the review but keep the retained request;
+transport uncertainty keeps both the review and retained request. Empty advice sends
+no `operator_advice` key. If a record from another tab or legacy migration contains
+advice different from the typed canonical advice, submission stops before POST,
+displays its canonical advice read-only, and explains that a second Resume click
+retries the earlier request. Legacy records keep their original body bytes and UUID,
+even when canonical display removes edge whitespace. Review also identifies retained
+advice as an earlier request's binding.
 Host resources for the resumed segment (#1385): the `#loop-resume-resources`
 fieldset (`loop-resume-resources-declare`, `-gpu`, `-vram`, `-memory`, `-cpus`,
 `-timed`, read and filled by `run-scheduling.js` `readResources(prefix)` /
@@ -1289,7 +1300,8 @@ A Resume refused with 422, or 409 with a code returned before any operation is
 claimed (`stale_review`, `resources_required`, `run_resources_conflict`,
 `host_ledger_missing`, `host_ledger_required`, `parallel_budget`,
 `parallel_budget_required`, `resource_refused`, `parallel_unit_exceeds_capacity`,
-`placement_unreachable`; an admitted request UUID replays before any of them), drops
+`placement_unreachable`, `credentials`, `loop_resume`; the admission owner replays
+existing requests, and the console rechecks credential failures as described above), drops
 the retained record and unlocks the advice and fieldset. A retained record whose
 `resources` differ from a newer successful review never overrides it silently: the
 client reads `GET /api/operations/<retained request_id>`; only `unknown_operation`
