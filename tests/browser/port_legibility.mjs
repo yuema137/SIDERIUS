@@ -50,6 +50,12 @@ try {
   // Optional inputs are folded; expand every card so all socket kinds render.
   for (const summary of await page.locator('.circuit-optional > summary').all()) await summary.click();
 
+  for (const name of ['check_left', 'check_right']) {
+    const advice = input(name, 'human_advice');
+    assert.equal(await advice.locator('.circuit-port-contract').textContent(), 'Advice text');
+    assert.equal(await advice.getAttribute('data-contract'), 'optional.advice-text');
+  }
+
   // U4: one stable token per contract, distinct across contracts, rendered by CSS.
   const ports = await page.evaluate(() => [...document.querySelectorAll('.circuit-port[data-contract]')].map(port => {
     const socket = getComputedStyle(port.querySelector('.circuit-socket'));

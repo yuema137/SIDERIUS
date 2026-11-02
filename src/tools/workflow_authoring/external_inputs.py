@@ -17,7 +17,8 @@ from .options import contract_info
 
 _SUMMARIES = {
     "interpretation.input": "Evidence the interpretation step reads to start a research iteration.",
-    "optional.text": "An optional text value, such as a data directory.",
+    "optional.text": "An optional path to the task data folder.",
+    "optional.advice-text": "Optional free-text advice for the validation step.",
     "optional.expert-advice": "Optional expert advice given to the tuning or proposal step.",
     "optional.expert-context": "Optional list of expert context items for a proposal.",
     "optional.parameter-rules": "Optional workflow rules that limit tunable parameters.",

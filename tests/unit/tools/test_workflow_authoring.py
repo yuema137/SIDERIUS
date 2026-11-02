@@ -636,3 +636,26 @@ def test_open_failures_name_the_reason_and_the_path(editor):
     with pytest.raises(AuthoringError) as missing:
         editor.read()
     assert missing.value.code == "not_found" and str(path) in str(missing.value)
+
+
+def test_validation_advice_catalog_is_not_a_data_folder():
+    """Catch shared primitive contracts mislabelling advice and offering data paths."""
+    from tools.workflow_authoring.external_inputs import external_input_catalog
+    from tools.workflow_authoring.options import node_catalog
+
+    routes = {item.protocol: item for item in node_catalog().entries if item.protocol}
+    validation = routes["proposed-implementation-to-validation"]
+    advice = next(item.contract for item in validation.arguments if item.name == "human_advice")
+    proposal = routes["interpretation-to-proposal"]
+    folder = next(item.contract for item in proposal.arguments if item.name == "data_dir")
+    assert advice.model_dump(mode="json")["name"] == "Advice text"
+    assert advice.id == "optional.advice-text"
+    assert advice.kind == "setting"
+    assert folder.name == "Data folder"
+    assert folder.id == "optional.text"
+    assert advice.id != folder.id
+    external = next(
+        item for item in external_input_catalog().entries if item.contract.id == advice.id
+    )
+    assert not external.managed
+    assert "advice" in external.summary.lower()
