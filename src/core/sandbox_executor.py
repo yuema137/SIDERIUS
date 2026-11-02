@@ -1937,8 +1937,9 @@ class TidmadSandbox:
             if os.path.exists(train_json_path):
                 with open(train_json_path) as f:
                     results.update(json.load(f))
-            with open(score_json_path) as f:
-                results.update(json.load(f))
+            from execute_tools.evaluation_child import read_scoring_output
+
+            results.update(read_scoring_output(score_json_path))
 
             if os.path.exists(score_json_path):
                 os.remove(score_json_path)

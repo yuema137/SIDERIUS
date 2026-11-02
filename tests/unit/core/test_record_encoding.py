@@ -119,3 +119,36 @@ def test_record_paths_preserve_array_positions_at_small_and_large_sizes(count):
     restored = Record.model_validate_json(payload)
     assert restored.values == value.values
     assert record_json(restored) == payload
+
+
+@pytest.mark.parametrize(
+    "floats",
+    [[["score"], ["score"]], [["values", 0], ["values", 1], ["values", 0]]],
+    ids=["duplicate", "duplicate-after-another-path"],
+)
+def test_duplicate_float_paths_are_refused_by_the_seen_path_check(floats):
+    """Defect (#1326): a repeated typed path is accepted or refused only incidentally.
+
+    Without the seen-path check the second dereference reaches an already-restored
+    float and fails with the generic reference error; this asserts the explicit
+    duplicate refusal, so removing the check fails the ``match``.
+    """
+    record = {"score": "NaN", "values": ["Infinity", "-Infinity"]}
+    with pytest.raises(ValueError, match="duplicate non-finite float path"):
+        decode_record({**record, METADATA: {"version": ENCODING_VERSION, "floats": floats}})
+
+
+@pytest.mark.parametrize(
+    "floats",
+    [[["values"], ["values", 0]], [["values", 0], ["values"]]],
+    ids=["parent-first", "child-first"],
+)
+def test_overlapping_float_paths_cannot_restore_a_container(floats):
+    """Defect: overlapping paths (a container and one of its leaves) decode to a value.
+
+    Neither order may succeed: the container is not a token, and after it is
+    restored its leaf cannot be dereferenced.
+    """
+    record = {"values": ["Infinity"], METADATA: {"version": ENCODING_VERSION, "floats": floats}}
+    with pytest.raises(ValueError, match="invalid non-finite float reference"):
+        decode_record(record)
