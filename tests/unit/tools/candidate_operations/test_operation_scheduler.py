@@ -761,11 +761,12 @@ def test_a_serial_resume_of_a_ledger_placed_root_is_refused(prepared, tmp_path, 
 
 
 @pytest.mark.parametrize("marker", ["process", "sandbox", "submitter"])
-@pytest.mark.parametrize("namespace", ["different", "missing"])
-def test_namespace_unknown_prevents_sweep_and_operator_release(
-    prepared, tmp_path, children, monkeypatch, marker, namespace
+@pytest.mark.parametrize("namespace", ["different", "missing", "capture_unknown"])
+@pytest.mark.parametrize("release", ["sweep", "operator"])
+def test_namespace_controls_sweep_and_operator_release(
+    prepared, tmp_path, children, monkeypatch, marker, namespace, release
 ):
-    """Neither release path may trust foreign/legacy PID numbers, including unbound entries."""
+    """Both release paths reject foreign/unknown namespaces and retain legacy behavior."""
     from tools.candidate_operations import process
     from tools.candidate_operations.files import publish_encoded
     from tools.candidate_operations.host_ledger import LEDGER_FILE
@@ -780,6 +781,8 @@ def test_namespace_unknown_prevents_sweep_and_operator_release(
     identity = dict(entry["submitter" if marker == "submitter" else "process"])
     if namespace == "missing":
         del identity["pid_namespace_inode"]
+    elif namespace == "capture_unknown":
+        identity["pid_namespace_inode"] = 0
     else:
         identity["pid_namespace_inode"] += 1
     if marker == "sandbox":
@@ -797,9 +800,15 @@ def test_namespace_unknown_prevents_sweep_and_operator_release(
 
     monkeypatch.setattr(process, "_stat", absent)
     monkeypatch.setattr("tools.candidate_operations.host_liveness.session_members", lambda _: 0)
-    with locked_ledger(host.ledger_root) as root:
-        state = sweep(root)
-    assert [entry.operation_id for entry in state.reservations] == [operation.request_id]
-    with pytest.raises(OperationFailure) as refused:
+    if release == "sweep":
+        with locked_ledger(host.ledger_root) as root:
+            state = sweep(root)
+        assert [entry.operation_id for entry in state.reservations] == (
+            [] if namespace == "missing" else [operation.request_id]
+        )
+    elif namespace == "missing":
         release_reservation(host.ledger_root, operation.request_id)
-    assert refused.value.detail.code == "liveness_unobservable"
+    else:
+        with pytest.raises(OperationFailure) as refused:
+            release_reservation(host.ledger_root, operation.request_id)
+        assert refused.value.detail.code == "liveness_unobservable"

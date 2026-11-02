@@ -96,7 +96,6 @@ def session_evidence(identity: ProcessIdentity, *, may_be_hidden: bool = False) 
     if observation.reason == "different_boot":
         return SessionEvidence(leader="exited", members=0)
     if observation.reason in {
-        "pid_namespace_missing",
         "pid_namespace_unobservable",
         "pid_namespace_mismatch",
     }:

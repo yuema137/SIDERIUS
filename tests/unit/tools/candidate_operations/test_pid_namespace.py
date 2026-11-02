@@ -18,11 +18,26 @@ def test_capture_records_observers_pid_namespace(admitted):
     assert identity.pid_namespace_inode == Path("/proc/self/ns/pid").stat().st_ino
 
 
-@pytest.mark.parametrize("namespace", ["same", "different", "missing", "unreadable"])
+@pytest.mark.parametrize(
+    "namespace", ["same", "different", "missing", "unreadable", "capture_unreadable"]
+)
 def test_namespace_gates_process_and_session_evidence(admitted, monkeypatch, namespace):
-    """An absent PID and empty session authorize release only in a known namespace."""
+    """Release needs matching namespaces, except for the legacy same-namespace assumption."""
     config, submission, record = admitted
-    identity = process.current_identity(record)
+    if namespace == "capture_unreadable":
+        original_stat = Path.stat
+
+        def namespace_denied(path, *args, **kwargs):
+            if path == Path("/proc/self/ns/pid"):
+                raise PermissionError()
+            return original_stat(path, *args, **kwargs)
+
+        with monkeypatch.context() as capture:
+            capture.setattr(Path, "stat", namespace_denied)
+            identity = process.current_identity(record)
+        assert identity.pid_namespace_inode == 0
+    else:
+        identity = process.current_identity(record)
     encoded = identity.model_dump()
     if namespace == "missing":
         del encoded["pid_namespace_inode"]
@@ -47,16 +62,17 @@ def test_namespace_gates_process_and_session_evidence(admitted, monkeypatch, nam
     with locked_store(config) as root:
         path = claim(root, record)
     publish(path / "process.json", identity)
+    permits_exit = namespace in {"same", "missing"}
     evidence = session_evidence(identity)
-    assert evidence.ended == (namespace == "same")
-    assert evidence.unobservable == (namespace != "same")
-    assert bool(scans) == (namespace == "same")
-    assert releasable(config, submission.request_id) == (namespace == "same")
+    assert evidence.ended == permits_exit
+    assert evidence.unobservable == (not permits_exit)
+    assert bool(scans) == permits_exit
+    assert releasable(config, submission.request_id) == permits_exit
     assert read_operation(config, submission.request_id).state == (
-        "operation_failed" if namespace == "same" else "unknown"
+        "operation_failed" if permits_exit else "unknown"
     )
     with locked_store(config) as root:
-        if namespace == "same":
+        if permits_exit:
             require_available(root, lambda op: releasable(config, op))
             assert not (root / "active.json").exists()
         else:

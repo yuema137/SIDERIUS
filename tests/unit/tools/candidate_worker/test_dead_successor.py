@@ -119,8 +119,8 @@ def test_dead_successor_can_end_without_reusing_reservation(
     assert predecessor.successor_operation_id == next_id
     assert predecessor.receipt_digest == review.receipt_digest
 
-    # Another namespace (or a legacy marker) cannot authorize admission or End.
-    for namespace in (None, Path("/proc/self/ns/pid").stat().st_ino + 1):
+    # Another namespace (or failed namespace capture) cannot authorize admission or End.
+    for namespace in (0, Path("/proc/self/ns/pid").stat().st_ino + 1):
         publish(
             identity_path,
             identity.model_copy(update={"pid_namespace_inode": namespace}),
@@ -169,6 +169,12 @@ def test_dead_successor_can_end_without_reusing_reservation(
         assert read_operation(config, next_id).state == "unknown"
         assert not releasable(config, next_id)
 
+    # Legacy markers retain admission and End behavior after an upgrade.
+    publish(
+        identity_path,
+        identity.model_copy(update={"pid_namespace_inode": None}),
+        replace=True,
+    )
     # No native evidence is rewritten, and a partial next body is never re-executed.
     assert review.receipt is not None
     control = Path(review.receipt.workspace) / "candidate_run"

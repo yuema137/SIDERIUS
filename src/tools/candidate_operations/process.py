@@ -66,7 +66,10 @@ def _boot_id() -> str:
 
 
 def _pid_namespace_inode() -> int:
-    return Path("/proc/self/ns/pid").stat().st_ino
+    try:
+        return Path("/proc/self/ns/pid").stat().st_ino
+    except OSError:
+        return 0  # Persist failed capture distinctly from a legacy missing field.
 
 
 def _stat(pid: int) -> tuple[str, int]:
@@ -148,10 +151,14 @@ def _scan_fields(name: str) -> list[str] | None:
 def _namespace_observation(identity: ProcessIdentity) -> ProcessObservation | None:
     """PID numbers are comparable only within their recorded namespace."""
     if identity.pid_namespace_inode is None:
-        return ProcessObservation(status="unknown", reason="pid_namespace_missing")
+        return None  # Legacy records retain their same-namespace assumption.
+    if identity.pid_namespace_inode == 0:
+        return ProcessObservation(status="unknown", reason="pid_namespace_unobservable")
     try:
         namespace = _pid_namespace_inode()
     except OSError:
+        return ProcessObservation(status="unknown", reason="pid_namespace_unobservable")
+    if namespace == 0:
         return ProcessObservation(status="unknown", reason="pid_namespace_unobservable")
     if namespace != identity.pid_namespace_inode:
         return ProcessObservation(status="unknown", reason="pid_namespace_mismatch")

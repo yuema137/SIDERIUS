@@ -379,24 +379,31 @@ never sees the sandbox.
   an unbound entry with an unknown recorded submitter), or
   `integrity` (a published identity names another operation). Otherwise it
   releases, including an unbound reservation whose child never published an
-  identity, on the operator's word.
+  identity when evidence is observable and no child or sandbox session appears live.
 
 Known caveats and observation boundaries (also apply to admission release and End):
 
-- PID namespace: `ProcessIdentity.pid_namespace_inode` records the inode of
-  `/proc/self/ns/pid` in the process capturing the identity. `process.observe`
-  first checks the boot ID; a different boot proves exit. On the same boot,
-  namespace mismatch, an unreadable local namespace, or a missing recorded
-  namespace returns `unknown` (`pid_namespace_mismatch`,
-  `pid_namespace_unobservable`, or `pid_namespace_missing`). No PID stat or
-  session scan can prove death in these cases. `host_liveness.session_evidence`
-  returns an unknown leader and `members=None`, so automatic ledger sweeps,
-  operator release, operation-store admission release and End of an abandoned
-  successor cannot release it. Unbound entries with an unknown submitter also
-  refuse operator release. Reopen from the original PID namespace to observe
-  new records. Old ledger/process markers without the field remain readable
-  with `None`; their same-boot liveness stays unknown, without migration or
-  inferred namespace identity. A completed receipt alone does not prove exit.
+- PID namespace: new `ProcessIdentity.pid_namespace_inode` values record the inode
+  of `/proc/self/ns/pid` in the process capturing the identity. If capture cannot
+  read that inode, it records `0`, an explicit unknown value that never matches,
+  even after access recovers. `process.observe` first checks the boot ID; a
+  different boot proves exit. On the same boot, a recorded namespace mismatch
+  returns `unknown` (`pid_namespace_mismatch`); a recorded `0` or unreadable
+  reader namespace returns `unknown` (`pid_namespace_unobservable`).
+  No PID stat or session scan can prove death in these cases.
+  `host_liveness.session_evidence` returns an unknown leader and `members=None`,
+  so automatic ledger sweeps, operator release, operation-store admission
+  release and End of an abandoned successor cannot release it. Unbound entries
+  with an unknown submitter also refuse operator release. Reopen from the
+  original PID namespace to observe records with a captured inode.
+- Compatibility: old ledger/process markers without the field remain readable
+  with `None` and retain the pre-field assumption that reader and writer share
+  a PID namespace. PID and session observations can still establish exit and
+  authorize admission release, ledger release and End without a reboot or
+  migration. This preserves upgrade behavior but cannot detect cross-namespace
+  readers of legacy records: keep those readers in the original namespace.
+  New records always carry a captured inode or explicit `0`; failed capture
+  affects only that record. A completed receipt alone does not prove exit.
 - Serial operations have no published sandbox identity and rely on
   `--die-with-parent`; the bwrap startup window below therefore also limits
   admission release and End for serial operations.
@@ -529,8 +536,9 @@ therefore participates in that same read, including an `unknown` completion that
 must keep admission blocked.
 Linux process observation compares boot ID, PID namespace inode, PID and
 `/proc/PID/stat` start ticks. On the same boot, the reader must match the recorded
-namespace before PID reuse, absence or zombies establish exit. Missing, mismatched
-or unreadable namespace evidence is unknown; see the Host reservation ledger
+namespace before PID reuse, absence or zombies establish exit. Recorded unknown,
+mismatched or unreadable namespace evidence is unknown; legacy missing fields
+retain the same-namespace assumption; see the Host reservation ledger
 observation boundaries above. Unreadable/malformed process identity is unknown.
 Presence only describes the wrapper, not provider progress.
 No persisted monotonic clock or elapsed-time timeout inference exists.
@@ -1325,8 +1333,9 @@ reason="loop_process_exiting"`; it is not a terminal failure.
 `process.observe` binds boot ID, PID namespace inode and PID start ticks. In a
 matching recorded namespace, absent PIDs on an observable `/proc`, reused PIDs
 and zombies/dead processes prove exit; a different boot independently proves
-exit. Missing, mismatched or unreadable namespace identities stay unknown
-(see Known caveats above). Marker integrity and native receipt validation
+exit. Recorded unknown, mismatched or unreadable namespace identities stay
+unknown; legacy missing fields retain the same-namespace assumption (see Known
+caveats above). Marker integrity and native receipt validation
 still precede this projection; no completion or scientific receipt is fabricated.
 Both failure projection and release require `host_liveness.reservation_evidence`
 to prove that the wrapper session and any published sandbox session ended;

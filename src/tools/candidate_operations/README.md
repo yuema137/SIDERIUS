@@ -124,8 +124,10 @@ Keep status readers and the console in the same container/PID namespace that
 launched the operation. Containers can give the same process different PID
 numbers, so a reader in another namespace cannot safely decide that it ended.
 That uncertainty blocks release of its slot and End of an abandoned loop.
-Older records without namespace information remain readable but cannot prove
-process exit on the same boot. Preserve them; see the
+Older records without namespace information retain the previous same-namespace
+assumption, so they can still release capacity after an upgrade. They cannot
+detect readers in another namespace. New records whose namespace cannot be
+read stay unknown and cannot release capacity; see the
 [observation boundaries](candidate-operations-contract.md#host-reservation-ledger)
 for the compatibility rule.
 
