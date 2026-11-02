@@ -70,6 +70,20 @@ from execute_tools.task_data_path import (
 )
 
 
+class EvaluationSampleCeilingExceeded(ValueError):
+    """The materialized evaluation scope holds more samples than the caller allows.
+
+    Raised before any forward pass or deliverable write, from the same dataset
+    construction the pass would iterate, so a caller enforcing a ceiling never
+    builds the scope twice.
+    """
+
+    def __init__(self, *, samples: int, ceiling: int) -> None:
+        super().__init__(f"evaluation scope materialized {samples} samples, above {ceiling}")
+        self.samples = samples
+        self.ceiling = ceiling
+
+
 class GenericInferenceOutcome(BaseModel):
     """What one generic inference pass produced, for the child's result JSON."""
 
@@ -92,6 +106,7 @@ def run_generic_inference(
     write_request: DeliverableWriteRequest,
     input_dtype: torch.dtype | None = None,
     runtime_session: RuntimeVerificationSession | None = None,
+    max_samples: int | None = None,
 ) -> GenericInferenceOutcome:
     """Iterate a task's own evaluation scope and persist its own deliverable.
 
@@ -109,11 +124,16 @@ def run_generic_inference(
             ``task_scope`` field is populated HERE, from ``task_scope``, so a
             caller cannot pass one and iterate another.
         input_dtype: cast for the model input when the run declares one.
+        max_samples: optional sample ceiling checked against the materialized
+            dataset before any forward pass. ``None`` (every real-inference
+            caller) checks nothing.
 
     Returns:
         The pass's own accounting.
 
     Raises:
+        EvaluationSampleCeilingExceeded: when ``max_samples`` is set and the
+            scope materializes more samples.
         Whatever the implementation raises. ``validation_dataset`` owns the
         exact-materialization obligation and fails closed by contract; this
         unit never pads, truncates or reorders.
@@ -129,6 +149,8 @@ def run_generic_inference(
     if not isinstance(dataset, Sized):
         raise TypeError("validation_dataset must return a sized, map-style dataset")
     dataset_size = len(dataset)
+    if max_samples is not None and dataset_size > max_samples:
+        raise EvaluationSampleCeilingExceeded(samples=dataset_size, ceiling=max_samples)
     # `shuffle=False` and `drop_last=False` are LOAD-BEARING, not defaults:
     # the outputs are handed back positionally, so any reordering or dropped
     # tail would silently mis-pair every sample with somebody else's identity.
