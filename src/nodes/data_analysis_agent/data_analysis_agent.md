@@ -263,14 +263,41 @@ interrupted) is one 0.02 s poll plus one `/proc` RSS sample, then
 group that exits on SIGTERM costs only its exit time; a group still present
 after the 1.0 s grace receives SIGKILL and the leader is awaited for at most
 1.0 s more before a second SIGKILL. A process in uninterruptible kernel sleep
-(D state) cannot be bounded by any signal. The disposition remains `timed_out`.
-Unchecked parent work between two named boundaries (store publication,
+(D state) cannot be bounded by any signal. After the leader is reaped, the
+post-loop check observes the process group once more; if any member is still
+observable (a descendant that survived, or a killed descendant its new parent
+has not reaped yet), a second `terminate_observed_group` round runs. It can add
+up to one more 1.0 s grace plus SIGKILL to the bound above (the leader wait
+returns at once because the leader is already reaped). Disposition precedence
+(#1448): a disposition the supervisor decided in its loop (`timed_out`,
+`memory_limit_exceeded`) is never replaced by that observation; only a worker
+that exited on its own becomes `orphaned_process_tree`. The observation itself
+is kept in `WorkerObservation.orphaned_process_tree` and, for executions, as
+`SkillExecutionProvenance.host_details["orphaned_process_tree"] = true`
+alongside `supervisor_disposition` (the key is absent when nothing was
+observed). Unchecked parent work between two named boundaries (store publication,
 materialization) is not interrupted; a `budget_receipt.json` overrun therefore
 belongs to the interval ending at `last_boundary`. Measured for #1425 under
 host I/O load with a 1.0 s allocation and a sleeping child: overrun before
 this binding up to 3.8 s (5.8 s for a SIGTERM-ignoring child); after it, at
 most 0.021 s beyond an uninterruptible publication (1.03 s when SIGTERM is
 ignored).
+
+Generated programs (`AnalysisCodeSandbox.execute`, reached through
+`execute_generated_program`) follow the same binding under the
+`analysis.generated_program` boundary: the absolute expiry is bound on entry,
+so the capability probe and the fsync'd request publication are charged to the
+allocation; the program timeout (`min(per_skill_timeout_s,
+resource_request.wall_time_s)`, or less when the caller passes the remaining
+allocation) starts at launch, and the program stops at the earlier of the two.
+Termination uses the same `terminate_observed_group` owner, grace and leader
+wait as skill workers. The capability probe has a 10 s ceiling
+(`PROBE_TIMEOUT_S`) and is also bounded by the remaining allocation, both in
+`execute` and in the pre-materialization probe in `execute_resolved_action`. A
+probe cut short by the allocation is a timeout, not missing isolation: the
+invocation records status and `failure_type` `timed_out` without launching
+generated code (no `worker_pid` is recorded, because none exists). A probe that fails before expiry still refuses with
+`generated_code_sandbox_unavailable`.
 
 ### Generated artifact paths
 
