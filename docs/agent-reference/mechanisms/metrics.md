@@ -132,3 +132,14 @@ primary-unit thresholds must be explicitly rebound or refused when formula selec
 lands. Rubrics remain outside MetricOrder. See the
 [evaluation contract](../../../src/execute_tools/evaluation-contract.md) for the
 schema, launch gates, identity and mandatory downstream binding rules.
+
+## Effective selection and source evidence
+
+Formula evaluation creates a new effective metric for ranking while retaining the
+source metric for scientific arithmetic and Health. The native scoring child owns
+aggregation; downstream ranking consumes the generated identity and scalar through
+MetricOrder. Typed component/source evidence is persisted beside `metric_result`.
+Required secondary evidence is determined by term references, not mere declaration.
+The [evaluation runtime contract](../../../src/execute_tools/evaluation-contract.md#deterministic-selection-runtime)
+owns output fields, supported routes, generated identity and explicit threshold
+units. Do not feed source per-file vectors into utility ranking.

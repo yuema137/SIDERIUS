@@ -112,11 +112,23 @@ def test_round_boundary_uses_relocated_production_policy_owner() -> None:
         and node.func.id == "apply_round_health"
     ]
     assert calls
-    keyword = next(k for call in calls for k in call.keywords if k.arg == "production_config_path")
-    assert isinstance(keyword.value, ast.Call)
-    assert isinstance(keyword.value.func, ast.Name)
-    assert keyword.value.func.id == "default_health_policy_path"
-    assert keyword.value.args == []
+    assert any(
+        isinstance(k.value, ast.Call)
+        and isinstance(k.value.func, ast.Name)
+        and k.value.func.id == "health_arguments"
+        for call in calls
+        for k in call.keywords
+    )
+    transport = ast.parse(EXECUTION_PY.with_name("scoring_transport.py").read_text())
+    value = next(
+        value
+        for node in ast.walk(transport)
+        if isinstance(node, ast.Dict)
+        for key, value in zip(node.keys, node.values, strict=True)
+        if isinstance(key, ast.Constant) and key.value == "production_config_path"
+    )
+    assert isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
+    assert value.func.id == "default_health_policy_path" and value.args == []
 
 
 def _score_meta(gate_results: Any, resolved_action: Any):
@@ -250,9 +262,11 @@ class TestTheGateCallIsReachableFromEveryScoringRoute:
         """
         source = EXECUTION_PY.read_text()
 
-        assert "evaluation_payload_fn=build_evaluation_payload_fn(" in source
-        assert "task_data_path=bindings.run_task_data_path" in source
-        assert "deliverable_dir=sandbox.base_dir" in source
+        assert "**health_arguments(bindings, prepared, identity, _denoised_fn)" in source
+        transport = EXECUTION_PY.with_name("scoring_transport.py").read_text()
+        assert '"evaluation_payload_fn": build_evaluation_payload_fn(' in transport
+        assert "task_data_path=bindings.run_task_data_path" in transport
+        assert "deliverable_dir=sandbox.base_dir" in transport
 
 
 class TestTheBoundaryReportsWhetherGatesActuallyRan:
