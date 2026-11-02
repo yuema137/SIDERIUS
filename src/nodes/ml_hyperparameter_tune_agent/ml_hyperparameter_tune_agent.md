@@ -1926,6 +1926,38 @@ drives the real tuner loop for success, OOM skip and training failure with an
 operator `lr` lock beyond the verbatim window, plus an un-overridden control,
 and bounds a 2,000-file `target_files` event in condensed history.
 
+### Dictionary-valued plan overrides
+
+`policy._apply_plan_overrides` replaces named top-level `ExperimentPlan` fields
+in the alias-form dump, then revalidates the effective plan. It does not merge
+nested dictionaries. This applies uniformly to `train_config`, `model_config`
+and `loss_config` (and their normalized Python field aliases). For example,
+`plan_overrides={"train_config": {"lr": 0.002}}` replaces an authored
+`{"lr": 0.0001, "epochs": 5}` with `{"lr": 0.002}`: `epochs` is no longer
+supplied by the plan. To retain it, include it in the replacement dictionary.
+Task/workflow `parameter_rules` are a separate per-field resolution mechanism;
+subsequent resolution and trainer/plugin defaults still apply. The provenance
+must not infer a downstream default for an omitted request key.
+
+`ResolutionTracker.record` compares both added/present and removed paths.
+A removed key receives the first diverging step's authority, like a changed
+value. Final events for keys omitted by `operator_plan_overrides` say
+`not supplied in the resolved configuration; plan_overrides uses whole-dictionary replacement`; other missing
+resolved keys say `not supplied in the resolved configuration`. A later step
+restoring the authored value removes the event. The internal absent sentinel
+still distinguishes missing keys from explicit `None`; neither is a numeric
+execution default. Persisted receipts, console output, reflector provenance and
+planner history share this explanation rather than independently interpreting
+missing keys. Execution and override precedence are unchanged.
+
+The outer attempt-failure handler intentionally retains attempt receipts in
+`proposed_config` and discovery text as preparation/audit context. They are not
+executor kwargs or proof that training ran; the failure stage and status own
+that distinction. Promotion keeps top-level persisted `params` a configuration.
+Regression: `test_mapping_override_provenance.py` exercises the real tuner loop
+for successful, skipped and failed training attempts and sweeps all three
+configuration mappings.
+
 ### Reflection provenance
 
 `plan.hypothesis` is free prose the planner authors **before** the framework

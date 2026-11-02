@@ -1595,7 +1595,8 @@ request digests of loops without `request_input` are unchanged.
 
 A Resume may carry operator advice: untrusted text, typed `loop_models.OperatorAdvice`
 (surrounding whitespace removed; 1..4000 characters; no `Cc`/`Cf` (control or format, e.g. C1, bidi overrides, BOM) characters except
-newline and tab). It is not a reviewed captured input: root captured inputs stay
+newline, tab, ZWNJ (U+200C), and ZWJ (U+200D)). Joiners preserve multilingual words
+and emoji; bidi formatting and BOM remain refused. It is not a reviewed captured input: root captured inputs stay
 unchanged, and the advice travels in the operations request and in the immutable
 `LoopContinuation.operator_advice` (omitted when absent, so advice-free bindings keep
 their bytes). `LoopContinuation.resume_advice()` gives
@@ -1976,7 +1977,16 @@ placements running when it started, is placed on the slot it recorded; and no
 entry starts after the first failed entry ended. It returns a
 `graph_evidence.DrainWindow` (`ended`: the `ended_event` of every dispatched
 entry; `failure_end`: the `ended_event` of the first failed entry, `None`
-without a failure).
+without a failure). Before returning, `_check_causality` requires each receipt's
+`started_event` to be strictly greater than every source's `ended_event`,
+including route control edges and every fan-in source. It reuses
+`graph_evidence.settled_sources_end` and this same `DrainWindow.ended` mapping;
+for sources closed without dispatch it follows their predecessors to the latest
+recorded end. Thus a skipped route arm consumed by an adaptor needs no invented
+receipt, but its deciding source must have ended. Violations raise `ValueError`
+(`started before its sources ended`). `graph_models.DISPATCHED_STATES` owns
+the shared unit outcome states; adaptors may also dispatch and return skipped.
+Serial verification and serialized trace/digest bytes are unchanged.
 
 `replay_readiness(..., drained=window)` replays a parallel trace without the
 declaration-order failure stop, because parallel dispatch follows completion
@@ -2027,7 +2037,11 @@ a later-declared failure draining an earlier-declared unit,
 SIGTERM kills real unit groups, a unit that cannot start fails alone, a held
 signal survives an exceptional exit, one failing termination), `test_readiness.py`
 (parallel replay: drain closures accepted, closures the drain cannot produce refused),
-`test_parallel_lock.py`,
+`test_parallel_lock.py`, `test_parallel_causality.py` (direct, route-control and
+fan-in forgeries and traversal through a skipped route arm; 24 default dispatcher
+representatives, with all 288 failure/hold-vector/unit combinations opt-in; see
+`tests/unit/tools/candidate_worker/parallel-causality-testing.md` for equivalence
+classes and mutation witnesses),
 `tests/unit/agent/test_token_unit.py`.
 
 

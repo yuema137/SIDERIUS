@@ -13,6 +13,7 @@ it re-derives, from the write-once receipts and the published body budget:
 - (a) start and end events form one permutation of the body's events;
 - (f) every placement fits the budget beside the placements running when it
   started, on the slot it recorded (``plan_dispatch`` re-run);
+- causality: every entry starts after all its sources have settled;
 - drain (decision B3-Q2): nothing started after the first failure ended.
 
 It returns the receipts' timing (``DrainWindow``), with which ``replay_readiness``
@@ -25,8 +26,8 @@ from pathlib import Path
 
 from core.runtime_control.scheduling import HostBudget, plan_dispatch
 
-from .graph_evidence import DrainWindow, read_graph_control
-from .graph_models import GraphNodeEvidence, GraphTrace
+from .graph_evidence import DrainWindow, read_graph_control, settled_sources_end
+from .graph_models import DISPATCHED_STATES, GraphNodeEvidence, GraphTrace
 from .layout import candidate_control_dir
 from .loop_models import LoopContinuation
 from .models import CandidateRunReceipt, CandidateRunRequest
@@ -34,7 +35,6 @@ from .parallel_envelope import declared_units
 from .parallel_models import GRANT_CONTROL_FILE, HostGrant, UnitExit, UnitReceipt
 from .unit_models import unit_paths
 
-_DISPATCHED = frozenset(("succeeded", "rejected", "failed"))
 _RECEIPT_FILE = "placement.json"
 
 
@@ -67,7 +67,9 @@ def drained_entries(
     _check_fit(receipts, budget)
     failure_end = _check_drain(receipts, entries)
     ended = {node_id: receipt.ended_event for node_id, receipt in receipts.items()}
-    return DrainWindow(ended=ended, failure_end=failure_end)
+    window = DrainWindow(ended=ended, failure_end=failure_end)
+    _check_causality(receipts, entries, window)
+    return window
 
 
 def admitted_budget(
@@ -89,7 +91,7 @@ def admitted_budget(
 
 def _dispatched(item: GraphNodeEvidence, adaptor: bool) -> bool:
     """Readiness closes an adaptor only as blocked; a unit is dispatched iff it has an outcome."""
-    return item.state != "blocked" if adaptor else item.state in _DISPATCHED
+    return item.state != "blocked" if adaptor else item.state in DISPATCHED_STATES
 
 
 def _receipts(
@@ -203,3 +205,14 @@ def _check_drain(
     if late:
         raise ValueError(f"parallel trace dispatched after a failure: {late}")
     return first
+
+
+def _check_causality(
+    receipts: Mapping[str, UnitReceipt],
+    entries: Mapping[str, GraphNodeEvidence],
+    window: DrainWindow,
+) -> None:
+    """Sources, including route control edges and undispatched closures, settle first."""
+    for node_id, receipt in receipts.items():
+        if receipt.started_event <= settled_sources_end(node_id, entries, window):
+            raise ValueError(f"parallel receipt {node_id!r} started before its sources ended")

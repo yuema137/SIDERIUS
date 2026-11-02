@@ -13,3 +13,12 @@ It is separate from implementor blocks even though both use
 [`../_task_blocks_loader.py`](../_task_blocks_loader.py). Prompt behavior is
 covered by [`test_step00_prompt_goldens.py`](../../../../tests/unit/agent/ml_model_proposal_agent/test_step00_prompt_goldens.py)
 and the adapter by [`test_step12_pr12a_c7_proposal_blocks.py`](../../../../tests/unit/workflows/test_step12_pr12a_c7_proposal_blocks.py).
+
+Literature reviews retain their separate headings, contributors, and claims.
+Contribution IDs, contributor names, and citation source labels stay on one
+display line. Labels containing line breaks or starting with a double quote
+are displayed as JSON strings. For example, an ID with a newline between `a`
+and `b` appears as `"a\nb"`; an ID containing those literal quote and backslash
+characters appears as `"\"a\\nb\""`. The two reviews remain distinguishable.
+Other single-line labels keep their existing text. Stored labels and evidence
+prose, including multiline claims, stay unchanged.

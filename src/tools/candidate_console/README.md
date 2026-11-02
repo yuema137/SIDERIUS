@@ -362,7 +362,12 @@ A successful data command ends with `Data ready in .../data/NAME`.
    to continue with the next iteration. After **Review resume** you can type advice for
    the next iterations (up to 4000 characters). Their proposal step receives it, and it
    replaces any advice an earlier resume gave. The box starts with this segment's
-   advice. It locks once you select **Resume loop**, so a retry sends the same text.
+   advice. Leading and trailing whitespace is removed; joiners used in multilingual
+   words and emoji are supported. The box locks once you select **Resume loop**, so
+   a retry sends the same text. A definite refusal before the run is accepted unlocks
+   it; review again, then edit and retry. If an earlier saved request has different
+   advice, the console shows that advice and asks you to select **Resume loop** again
+   before retrying it.
    The resumed segment then shows "Resumed with your advice: …". If you pressed Stop while it was waiting, the run
    cannot continue and no Resume is offered.
    **Resume under a shared host ledger.** A host ledger (the `host_ledger` entry in
