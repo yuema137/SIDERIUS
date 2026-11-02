@@ -3345,9 +3345,12 @@ messages merely because the condition examines an exception.
 
 The guard checks aliased returns, message/detail/error/content keywords,
 JSONResponse/dict/json serialization and whole-carrier model_dump/model_dump_json
-calls. Four newly visible existing statements are individually reviewed in the
+calls. Five newly visible existing statements are individually reviewed in the
 exact baseline: SetupRefused finding serialization and response alias, the
-SourceDiagnostic response, and the code-filtered admission-not-attempted response.
+SourceDiagnostic response, the code-filtered admission-not-attempted response,
+and `example_bundle.copy_package`'s `AddTaskRefused` raise. The package-copy
+message comes from audited `WorkspaceRefused` guidance or `console_error_message`;
+its suffix adds fixed partial-copy guidance and the explicit target path.
 Their owners supply framework guidance; there are no whole-file exemptions.
 Existing #1328 repairs remove their own legacy entries independently.
 
