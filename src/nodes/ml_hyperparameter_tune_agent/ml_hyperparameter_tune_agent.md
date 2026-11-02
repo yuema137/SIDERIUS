@@ -1934,7 +1934,7 @@ must not infer a downstream default for an omitted request key.
 `ResolutionTracker.record` compares both added/present and removed paths.
 A removed key receives the first diverging step's authority, like a changed
 value. Final events for keys omitted by `operator_plan_overrides` say
-`not supplied in resolved configuration; plan_overrides uses whole-dictionary replacement`; other missing
+`not supplied in the resolved configuration; plan_overrides uses whole-dictionary replacement`; other missing
 resolved keys say `not supplied in the resolved configuration`. A later step
 restoring the authored value removes the event. The internal absent sentinel
 still distinguishes missing keys from explicit `None`; neither is a numeric

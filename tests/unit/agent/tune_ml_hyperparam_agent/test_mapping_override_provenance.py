@@ -28,11 +28,11 @@ def test_train_mapping_replacement_explains_omitted_epochs(
     assert event == {
         "field_path": "train_cfg.epochs",
         "proposed": "5",
-        "executed": "not supplied in resolved configuration; plan_overrides uses whole-dictionary replacement",
+        "executed": "not supplied in the resolved configuration; plan_overrides uses whole-dictionary replacement",
         "authority": "operator_plan_overrides",
     }
     assert (
-        "not supplied in resolved configuration; plan_overrides uses whole-dictionary replacement"
+        "not supplied in the resolved configuration; plan_overrides uses whole-dictionary replacement"
         in capsys.readouterr().out
     )
     for history in ([record], [record] + [_later(i) for i in range(PLANNER_FULL_WINDOW)]):
@@ -67,6 +67,6 @@ def test_other_config_mappings_share_replacement_provenance(
     event = next(e for e in record["resolution_events"] if e["field_path"] == removed_path)
     assert (
         event["executed"]
-        == "not supplied in resolved configuration; plan_overrides uses whole-dictionary replacement"
+        == "not supplied in the resolved configuration; plan_overrides uses whole-dictionary replacement"
     )
     assert event["authority"] == "operator_plan_overrides"

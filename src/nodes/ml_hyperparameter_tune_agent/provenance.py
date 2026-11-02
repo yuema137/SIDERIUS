@@ -108,7 +108,7 @@ def _resolved_value_text(value: str, authority: str) -> str:
     if value != ABSENT:
         return value
     if authority == "operator_plan_overrides":
-        return "not supplied in resolved configuration; plan_overrides uses whole-dictionary replacement"
+        return "not supplied in the resolved configuration; plan_overrides uses whole-dictionary replacement"
     return "not supplied in the resolved configuration"
 
 
