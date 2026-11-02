@@ -27,14 +27,17 @@
       "raise ExportRefused(422, 'invalid_profile', f\"the task's LLM profile is not usable with --llm_config: {error}\") from None"
     ],
     "setup_routes.py": [
-      "content: dict[str, object] = {'error': {'code': error.code, 'message': error.message}}"
+      "content: dict[str, object] = {'error': {'code': error.code, 'message': error.message}}",
+      "content['finding'] = error.finding.model_dump(mode='json')",
+      "return JSONResponse(status_code=error.status, content=content)"
     ],
     "settings_library.py": [
       "raise LibraryRefused(422, 'invalid_file', f'Not an LLM profile: {error}') from None",
       "raise LibraryRefused(422, 'invalid_file', str(error)) from None"
     ],
     "editor.py": [
-      "return JSONResponse(status_code=409, content={'error': {'code': error.code, 'message': str(error)}, 'current': error.current.model_dump(mode='json') if error.current else None, 'proposal': safe_review(error.proposal).model_dump(mode='json') if error.proposal else None})"
+      "return JSONResponse(status_code=409, content={'error': {'code': error.code, 'message': str(error)}, 'current': error.current.model_dump(mode='json') if error.current else None, 'proposal': safe_review(error.proposal).model_dump(mode='json') if error.proposal else None})",
+      "return JSONResponse(status_code=422, content={'error': {'code': 'source', 'message': 'proposal is not a supported declaration'}, 'diagnostics': [item.model_dump(mode='json') for item in error.diagnostics]})"
     ],
     "config.py": [
       "raise ValueError(f'configured host ledger is unusable: {error}') from error"
@@ -44,6 +47,7 @@
     ],
     "app.py": [
       "message = error.detail.message if error.detail.code in ('credentials', 'launch_policy', 'judge_route', 'loop_end', 'candidate_preflight', 'reusable_preflight', 'native_chain_admission') else {'native_chain_policy': 'native chain choice is unavailable or overlaps editor writes', 'not_supported': 'native-chain token aggregation is not supported', 'example': 'recorded example is not configured', 'example_path': 'recorded example is unavailable', 'busy': 'another operation is active or unresolved', 'conflict': 'operation ID already identifies different content', 'stale_review': 'reviewed source or bindings changed; review again', 'unsupported': 'saved declaration bindings cannot be reviewed; inspect source and prepared context', 'context': 'saved declaration differs from selected prepared context', 'editor_policy': 'project is not enabled for candidate runs', 'task_policy': 'preparation does not match the configured task policy', 'not_prepared': 'preparation has no verified candidate to review', 'host_ledger_missing': 'host resources and parallel nodes need a host ledger in the console configuration; review without them', 'resources_required': \"this console shares a host ledger: declare the run's host resources, then review again\"}.get(error.detail.code, 'native operation could not be verified')",
+      "return JSONResponse(status_code=409, content={'error': {'code': error.detail.code, 'message': message, 'admission_not_attempted': True}})",
       "return JSONResponse(status_code=409, content={'error': {'code': error.detail.code, 'message': message, 'blocking_operation_id': str(error.detail.blocking_operation_id)}})",
       "return error_response(404, 'unknown_operation', error.detail.message)"
     ],
@@ -84,8 +88,9 @@
   },
   "reviewed_safe_statements": {
     "setups.py": "Exact args equality against the two framework-owned registry literals returns the literal, never arbitrary exception text.",
-    "editor.py": "Existing AuthoringError carrier now projects its ReviewView proposal through safe_review; raw AuthoringError guidance remains in #1328.",
-    "app.py": "Existing typed operation error/message/UUID carriers, now visible to the stronger chain scan; audit nested sources in #1328."
+    "editor.py": "Existing AuthoringError carrier now projects its ReviewView proposal through safe_review; raw AuthoringError guidance remains in #1328. Whole SourceDiagnostic serialization carries framework validation/syntax codes, messages and source locations from definition.source; arbitrary native exception objects are not serialized.",
+    "app.py": "Existing typed operation error/message/UUID carriers, now visible to the stronger chain scan; audit nested sources in #1328. The now-visible admission_not_attempted response forwards the same previously reviewed code-filtered message, plus a boolean marker.",
+    "setup_routes.py": "SetupRefused.message already uses safe projection; TaskReferenceFinding is fixed framework finding guidance from candidate_compatibility, not a native exception model. The now-visible content alias and finding dump are exact reviewed statements."
   },
   "guard_limits": "https://github.com/Galileo-Sandbox/SIDERIUS/issues/1339"
 }

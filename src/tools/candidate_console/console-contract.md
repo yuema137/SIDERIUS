@@ -3212,3 +3212,40 @@ projection independently of this syntactic guard. The editor browser witness
 renders real sanitized HTTP observations through the production JSON details
 component, using synthetic visibility gates only; it does not qualify saving or
 scientific compatibility.
+
+### Bounded alias and whole-model projection evidence (#1339)
+
+`test_error_projection_guard._forwarding` scans lexical scopes independently.
+Handler-bound exceptions and conventionally named, annotated exception carriers
+seed a conservative fixed point over local assignments. Direct assignment,
+chained aliases, literal tuple/list unpacking and container literals propagate
+exception/message provenance; assigning `str`, `repr` or `format` also preserves
+the formatting-call check. Safe projection calls and private logger calls retain
+their existing boundaries. Fixed conditional result strings do not become raw
+messages merely because the condition examines an exception.
+
+The guard checks aliased returns, message/detail/error/content keywords,
+JSONResponse/dict/json serialization and whole-carrier model_dump/model_dump_json
+calls. Four newly visible existing statements are individually reviewed in the
+exact baseline: SetupRefused finding serialization and response alias, the
+SourceDiagnostic response, and the code-filtered admission-not-attempted response.
+Their owners supply framework guidance; there are no whole-file exemptions.
+Existing #1328 repairs remove their own legacy entries independently.
+
+Arbitrary models are not proven safe by syntax. `test_error_model_inventory`
+inventories every typed CheckFailure path below the existing ReviewView boundary.
+Each inventoried path must be populated with a private sentinel, safely projected,
+and leave the native model unchanged. The real HTTP witnesses in
+`test_editor_errors` exercise both ordinary review and AuthoringError.proposal
+serialization. Adding a typed failure path requires a projection and witness
+update even when the adapter never directly accesses `.failure.message`.
+
+Limits remain explicit: unknown helper returns, closure capture, mutation of
+containers after assignment, dynamically selected attributes, arbitrary
+formatting APIs, aliases/shadowing of logger or safe-projection owners, unannotated
+exception parameters without a handler binding, unrelated model types and
+JavaScript transformations still require source-aware review and boundary tests.
+The analysis is control-insensitive and does not kill aliases after reassignment;
+its findings are review obligations, not proof of a runtime leak. This bounded
+tripwire is not an interprocedural taint analyzer or a general serialization
+security proof. No runtime behavior, scientific default or identity changes.
