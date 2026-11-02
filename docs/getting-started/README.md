@@ -166,11 +166,29 @@ performance. A real run, including a Quickstart research chain, needs an NVIDIA
 GPU with CUDA; the chain header and the console run review say so, and a launch
 on a machine without one stops before any model call.
 
-To check your own task package end to end on a CPU without an API key, add
-`--is_pseudo_llm --is_pseudo_training` to a CLI launch (see
-[entrypoints](../reference/entrypoints.md)). A pseudo run uses synthetic models
-and scores, so it tests wiring, not science. Success: the run exits 0. A task
-shape the pseudo model cannot produce is refused up front with the reason.
+To check your own task package end to end on a CPU, without a GPU or an API
+key, run one pseudo iteration from the checkout's root. Replace the task
+manifest, data folder and workspace with your own absolute paths; use a new
+workspace folder for each check:
+
+```bash
+.venv/bin/python -m workflows.run_one_iteration \
+  --workspace /absolute/project/pseudo_ws --run_name pseudo_check --iteration 1 \
+  --task_composition /absolute/project/task.yaml --data_dir /absolute/project/data \
+  --healthgate_mode blocking --result_authority scientific \
+  --max_rounds 1 --formal_portion 1.0 \
+  --is_pseudo_llm --is_pseudo_training
+```
+
+A pseudo run uses synthetic models and scores, so it tests wiring, not
+science. `--max_rounds 1 --formal_portion 1.0` runs one formal tuning round on
+the whole training scope, which keeps a small task from failing a too-small
+trial round. Success: the command exits 0 and ends with an `ITERATION 1
+COMPLETE` banner. Exit 0 alone is not enough: if every attempt failed, the run
+still exits 0 but prints `No models passed gates this iteration` with
+`status=no_records`; the `Loop Error` lines above it name the cause. A task
+shape the synthetic model cannot produce is refused before any work, with the
+reason. Other flags are in [entrypoints](../reference/entrypoints.md).
 
 To let an LLM orchestrator choose the research steps instead of a fixed
 `workflow.py`, use the [external orchestration guide](../../src/tools/orchestration_setup/README.md).

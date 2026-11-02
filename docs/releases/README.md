@@ -5,8 +5,8 @@ differently from the previous release, known limitations and how to upgrade.
 
 To upgrade:
 
-1. Check which version your checkout has: `grep '^version' pyproject.toml`
-   prints, for example, `version = "1.1.0"`.
+1. Check which version your checkout has. In your checkout's root,
+   `grep '^version' pyproject.toml` prints, for example, `version = "1.1.0"`.
 2. Open the page for the release you are moving to and read what changed
    (in v1.1.0, **Changed behavior for v1.0.0 users**) before updating. Runs
    started with an older version usually cannot be resumed after the upgrade.
