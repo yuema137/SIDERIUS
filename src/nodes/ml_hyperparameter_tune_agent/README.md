@@ -19,6 +19,14 @@ the log shows `8 -> effective 4` and labels the proposal as superseded. The
 preceding inheritance line identifies the winning trial. These are prepared
 request values; training results are reported separately after execution.
 
+The next planner sees the same distinction in its experiment history. Each
+record whose proposal was overridden keeps the planner's original hypothesis,
+plus a `resolution_events` list (for example `train_cfg.lr` proposed `0.0001`,
+executed `0.002`) and a label saying the hypothesis was superseded. This holds
+even after older records are shortened to a summary. The record's `status`
+still says whether the attempt actually ran. Records with no override look
+exactly as before.
+
 - [Public entry and CLI](ml_hyperparameter_tune_agent.py) · [full guide](ml_hyperparameter_tune_agent.md)
   (`cli.py` is a private parser/input adapter used by that entrypoint.)
 - Input/output owners: [HyperparamTuningInput/HyperparamTuningOutput](../../agent/schemas/hyperparam_tuning.py)

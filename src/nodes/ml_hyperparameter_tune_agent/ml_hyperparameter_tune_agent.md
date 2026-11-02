@@ -1860,6 +1860,52 @@ The rendering assembly identity changes when `planning.py` changes because it is
 part of that identity's source closure; this console change does not bypass that
 binding or rewrite archived evidence.
 
+### Condensed planner history resolution receipts (issue #1322)
+
+Problem closed: `agent/prompts.py::_truncate_memory_history` keeps
+`memory.hypothesis` for records older than `PLANNER_FULL_WINDOW` (3) but drops
+`params`, so an overridden attempt's authored prose reached the next planner
+with neither the effective values nor any sign that it had been superseded.
+
+Producer: `planning.py::prepare_attempt` adds
+`parameter_rule_receipts.resolution_event_record(execution_provenance)` to
+`record_params`. It writes `resolution_events` (the final
+`ExecutionProvenance.events`, `mode="json"`) only when `diverged`; the
+plan-only `plan_resolution_events` comparison is never persisted. The key is
+record-only (never an executor argument). `records._emit_record` calls
+`attach_attempt_receipts`, which promotes it with `inactive_parameter_rules`
+to the typed top-level `ExperimentRecord.resolution_events` before validation,
+so every builder that receives `prepared.record_params` (success, VRAM/time
+skips, admission refusals, training/inference/scoring failures and the outer
+attempt-failure handler) persists it without its own branch, and the persisted
+`params` remain the reflector's best-configuration input. Attempts refused
+before `finish_with_model` (plan schema violations) and archived records carry
+no receipt. The outer handler's `proposed_config` and its `discovery` text
+render `record_params` before promotion and therefore include the receipt.
+
+Consumer: `prompts.py` adds `resolution_events` to `_CONDENSED_KEYS` and
+`_label_superseded_proposal` inserts `memory.hypothesis_provenance =
+SUPERSEDED_PROPOSAL_LABEL` immediately after `hypothesis` in both the verbatim
+window (`_planner_visible`) and condensed entries. The authored hypothesis is
+kept verbatim; status (not the label) says whether the effective request ran.
+The projection reads the persisted receipt only — it never re-derives
+resolution — and returns the original record/memory object when there is no
+receipt, so records without divergence and all archived histories render
+byte-identically. Persisted records are never mutated.
+
+Divergence follows the existing tracker: formal-round `is_trial` lockout and
+`resolved_round_workload` portions are events, so most formal attempts in
+native runs (including TIDMAD paper-shaped runs) carry a receipt and the label,
+exactly as the console action block and the reflector already show them.
+
+Identity impact: native planner content/assembly identities and the rendering
+assembly identity change (pins updated in `test_planner_strategy.py` and
+`test_native_tuner_preparation.py`); archived workspaces keep their recorded
+identities, and paper prompt-compat profiles requalify at freeze. Regression:
+`tests/unit/agent/tune_ml_hyperparam_agent/test_condensed_resolution_history.py`
+drives the real tuner loop for success, OOM skip and training failure with an
+operator `lr` lock beyond the verbatim window, plus an un-overridden control.
+
 ### Reflection provenance
 
 `plan.hypothesis` is free prose the planner authors **before** the framework
@@ -2303,7 +2349,7 @@ inactive field does not refuse the plan. Shared rule resolution logs each
 inactive constraint and fills typed `ExperimentPlan.inactive_parameter_rules`.
 `parameter_rule_receipts.inactive_parameter_rule_record` transports nonempty
 receipts through `record_params` only (never executor arguments); `_emit_record`
-uses `attach_inactive_parameter_rules` to promote them onto the validated
+uses `attach_attempt_receipts` to promote them onto the validated
 `ExperimentRecord` before saving, for success and refusal/failure paths alike.
 The receipt records path, task/workflow owner, selected loss type, declared rule
 and `inactive_for_selected_loss`. Planner history exposes it in recent and

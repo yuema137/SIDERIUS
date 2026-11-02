@@ -754,6 +754,10 @@ context for later resolution, role applicability and additional constraints.
 _CONDENSED_KEYS = frozenset(
     {
         "inactive_parameter_rules",
+        # #1322 — the effective values that replaced authored ones. Without
+        # it a condensed entry kept the proposal prose and dropped `params`,
+        # so an overridden hypothesis read as what the attempt requested.
+        "resolution_events",
         "exp_id",
         "status",
         "model_type",
@@ -821,16 +825,49 @@ _PLANNER_HIDDEN_RECORD_KEYS = frozenset(
 )
 
 
-def _planner_visible(rec: dict) -> dict:
-    """``rec`` without the keys the planner must not see.
+#: #1322 — label beside a hypothesis whose record carries ``resolution_events``.
+#: The authored prose is history and stays verbatim; the label states that it
+#: no longer describes the resolved request. ``status`` (not this label) says
+#: whether that request ran or succeeded.
+SUPERSEDED_PROPOSAL_LABEL = (
+    "Superseded proposal: resolution_events lists the effective (executed) values "
+    "that replaced proposed ones; status says whether that request ran."
+)
 
-    Returns ``rec`` ITSELF when it carries none of them (a pre-Step-06 record
-    keeps its identity in the verbatim window, exactly as before) and a
-    shallow copy without them otherwise. Never mutates the input.
+
+def _label_superseded_proposal(rec: dict, memory: dict) -> dict:
+    """``memory`` with the supersession label after ``hypothesis`` when overruled.
+
+    Reads only the persisted ``resolution_events`` receipt (the tracker's
+    final events); it never re-derives resolution. Returns ``memory`` ITSELF
+    when there is nothing to label, so unaffected records keep their bytes.
     """
-    if not (_PLANNER_HIDDEN_RECORD_KEYS & rec.keys()):
+    if not rec.get("resolution_events") or "hypothesis" not in memory:
+        return memory
+    labelled: dict = {}
+    for key, value in memory.items():
+        labelled[key] = value
+        if key == "hypothesis":
+            labelled["hypothesis_provenance"] = SUPERSEDED_PROPOSAL_LABEL
+    return labelled
+
+
+def _planner_visible(rec: dict) -> dict:
+    """``rec`` as the planner's verbatim window shows it.
+
+    Drops the keys the planner must not see and labels a superseded
+    proposal. Returns ``rec`` ITSELF when neither applies (a pre-Step-06
+    record keeps its identity in the verbatim window, exactly as before) and
+    a shallow copy otherwise. Never mutates the input.
+    """
+    memory = rec.get("memory")
+    labelled = _label_superseded_proposal(rec, memory) if isinstance(memory, dict) else memory
+    if not (_PLANNER_HIDDEN_RECORD_KEYS & rec.keys()) and labelled is memory:
         return rec
-    return {k: v for k, v in rec.items() if k not in _PLANNER_HIDDEN_RECORD_KEYS}
+    visible = {k: v for k, v in rec.items() if k not in _PLANNER_HIDDEN_RECORD_KEYS}
+    if labelled is not memory:
+        visible["memory"] = labelled
+    return visible
 
 
 #: How many most-recent records the planner sees VERBATIM. One symbol, because
@@ -854,7 +891,9 @@ def _truncate_memory_history(
         New list (non-destructive). Recent records are unchanged apart from
         the Step-06 record-only payload keys, which are never rendered
         (``_PLANNER_HIDDEN_RECORD_KEYS``); older records are condensed to
-        identity + score + hypothesis/conclusion.
+        identity + score + resolution receipts + hypothesis/conclusion. In
+        both, a hypothesis whose record carries ``resolution_events`` is
+        labelled a superseded proposal (#1322).
     """
     if len(records) <= full_window:
         return [_planner_visible(rec) for rec in records]
@@ -876,7 +915,9 @@ def _truncate_memory_history(
         entry = {k: rec[k] for k in rec if k in _CONDENSED_KEYS}
         memory = rec.get("memory", {})
         if memory:
-            entry["memory"] = {k: memory[k] for k in memory if k in _CONDENSED_MEMORY_KEYS}
+            entry["memory"] = _label_superseded_proposal(
+                rec, {k: memory[k] for k in memory if k in _CONDENSED_MEMORY_KEYS}
+            )
         condensed.append(entry)
 
     return condensed + [_planner_visible(rec) for rec in records[cutoff:]]
