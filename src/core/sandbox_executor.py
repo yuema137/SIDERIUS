@@ -1991,8 +1991,9 @@ class StubSandbox(TidmadSandbox):
     The chain orchestration layer (``ml_hyperparameter_tune_agent``) treats
     a sandbox as a black box that returns ``status: success`` plus a results
     dict shaped like the production trainer / inference / scorer output.
-    StubSandbox honours that contract without launching any subprocesses,
-    writing any GPU artefacts, or touching the real data directory.
+    StubSandbox honours that contract without launching any subprocesses
+    or writing any GPU artefacts. Composed inference reads task inputs
+    and writes explicitly synthetic deliverables through the task codec.
 
     Per-method synthesis:
         * ``execute_training``: ``final_loss`` ∈ [0.5, 5.0],
@@ -2175,7 +2176,7 @@ class StubSandbox(TidmadSandbox):
         ``runtime_policy`` accepted for RT2-D signature parity;
         ``runtime_verification=None`` is the explicit-absence shape.
         Composed scopes use the production transport owner and task codec;
-        only scope configuration artifacts are written, never deliverables.
+        synthetic predictions also pass through the ordinary task deliverable writer.
         """
         validate_generated_artifact_name(run_name, field="run_name")
         if getattr(task_scopes, "training", None) is not None:
@@ -2191,6 +2192,16 @@ class StubSandbox(TidmadSandbox):
                     "subprocess_wall_ms": None,
                 }
         task_scope_argv(self.dirs["configs"], exp_id, task_scopes)
+        from core.pseudo_deliverables import write_pseudo_deliverable
+
+        write_pseudo_deliverable(
+            output_dir=self.base_dir,
+            data_dir=self.dirs["data"],
+            exp_id=exp_id,
+            run_name=run_name,
+            model_type=model_type,
+            task_scopes=task_scopes,
+        )
         return {
             "status": "success",
             "message": "stub_inference_ok",
@@ -2257,9 +2268,10 @@ class StubSandbox(TidmadSandbox):
     ) -> MetricResult:
         """The pseudo-mode mirror of the production metric route (Step 06 C2).
 
-        No deliverable exists under ``--is_pseudo_training``, so no
-        scoreability contract can run and no arithmetic can be reached; this
-        synthesises the same 2-tuple :meth:`score_vector` has always produced
+        Legacy pseudo inference need not write a deliverable. This method
+        retains synthetic scoring, including when composed inference writes
+        synthetic Health evidence. It synthesises the same 2-tuple
+        :meth:`score_vector` has always produced
         and returns it under the run's REAL metric identity/direction — the
         handle's own declaration, not an invention — so the record payload
         the tuner writes has the production shape. Values are synthetic
@@ -2290,10 +2302,9 @@ class StubSandbox(TidmadSandbox):
         Production ``TidmadSandbox.score_vector`` delegates to
         ``execute_tools.scoring_utils.score_vector``, which opens the
         ``abra_validation_denoised_*.h5`` artefacts produced by inference.
-        Under ``--is_pseudo_training`` those artefacts never get written
-        (inference is stubbed), so calling the inherited implementation
-        crashes with ``FileNotFoundError`` mid-scoring. This override
-        mirrors the synthesis contract of ``execute_scoring`` — same
+        Legacy pseudo inference does not write those artefacts. Composed
+        inference can write synthetic Health evidence, but scoring remains
+        synthetic through this override. It mirrors the synthesis contract of ``execute_scoring`` — same
         ``denoising_score`` ∈ [-3.0, -2.0] band, length-9 ``file_vector``
         — and returns them in the 2-tuple order the tuner unpacks at
         ``ml_hyperparameter_tune_agent.py`` (``score_vector`` call site).

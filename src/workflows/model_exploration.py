@@ -1626,8 +1626,9 @@ def run_workflow(
             HyperparamTuningInput (tuner's per-round gate). None = trial gate
             disabled. See docs/resource_estimator_implement.md §2.7.2 / Phase I.
         formal_time_budget_minutes: Same as above, but for formal-mode rounds
-            (plan.is_trial=False). Sized independently because formal runs
-            use the full dataset and are 50-100x longer.
+            (plan.is_trial=False). Sized independently because formal rounds
+            train on formal_portion (default 0.1) and score on
+            formal_eval_portion (default 1.0), not the trial workload.
         gpu_admission_measurement_source: V20 B-G3. Reference naming
             where an authoritative GPU measurement would resolve
             from. Never a figure. Unresolved before PR C, so formal
