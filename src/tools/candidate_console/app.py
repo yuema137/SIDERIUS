@@ -161,6 +161,12 @@ def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -
                 "capacity is available",
                 "resources_required": "this console shares a host ledger: declare the run's "
                 "host resources, then review again",
+                "resource_refused": "the run's host resources exceed the host budget even "
+                "when it is idle; lower them, then review again",
+                "parallel_unit_exceeds_capacity": "a parallel unit exceeds the host budget "
+                "even alone; lower it in the parallel table or remove its capability",
+                "run_resources_conflict": "the reviewed run already declares other host "
+                "resources or parallel nodes; review again without overriding them",
             }.get(error.detail.code, "native operation could not be verified")
         )
         if isinstance(error, UnknownOperation):

@@ -12,6 +12,7 @@ concurrency over them:
   completion (no backfill, decision B3-Q4);
 - drain (decision B3-Q2): after a failure readiness closes every undispatched
   node; running units finish with their real outcome;
+- a unit that cannot start fails alone, as in the serial path;
 - every dispatched entry publishes a write-once `UnitReceipt`;
 - every finished unit is collected before readiness is asked for the next node,
   so a failure that already exited stops new dispatch;
@@ -250,25 +251,26 @@ def _start(
         invocation = body.invocation(node_id).model_copy(update={"parallel": True})
         path, result_path = unit_runner.publish_invocation(invocation)
         env = unit_environment(placement)
+        # A SIGTERM landing between the spawn and the registration would orphan it.
+        with gate.held():
+            process = start_unit(path, env)
+            running[node_id] = RunningUnit(
+                node_id,
+                item,
+                invocation,
+                result_path,
+                process,
+                placement,
+                queued_event,
+                started,
+                started_at,
+            )
     except Exception as error:
+        # As in the serial path, a unit that cannot start (its invocation, a
+        # code-package refusal, a Popen OSError) fails alone; running units drain.
         body.fail(node_id, item, error)
         _publish(body, node_id, placement, queued_event, started, started_at, clock, "raised")
         body.decide_routes(node_id)
-        return
-    # A SIGTERM landing between the spawn and the registration would orphan it.
-    with gate.held():
-        process = start_unit(path, env)
-        running[node_id] = RunningUnit(
-            node_id,
-            item,
-            invocation,
-            result_path,
-            process,
-            placement,
-            queued_event,
-            started,
-            started_at,
-        )
 
 
 def _collect_finished(body: GraphBody, running: dict[str, RunningUnit], clock: _Clock) -> None:
@@ -355,16 +357,22 @@ def _terminating(
 ) -> Iterator[None]:
     """Any exit with units still running kills every one of their process groups.
 
-    SIGTERM is held during the cleanup, so a second signal cannot abort it. Each
-    terminated unit publishes a ``terminated`` receipt (best effort: the body
-    has no trace to verify it against).
+    SIGTERM is held during the cleanup, so a second signal cannot abort it, and
+    one unit whose termination raises never leaves the others running: its
+    error is re-raised once every group was terminated. Each terminated unit
+    publishes a ``terminated`` receipt (best effort: the body has no trace to
+    verify it against).
     """
     try:
         yield
     finally:
         with gate.held():
+            failure: Exception | None = None
             for unit in list(running.values()):
-                terminate(unit.process)
+                try:
+                    terminate(unit.process)
+                except Exception as error:
+                    failure = failure or error
                 with suppress(Exception):
                     _publish(
                         body,
@@ -377,3 +385,5 @@ def _terminating(
                         "terminated",
                     )
             running.clear()
+            if failure is not None:
+                raise failure

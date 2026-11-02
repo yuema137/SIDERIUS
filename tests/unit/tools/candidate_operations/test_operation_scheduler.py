@@ -845,3 +845,69 @@ def test_namespace_controls_sweep_and_operator_release(
         with pytest.raises(OperationFailure) as refused:
             release_reservation(host.ledger_root, operation.request_id)
         assert refused.value.detail.code == "liveness_unobservable"
+
+
+def test_a_placed_child_runs_only_while_admission_keeps_its_reservation(
+    prepared, tmp_path, children, processes, monkeypatch
+):
+    """Ctrl-C inside ``Popen`` after the fork removed the entry while the forked child
+    went on to run unaccounted (#1108). The child now confirms its entry first."""
+    from tools.candidate_operations import child as operation_child
+
+    launched: list[object] = []
+    monkeypatch.setattr(
+        operation_child, "launch_candidate", lambda *args, **kwargs: launched.append(args)
+    )
+    host = _ledger(tmp_path)
+    store = _store(tmp_path, "a")
+    kept = _gpu_operation(prepared, 1.0)
+    submit_operation(store, kept, launch_environment=KEY, host=host)
+    assert operation_child.execute(_operation_dir(store, kept)) == 1  # fake native: no receipt
+    assert len(launched) == 1  # a held reservation is confirmed and the run proceeds
+
+    def forked_then_interrupted(path, env):
+        processes.append(_session_leader())  # the child already exists
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("tools.candidate_operations.submit.spawn", forked_then_interrupted)
+    removed, other = _gpu_operation(prepared, 1.0), _store(tmp_path, "b")
+    with pytest.raises(KeyboardInterrupt):
+        submit_operation(other, removed, launch_environment=KEY, host=host)
+    assert [r.operation_id for r in _reservations(host)] == [kept.request_id]
+    path = _operation_dir(other, removed)
+    assert operation_child.execute(path) == 1
+    completion = json.loads((path / "completion.json").read_text())
+    assert (completion["outcome"], completion["reason"]) == (
+        "pre_dispatch_failure",
+        "host_reservation_unconfirmed",
+    )
+    assert len(launched) == 1  # the unaccounted child never ran
+
+
+def test_a_parallel_refusal_names_the_run_declaration_not_the_clamped_envelope(
+    prepared, tmp_path, children
+):
+    """After the envelope clamp only the run's own ``resources`` can exceed an idle
+    budget; the generic single-unit message sent the operator to the capabilities."""
+    from tests.helpers.candidate_fanout import fanout_request
+    from tools.candidate_worker.parallel_models import CapabilityResources, ParallelDispatch
+
+    request = fanout_request(prepared, 2)
+    parallel = ParallelDispatch(
+        capabilities={
+            "implementation": CapabilityResources(gpu=False, host_memory_gib=1.0, cpu_slots=1)
+        }
+    )
+    operation = CandidateOperation(
+        request_id=uuid4(),
+        request=request.model_copy(update={"parallel": parallel}),
+        resources=OperationResources(
+            gpu_count=0, host_memory_gib=128.0, cpu_slots=1, time_budgeted=False
+        ),
+    )
+    store = _store(tmp_path, "a")
+    with pytest.raises(OperationFailure) as refused:
+        submit_operation(store, operation, launch_environment=KEY, host=_ledger(tmp_path))
+    assert refused.value.detail.code == "resource_refused"
+    assert "resources declaration" in str(refused.value) and "128.00 GiB" in str(refused.value)
+    assert _claims(store) == []
