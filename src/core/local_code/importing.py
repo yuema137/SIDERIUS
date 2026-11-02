@@ -9,6 +9,7 @@ import importlib.util
 import sys
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
+from pathlib import Path
 from threading import RLock
 from types import ModuleType
 
@@ -18,7 +19,6 @@ from core.local_code.capture import (
     LocalCodeError,
     MemberIdentity,
     module_key,
-    sha256,
 )
 
 _METADATA = "__siderius_local_code__"
@@ -78,9 +78,25 @@ class _FiniteImporter(importlib.abc.MetaPathFinder, importlib.abc.Loader):
                 exec(compile(member.source, module.__file__, "exec"), module.__dict__)
 
 
+# Content namespace -> package roots in first-load order (guarded by _LOCK).
+_ROOTS: dict[str, list[Path]] = {}
+
+
 def _namespace(package: CapturedCodePackage) -> str:
-    location = sha256(str(package.root).encode())
-    return f"_siderius_task_{package.identity.digest}_{location}"
+    """Name from content only; disambiguate same-content roots per process.
+
+    The first root loaded for a content digest owns the canonical name, so a
+    run's module names do not depend on its checkout path. A second root with
+    identical content in the same interpreter gets an ordinal suffix and keeps
+    its own classes and ``__file__``; the suffix never enters semantic identity.
+    """
+    base = f"_siderius_task_{package.identity.digest}"
+    with _LOCK:
+        roots = _ROOTS.setdefault(base, [])
+        if package.root not in roots:
+            roots.append(package.root)
+        index = roots.index(package.root)
+    return base if index == 0 else f"{base}_{index}"
 
 
 @contextmanager

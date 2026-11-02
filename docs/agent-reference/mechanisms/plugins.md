@@ -171,7 +171,8 @@ collisions between unrelated plugin files:
 With the optional [package declaration](../../reference/task-composition.md),
 selected file consumers share a finite namespace across families. Relative
 imports execute only declared captured members, so helper-defined classes have
-one identity within a package. Directory-roster rules remain unchanged; this
+one identity within a package. The namespace name is derived from the package
+content digest, not its checkout path. Directory-roster rules remain unchanged; this
 does not add recursive model/loss discovery. See the
 [loading/transport owner](../../../src/core/local_code/README.md).
 
