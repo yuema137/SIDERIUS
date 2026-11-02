@@ -112,3 +112,15 @@ this package are in `tests/unit/examples/test_quickstart_pack.py`; the rules
 for framework example packs are in
 [siderius_generic_framework_upgrade.md](../../docs/design/siderius_generic_framework_upgrade.md)
 §22.23.
+
+## Repeating a sampled run
+
+The generated dataset stays fixed. To repeat the random row selections in a
+run, use the same `--run_seed`; the framework supplies the scope and epoch
+sampling seeds. Direct plugin callers must supply `ScopeBuildRequest.seed`
+and `EpochSamplingParams.epoch_seed` when sampling, or receive `MissingRunSeed`.
+Selecting all rows or applying a prefix ceiling needs no seed.
+
+Updating a plugin changes the composition fingerprint that identifies the
+run's configuration and code. Start a new workspace after updating this pack;
+a workspace pinned to the previous plugin cannot resume with the new one.
