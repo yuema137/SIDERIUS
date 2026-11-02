@@ -211,3 +211,30 @@ preservation, finite-only ranking, and JSON parsing that rejects non-standard
 numeric tokens. Reverting either the status projection or exploration response
 model must fail the relevant HTTP witness. No prompt, scientific record,
 protection/estimation assembly or verifier identity changes are involved.
+
+## Unrankable leaderboard and overview projection
+
+The data source composes `execute_tools.persisted_ranking.corpus_order` and
+`execute_tools.metric_order` to decide whether records can be ranked and in
+which direction. The HTTP boundary preserves that decision without inferring
+metric identity or direction. `LeaderboardEntry.rank` accepts `null`;
+`metric_ranking` carries the data source's reason for an unrankable row and is
+`null` for a ranked row. Finite legacy scores remain inspectable. The existing
+status filter and `top_n` limit still apply; compatible ranked entries precede
+legacy unrankable entries within that limit. Conflicting declared identities
+leave the corpus unranked and include the conflict in the reason.
+
+`ModelOverview` exposes `metric_identity_unavailable_rows` (the data source's
+count of finite agent records excluded for missing identity) and
+`metric_ranking_unavailable` (the reason no corpus order was available, otherwise
+`null`). Neither field is recomputed by the router. Missing identity does not
+poison compatible records; legacy-only or conflicting corpora have no
+`best_agent_score` or `best_run_name`. Non-finite exclusion and persisted records
+remain unchanged.
+
+`tests/unit/dashboard/test_ranking_http.py` exercises real `create_app` HTTP
+responses for legacy-only, mixed legacy/rankable records in both directions,
+and conflicting declared identities. Integration fixtures explicitly declare
+identity when asserting ranks and best scores; a separate legacy fixture omits
+it. These witnesses require successful HTTP responses, preserved raw scores,
+null ranks with reasons, overview diagnostics and owner-selected best scores.

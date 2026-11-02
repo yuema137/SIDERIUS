@@ -21,3 +21,9 @@ Source owners are the [local data reader](../../../src/dashboard/data_sources/lo
 [API response boundary](../../../src/dashboard/api/README.md).
 See the [dashboard contract](../../../src/dashboard/dashboard-contract.md) for
 status ownership and serialization details.
+
+Ranking checks also cover records that lack metric identity (the metric name
+and whether higher or lower scores are better). For example, a legacy score of
+100 stays readable but receives `rank: null` with a reason. It cannot outrank
+records whose metric identity is declared. Tests cover both ordering directions
+and conflicting metric identities through the real HTTP app.
