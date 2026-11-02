@@ -1595,7 +1595,8 @@ request digests of loops without `request_input` are unchanged.
 
 A Resume may carry operator advice: untrusted text, typed `loop_models.OperatorAdvice`
 (surrounding whitespace removed; 1..4000 characters; no `Cc`/`Cf` (control or format, e.g. C1, bidi overrides, BOM) characters except
-newline and tab). It is not a reviewed captured input: root captured inputs stay
+newline, tab, ZWNJ (U+200C), and ZWJ (U+200D)). Joiners preserve multilingual words
+and emoji; bidi formatting and BOM remain refused. It is not a reviewed captured input: root captured inputs stay
 unchanged, and the advice travels in the operations request and in the immutable
 `LoopContinuation.operator_advice` (omitted when absent, so advice-free bindings keep
 their bytes). `LoopContinuation.resume_advice()` gives
