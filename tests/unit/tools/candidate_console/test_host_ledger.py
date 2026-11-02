@@ -179,3 +179,85 @@ def test_queue_full_refusal_reaches_the_browser_with_recovery_action(console_con
         "code": "host_queue_full",
         "message": "host waiting queue is full or disabled; retry when capacity is available",
     }
+
+
+def test_run_resources_set_only_supplied_fields_and_never_override_a_reviewed_one(
+    worker_prepared,
+):
+    """Supplying only ``resources`` silently cleared a reviewed request's ``parallel``,
+    so the run launched serially inside a reservation sized for parallel (#1108)."""
+    from tests.helpers.candidate_fanout import fanout_request
+    from tools.candidate_operations.models import OperationFailure
+    from tools.candidate_worker.parallel_models import CapabilityResources, ParallelDispatch
+
+    def parallel(memory: float) -> ParallelDispatch:
+        unit = CapabilityResources(gpu=False, host_memory_gib=memory, cpu_slots=1)
+        return ParallelDispatch(capabilities={"implementation": unit})
+
+    request = fanout_request(worker_prepared).model_copy(update={"parallel": parallel(1.0)})
+    operation = CandidateOperation(request_id=uuid4(), request=request)
+    resources = OperationResources(
+        gpu_count=0, host_memory_gib=2.0, cpu_slots=1, time_budgeted=False
+    )
+    launched = with_run_resources(operation, RunResourcesSelection(resources=resources))
+    assert launched.request.parallel == parallel(1.0) and launched.resources == resources
+    same = with_run_resources(operation, RunResourcesSelection(parallel=parallel(1.0)))
+    assert same.request.parallel == parallel(1.0)
+    with pytest.raises(OperationFailure) as conflict:
+        with_run_resources(operation, RunResourcesSelection(parallel=parallel(2.0)))
+    assert conflict.value.detail.code == "run_resources_conflict"
+    with pytest.raises(OperationFailure) as replaced:
+        with_run_resources(
+            launched,
+            RunResourcesSelection(resources=resources.model_copy(update={"cpu_slots": 2})),
+        )
+    assert replaced.value.detail.code == "run_resources_conflict"
+
+
+def test_a_relative_budget_file_stops_the_console(ledgered, tmp_path, monkeypatch):
+    """A relative ``budget_file`` was resolved against the console's working directory,
+    so the same configuration loaded a different budget per launch directory."""
+    monkeypatch.chdir(tmp_path)
+    config = ledgered.model_copy(
+        update={
+            "host_ledger": ledgered.host_ledger.model_copy(
+                update={"budget_file": "host-budget.json"}
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="configured host ledger is unusable"):
+        CandidateConsole(config)
+
+
+@pytest.mark.parametrize(
+    ("code", "remedy"),
+    [
+        ("resource_refused", "lower them"),
+        ("parallel_unit_exceeds_capacity", "parallel table"),
+        ("run_resources_conflict", "without overriding"),
+    ],
+)
+def test_resource_refusals_reach_the_browser_with_their_remedy(
+    console_config, monkeypatch, code, remedy
+):
+    """These refusals reached the browser as "native operation could not be verified",
+    so a parallel run refused for its own declaration gave the operator no remedy."""
+    from tests.unit.tools.candidate_console.test_http import client
+    from tools.candidate_operations.models import OperationFailure
+
+    def refuse(self, selection):
+        raise OperationFailure(code, "private diagnostic")
+
+    monkeypatch.setattr(CandidateConsole, "resume_loop", refuse)
+    response = client(console_config).post(
+        "/api/loop-resumes",
+        json={
+            "request_id": str(uuid4()),
+            "predecessor_operation_id": str(uuid4()),
+            "expected_receipt_digest": "a" * 64,
+        },
+    )
+    assert response.status_code == 409
+    error = response.json()["error"]
+    assert error["code"] == code and remedy in error["message"]
+    assert "private diagnostic" not in error["message"]

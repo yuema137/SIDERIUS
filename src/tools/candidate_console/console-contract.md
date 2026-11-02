@@ -327,8 +327,11 @@ Optional `host_ledger` (`ConsoleHostLedger`: `ledger_root`, `budget_file`;
 omitted when absent, so existing configurations keep their bytes and every
 launch stays serial and unbudgeted). `CandidateConsole.__init__` loads it once
 (`config.host_scheduling`): the directory must already exist with owned mode
-0700 (`host_ledger.ledger_directory`) and the budget is read only through
-`budget_intake.load_host_budget_file`. Either failure raises `ValueError`
+0700 (`host_ledger.ledger_directory`), `budget_file` must be a canonical
+absolute path (`files.canonical`, the rule every configured path follows; a
+relative path is never resolved against the console's working directory), and
+the budget is read only through `budget_intake.load_host_budget_file`. Any of
+these failures raises `ValueError`
 ("configured host ledger is unusable") and the console does not start; it never
 falls back to unbudgeted launches.
 
@@ -357,7 +360,10 @@ different values therefore refuses `stale_review`, and a retried launch replays
 idempotently: the replay check recomputes the same bound digest from the stored
 operation. `with_run_resources` attaches them, revalidating through the
 operation and request owners; without them the reviewed operation is submitted
-byte for byte.
+byte for byte. It sets only the supplied fields: an absent one keeps what the
+reviewed operation already carries (`CandidateOperation.resources`,
+`request.parallel`), and a supplied one that differs from a value the operation
+already carries refuses `run_resources_conflict` instead of replacing it.
 
 Review-time refusals (B3-4c UI review). `CandidateConsole.require_reviewable_resources`
 runs at every candidate review (prepared, edited, reusable): without a host

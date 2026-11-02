@@ -311,7 +311,12 @@ code and leaves no claim, reservation or child):
    CPU-only declaration that binds device nodes (`request.devices`):
    `placement_unreachable`;
 6. `plan_dispatch` refusal (cannot fit even an idle budget):
-   `resource_refused` with its `escalated to operator` reasons. Otherwise the
+   `resource_refused` with its `escalated to operator` reasons. For a parallel
+   run every envelope quantity is clamped to the budget but never below the
+   run's own `resources` declaration, and a unit that fits no slot alone was
+   already refused `parallel_unit_exceeds_capacity`; so this refusal can only
+   mean that declaration exceeds the idle budget, and its message says so
+   ("the run's resources declaration exceeds this host budget ..."). Otherwise the
    ledger is first promoted (below), then this unit is planned behind every
    remaining waiter, `plan_dispatch((*queued, unit), reservations, budget,
    on_refusal="continue")`: it is placed only when every earlier waiter is
@@ -325,8 +330,9 @@ code and leaves no claim, reservation or child):
    reason names the contention. `host_capacity` is no longer returned.
 
 Placement and spawn. After the claim the reservation (or queue entry) is
-written (process unbound, so a crash fails closed). A placed unit's `Placement`
-is published write-once as `operations/<UUID>/placement.json`; a queued unit
+written (process unbound, so a crash fails closed). A placed unit publishes
+write-once `operations/<UUID>/host_reservation.json` (`HostReservationTicket`:
+`ledger_root`), then its `Placement` as `operations/<UUID>/placement.json`; a queued unit
 publishes `operations/<UUID>/queued.json` instead (below). For a GPU unit the launch mapping is
 overlaid before every later name check and the child environment: the slot UUID
 replaces any inherited `CUDA_VISIBLE_DEVICES` (the sandbox sees the slot as
@@ -337,6 +343,24 @@ and bound. A `Popen` `OSError` removes the reservation and publishes
 `placement.json` and `spawn_failure.json`; the placement then names a
 reservation that no longer exists. Any other failure after the write keeps the
 reservation unbound.
+
+Placed-child confirmation (#1108). The submitter holds the ledger lock from
+writing the entry until it has bound the child or removed the entry. A directly
+placed operation child (it sees `placement.json` and no `queued.json`), right
+after publishing `process.json` and checking its runtime binding and before any
+reusable verification or native dispatch, calls `host_queue.confirm_reservation`:
+under the ledger lock it requires a reservation with its `operation_id`,
+`request_digest` and the published `placement`. Absent (or the ledger busy past
+`LEDGER_LOCK_WAIT_SECONDS`, or unreadable), the child publishes
+`Completion(outcome="pre_dispatch_failure", reason="host_reservation_unconfirmed")`
+and never runs. This closes two windows with one rule: a `KeyboardInterrupt`
+inside `Popen` after the fork (the submitter removes the entry, but the child
+already exists in its own session), and a submitter killed after `Popen`
+returned but before the child published `process.json` (the sweep releases the
+entry on the submitter's positive exit). Once `process.json` exists the sweep
+sees a live child and keeps the entry, so a confirmed reservation stays held.
+A queued child needs no separate step: each `_poll` already reads its own entry
+under the lock, and a missing one ends it with `host_queue_failed`.
 
 Sandbox identity. A placed operation's child (it sees `placement.json`) passes
 `on_sandbox_spawn` to `launch_candidate`, which publishes the bwrap process
@@ -369,7 +393,8 @@ never sees the sandbox.
   and the entry would otherwise hold capacity, or the head of the queue,
   forever. An interrupted spawn that does not kill the submitter (any
   non-`OSError`, such as `KeyboardInterrupt`) removes the entry itself before
-  re-raising. With no identity and no recorded or exited submitter, a
+  re-raising; a child already forked then fails its confirmation (above) and
+  never runs. With no identity and no recorded or exited submitter, a
   mismatched published identity, or any unreadable record, the entry is kept
   (no exception).
 - Operator, `release_reservation` (CLI `release-reservation --host-ledger DIR
@@ -410,9 +435,9 @@ Known caveats and observation boundaries (also apply to admission release and En
 
 - Submitter window: if the submitter is killed after `Popen` returned but
   before the child published `process.json` (its first action), the entry is
-  released while that child starts. A queued child then finds its entry gone
-  and ends without running (`host_queue_failed`); a placed child would run
-  unaccounted until it exits.
+  released while that child starts. The child then finds its entry gone and
+  ends without running: a queued child with `host_queue_failed`, a placed one
+  with `host_reservation_unconfirmed` (placed-child confirmation, above).
 
 - bwrap startup window: `--die-with-parent` takes effect only once bwrap has
   set its parent-death signal during startup. If the operation child dies in
