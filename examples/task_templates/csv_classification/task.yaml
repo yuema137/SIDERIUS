@@ -67,12 +67,14 @@ deliverable:
 task_config:
   config: declared/task_config.yaml
 
-# Locked parameters: the agents cannot change these values.
+# Limited parameters: the agents must keep these values inside the rule.
 parameter_rules:
-  # EDIT HERE: lock or remove. `exact` fixes a value; `range: {min: 1, max: 50}`
-  # or `allowed: [16, 32]` limit the agents' choice instead.
+  # EDIT HERE: change or remove. `range` limits the agents' choice; `exact: 32`
+  # fixes a value; `allowed: [16, 32]` lists the permitted values. The range
+  # starts at 1 so a training scope smaller than one batch (small data in a
+  # Trial round) is trained with a smaller batch; an `exact` lock refuses it.
   train_config.batch_size:
-    exact: 32
+    range: {min: 1, max: 32}
 
 model_plugins:
   dir: plugins

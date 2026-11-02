@@ -484,3 +484,77 @@ def test_uncommented_evaluation_example_binds_and_reaches_agent_prompts(
             rendered = append_evaluation_spec("")
     assert f"Meaning: {meaning}" in rendered
     assert "Deterministic ranking: balanced_accuracy; maximize" in rendered
+
+
+def test_small_data_trial_round_clamps_batch_and_trains_a_step(data_dir, tmp_path) -> None:
+    """Issue #1506: an ``exact: 32`` batch lock makes a small-data Trial round
+    unrunnable. With the planner's default portions the template's own sampler
+    leaves one training row, so ``prepare_attempt`` raised
+    ``TrainingBatchPlanError`` for every attempt and the run ended
+    ``no_records``. Fails at ``prepare_attempt`` if the template rule refuses
+    clamping again, and at the step count if the clamped batch still cannot
+    train one optimizer step on the rows the template actually serves."""
+    from dataclasses import replace
+
+    from torch.utils.data import DataLoader
+
+    from agent.schemas.hyperparam_tuning import ExperimentPlan
+    from execute_tools.task_data_path import bind_task_data_path
+    from nodes.ml_hyperparameter_tune_agent.contracts import AttemptIdentity, AttemptOrdering
+    from nodes.ml_hyperparameter_tune_agent.planning import prepare_attempt
+    from tests.unit.nodes.ml_hyperparameter_tune_agent.test_c12p_b11_composed_seg_size_authoring import (
+        _bindings,
+        _Brain,
+        _composed_input,
+    )
+    from workflows.task_composition import build_task_composition_ref
+
+    defaults = ExperimentPlan()
+
+    class PlannerDefaults(_Brain):
+        def plan(self, *args, **kwargs):
+            return {
+                **super().plan(*args, **kwargs),
+                "train_cfg": {"batch_size": 32, "epochs": 1, "drop_last": True},
+                "trial_portion": defaults.trial_portion,
+                "train_portion": defaults.train_portion,
+            }
+
+    with run_registration_scope():
+        composition = compose_run_task_bindings(str(MANIFEST))
+        inputs = _composed_input()
+        inputs.is_trial = True
+        inputs.task_composition_ref = build_task_composition_ref(composition)
+        path = composition.task_data_path
+        bindings = replace(
+            _bindings(inputs, tmp_path, path),
+            brain=PlannerDefaults(),
+            max_rounds=2,
+            time_data_dir=str(data_dir),
+        )
+        with (
+            bind_run_task_composition(composition, physical_data_root=str(data_dir)),
+            bind_task_data_path(path),
+        ):
+            prepared = prepare_attempt(
+                bindings,
+                attempt_ordering=AttemptOrdering(),
+                identity=AttemptIdentity(round_index=1, attempt_in_round=1, is_formal_round=False),
+                total_attempts=1,
+                attempts_this_round=1,
+                formal_trial_winner=None,
+            )
+            fit = prepared.record_params["training_batch_fit"]
+            batch = prepared.active_params["train_config"]["batch_size"]
+            sampling = EpochSamplingParams(
+                data_dir=str(data_dir),
+                epoch_seed=1,
+                train_portion=prepared.trial_config.train_portion,
+            )
+            rows = path.training_dataset(prepared.task_scopes.training, sampling)
+            steps = len(DataLoader(rows, batch_size=batch, drop_last=True))
+
+    assert prepared.plan.is_trial
+    assert fit["requested_batch_size"] == 32
+    assert batch == fit["resolved_batch_size"] == len(rows) < 32
+    assert steps >= 1

@@ -73,7 +73,7 @@ def test_task_summary_shows_score_health_lock_and_split_sizes(
 ):
     """Defect: the Task tab cannot show what the template declares. Fails if
     the main score, either Health gate with its declared role, the batch-size
-    lock, the declared per-file volume or the counted split sizes are missing."""
+    range, the declared per-file volume or the counted split sizes are missing."""
     manifest = copy_template(tmp_path / "tasks" / "iris")
     task = console_config.tasks[0]
     write_csv_dataset(Path(task.data_root))
@@ -111,7 +111,7 @@ def test_task_summary_shows_score_health_lock_and_split_sizes(
     }
     assert [
         (lock["path"], lock["rule"], lock["value"]) for lock in package["locked_parameters"]
-    ] == [("train_config.batch_size", "exact", 32)]
+    ] == [("train_config.batch_size", "range", {"min": 1.0, "max": 32.0})]
     assert package["scopes"]["state"] == "declared"
     assert package["scopes"]["evaluation"]["file_count"] == 1
     counts = package["sample_counts"]
