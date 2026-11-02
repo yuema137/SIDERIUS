@@ -330,8 +330,10 @@ A successful data command ends with `Data ready in .../data/NAME`.
    enter its complete operation UUID (Settings › Show advanced tools). You can also open a link such as
    `http://127.0.0.1:8740/#monitor/22222222-2222-4222-8222-222222222222`
    (replace the example UUID), then Connect. No task or editor project selection
-   is needed. The optional remembered ID is labelled **Last opened on this browser**;
-   it is separate from the Recent operations list. Expand Operation facts, Reported
+   is needed. After connecting, the optional remembered ID is labelled **Last opened
+   on this browser for this operations store**. Switching to another operations store
+   restores that store's remembered ID, if any. An explicit UUID link takes precedence;
+   the remembered ID is separate from the Recent operations list. Expand Operation facts, Reported
    token table, or Activity and logs when needed. When a workflow run has
    finished, **Workflow training results** shows the tuner report of each
    verified iteration separately; it never combines or ranks iterations.
@@ -527,7 +529,10 @@ external inputs such as storage. Only existing inputs can be rewired here.
 
 A large workflow opens zoomed out (never below 75%, so text stays readable; scroll the
 canvas for the rest). The controls at the bottom right of the canvas (zoom, **Actual
-size**, **Fit to view**) change only the view. Optional inputs that no wire feeds are
+size**, **Fit to view**) change only the view. If the whole graph cannot fit at 75%,
+**Fit to view** brings the selected module into view, or the first module if none is
+selected. The note below the canvas explains the limit; scroll inside the canvas
+to reach the remaining modules. Optional inputs that no wire feeds are
 folded into a "+N optional" row on each card; expand it to connect one. If saved cards overlap, the canvas says so;
 **Tidy up** arranges them (one edit you can undo).
 
