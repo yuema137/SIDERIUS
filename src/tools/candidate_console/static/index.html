@@ -377,6 +377,14 @@
       <p id="loop-stop-status" role="status"></p>
       <p id="loop-continued" hidden>Continued by <a id="loop-successor"></a></p>
       <div id="loop-resume-group" hidden><div class="actions"><button id="loop-resume-review" type="button">Review resume</button><button id="loop-resume" type="button" hidden>Resume loop</button><button id="loop-end" type="button">End loop here</button></div>
+        <fieldset id="loop-resume-resources" class="run-scheduling" hidden><legend><label><input type="checkbox" id="loop-resume-resources-declare"> Declare host resources for the resumed segment</label></legend>
+          <p class="muted">This console shares a host ledger, and the loop's first run declared no host resources. Declare what the resumed segment needs; it waits its turn when the host is busy. Changing anything here needs a new review.</p>
+          <label>GPU <select id="loop-resume-resources-gpu"><option value="">Choose</option><option value="0">No GPU</option><option value="1">One GPU</option></select></label>
+          <label>GPU memory (GiB) <input id="loop-resume-resources-vram" type="number" min="0" step="any" inputmode="decimal"></label>
+          <label>Host memory (GiB) <input id="loop-resume-resources-memory" type="number" min="0" step="any" inputmode="decimal"></label>
+          <label>CPU slots <input id="loop-resume-resources-cpus" type="number" min="1" step="1" inputmode="numeric"></label>
+          <label><input type="checkbox" id="loop-resume-resources-timed"> Uses a training time budget</label>
+        </fieldset>
         <p id="loop-resume-summary" class="muted"></p>
         <div id="loop-resume-advice-group" hidden><label for="loop-resume-advice">Your advice for the next iterations (optional)</label>
           <textarea id="loop-resume-advice" rows="4" maxlength="4000"></textarea>

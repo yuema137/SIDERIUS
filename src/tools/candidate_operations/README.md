@@ -274,8 +274,10 @@ the reservation back when its processes, including training, have ended.
    that is how the run receives the GPU it was given. The `vram_gib` you declare
    is what the ledger reserves. The run itself does not yet check that it stays
    within it, so declare at least the run's own VRAM budget. Only `candidate`
-   submissions are accepted with a budget; other kinds are refused with
-   `resources_required`.
+   submissions and research-loop resumes are accepted with a budget; other kinds
+   are refused with `resources_required`. A resume reuses its first run's
+   `resources`, or brings its own when that run had none (see
+   [Stop, pause or resume a research loop](#stop-pause-or-resume-a-research-loop)).
 4. Submit every candidate with the same ledger directory and budget file. The
    two flags always go together:
 
@@ -463,6 +465,13 @@ browser console offers the same actions in Monitor.
    control characters other than line breaks and tabs. Windows (CRLF) and Unix (LF)
    line breaks both work. If the advice is refused,
    nothing is saved and the command exits with status 2.
+
+   If you will submit with a [shared host ledger](#share-one-gpu-budget-across-operations)
+   and the loop's first run had no `resources`, also add
+   `--resources-file resources.json`: a file holding one `resources` object for the
+   resumed part, in the format of step 3 there. Each resume of such a loop needs its
+   own. If the first run declared `resources`, leave the flag out; the resume reuses
+   them, and a second declaration is refused with `run_resources_conflict`.
 
 3. Make the same provider API keys available in this shell as for the original
    launch, then submit:

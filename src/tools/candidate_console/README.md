@@ -363,6 +363,13 @@ A successful data command ends with `Data ready in .../data/NAME`.
    advice. It locks once you select **Resume loop**, so a retry sends the same text.
    The resumed segment then shows "Resumed with your advice: …". If you pressed Stop while it was waiting, the run
    cannot continue and no Resume is offered.
+   If `console.json` has a `host_ledger` (see [Credentials](#credentials)) and the
+   loop's first run declared no host resources, the resumed segment needs its own:
+   **Review resume** says so and shows **Declare host resources for the resumed
+   segment**. Tick it, enter what the segment needs (the same fields as on **Run**),
+   then choose **Review resume** again. The summary lists what you entered; changing
+   it asks you to review again. A loop whose first run declared resources reuses
+   them and asks for nothing.
    A loop with a judge stop condition lists each judge decision under it, with
    the judge's own reason when the call decided.
    To stop a running candidate now, press **Stop run** and confirm. The run

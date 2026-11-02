@@ -13,7 +13,7 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, overload
 from uuid import UUID
 
 from core.runtime_control.scheduling import HostBudget, Placement, ResourceRequest, plan_dispatch
@@ -173,8 +173,10 @@ def host_slot(
     submission: OperationSubmission,
 ) -> Iterator[HostSlot]:
     if host is None:
-        _require_unplaced_root(config, submission)
+        _require_unplaced_loop(config, submission)
         _require_serial_or_own_budget(config, submission)
+        if submission.kind == "candidate_loop_resume":
+            loop_resume_resources(None, submission.request.resources, ledger=False)
         yield HostSlot()
         return
     root_operation, resources = _declared(config, submission)
@@ -194,22 +196,26 @@ def host_slot(
         yield LedgerSlot(root, host, admitted)
 
 
-def _require_unplaced_root(config: OperationStoreConfig, submission: OperationSubmission) -> None:
-    """A loop whose root ran placed in a host ledger never resumes outside it.
+def _require_unplaced_loop(config: OperationStoreConfig, submission: OperationSubmission) -> None:
+    """A loop any of whose segments ran placed in a host ledger never resumes outside it.
 
     The serial path would run the segment unaccounted beside ledger-placed runs;
-    the operator resumes it with the same ledger and budget instead.
+    the operator resumes it with the same ledger and budget instead. Every earlier
+    segment counts, not only the root: a root without ``resources`` runs serially,
+    and its resumes may still be placed with their own declaration (#1385).
     """
     if submission.kind != "candidate_loop_resume":
         return
-    from .loop_resume import root_record
+    from .loop_resume import loop_chain
 
-    root = root_record(load_record(config, submission.request.predecessor_operation_id))
-    placed = operation_path(config, root.submission.request_id) / PLACEMENT_FILE
-    if os.path.lexists(placed):
+    chain = loop_chain(load_record(config, submission.request.predecessor_operation_id))
+    if any(
+        os.path.lexists(operation_path(config, record.submission.request_id) / PLACEMENT_FILE)
+        for record in chain
+    ):
         raise OperationFailure(
             "host_ledger_required",
-            "this loop's root ran placed in a host ledger; resume it with the same "
+            "this loop ran placed in a host ledger; resume it with the same "
             "--host-ledger and --host-budget",
         )
 
@@ -217,12 +223,16 @@ def _require_unplaced_root(config: OperationStoreConfig, submission: OperationSu
 def _declared(
     config: OperationStoreConfig, submission: OperationSubmission
 ) -> tuple[CandidateOperation, OperationResources]:
-    """The candidate whose request and declaration the ledger reserves for.
+    """The candidate whose request the ledger reserves for, and the reservation.
 
-    A loop resume inherits its root candidate's declaration and launch request:
-    the segment runs that request again in the same workspace.
+    A loop resume runs its root candidate's launch request again in the same
+    workspace; its reservation is ``loop_resume_resources``.
     """
     operation = _root_candidate(config, submission)
+    if operation is not None and submission.kind == "candidate_loop_resume":
+        return operation, loop_resume_resources(
+            operation, submission.request.resources, ledger=True
+        )
     if operation is None or operation.resources is None:
         raise OperationFailure(
             "resources_required",
@@ -230,6 +240,53 @@ def _declared(
             "resources declaration",
         )
     return operation, operation.resources
+
+
+@overload
+def loop_resume_resources(
+    root: CandidateOperation, supplied: OperationResources | None, *, ledger: Literal[True]
+) -> OperationResources: ...
+@overload
+def loop_resume_resources(
+    root: CandidateOperation | None, supplied: OperationResources | None, *, ledger: bool
+) -> OperationResources | None: ...
+def loop_resume_resources(
+    root: CandidateOperation | None, supplied: OperationResources | None, *, ledger: bool
+) -> OperationResources | None:
+    """The one rule for what a loop resume reserves (#1385); refusals are typed.
+
+    ``supplied`` is the resume request's own ``resources``. Without a ledger
+    nothing is reserved, so a supplied declaration refuses ``host_ledger_missing``
+    instead of being ignored. Under a ledger the root candidate's declaration is
+    the authority when it has one, and a supplied one then refuses
+    ``run_resources_conflict`` even when equal; a root without one requires the
+    supplied declaration (``resources_required``). A predecessor segment's
+    declaration is never inherited: each segment of an undeclared root supplies
+    its own. Host admission and the console's Resume review both call this.
+    """
+    if not ledger:
+        if supplied is not None:
+            raise OperationFailure(
+                "host_ledger_missing",
+                "a loop resume's resources are reserved only in a host ledger; submit with "
+                "--host-ledger and --host-budget, or omit resources",
+            )
+        return None
+    declared = None if root is None else root.resources
+    if supplied is not None:
+        if declared is not None:
+            raise OperationFailure(
+                "run_resources_conflict",
+                "the loop root already declares resources; resume without a resources declaration",
+            )
+        return supplied
+    if declared is None:
+        raise OperationFailure(
+            "resources_required",
+            "the loop root declares no resources; a budgeted resume supplies its own "
+            "resources declaration",
+        )
+    return declared
 
 
 def _root_candidate(
