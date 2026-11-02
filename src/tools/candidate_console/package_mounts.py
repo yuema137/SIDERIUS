@@ -90,11 +90,13 @@ def device_problem(device: str) -> str | None:
 
     Calls the sandbox's own admission, ``SandboxProfile.device_paths`` (a
     canonical existing path under ``/dev`` that is a character device), and
-    returns its refusal reason; this module adds no second device rule.
+    returns its audited fixed guidance plus the declared path. Nested causes are
+    not forwarded; this module adds no second device rule.
     """
     try:
         SandboxProfile.device_paths((Path(device),))
     except ValueError as error:
+        # This owner raises fixed framework guidance plus the operator's declared path.
         return str(error)
     return None
 

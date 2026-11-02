@@ -274,8 +274,10 @@ the reservation back when its processes, including training, have ended.
    that is how the run receives the GPU it was given. The `vram_gib` you declare
    is what the ledger reserves. The run itself does not yet check that it stays
    within it, so declare at least the run's own VRAM budget. Only `candidate`
-   submissions are accepted with a budget; other kinds are refused with
-   `resources_required`.
+   submissions and research-loop resumes are accepted with a budget; other kinds
+   are refused with `resources_required`. A resume reuses its first run's
+   `resources`, or brings its own when that run had none (see
+   [Stop, pause or resume a research loop](#stop-pause-or-resume-a-research-loop)).
 4. Submit every candidate with the same ledger directory and budget file. The
    two flags always go together:
 
@@ -463,6 +465,26 @@ browser console offers the same actions in Monitor.
    control characters other than line breaks and tabs. Windows (CRLF) and Unix (LF)
    line breaks both work. If the advice is refused,
    nothing is saved and the command exits with status 2.
+
+   **Resuming under a shared host ledger.** If you will submit with
+   `--host-ledger` and `--host-budget` (a
+   [shared host ledger](#share-one-gpu-budget-across-operations), where each run
+   reserves part of the host budget before it starts), check whether the loop's
+   first run had a `resources` object:
+
+   - It had one: add nothing. The resume reserves the same `resources`.
+   - It had none: write the resumed part's needs to a file, for example
+     `resources.json` containing
+     `{"gpu_count": 0, "host_memory_gib": 8.0, "cpu_slots": 2, "time_budgeted": false}`
+     (the format of step 3 there), and add `--resources-file resources.json`.
+     Each resume of such a loop needs its own file.
+
+   An invalid file saves nothing and exits with status 2
+   (`invalid_input_or_record`). Whether the declaration fits is checked at
+   `submit`: a missing one is refused with `resources_required`, one beside the
+   first run's own `resources` with `run_resources_conflict`, and one submitted
+   without `--host-ledger` with `host_ledger_missing`. After such a refusal, write a
+   new request file with a new `--output` name; the saved file cannot be changed.
 
 3. Make the same provider API keys available in this shell as for the original
    launch, then submit:

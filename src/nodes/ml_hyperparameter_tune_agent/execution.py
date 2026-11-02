@@ -57,6 +57,7 @@ from execute_tools.evaluation_metric import (
 from execute_tools.health_checks.schemas import (
     PerSampleEvidence,
 )
+from execute_tools.metric_order import finite_score
 from execute_tools.scoring_helpers import (
     build_score_table,
     file_vector_to_log_space,
@@ -1695,7 +1696,7 @@ def run_inference_scoring_health(
         if (
             reference_scores is not None
             and _sc_fv is not None
-            and _sc_scalar is not None
+            and finite_score(_sc_scalar)
             and not _is_degenerate_formal
         ):
             try:

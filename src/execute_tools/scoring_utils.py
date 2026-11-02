@@ -751,17 +751,14 @@ def score_vector(
 
 
 def coerce_nonfinite_to_none(obj):
-    """Recursively replace non-finite floats with ``None`` for JSON output.
+    """Recursively replace non-finite floats with ``None``: the legacy storage image.
 
-    JSON RFC 8259 disallows ``Infinity``/``-Infinity``/``NaN``. ``json.dump``
-    will silently emit those tokens when ``allow_nan=True`` (the default),
-    which then breaks the dashboard's ``JSON.parse``. Apply this coercion
-    immediately before ``json.dump`` at every storage boundary that may
-    carry the ``float('-inf')`` "no-signal" sentinel produced by
-    :func:`score_vector` and the grand-mean log helpers.
-
-    Pydantic ``Optional[float]`` fields accept ``None`` on round-trip, so
-    the on-disk representation is browser-safe and Python-safe.
+    Historical recorders (before #1111) and the scoring child's
+    ``--output_json`` (before #1316) applied this before ``json.dump``, so
+    archived files carry ``null`` where a NaN/±inf was. No current writer
+    uses it: new storage keeps non-finite floats through
+    ``core.record_encoding``. It remains for comparing in-memory values with
+    such legacy storage images; ``null`` there cannot be decoded back.
     """
     if isinstance(obj, float):
         return obj if math.isfinite(obj) else None

@@ -31,6 +31,7 @@ from .test_finite_loop import loop_tuner as loop_tuner
 from .test_interpretation import interpretation_provider as interpretation_provider
 from .test_native import native_runner as native_runner
 from .test_training import training_runner as training_runner
+from .validation_child import install_fresh_validation_units
 
 #: Names the offline fixtures bind in the test process that a real launcher would
 #: provide some other way; every other inherited name is dropped like Popen(env=...).
@@ -44,13 +45,14 @@ FIXTURE_ENVIRONMENT = (
 
 
 @pytest.fixture
-def process_segments(monkeypatch):
-    """Fork retains only SDK doubles; each native segment runs in a separate process."""
+def process_segments(native_runner, monkeypatch, tmp_path):
+    """Fork SDK doubles; exec validation so parent autograd state cannot leak."""
     from core.runtime_control.process_group import terminate_observed_group
     from tools.candidate_operations.child import execute as operation
     from tools.candidate_worker.child import execute
     from tools.candidate_worker.loop_resume import execute_continuation
 
+    install_fresh_validation_units(monkeypatch, tmp_path)
     operations = []
 
     def observed(profile, argv, *, cancel_requested=None, **_supervision):
@@ -806,24 +808,9 @@ def test_resumed_segment_bounds_validator_pytest_by_its_own_worker_budget(
     """Fails if loop.py or the continuation entry drops ``budget=`` (issue #984)."""
     from tools.candidate_worker import training
 
-    validator = importlib.import_module("nodes.ml_code_validator_agent.ml_code_validator_agent")
+    # The fresh validation child records the real generated-pytest call and limit.
     record = tmp_path / "pytest_limits.jsonl"
 
-    # Forked segments inherit this double; a file carries their observations back.
-    def launched(test_file_path, env, *, limit=None):
-        with record.open("a") as stream:
-            stream.write(
-                json.dumps(
-                    {
-                        "path": test_file_path,
-                        "limit": None if limit is None else limit.model_dump(),
-                    }
-                )
-                + "\n"
-            )
-        return True, "1 passed"
-
-    monkeypatch.setattr(validator, "run_generated_pytest", launched)
     request = loop_request(prepared, final_iteration=2)
     config = OperationStoreConfig(
         state_root=str(tmp_path / "operations"),
@@ -1322,3 +1309,116 @@ def test_resume_without_advice_replaces_earlier_advice_across_three_segments(
         (2, None),
     )
     assert len(verify_loop(request, launched, last.receipt)) == 3
+
+
+def test_an_undeclared_root_resumes_placed_with_its_own_resources(
+    prepared, loop_tuner, interpretation_provider, process_segments, monkeypatch, tmp_path
+):
+    """#1385: a root that ran serially without ``resources`` could not be resumed under a
+    host ledger at all (``resources_required``); the segment now reserves its own reviewed
+    declaration. Once any segment ran placed, a serial Resume is refused: only the root's
+    ``placement.json`` was checked, so the next hop would run unaccounted beside placed runs.
+    """
+    from core.runtime_control.pair_admission import ResolvedGpuCeiling
+    from core.runtime_control.scheduling import GpuHardwareClass, GpuSlot, HostBudget
+    from tools.candidate_operations.host_ledger import HostScheduling
+    from tools.candidate_operations.models import OperationResources
+    from tools.candidate_operations.store import operation_path
+    from tools.candidate_worker import training
+
+    budget = HostBudget(
+        gpus=(
+            GpuSlot(
+                uuid="GPU-aaaa",
+                hardware_class=GpuHardwareClass(
+                    device_name="NVIDIA H100",
+                    total_memory_bytes=80 * 1024**3,
+                    compute_capability=(9, 0),
+                ),
+                ceiling=ResolvedGpuCeiling(
+                    operator_ceiling_gib=4.0,
+                    operator_source="caller",
+                    host_quota_gib=None,
+                    measured_capacity_gib=80.0,
+                ),
+            ),
+        ),
+        host_memory_gib=64.0,
+        cpu_slots=16,
+        max_concurrent_units=4,
+        source="file",
+    )
+    ledger = tmp_path / "ledger"
+    ledger.mkdir(mode=0o700)
+    host = HostScheduling(ledger_root=str(ledger), budget=budget)
+    config = OperationStoreConfig(
+        state_root=str(tmp_path / "operations"),
+        preparation_roots=(str(tmp_path),),
+        candidate_roots=(str(tmp_path),),
+    )
+    env = {"OPENAI_API_KEY": "offline-stub"}
+    root_id, first_id, second_id = uuid4(), uuid4(), uuid4()
+    real_tune = training.HyperparamTuningAgent.run
+    pause_during = {"iteration_001": root_id, "iteration_002": first_id}
+
+    def pause_by_slot(self, value):
+        output = real_tune(self, value)
+        for slot, operation_id in pause_during.items():
+            if slot in value.storage.local.workspace:
+                request_loop_pause(config, operation_id)
+        return output
+
+    monkeypatch.setattr(training.HyperparamTuningAgent, "run", pause_by_slot)
+    resources = OperationResources(
+        gpu_count=0, host_memory_gib=4.0, cpu_slots=2, time_budgeted=False
+    )
+
+    def resume(predecessor_id, request_id, supplied, ledger_host):
+        review = review_loop_resume(config, predecessor_id)
+        return submit_operation(
+            config,
+            CandidateLoopResumeOperation(
+                request_id=request_id,
+                request=CandidateLoopResumeRequest(
+                    predecessor_operation_id=predecessor_id,
+                    expected_receipt_digest=review.receipt_digest,
+                    resources=supplied,
+                ),
+            ),
+            launch_environment=env,
+            host=ledger_host,
+        )
+
+    def refused(*args) -> str:
+        with pytest.raises(OperationFailure) as failure:
+            resume(*args)
+        return failure.value.detail.code
+
+    submit_operation(
+        config,
+        CandidateOperation(request_id=root_id, request=loop_request(prepared, final_iteration=3)),
+        launch_environment=env,
+    )
+    process_segments()
+    assert refused(root_id, first_id, None, host) == "resources_required"
+    assert refused(root_id, first_id, resources, None) == "host_ledger_missing"
+    claimed = Path(config.state_root) / "operations"
+    assert not (claimed / str(first_id)).exists(), "a refused Resume left a claim"
+
+    assert resume(root_id, first_id, resources, host).observation == "starting"
+    process_segments()
+    placement = json.loads((operation_path(config, first_id) / "placement.json").read_text())
+    assert (placement["decision"], placement["gpu_uuid"]) == ("placed", None)
+    assert placement["reserved"]["cpu_slots"] == 2
+    first = read_operation(config, first_id)
+    assert first.receipt.status == "paused", first
+
+    # The root never ran placed; the paused segment did.
+    assert not (operation_path(config, root_id) / "placement.json").exists()
+    assert refused(first_id, second_id, None, None) == "host_ledger_required"
+    assert not (claimed / str(second_id)).exists(), "a refused Resume left a claim"
+    resume(first_id, second_id, resources, host)
+    process_segments()
+    second = read_operation(config, second_id)
+    assert second.receipt.status == "completed", second
+    assert (operation_path(config, second_id) / "placement.json").exists()

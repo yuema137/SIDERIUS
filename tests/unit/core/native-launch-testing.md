@@ -17,7 +17,7 @@ only after `protection_receipt().valid_live_samples` is nonzero: returning from
 the sampler alone is insufficient because the observer checks child liveness
 again before committing a sample. Inference publishes its consumption receipt
 before waiting, so the witness can force ACK consumption to precede sampling.
-The barrier's 60-second escape bounds a broken test handshake and fails the
+The barrier's 600-second escape bounds a broken test handshake and fails the
 test; it does not authorize a runtime success or retry.
 
 `test_native_inference_waits_for_observation_after_consumption` withholds the
