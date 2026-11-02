@@ -15,8 +15,8 @@ it re-derives, from the write-once receipts and the published body budget:
   started, on the slot it recorded (``plan_dispatch`` re-run);
 - drain (decision B3-Q2): nothing started after the first failure ended.
 
-It returns the dispatched entries, which ``replay_readiness`` may accept where
-the serial replay would close them as blocked. Contract:
+It returns the receipts' timing (``DrainWindow``), with which ``replay_readiness``
+replays the trace under the drain instead of the serial failure stop. Contract:
 candidate-worker-contract.md, "Concurrent dispatch (B3-4b)".
 """
 
@@ -25,7 +25,7 @@ from pathlib import Path
 
 from core.runtime_control.scheduling import HostBudget, plan_dispatch
 
-from .graph_evidence import read_graph_control
+from .graph_evidence import DrainWindow, read_graph_control
 from .graph_models import GraphNodeEvidence, GraphTrace
 from .layout import candidate_control_dir
 from .loop_models import LoopContinuation
@@ -44,12 +44,12 @@ def drained_entries(
     trace: GraphTrace,
     *,
     iteration: int,
-) -> frozenset[str]:
-    """The dispatched entries of a parallel trace; empty for a serial one."""
+) -> DrainWindow | None:
+    """The receipt timing of a parallel trace's dispatched entries; None for a serial one."""
     if (trace.scheduling == "parallel-v1") != (request.parallel is not None):
         raise ValueError("graph trace scheduling disagrees with the request")
     if trace.scheduling == "serial":
-        return frozenset()
+        return None
     from .parallel_dispatch import BUDGET_FILE
 
     control = candidate_control_dir(Path(initial.workspace), iteration=iteration)
@@ -65,8 +65,9 @@ def drained_entries(
     _check_events(receipts)
     _check_alone(receipts, declared, adaptors)
     _check_fit(receipts, budget)
-    _check_drain(receipts, entries)
-    return frozenset(receipts)
+    failure_end = _check_drain(receipts, entries)
+    ended = {node_id: receipt.ended_event for node_id, receipt in receipts.items()}
+    return DrainWindow(ended=ended, failure_end=failure_end)
 
 
 def admitted_budget(
@@ -192,11 +193,13 @@ def _check_fit(receipts: Mapping[str, UnitReceipt], budget: HostBudget) -> None:
 
 def _check_drain(
     receipts: Mapping[str, UnitReceipt], entries: Mapping[str, GraphNodeEvidence]
-) -> None:
-    """Decision B3-Q2: nothing starts after the first failed entry ended."""
+) -> int | None:
+    """Decision B3-Q2: nothing starts after the first failed entry ended; returns that end."""
     failures = [r.ended_event for key, r in receipts.items() if entries[key].state == "failed"]
-    if failures:
-        first = min(failures)
-        late = sorted(key for key, r in receipts.items() if r.started_event > first)
-        if late:
-            raise ValueError(f"parallel trace dispatched after a failure: {late}")
+    if not failures:
+        return None
+    first = min(failures)
+    late = sorted(key for key, r in receipts.items() if r.started_event > first)
+    if late:
+        raise ValueError(f"parallel trace dispatched after a failure: {late}")
+    return first

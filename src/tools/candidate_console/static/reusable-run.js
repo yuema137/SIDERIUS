@@ -8,7 +8,7 @@
   const profileDescriptions = {
     'native-proposal-families/v1': ' Independent proposal instances executed serially.',
     'native-literature-candidate/v1': ' Native literature review feeds one proposal, implementation and validation.',
-    'native-interpretation-candidate/v1': ' Native interpretation feeds one proposal, implementation, validation and tuning.',
+    [window.executionProfiles.nativeInterpretation]: ' Native interpretation feeds one proposal, implementation, validation and tuning.',
   };
   // The reviewed request's authored loop bound decides how many bodies a launch may run.
   function researchLoop(value) {

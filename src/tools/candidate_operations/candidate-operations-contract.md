@@ -294,8 +294,10 @@ co-tenant, and its admission is observe-only by default.
 Admission, before the claim (each refusal is an `OperationFailure` with this
 code and leaves no claim, reservation or child):
 
-1. not a `candidate` submission with `resources` (every other kind, including
-   `candidate_loop_resume` and native chains): `resources_required`;
+1. no reservation: a `candidate` without `resources`, any other kind except
+   `candidate_loop_resume` (native chains, preparations), or a
+   `candidate_loop_resume` that `loop_resume_resources` refuses (below):
+   `resources_required` (or that function's `run_resources_conflict`);
 2. ledger location (above): `path`; then the lock (`ledger_busy`); then
    `ledger.json` must parse as this revision's `HostLedgerState`, else
    `ledger_format`: the file is unreadable by this revision (written by an
@@ -512,14 +514,53 @@ holds the budget digest: while one exists a different budget is refused
 `budget_mismatch`.
 
 Loop resume. A `candidate_loop_resume` under a ledger reserves with its root
-candidate's `resources` and launch request (timeout, environment names,
-devices), placed or queued like a candidate. Waiting resumes consume the same
-`max_queued_operations` allowance; a full or disabled queue refuses
-`host_queue_full`. A root without `resources` still refuses
-`resources_required`. A placed segment publishes `sandbox.json` like a
-candidate. A resume submitted without a ledger whose root ran placed (the root's
-operation directory holds `placement.json`) refuses `host_ledger_required`
-before any claim: it would otherwise run unaccounted beside placed runs.
+candidate's launch request (timeout, environment names, devices) and the
+reservation `host_admission.loop_resume_resources(root, request.resources,
+ledger=...)` returns, placed or queued like a candidate (#1385). That function
+is the one rule, also called by the console's Resume review:
+
+| Ledger | Root `resources` | `CandidateLoopResumeRequest.resources` | Result |
+| --- | --- | --- | --- |
+| yes | declared | absent | the root's declaration |
+| yes | declared | present (even equal) | `run_resources_conflict` (one authority) |
+| yes | absent | present | the request's declaration |
+| yes | absent | absent | `resources_required` |
+| no | any | present | `host_ledger_missing` (it would be ignored) |
+| no | any | absent | serial, unchanged |
+
+Under a ledger a root whose request carries `parallel.budget` refuses
+`parallel_budget` first (the same `_require_ledger_parallel` rule `host_slot` applies
+to every placed run), so the console review refuses it too.
+
+Equal values: the console's candidate path (`candidate_console.service._merged`,
+via `with_run_resources`) accepts a supplied value equal to one the reviewed
+operation already carries and refuses only a different one, under the same
+`run_resources_conflict` code. That merge is idempotent on a single
+`CandidateOperation`, whose stored `resources` field is the one value either way.
+A resume's supplied value instead becomes a separate `CandidateLoopResumeRequest`
+field beside the root's: accepting an equal copy would leave two declarations of
+one reservation (two authorities that could later diverge) and give the same
+resume two request digests. So a resume refuses any supplied value when the root
+declares one.
+
+`CandidateLoopResumeRequest.resources: OperationResources | None` is omitted when
+absent, so existing resume requests keep their bytes and request digest; when
+present it is part of the request digest, so reusing a request ID with other
+resources is a `conflict`. A predecessor segment's declaration is never
+inherited: each resume of an undeclared root supplies its own. Waiting resumes
+consume the same `max_queued_operations` allowance; a full or disabled queue
+refuses `host_queue_full`. A placed segment publishes `sandbox.json` like a
+candidate. A resume submitted without a ledger refuses `host_ledger_required`
+before any claim when any record of its loop (the predecessor, every earlier
+segment and the root, `loop_resume.loop_chain`) ran placed (its operation
+directory holds `placement.json`): it would otherwise run unaccounted beside
+placed runs. All of these refusals precede the claim. Witnesses:
+`test_operation_scheduler.py` (`test_loop_resume_reserves_with_one_declaration_authority`,
+`test_a_supplied_resume_declaration_is_what_the_ledger_places`,
+`test_a_serial_resume_of_a_ledger_placed_loop_is_refused`,
+`test_a_resume_without_resources_keeps_its_pre_1385_bytes_and_digest`) and
+`candidate_worker/test_loop_resume.py::test_an_undeclared_root_resumes_placed_with_its_own_resources`
+(real serial root, placed first and second segments).
 
 Operation receipt. The child's `Completion` carries `host_placement`
 (`HostPlacementEvidence`: the published `placement`, the operation child
@@ -1335,7 +1376,9 @@ verified paused segment. The review constructs no process and reads no credentia
 
 Submit `CandidateLoopResumeOperation(request_id=..., request=CandidateLoopResumeRequest(
 predecessor_operation_id=..., expected_receipt_digest=review.receipt_digest,
-operator_advice=None))` through `submit_operation`. `operator_advice` is optional
+operator_advice=None))` through `submit_operation`; under a host ledger a loop whose
+root declared no `resources` also sets `resources` (see
+[Host reservation ledger](#host-reservation-ledger), "Loop resume"). `operator_advice` is optional
 untrusted text for the resumed segment's proposals (the worker's `OperatorAdvice`:
 surrounding whitespace removed, 1..4000 characters, no `Cc`/`Cf` (control or format) characters except
 newline and tab; invalid advice refuses at validation). It is omitted when absent, so
@@ -1428,7 +1471,7 @@ admission, refusals and idempotency are the owner's:
 | `stop-loop` | `request_loop_stop(config, operation_id)` | `LoopStop` marker (requested) |
 | `pause-loop` | `request_loop_pause(config, operation_id)` | `LoopPause` marker (requested) |
 | `review-loop-resume` | `review_loop_resume(config, operation_id)` | paused `OperationSnapshot` with `receipt_digest` |
-| `write-loop-resume ... --output FILE [--advice-file TEXT_FILE]` | review, then construct the request below | the saved `CandidateLoopResumeOperation` |
+| `write-loop-resume ... --output FILE [--advice-file TEXT_FILE] [--resources-file JSON_FILE]` | review, then construct the request below | the saved `CandidateLoopResumeOperation` |
 
 For a condition input pause, `review-loop-resume` includes the worker-owned
 `receipt.loop_trace.input_request.summary.what_was_tried` when populated. Its
@@ -1439,7 +1482,12 @@ worker contract's "Condition input pause" section; the CLI prints it unchanged.
 (non-UTF-8, empty after trimming, over 4000 characters, control or format
 characters; CRLF line breaks are first normalized to LF, a lone CR is refused) exits 2
 with `invalid_input_or_record`. It never echoes the text, and nothing is reviewed or
-written. `write-loop-resume` reviews the paused segment and creates `FILE` once; an existing
+written. `--resources-file` reads one `OperationResources` JSON object into
+`resources` (for a loop whose root declared none, submitted with `--host-ledger`);
+an invalid declaration likewise exits 2 with `invalid_input_or_record` before any
+review or write. Whether the declaration applies is decided at `submit` by
+`loop_resume_resources`, so a file whose declaration admission refuses is
+replaced by writing a new `--output` file (a new request ID). `write-loop-resume` reviews the paused segment and creates `FILE` once; an existing
 file refuses with `output_exists` and is left unchanged, so a retry after a lost
 response submits the same request ID. It does not launch. Launch is the ordinary
 `submit --store-config FILE --request FILE`, which reads the launching process

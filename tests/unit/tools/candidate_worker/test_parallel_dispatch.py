@@ -232,6 +232,36 @@ def test_a_failure_drains_running_units_and_dispatches_nothing_new(
         verify_graph_trace(request, launched, receipt)
 
 
+def test_a_later_declared_failure_drains_an_earlier_declared_running_unit(
+    prepared, native_runner, monkeypatch
+):
+    """#1386: `build1` fails while `build0`, declared before it, still runs.
+
+    Serially `check0` (fed by `build0` alone) runs before `build1`; under the drain
+    it was never dispatched and closed `blocked`. A replay in declaration order
+    refuses that trace, so the body ended `failed` with no graph trace.
+    """
+    starter = _Starter(3, failing=frozenset({"build1"}), hold={"build0": 8, "build1": 0})
+    monkeypatch.setattr(parallel_dispatch, "start_unit", starter)
+    request = _parallel(prepared, _budget(units=2))
+    receipt = launch_candidate(request)
+    assert receipt.status == "failed", receipt.error
+    assert receipt.graph_trace is not None, receipt.error
+    states = {item.node_id: item.state for item in receipt.graph_trace.nodes}
+    assert states == {
+        "propose": "succeeded",
+        "build0": "succeeded",  # running when build1 failed: it drains with its outcome
+        "check0": "blocked",
+        "build1": "failed",
+        "check1": "blocked",
+    }
+    assert "check0" not in starter.envs
+    launched = CandidateRunReceipt.model_validate_json(
+        (Path(receipt.workspace) / "candidate_run" / "launch.json").read_bytes()
+    )
+    verify_graph_trace(request, launched, receipt)
+
+
 def test_sigterm_kills_every_running_unit_process_group(prepared, native_runner, monkeypatch):
     """A unit outliving its worker would keep its GPU and budget after the run is gone."""
     started: list[subprocess.Popen] = []
