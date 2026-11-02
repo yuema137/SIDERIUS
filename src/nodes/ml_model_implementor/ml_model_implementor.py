@@ -2174,6 +2174,7 @@ class MLModelImplementor:
                 candidate_id=inp.candidate_id,
                 model_type=branch_b_model_name,
                 consumed_input_sha256=inp.consumed_input_sha256,
+                consumed_input_encoding=inp.consumed_input_encoding,
                 description_file_path=os.path.abspath(existing_desc_path),
                 model_file_path=os.path.abspath(existing_path),
                 test_file_path="",  # no test re-emitted on Branch B reuse
@@ -2352,6 +2353,7 @@ class MLModelImplementor:
             candidate_id=inp.candidate_id,
             model_type=inp.model_name,
             consumed_input_sha256=inp.consumed_input_sha256,
+            consumed_input_encoding=inp.consumed_input_encoding,
             description_file_path=os.path.abspath(desc_path),
             model_file_path=model_file_path,
             test_file_path=test_file_path,
