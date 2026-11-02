@@ -19,6 +19,11 @@ declaration and storage inputs using that contract, then submit through the same
 includes the verified per-instance trace. This profile has no training, graph
 resume or visual graph editor.
 
+With [concurrent dispatch](candidate-worker-contract.md#concurrent-dispatch-b3-4b),
+independent branches can overlap. The verifier checks that each step started
+after its sources finished, including the source that chose a route. It refuses
+saved traces whose dispatch receipts contradict that order.
+
 To generate several independent proposal candidates in one run, code callers can
 select [proposal families](candidate-worker-contract.md#opt-in-independent-proposal-families)
 and supply one native seed per declared proposer. Each family has isolated files

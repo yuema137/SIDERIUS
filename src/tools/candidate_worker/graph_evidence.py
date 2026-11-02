@@ -13,7 +13,14 @@ from execute_tools.impl_attempts import impl_attempt_dir
 from workflows.definition.fanout import execution_families
 
 from . import readiness
-from .graph_models import GraphCapability, GraphNodeEvidence, GraphReason, GraphState, GraphTrace
+from .graph_models import (
+    DISPATCHED_STATES,
+    GraphCapability,
+    GraphNodeEvidence,
+    GraphReason,
+    GraphState,
+    GraphTrace,
+)
 from .layout import graph_instance_dir
 from .models import CandidateRunReceipt, CandidateRunRequest, tuning_seed_scope
 from .route_eval import RouteEvaluationOutput
@@ -131,8 +138,7 @@ _UNDISPATCHED_REASONS: dict[GraphState, frozenset[GraphReason]] = {
 }
 
 
-# Terminal states of a dispatched entry, and the closure the drain gives the rest.
-_DISPATCHED_STATES: frozenset[GraphState] = frozenset(("succeeded", "rejected", "failed"))
+# Terminal closure the drain gives entries that were not dispatched.
 _DRAIN_CLOSURE: tuple[GraphState, GraphReason] = ("blocked", "dependency_not_successful")
 
 
@@ -144,7 +150,9 @@ class DrainWindow:
     failure_end: int | None  # `ended_event` of the first failed entry; None without one
 
 
-def _settled(node_id: str, recorded: Mapping[str, GraphNodeEvidence], window: DrainWindow) -> int:
+def settled_sources_end(
+    node_id: str, recorded: Mapping[str, GraphNodeEvidence], window: DrainWindow
+) -> int:
     """The last end event among ``node_id``'s sources, through sources closed without dispatch.
 
     A closure is decided at the first readiness step after its sources ended, so
@@ -180,13 +188,13 @@ def _replay_step(
     """
     if step.next is not None:
         item = recorded[step.next]
-        valid = item.state in _DISPATCHED_STATES
+        valid = item.state in DISPATCHED_STATES
     elif step.terminal:
         node_id, state, reason = step.terminal[0]
         item = recorded[node_id]
         valid = (item.state, item.reason) == (state, reason)
         if valid and state == "skipped" and window is not None and window.failure_end is not None:
-            valid = _settled(node_id, recorded, window) < window.failure_end
+            valid = settled_sources_end(node_id, recorded, window) < window.failure_end
     else:
         raise ValueError("graph trace violates serial readiness or failure stop")
     drained = window is not None and window.failure_end is not None
@@ -433,7 +441,7 @@ def _check_adaptor_entry(
         ):
             raise ValueError("graph incomplete invocation claims output")
         return
-    if item.state not in ("succeeded", "rejected", "failed") or any(
+    if item.state not in DISPATCHED_STATES or any(
         states[key] in ("pending", "running", "failed", "blocked") for key in item.predecessors
     ):
         raise ValueError("graph adaptor ran before its inputs were terminal")
