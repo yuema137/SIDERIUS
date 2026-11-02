@@ -188,3 +188,12 @@ with a mocked client; AST guard that readback modules import no bridge.
 - Task judge guidance text is not rendered by `judge.stop/v1`; JudgeStop therefore
   records `task_guidance_sha256=None`. Rendering guidance needs a new template
   version.
+
+### Canonical encoding compatibility
+
+Judge and rubric identities use the Data Analysis
+[UTF-8 canonical owner](../schemas/data_analysis/canonical-identity-contract.md).
+Finite canonical bytes and existing prompt/response-schema identities remain
+unchanged by its strict non-finite migration. Judge numeric fields reject
+non-finite numbers; the migration does not relax those schemas. Readback still
+requires both the trusted SHA-256 anchor and canonical-byte equality.

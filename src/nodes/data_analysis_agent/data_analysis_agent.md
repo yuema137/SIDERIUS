@@ -306,3 +306,11 @@ generation, synthesis and promotion. It grants no data access. Present context
 participates in input identity; absent context is omitted from serialization.
 See the [disclosure contract](../../../docs/agent-reference/mechanisms/constraint-disclosure.md)
 for the explicit historical transport and rendering requirements.
+
+### Canonical numeric records
+
+The [UTF-8 identity contract](../../agent/schemas/data_analysis/canonical-identity-contract.md)
+owns strict non-finite encoding, typed record readback, legacy null limitations
+and identity/prompt compatibility. `AnalysisRunStore` publishes those canonical
+bytes; exact-input resume compares the same bytes and never treats an archived
+null as a current non-finite measurement.
