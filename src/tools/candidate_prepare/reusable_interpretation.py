@@ -13,6 +13,7 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from tools.candidate_worker.layout import graph_instance_dir
 from workflows.definition import ExternalSource, ProtocolRequest, ReusableWorkflowDocument
 from workflows.definition.fanout import execution_families
+from workflows.definition.models import NATIVE_INTERPRETATION_PROFILE
 
 from .models import CandidatePreparationRequest
 
@@ -24,7 +25,7 @@ def external_payloads(
     proposal: ProposalInput,
 ) -> tuple[tuple[str, bytes], ...]:
     """Project declared external roles from the existing native preparation owners."""
-    if document.execution_profile != "native-interpretation-candidate/v1":
+    if document.execution_profile != NATIVE_INTERPRETATION_PROFILE:
         return ()
     shape = execution_families(document.definition, document.execution_profile)
     assert shape.interpretation is not None
@@ -69,7 +70,7 @@ def verify_payloads(
     read_bytes: Callable[[Path], bytes],
 ) -> None:
     """Rebuild generated protocol inputs from retained source and parent capture."""
-    if document.execution_profile != "native-interpretation-candidate/v1":
+    if document.execution_profile != NATIVE_INTERPRETATION_PROFILE:
         return
     shape = execution_families(document.definition, document.execution_profile)
     assert shape.interpretation is not None

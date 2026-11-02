@@ -11,6 +11,7 @@ from tools.candidate_operations.models import OperationFailure
 from tools.candidate_prepare import ReusablePreparedSelection
 from tools.workflow_preview.models import PreviewModel
 from workflows.definition import AuthoredLoop
+from workflows.definition.models import NativeInterpretationProfile
 
 from .capture_facts import CaptureFacts
 from .models import CredentialReadiness, RouteView, RunResourcesSelection
@@ -58,7 +59,7 @@ class ReusableCaptureReview(PreviewModel):
             "native-proposal-fanout/v1",
             "native-proposal-families/v1",
             "native-literature-candidate/v1",
-            "native-interpretation-candidate/v1",
+            NativeInterpretationProfile,
         ]
         | None
     ) = Field(default=None, exclude_if=lambda value: value is None)

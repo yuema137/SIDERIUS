@@ -6,6 +6,8 @@ from uuid import UUID
 
 from pydantic import AfterValidator, Field, model_validator
 
+from workflows.definition.models import NATIVE_INTERPRETATION_PROFILE
+
 if TYPE_CHECKING:
     from .models import CandidateRunRequest
 
@@ -127,7 +129,7 @@ def admit_loop(request: "CandidateRunRequest") -> LoopAdmissionRefusal | None:
     definition = request.preview.document.definition
     loop = definition.loop
     assert loop is not None
-    if request.preview.execution_profile != "native-interpretation-candidate/v1":
+    if request.preview.execution_profile != NATIVE_INTERPRETATION_PROFILE:
         return LoopAdmissionRefusal("profile")
     try:
         shape = execution_families(definition, request.preview.execution_profile)
