@@ -6,8 +6,10 @@ import torch
 from agent.llm_bridge import StubLLMBridge
 from agent.schemas.implementor import ImplementorInput
 from agent.schemas.model_io_contract import ModelIOContract
+from agent.schemas.proposal import ProposalOutput
 from agent.schemas.task_config import ForwardContract
 from agent.stub_model import UnsupportedStubShapeError, stub_model_code
+from ml_models.models_format_sandbox import validate_semantic_loss_compatibility
 from nodes.ml_model_implementor import MLModelImplementor, _assemble_plugin
 from tests.helpers.probe_seed import PROBE_SEED
 from workflows.task_config import bind_task_config
@@ -136,3 +138,60 @@ def test_stub_output_owns_storage_for_in_place_loss_steps() -> None:
     with torch.no_grad():
         output[:, 0] = 1.0
     assert output[:, 1:].abs().max().item() == 0.0
+
+
+@pytest.mark.usefixtures("synthetic_dataset_profile")
+@pytest.mark.parametrize(
+    ("input_shape", "output_shape", "class_axis"),
+    [
+        (("B", 2, 1024), ("B", 1), None),
+        (("B", "R", 68), ("B", "R", 3), None),
+        (("B", 3, 8, 128, 224), ("B", 3, 4, 128, 224), None),
+        (("B", 3, 144, 144), ("B", 37), 1),
+        (("B", "T"), ("B", 256, "T"), 1),
+    ],
+)
+def test_proposal_semantics_reach_the_implementor_and_loss_authority(
+    input_shape: tuple, output_shape: tuple, class_axis: int | None
+) -> None:
+    """#1403: a classifier proposal for a continuous contract fails the probe.
+
+    The implementor receives ``output_type`` from the synthesised proposal, not
+    from the test, and both proposal and planner losses must pass the loss
+    authority for the contract's own output semantic.
+    """
+    contract = _contract(input_shape, output_shape, class_axis)
+    forward = ForwardContract(model_io=contract)
+    with bind_task_config({"forward_contract": forward.model_dump()}):
+        bridge = StubLLMBridge()
+        proposal = ProposalOutput.model_validate(bridge._synthesise_json("proposer.proposing"))
+        planner_loss = bridge._synthesise_json("tuner.planner")["loss_config"]["loss_type"]
+        inp = ImplementorInput(
+            model_name=proposal.model_name,
+            model_description=proposal.model_description,
+            mathematical_definition=proposal.mathematical_definition,
+            forward_contract=forward,
+            baseline_config=proposal.baseline_config,
+            output_type=proposal.output_type,
+        )
+        code = bridge._synthesise_json("implementor.code")
+        assert MLModelImplementor._validate_code(code, inp, PROBE_SEED) is None
+    for loss in (proposal.baseline_config["loss_config"]["loss_type"], planner_loss):
+        validate_semantic_loss_compatibility(
+            contract.output_semantic,
+            loss,
+            model_type=proposal.model_name,
+            output_has_temporal_axis=contract.output_has_temporal_axis,
+        )
+    narrative = (proposal.model_description, proposal.mathematical_definition)
+    assert all(contract.output.render_shape() in text for text in narrative)
+    assert "Embedding" not in proposal.model_description
+
+
+@pytest.mark.usefixtures("synthetic_dataset_profile")
+def test_unbound_fixtures_keep_the_legacy_sequence_narrative() -> None:
+    """Unbound bridge fixtures have no contract to describe; their bytes stay put."""
+    proposal = ProposalOutput.model_validate(StubLLMBridge()._synthesise_json("proposer.proposing"))
+    assert proposal.output_type == "classifier"
+    assert proposal.baseline_config["loss_config"]["loss_type"] == "ce"
+    assert proposal.model_description.startswith("Stub architecture: nn.Embedding(256, hidden_dim)")

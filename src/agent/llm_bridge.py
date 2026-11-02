@@ -90,6 +90,12 @@ from agent.schemas.telemetry import (
     TokenUsageChars,
     TokenUsageRow,
 )
+from agent.stub_model import (
+    StubProposalSemantics,
+    bound_stub_contract,
+    stub_model_code,
+    stub_proposal_semantics,
+)
 from agent.token_unit import token_unit_fields
 from core.execution_deadline import (
     ExecutionDeadlineExceeded,
@@ -263,7 +269,9 @@ def _synth_stub_model_name(iter_idx: int, slot: str) -> str:
 # ProposalOutput-validatable dict with the same architecture description,
 # expert advice, and baseline config; the proposing path additionally
 # carries `memo_consistency_notes`. Centralising the shared fields keeps
-# the two synthesisers in lockstep and makes drift visible.
+# the two synthesisers in lockstep and makes drift visible. The narrative,
+# output type and loss come from `agent.stub_model.stub_proposal_semantics`,
+# derived from the run's bound Model-I/O contract.
 #
 # `baseline_config["model_config"]["segmentation_size"]` is 40 000 — it
 # divides `psd_segment_length=10 000 000` cleanly (250 chunks) so the
@@ -271,30 +279,12 @@ def _synth_stub_model_name(iter_idx: int, slot: str) -> str:
 # accepts the dict.
 # ---------------------------------------------------------------------------
 
-_STUB_MODEL_DESCRIPTION = (
-    "Stub architecture: nn.Embedding(256, hidden_dim) followed by "
-    "nn.Linear(hidden_dim, 256). Returns [B, 256, T] floats — the "
-    "minimum viable plugin that satisfies the chain's forward contract."
-)
 
-_STUB_MATHEMATICAL_DEFINITION = (
-    "x in Z^{B x T}; e = Embed(x) in R^{B x T x h}; "
-    "y = Linear(e) in R^{B x T x 256}; "
-    "out = transpose(y, 1, 2) in R^{B x 256 x T}."
-)
-
-_STUB_MOTIVATION = (
-    "Stub mode: emits the minimal model that respects the [B, 256, T] "
-    "forward contract so downstream stages have a runnable plugin to "
-    "consume. Architecture choice is irrelevant under stub training."
-)
-
-
-def _stub_expert_advice_dict() -> dict:
+def _stub_expert_advice_dict(semantics: StubProposalSemantics) -> dict:
     """Default ``ExpertAdvice``-validatable dict for stub proposals."""
     return {
         "focus_areas": ["Stub mode — exploration is a no-op."],
-        "constraints": ["Forward contract: [B, T] int -> [B, 256, T] float."],
+        "constraints": [semantics.forward_constraint],
         "known_failures": [],
         "suggested_directions": ["Continue with default trial settings."],
         "rationale": "Stub bridge in effect; no real guidance.",
@@ -302,7 +292,7 @@ def _stub_expert_advice_dict() -> dict:
     }
 
 
-def _stub_baseline_config_dict() -> dict:
+def _stub_baseline_config_dict(semantics: StubProposalSemantics) -> dict:
     """Minimal ``baseline_config`` with ``model_config`` / ``train_config`` / ``loss_config``.
 
     The only constraint enforced by ``ProposalOutput._validate_baseline_segmentation_size``
@@ -322,9 +312,14 @@ def _stub_baseline_config_dict() -> dict:
             "lr": 1e-3,
         },
         "loss_config": {
-            "loss_type": "ce",
+            "loss_type": semantics.loss_type,
         },
     }
+
+
+def _bound_stub_semantics() -> StubProposalSemantics:
+    """Pseudo narrative, output type and loss for the run's bound contract."""
+    return stub_proposal_semantics(bound_stub_contract())
 
 
 def _reflector_score_noun(task_render: "TunerTaskRender | None") -> str:
@@ -2477,7 +2472,7 @@ class StubLLMBridge(LLMBridge):
             "reasoning": "Stub mode — no real planning; minimal viable hyperparameters returned.",
             "model_config": {},
             "train_config": {"epochs": 1, "batch_size": 1, "lr": 1e-3},
-            "loss_config": {"loss_type": "ce"},
+            "loss_config": {"loss_type": _bound_stub_semantics().loss_type},
             "is_trial": True,
             "trial_strategy": "snapshot",
             "trial_portion": 0.02,
@@ -2566,12 +2561,7 @@ class StubLLMBridge(LLMBridge):
         See ``nodes/ml_model_proposal_agent.py:922`` — the caller only
         checks ``len(reasoning)``; any non-empty string suffices.
         """
-        return (
-            "Stub proposer reasoning: the simplest model that "
-            "satisfies the [B, 256, T] forward contract is a token "
-            "embedding into a linear head. Stub mode emits this "
-            "baseline regardless of the upstream interpretation."
-        )
+        return _bound_stub_semantics().proposer_reasoning
 
     def _synth_proposer_legacy_commit(self) -> dict:
         """``ProposalOutput``-validatable dict for the legacy 2-call commit path.
@@ -2583,13 +2573,15 @@ class StubLLMBridge(LLMBridge):
         passes them to ``ProposalOutput.model_validate(...)``.
         """
         iter_idx = self._iter if self._iter is not None else 0
+        semantics = _bound_stub_semantics()
         return {
             "model_name": _synth_stub_model_name(iter_idx, "a"),
-            "model_description": _STUB_MODEL_DESCRIPTION,
-            "mathematical_definition": _STUB_MATHEMATICAL_DEFINITION,
-            "motivation": _STUB_MOTIVATION,
-            "expert_advice": _stub_expert_advice_dict(),
-            "baseline_config": _stub_baseline_config_dict(),
+            "output_type": semantics.output_type,
+            "model_description": semantics.model_description,
+            "mathematical_definition": semantics.mathematical_definition,
+            "motivation": semantics.motivation,
+            "expert_advice": _stub_expert_advice_dict(semantics),
+            "baseline_config": _stub_baseline_config_dict(semantics),
             "parameter_count_estimate": 4096,
         }
 
@@ -2607,7 +2599,7 @@ class StubLLMBridge(LLMBridge):
             "comparative_analysis": [],
             "sota_model_type": "stub_arch",
             "sota_score": -2.5,
-            "sota_mechanism": "Stub: token embedding to linear head.",
+            "sota_mechanism": f"Stub: {_bound_stub_semantics().mechanism}.",
             "proposed_vocab_links": [],
             "proposed_vocab_candidates": [],
         }
@@ -2625,8 +2617,8 @@ class StubLLMBridge(LLMBridge):
         """
         return {
             "causal_hypothesis": (
-                "Stub: a token-embedding head should produce some "
-                "signal; the chain's wiring is the real test surface, "
+                f"Stub: a {_bound_stub_semantics().mechanism} should produce "
+                "some signal; the chain's wiring is the real test surface, "
                 "not the architecture."
             ),
             "proposed_change": "Stub: no change vs SOTA — stub baseline.",
@@ -2653,13 +2645,15 @@ class StubLLMBridge(LLMBridge):
         all resolve to the same slug.
         """
         iter_idx = self._iter if self._iter is not None else 0
+        semantics = _bound_stub_semantics()
         return {
             "model_name": _synth_stub_model_name(iter_idx, "a"),
-            "model_description": _STUB_MODEL_DESCRIPTION,
-            "mathematical_definition": _STUB_MATHEMATICAL_DEFINITION,
-            "motivation": _STUB_MOTIVATION,
-            "expert_advice": _stub_expert_advice_dict(),
-            "baseline_config": _stub_baseline_config_dict(),
+            "output_type": semantics.output_type,
+            "model_description": semantics.model_description,
+            "mathematical_definition": semantics.mathematical_definition,
+            "motivation": semantics.motivation,
+            "expert_advice": _stub_expert_advice_dict(semantics),
+            "baseline_config": _stub_baseline_config_dict(semantics),
             "memo_consistency_notes": [],
             "parameter_count_estimate": 4096,
         }
@@ -2670,22 +2664,11 @@ class StubLLMBridge(LLMBridge):
         See ``nodes/ml_model_implementor.py:755`` — only
         ``len(reasoning)`` is logged; any non-empty string suffices.
         """
-        return (
-            "Stub implementor reasoning: implement the proposed stub "
-            "architecture as a token embedding into a linear head. "
-            "The forward pass transposes the last two dimensions to "
-            "produce [B, 256, T]."
-        )
+        return _bound_stub_semantics().implementor_reasoning
 
     def _synth_implementor_code(self) -> dict:
         """Build pseudo snippets from the same bound contract as candidate checks."""
-        from agent.stub_model import stub_model_code
-        from workflows.task_config import resolve_bound_task_config, run_bound_model_io_contract
-
-        contract = (
-            run_bound_model_io_contract() if resolve_bound_task_config() is not None else None
-        )
-        return dict(stub_model_code(contract))
+        return dict(stub_model_code(bound_stub_contract()))
 
     def _synth_implementor_repair(self) -> dict:
         """Identical payload to ``implementor.code``.
