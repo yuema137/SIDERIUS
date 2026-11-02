@@ -12,7 +12,7 @@ import {createServer} from 'node:net';
 import {tmpdir} from 'node:os';
 import {dirname, resolve, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 import {showAllConsoleSections} from './console_view_flags.mjs';
 import {chooseFirstConfiguredTask} from './console_task_choice.mjs';
 
@@ -36,8 +36,7 @@ const origin = `http://127.0.0.1:${probe.address().port}`; await new Promise(res
 let browser, server, provider, metadata;
 try {
   provider = start('provider', root);
-  const lines = createInterface({input: provider.stdout});
-  const endpoint = await new Promise(resolve => lines.once('line', line => resolve(JSON.parse(line).endpoint))); lines.close();
+  const {endpoint} = await waitForMetadata(provider);
   metadata = JSON.parse((await completed(start('setup', root, '--origin', origin, '--endpoint', endpoint, '--captures-count', '0', '--training'))).trim().split('\n').at(-1));
   server = start('serve', root);
   async function ready() { await until(async () => { try {return (await fetch(origin + '/')).ok;} catch {return false;} }); }

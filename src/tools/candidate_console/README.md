@@ -330,8 +330,10 @@ A successful data command ends with `Data ready in .../data/NAME`.
    enter its complete operation UUID (Settings › Show advanced tools). You can also open a link such as
    `http://127.0.0.1:8740/#monitor/22222222-2222-4222-8222-222222222222`
    (replace the example UUID), then Connect. No task or editor project selection
-   is needed. The optional remembered ID is labelled **Last opened on this browser**;
-   it is separate from the Recent operations list. Expand Operation facts, Reported
+   is needed. After connecting, the optional remembered ID is labelled **Last opened
+   on this browser for this operations store**. Switching to another operations store
+   restores that store's remembered ID, if any. An explicit UUID link takes precedence;
+   the remembered ID is separate from the Recent operations list. Expand Operation facts, Reported
    token table, or Activity and logs when needed. When a workflow run has
    finished, **Workflow training results** shows the tuner report of each
    verified iteration separately; it never combines or ranks iterations.
@@ -361,6 +363,21 @@ A successful data command ends with `Data ready in .../data/NAME`.
    advice. It locks once you select **Resume loop**, so a retry sends the same text.
    The resumed segment then shows "Resumed with your advice: …". If you pressed Stop while it was waiting, the run
    cannot continue and no Resume is offered.
+   **Resume under a shared host ledger.** A host ledger (the `host_ledger` entry in
+   `console.json`, see [Credentials](#credentials)) makes every run reserve host
+   resources (GPU, GPU memory, host memory, CPU slots) before it starts. A loop
+   whose first run declared no host resources needs a reservation for the resumed
+   segment (the new part of the run that Resume starts):
+   1. Choose **Review resume**. It is refused with "the loop's first run declared no
+      host resources", and **Declare host resources for the resumed segment** appears.
+   2. Tick it and enter what the segment needs, with the same fields as on **Run**.
+   3. Choose **Review resume** again. Success: the summary ends with "Host resources:
+      Reserves …" listing what you entered, and **Resume loop** appears. A value
+      that is missing or invalid shows "Resume review not sent: …" and nothing is
+      sent. Changing a value after the review shows "Host resources changed. Review
+      again before resuming." and hides **Resume loop** until you review again.
+   A loop whose first run declared host resources reuses them: the review asks for
+   nothing, and the fields never appear.
    A loop with a judge stop condition lists each judge decision under it, with
    the judge's own reason when the call decided.
    To stop a running candidate now, press **Stop run** and confirm. The run
@@ -527,7 +544,10 @@ external inputs such as storage. Only existing inputs can be rewired here.
 
 A large workflow opens zoomed out (never below 75%, so text stays readable; scroll the
 canvas for the rest). The controls at the bottom right of the canvas (zoom, **Actual
-size**, **Fit to view**) change only the view. Optional inputs that no wire feeds are
+size**, **Fit to view**) change only the view. If the whole graph cannot fit at 75%,
+**Fit to view** brings the selected module into view, or the first module if none is
+selected. The note below the canvas explains the limit; scroll inside the canvas
+to reach the remaining modules. Optional inputs that no wire feeds are
 folded into a "+N optional" row on each card; expand it to connect one. If saved cards overlap, the canvas says so;
 **Tidy up** arranges them (one edit you can undo).
 
@@ -821,8 +841,11 @@ Then, on **Run**, open **Host resources and parallel nodes** before you review:
 3. Click **Review prepared run**. The review lists what you entered; changing it
    afterwards asks you to review again.
 
-When the host is busy, the run shows **queued** and starts by itself when earlier
-runs finish. Stopping a queued run removes it before it starts ("Cancelled before
+To allow waiting runs, set `max_queued_operations` in the shared host budget
+file to a positive limit. When the host is busy and the queue has room, the run
+shows **queued** and starts by itself when earlier runs finish. Otherwise the
+submission is refused with `host_queue_full`; retry when capacity is
+available. Stopping a queued run removes it before it starts ("Cancelled before
 start"). Native chains always run one step at a time, outside the ledger.
 
 For example, if your saved `llm.json` uses OpenAI routes, set

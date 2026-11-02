@@ -3,6 +3,7 @@
 import json
 
 from agent.prompt_rendering import prompt_boundary
+from agent.prompt_templates.evaluation import append_evaluation_spec
 from agent.schemas.constraint_disclosure import CONSTRAINT_SECTIONS, ConstraintContext
 
 
@@ -41,4 +42,5 @@ def render_constraint_disclosure(context: ConstraintContext | None) -> str:
 
 def append_constraint_disclosure(prompt: str, context: ConstraintContext | None) -> str:
     section = render_constraint_disclosure(context)
-    return prompt + "\n\n" + section if section else prompt
+    prompt = prompt + "\n\n" + section if section else prompt
+    return append_evaluation_spec(prompt)

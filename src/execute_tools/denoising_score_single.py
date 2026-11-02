@@ -165,7 +165,9 @@ def _scoreable_payload(payload: object, fallback: dict[int, str]) -> tuple[objec
     return payload, fallback
 
 
-def _emit_task_owned_score(args, dataset_profile, metric, *, declared_naming=None) -> None:
+def _emit_task_owned_score(
+    args, dataset_profile, metric, *, declared_naming=None, composition=None
+) -> None:
     """Score a composed task's OWN deliverable through its OWN metric.
 
     Step 12 / PR-12d D4b. The frozen rule (§D.D):
@@ -261,6 +263,9 @@ def _emit_task_owned_score(args, dataset_profile, metric, *, declared_naming=Non
     with bind_task_data_path(data_path):
         outcome = metric.evaluate(scoreable_deliverables, **compute_kwargs)
         secondaries = _evaluate_task_owned_secondaries(args, deliverable, compute_kwargs)
+    from execute_tools.evaluation_child import aggregate_child_outcome
+
+    outcome, secondaries = aggregate_child_outcome(composition, outcome, secondaries)
     _emit_outcome(args, outcome, secondaries=secondaries)
 
 
@@ -344,6 +349,9 @@ def _emit_outcome(args, outcome, *, secondaries: dict | None = None) -> None:
                 "denoising_score": None,
                 "file_vector": None,
                 "not_scoreable": outcome.model_dump(mode="json"),
+                # Legacy refusals omit observational secondaries; only formula
+                # refusals need the extra evidence transported to the parent.
+                **(secondaries if secondaries and "evaluation_result" in secondaries else {}),
             },
         )
         sys.exit(1)
@@ -437,19 +445,23 @@ def main(argv: list[str] | None = None) -> None:
 
     declared_naming = compose_deliverable_naming_from_manifest(args.task_manifest)
 
-    # There is deliberately NO fallback: `compose_metric_from_manifest` raises
+    # There is deliberately NO fallback: `compose_scoring_child_bindings` raises
     # `TaskCompositionError` and this child lets it terminate the scoring
     # subprocess. A composed run must never silently score with an unrelated
     # metric; such a fallback would be indistinguishable from success.
-    from workflows.task_composition import compose_metric_from_manifest
+    # The full composition exists only when the manifest declares evaluation;
+    # an absent-evaluation child composes the metric section alone (#1294).
+    from workflows.task_composition import compose_scoring_child_bindings
 
-    metric = compose_metric_from_manifest(args.task_manifest)
+    metric, composition = compose_scoring_child_bindings(args.task_manifest)
 
     # Step 12 / PR-12d D4b — the TASK-OWNED scoring route.
     #
     # The framework hands the metric only the task-owned payload, transported
     # scope, and physical data root that the generic scoring contract owns.
-    _emit_task_owned_score(args, dataset_profile, metric, declared_naming=declared_naming)
+    _emit_task_owned_score(
+        args, dataset_profile, metric, declared_naming=declared_naming, composition=composition
+    )
 
 
 if __name__ == "__main__":

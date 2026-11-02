@@ -110,12 +110,21 @@ class TermGate:
 
     @contextmanager
     def held(self) -> Iterator[None]:
-        """Hold SIGTERM for the block; deliver it once the block completes normally."""
+        """Hold SIGTERM for the block; deliver it when the outermost block exits.
+
+        Delivered however the block exits: an exception leaving it (such as a
+        failing cleanup) is chained to the ``UnitTerminated``, never allowed to
+        drop the signal (#1108).
+        """
         self.depth += 1
         try:
             yield
-        except BaseException:
+        except BaseException as error:
             self.depth -= 1
+            if not self.depth and self.pending:
+                self.pending = False
+                if not isinstance(error, UnitTerminated):
+                    raise UnitTerminated("signal held during a critical section") from error
             raise
         self.depth -= 1
         if not self.depth and self.pending:

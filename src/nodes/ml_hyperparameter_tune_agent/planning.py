@@ -44,6 +44,7 @@ from nodes.ml_hyperparameter_tune_agent.health_coverage import (
 )
 from nodes.ml_hyperparameter_tune_agent.parameter_rule_receipts import (
     inactive_parameter_rule_record,
+    resolution_event_record,
 )
 from nodes.ml_hyperparameter_tune_agent.plan_logging import render_effective_plan
 from nodes.ml_hyperparameter_tune_agent.policy import (
@@ -71,6 +72,7 @@ from nodes.ml_hyperparameter_tune_agent.training_batch_plan import (
     resolve_training_batch_plan,
     training_batch_fit_record,
 )
+from workflows.evaluation_selection import selection_metric
 
 
 def _apply_declared_objective(plan: Any, composition_ref: Any) -> Any:
@@ -488,7 +490,7 @@ def _request_attempt_plan(
         task_render=run_task_render,
         # Step 07 PR 07b (P3) — the run's golden-metric
         # declaration: direction words + metric identity.
-        metric_spec=run_metric.spec,
+        metric_spec=selection_metric(agent_input.task_composition_ref, run_metric.spec),
     )
 
     return _PlannerResponse(
@@ -874,6 +876,12 @@ def prepare_attempt(
         # with.
         task_parameters={"seg_size": declared_segmentation_size},
     )
+    from workflows.evaluation_admission import require_formula_route
+
+    require_formula_route(
+        agent_input.task_composition_ref,
+        "TASK_OWNED" if task_scopes.evaluation is not None else "ANCHOR_NORMALIZED",
+    )
 
     # 01B2 — a composed Health-enabled attempt may execute only after the
     # bound task confirms that THIS opaque evaluation scope covers its own
@@ -968,6 +976,7 @@ def prepare_attempt(
     # Clean params for records — exclude bulky SampleSet dicts
     record_params = {
         **inactive_parameter_rule_record(plan),
+        **resolution_event_record(execution_provenance),
         **training_batch_fit_record(execution_provenance),
         "exp_id": exp_id,
         "run_name": run_name,

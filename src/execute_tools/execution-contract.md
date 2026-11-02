@@ -176,3 +176,14 @@ Declared from a manifest via `file:` — never by editing this package.
 `tests/unit/execute_tools/` (registry two-phase rule, scope transport,
 scoreability ordering, metric reconciliation, deliverable naming) and the
 Gate-2 harnesses under `scripts/` for real-execution evidence.
+
+### Deterministic evaluation selection
+
+On the native task-owned scoring route, `denoising_score_single` evaluates the
+source primary and declared secondaries, then delegates opted-in formula selection
+to `evaluation_aggregation`. The child emits the effective scalar and its generated
+metric identity together with typed component evidence; `evaluation_child` validates
+that transport before ranking or record construction. Health receives the source
+primary scalar/vector through `source_health_inputs`. No formula is computed by an
+agent. Unsupported anchor/external routes and ambiguous threshold units fail closed;
+see [evaluation contract](evaluation-contract.md) for the owning rules and schema.

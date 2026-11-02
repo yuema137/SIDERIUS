@@ -38,6 +38,9 @@ def build_parser() -> argparse.ArgumentParser:
     from ml_models.models_sandbox import MODEL_REGISTRY
 
     parser = argparse.ArgumentParser(description="TIDMAD Autonomous Agent Kernel")
+    parser.add_argument(
+        "--score_units_metric", help="Effective metric id for active score-unit settings."
+    )
 
     parser.add_argument(
         "--provider",
@@ -694,6 +697,7 @@ def build_agent_input(
         "seed_plugin_path": args.seed_plugin_path,
         "file_index": args.file_index,
         "max_rounds": args.max_rounds,
+        "score_units_metric": getattr(args, "score_units_metric", None),
         "health_checks_config": args.health_checks_config,
         # DS5c — DataScope + HealthGate subsystem. from_cli parses "4-9" /
         # "4,5,6,7,8,9" / mixed; schema + validate_runtime_config do the rest.

@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from uuid import uuid4
 
+from tests.browser.fixture_metadata import emit_metadata
 from tests.unit.tools.candidate_worker.test_native import Provider
 
 
@@ -65,5 +66,5 @@ def provider(root: Path) -> None:
             self.wfile.write(payload)
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    print(json.dumps({"endpoint": f"http://127.0.0.1:{server.server_port}/v1"}), flush=True)
+    emit_metadata({"endpoint": f"http://127.0.0.1:{server.server_port}/v1"})
     server.serve_forever()

@@ -456,3 +456,31 @@ def test_copied_workflow_uses_all_csv_training_rows(tmp_path):
             scope, EpochSamplingParams(data_dir=str(data))
         )
         assert len(dataset) == TRAIN_ROWS
+
+
+def test_uncommented_evaluation_example_binds_and_reaches_agent_prompts(
+    tmp_path: Path, data_dir: Path
+) -> None:
+    """Defect: the commented ``evaluation:`` example in ``task.yaml`` drifts from
+    the schema, names a metric the template does not declare, or needs a runtime
+    capability that is not implemented, so a user who uncomments it gets a
+    refusal. Composition, the launch guard in ``bind_run_task_composition`` or
+    the rendered-meaning assertion fails respectively."""
+    from agent.prompt_templates.evaluation import append_evaluation_spec
+
+    manifest = copy_template(tmp_path / "own-task")
+    lines = manifest.read_text().splitlines()
+    start = lines.index("# evaluation:")
+    end = next(i for i in range(start, len(lines)) if not lines[i].startswith("#"))
+    assert all(line.startswith("# ") for line in lines[start:end])
+    lines[start:end] = [line[2:] for line in lines[start:end]]
+    manifest.write_text("\n".join(lines) + "\n")
+    meaning = yaml.safe_load(manifest.read_text())["evaluation"]["components"][0]["meaning"]
+
+    with run_registration_scope():
+        composition = compose_run_task_bindings(str(manifest))
+        assert composition.evaluation is not None
+        with bind_run_task_composition(composition, physical_data_root=str(data_dir)):
+            rendered = append_evaluation_spec("")
+    assert f"Meaning: {meaning}" in rendered
+    assert "Deterministic ranking: balanced_accuracy; maximize" in rendered
