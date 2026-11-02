@@ -47,6 +47,9 @@ class WorkerObservation:
     worker_pid: int
     started_at: str
     finished_at: str
+    #: Process-group members were still observable after the leader was reaped.
+    #: Recorded independently of ``disposition``, which it never overrides.
+    orphaned_process_tree: bool = False
 
 
 class SkillExecutorError(RuntimeError):
@@ -129,6 +132,20 @@ def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
         process.wait()
 
 
+def _worker_command(request_path: Path, response_path: Path) -> list[str]:
+    """The skill-worker command line (also the test seam for a controlled child)."""
+
+    return [
+        sys.executable,
+        "-m",
+        "agent.data_analysis.worker_main",
+        "--request",
+        str(request_path),
+        "--response",
+        str(response_path),
+    ]
+
+
 def _run_worker(
     request: SkillWorkerRequest,
     *,
@@ -156,15 +173,7 @@ def _run_worker(
     memory_ceiling = None if max_host_memory_gb is None else int(max_host_memory_gb * 1024**3)
     with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
         process = subprocess.Popen(
-            [
-                sys.executable,
-                "-m",
-                "agent.data_analysis.worker_main",
-                "--request",
-                str(request_path),
-                "--response",
-                str(response_path),
-            ],
+            _worker_command(request_path, response_path),
             stdin=subprocess.DEVNULL,
             stdout=stdout,
             stderr=stderr,
@@ -186,10 +195,18 @@ def _run_worker(
                 break
             time.sleep(_POLL_S)
         peak_rss = max(peak_rss, tree_rss_bytes(process.pid))
+        orphaned_process_tree = False
         if process.poll() is None:
             _terminate_process_group(process)
         elif process_group_alive(process.pid):
-            disposition = "orphaned_process_tree"
+            # Precedence (#1448): a disposition the supervisor already decided
+            # (timed_out, memory_limit_exceeded) stands. After its termination
+            # a killed descendant can still be observable until its new parent
+            # reaps it; that fact is recorded separately. Only a worker that
+            # exited on its own is classified as orphaned_process_tree.
+            orphaned_process_tree = True
+            if disposition == "exited":
+                disposition = "orphaned_process_tree"
             _terminate_process_group(process)
         returncode = process.wait()
 
@@ -209,6 +226,7 @@ def _run_worker(
         worker_pid=process.pid,
         started_at=started_at,
         finished_at=utc_now(),
+        orphaned_process_tree=orphaned_process_tree,
     )
 
 
@@ -370,7 +388,10 @@ def execute_skill(
         started_at=observed.started_at,
         finished_at=observed.finished_at,
         worker_pid=observed.worker_pid,
-        host_details={"supervisor_disposition": observed.disposition},
+        host_details={
+            "supervisor_disposition": observed.disposition,
+            **({"orphaned_process_tree": True} if observed.orphaned_process_tree else {}),
+        },
     )
     if observed.disposition == "timed_out":
         return SkillResult(
