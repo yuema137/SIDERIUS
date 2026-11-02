@@ -36,8 +36,7 @@ timing belong to B3-4. Without a
 - `HostBudget`: `gpus` (declared order is first-fit order; may be empty),
   `host_memory_gib`, `cpu_slots`, `max_concurrent_units`, `source`
   (`caller`, `file`, or `host_reservation` for a run's budget derived from its
-  host-ledger grant, `HostGrant.run_budget`). There are no defaults: every quantity is an explicit
-  operator input. Measured capacity alone and `hardware_models._SAFETY_FRACTION`
+  host-ledger grant, `HostGrant.run_budget`). Capacity quantities are explicit operator inputs. Measured capacity alone and `hardware_models._SAFETY_FRACTION`
   are never promoted into a budget. Duplicate slot UUIDs refuse.
   `acknowledge_shared_gpu_time_budget` (strict bool, default `false`, omitted
   from serialization and the digest when false) is the operator's acceptance
@@ -45,6 +44,11 @@ timing belong to B3-4. Without a
   `plan_dispatch` enforces it (step 3).
   Heterogeneous hardware classes refuse (decision B3-Q3): the proposer's
   `hardware_context` is LLM-visible and must not depend on placement.
+- Host-operation queue bound: `max_queued_operations` is a strict nonnegative
+  integer, default zero (no waiting), omitted from serialization at zero and
+  included in the digest otherwise. Host-ledger admission enforces it after
+  promotion and before claim/spawn. `plan_dispatch` does not limit ready units
+  inside a run. See the [queue contract](../../tools/candidate_operations/candidate-operations-contract.md#queued-operations).
 - `HostBudget.digest`: SHA-256 hex of the sorted-key compact JSON of every
   field except `source` (where the operator declared it is provenance; what
   is scheduled against is identity). Slot order is part of the digest.

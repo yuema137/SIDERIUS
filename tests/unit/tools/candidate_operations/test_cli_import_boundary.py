@@ -70,3 +70,22 @@ except SystemExit:
         observed = json.loads(result.stdout)
         assert observed["operation_id"] == str(submission.request_id)
         assert (observed["state"], observed["reason"]) == ("operation_failed", "spawn_failed")
+
+
+def test_waiting_child_does_not_import_tensor_runtime():
+    """An idle waiter used to load torch through native-chain hardware review."""
+    probe = """
+import importlib.abc
+import sys
+class NoTensorRuntime(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in {'torch', 'jax', 'tensorflow'}:
+            raise AssertionError(f'waiting child imported {fullname}')
+sys.meta_path.insert(0, NoTensorRuntime())
+import tools.candidate_operations.child
+import tools.candidate_operations.host_queue
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, timeout=30
+    )
+    assert result.returncode == 0, result.stderr

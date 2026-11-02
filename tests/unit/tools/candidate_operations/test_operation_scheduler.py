@@ -52,6 +52,7 @@ def _budget(*, acknowledge: bool = False, memory: float = 64.0) -> HostBudget:
         host_memory_gib=memory,
         cpu_slots=16,
         max_concurrent_units=4,
+        max_queued_operations=2,
         source="file",
         acknowledge_shared_gpu_time_budget=acknowledge,
     )
@@ -758,6 +759,38 @@ def test_a_serial_resume_of_a_ledger_placed_root_is_refused(prepared, tmp_path, 
             pass
 
     assert _code(enter) == "host_ledger_required"
+
+
+@pytest.mark.parametrize("limit", [0, 2])
+def test_host_queue_cap_refuses_before_claim_or_spawn(prepared, tmp_path, children, limit):
+    """The (limit + 1)th waiter must not allocate another unreserved process."""
+    host = _ledger(tmp_path)
+    host = host.model_copy(
+        update={"budget": host.budget.model_copy(update={"max_queued_operations": limit})}
+    )
+    first = _gpu_operation(prepared, 3.0)
+    submit_operation(_store(tmp_path, "running"), first, launch_environment=KEY, host=host)
+    for index in range(limit):
+        submit_operation(
+            _store(tmp_path, f"waiting-{index}"),
+            _gpu_operation(prepared, 3.0),
+            launch_environment=KEY,
+            host=host,
+        )
+    refused_store = _store(tmp_path, "refused")
+    refused = _gpu_operation(prepared, 3.0)
+    assert (
+        _code(lambda: submit_operation(refused_store, refused, launch_environment=KEY, host=host))
+        == "host_queue_full"
+    )
+    assert _claims(refused_store) == []
+    assert len(children.children) == limit + 1
+    assert len(_queue(host)) == limit
+    # Promotion frees queue space before applying the cap to a fresh submission.
+    _end(children.children[0])
+    handle = submit_operation(refused_store, refused, launch_environment=KEY, host=host)
+    assert handle.observation == ("queued" if limit else "starting")
+    assert len(_queue(host)) == limit
 
 
 @pytest.mark.parametrize("marker", ["process", "sandbox", "submitter"])

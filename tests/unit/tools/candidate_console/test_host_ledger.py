@@ -155,3 +155,27 @@ def test_review_refuses_what_the_launch_would_refuse_or_ignore(ledgered, console
     with pytest.raises(OperationFailure) as missing:
         shared.require_reviewable_resources(RunResourcesSelection())
     assert missing.value.detail.code == "resources_required"
+
+
+def test_queue_full_refusal_reaches_the_browser_with_recovery_action(console_config, monkeypatch):
+    """The generic native-verification error hid the host admission refusal."""
+    from tests.unit.tools.candidate_console.test_http import client
+    from tools.candidate_operations.models import OperationFailure
+
+    def refuse(self, selection):
+        raise OperationFailure("host_queue_full", "private diagnostic")
+
+    monkeypatch.setattr(CandidateConsole, "resume_loop", refuse)
+    response = client(console_config).post(
+        "/api/loop-resumes",
+        json={
+            "request_id": str(uuid4()),
+            "predecessor_operation_id": str(uuid4()),
+            "expected_receipt_digest": "a" * 64,
+        },
+    )
+    assert response.status_code == 409
+    assert response.json()["error"] == {
+        "code": "host_queue_full",
+        "message": "host waiting queue is full or disabled; retry when capacity is available",
+    }

@@ -24,7 +24,6 @@ from tools.native_chain.models import (
 from tools.setup_review.composition_check import check_task
 from tools.setup_review.composition_models import TaskCheckRequest
 from tools.setup_review.environment_models import EnvironmentPreviewRequest
-from tools.setup_review.environment_settings import inspect_environment
 from tools.setup_review.models import SetupReviewRequest
 from workflows.reviewed_launch_binding import verify_binding
 
@@ -128,6 +127,9 @@ def review(request: NativeChainReviewRequest) -> NativeChainCapture:
     if report.result.outcome != "passed" or report.result.task_settings is None:
         raise NativeChainRefusal("task_check_incomplete")
     task_path = request.output / "task-check/report.json"
+    # Hardware inspection imports the scientific runtime only when reviewing a launch.
+    from tools.setup_review.environment_settings import inspect_environment
+
     environment = inspect_environment(
         EnvironmentPreviewRequest(
             report=task_path,
