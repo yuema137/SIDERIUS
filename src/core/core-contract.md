@@ -279,3 +279,19 @@ version does not authorize arbitrary replacement values under an unchanged
 trusted digest; if both anchors and artifacts are attacker-controlled, this
 format alone supplies no authenticity. Additional consumed-input identity and
 downgrade/path-check hardening is tracked in #1326.
+
+## Pseudo resource admission
+
+`pseudo_admission.resolve_pseudo_envelope` resolves all three roles through
+`execution_calibration.resolve_role_ceiling`; it never discovers hardware or
+adds an override layer. Pseudo training requires explicitly declared positive
+GiB values for training, inference and scoring. Omitted or zero declarations
+raise `PseudoEnvelopeRequired` with code `PSEUDO_ENVELOPE_REQUIRED`; malformed
+values retain `MalformedCeilingOverride`. The standard launcher checks before
+workflow setup; direct production-preflight calls check again before admission.
+
+`PseudoEnvelope` carries the resolved `RoleCeiling` objects. The pseudo adapter
+persists them in `preflight_workers/<label>.json` with outcome
+`PSEUDO_DECLARED_ENVELOPE`. This is synthetic admission, not a GPU measurement,
+model-fit assertion or parent-process memory enforcement. No real worker is
+launched. Real training retains the existing GPU snapshot and isolated probe.

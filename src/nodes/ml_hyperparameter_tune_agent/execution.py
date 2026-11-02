@@ -42,6 +42,7 @@ from agent.schemas.training_diagnosis import derive_training_diagnosis
 from agent.skills.evaluate_vram_skill.preflight_adapter import run_production_preflight
 from core.layout import checkout_root
 from core.record_role import AttemptRole, observed_attempt_role
+from core.sandbox_executor import StubSandbox
 from execute_tools.dataset_config import (
     ScopeViolationError,
 )
@@ -434,6 +435,7 @@ def run_admission_preflight(
         max_samples=agent_input.validation_max_train_samples,
     )
     resource_check = run_production_preflight(
+        pseudo_training=isinstance(sandbox, StubSandbox),
         model_type=active_params["model_type"],
         model_config=active_params["model_config"],
         train_config=active_params["train_config"],

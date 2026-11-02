@@ -304,3 +304,15 @@ arithmetic/rendering providers; native behavior does not infer historical mode.
 ### Independent output geometry
 
 Generic synthetic targets are resolved from fixed output dimensions and input-bound symbols through `model_output_geometry.resolve_output_shape`. Unbound independent output symbols or dynamic output axes raise `ProbeConstructionError`; no segmentation-size guess is permitted. Tasks requiring these geometries supply both task-owned input and target samples through the existing real-sample path. This changes neither their target semantics nor the resource budget.
+
+### Pseudo training admission
+
+`run_production_preflight(pseudo_training=True)` resolves the explicit envelope
+through `core.pseudo_admission` before hardware snapshot construction or worker
+launch. It returns `status=success`, `feasible=True` and
+`preflight_outcome=PSEUDO_DECLARED_ENVELOPE`, with the three declared role ceilings
+in `pseudo_envelope`; the same payload is persisted under
+`preflight_workers/<label>.json`. It contains no measured GPU capacity or estimated
+model demand. Missing/unbounded ceilings refuse with `PseudoEnvelopeRequired`.
+The default `False` preserves the real isolated GPU probe, including its result
+mapping, budget resolution and inference-refusal verification.

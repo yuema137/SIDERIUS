@@ -2393,3 +2393,11 @@ Console templates and small executable examples explicitly choose
 settings remain unchanged. `WorkflowLaunchConfig` owns editor help metadata,
 not a second execution policy. Changing the final iteration count or Trial
 budgets does not change the resolved Formal workload.
+
+### Pseudo resource admission selection
+
+`execution.run_admission_preflight` passes `pseudo_training=True` only for a
+`StubSandbox` instance (including subclasses). The core's declared-envelope
+resolver owns pseudo admission. GPU visibility never selects this route, and
+`--is_pseudo_llm` alone does not change resource admission. Subsequent task checks,
+training/inference/scoring stubs and Health policy retain their existing behavior.
