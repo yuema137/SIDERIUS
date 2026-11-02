@@ -116,3 +116,45 @@ def test_inference_wrapper_transports_the_run_ceiling_to_the_stub(tmp_path):
         )
     sidecar = Path(sandbox.base_dir) / "pseudo_inference_ceiling_attempt_ceiling_run.json"
     assert json.loads(sidecar.read_text())["evaluation_max_samples"] == 10**6
+
+
+@pytest.mark.usefixtures("synthetic_dataset_profile", "synthetic_physical_data_root")
+def test_admitted_ceiling_adds_no_dataset_construction(monkeypatch, tmp_path):
+    """An admitted ceiling costs no construction beyond the uncapped pass.
+
+    The task writer may rematerialize its own scope, so the uncapped pass is
+    the baseline; a separate size-check construction adds one.
+    """
+    from examples.quickstart.plugins._quickstart_task import write_data_dir
+
+    write_data_dir(tmp_path)
+    composition = compose_run_task_bindings(str(MANIFEST))
+    task = composition.task_data_path
+    request = ScopeBuildRequest(
+        round_kind="formal", selection_strategy="snapshot", portion=1.0, seed=0, max_samples=2
+    )
+    scopes = SimpleNamespace(evaluation=task.build_eval_scope(request))
+    built = type(task).validation_dataset
+    calls = []
+
+    def counting(self, scope, params):
+        calls.append(scope)
+        return built(self, scope, params)
+
+    monkeypatch.setattr(type(task), "validation_dataset", counting)
+    counts = {}
+    with bind_run_task_composition(composition, physical_data_root=str(tmp_path)):
+        for ceiling in (None, 2):
+            calls.clear()
+            write_pseudo_deliverable(
+                output_dir=str(tmp_path / f"out_{ceiling}"),
+                data_dir=str(tmp_path),
+                exp_id="once",
+                run_name="once_run",
+                model_type="stub",
+                task_scopes=scopes,
+                max_samples=ceiling,
+            )
+            counts[ceiling] = len(calls)
+    assert counts[None] >= 1
+    assert counts[2] == counts[None]
