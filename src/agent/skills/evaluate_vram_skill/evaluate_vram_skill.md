@@ -307,12 +307,13 @@ Generic synthetic targets are resolved from fixed output dimensions and input-bo
 
 ### Pseudo training admission
 
-`run_production_preflight(pseudo_training=True)` resolves the explicit envelope
-through `core.pseudo_admission` before hardware snapshot construction or worker
-launch. It returns `status=success`, `feasible=True` and
-`preflight_outcome=PSEUDO_DECLARED_ENVELOPE`, with the three declared role ceilings
-in `pseudo_envelope`; the same payload is persisted under
-`preflight_workers/<label>.json`. It contains no measured GPU capacity or estimated
-model demand. Missing/unbounded ceilings refuse with `PseudoEnvelopeRequired`.
+`run_production_preflight(pseudo_training=True)` resolves the no-execution-envelope
+decision through `core.pseudo_admission` before hardware snapshot construction or
+worker launch. It returns `status=success`, `feasible=True` and
+`preflight_outcome=PSEUDO_NO_EXECUTION_ENVELOPE`, with the explicit decision and
+three optional role declarations in `pseudo_admission`; the same payload is
+persisted under `preflight_workers/<label>.json`. No host ceiling is required.
+Optional overrides are validated by the existing core ceiling parser and recorded,
+not enforced by the stub. Malformed overrides raise `MalformedCeilingOverride`.
 The default `False` preserves the real isolated GPU probe, including its result
 mapping, budget resolution and inference-refusal verification.

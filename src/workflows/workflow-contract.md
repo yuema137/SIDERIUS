@@ -417,12 +417,12 @@ with `--target_score_metric`. The shared tuner launch surface transports
 See the [runtime contract](../execute_tools/evaluation-contract.md#deterministic-selection-runtime)
 for the single authority on formula semantics and unsupported combinations.
 
-### Standard pseudo launch resource requirement
+### Standard pseudo launch resource decision
 
 When `--is_pseudo_training` selects `StubSandbox`, `run_one_iteration.main` invokes
-`core.pseudo_admission.resolve_pseudo_envelope` before constructing the workflow.
-All execution roles must have explicit positive `SIDERIUS_SUBPROCESS_RSS_GB`
-ceilings; omission or zero raises the typed `PSEUDO_ENVELOPE_REQUIRED` refusal.
-This requirement is independent of GPU visibility. `--is_pseudo_llm` alone keeps
-real execution and its admission. The preflight adapter rechecks the same owner
-for callers that construct a sandbox without using the standard CLI.
+`core.pseudo_admission.resolve_pseudo_admission` before constructing the workflow.
+No host ceiling is required: the stub starts no subprocess. Optional
+`SIDERIUS_SUBPROCESS_RSS_GB` declarations are validated and recorded; malformed
+values print the standard `LAUNCH REFUSED` line and exit 2. This decision is
+independent of GPU visibility. `--is_pseudo_llm` alone keeps real execution and
+its admission. The preflight adapter rechecks the same owner for direct callers.

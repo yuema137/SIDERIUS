@@ -6,7 +6,7 @@ import pytest
 
 from agent.skills.evaluate_vram_skill import preflight_adapter as adapter
 from agent.skills.evaluate_vram_skill.isolated_probe import IsolatedProbeResult
-from core.pseudo_admission import PseudoEnvelopeRequired
+from core.execution_calibration import MalformedCeilingOverride
 
 
 def _run(tmp_path, **kwargs):
@@ -39,8 +39,9 @@ def test_pseudo_uses_declared_roles_without_gpu_measurement(tmp_path, monkeypatc
         hardware_context=SimpleNamespace(device_available=gpu_available),
         pseudo_training=True,
     )
-    assert result["preflight_outcome"] == "PSEUDO_DECLARED_ENVELOPE"
-    assert result["pseudo_envelope"] == {
+    assert result["preflight_outcome"] == "PSEUDO_NO_EXECUTION_ENVELOPE"
+    assert result["pseudo_admission"] == {
+        "decision": "pseudo: no execution envelope (StubSandbox launches no subprocess)",
         "training": {"role": "training", "gib": 16, "source": "environment"},
         "inference": {"role": "inference", "gib": 8, "source": "environment"},
         "scoring": {"role": "scoring", "gib": 4, "source": "environment"},
@@ -50,12 +51,23 @@ def test_pseudo_uses_declared_roles_without_gpu_measurement(tmp_path, monkeypatc
 
 
 @pytest.mark.parametrize("declaration", [None, "0", "training=16,inference=0,scoring=4"])
-def test_pseudo_refuses_missing_or_unbounded_envelope(tmp_path, monkeypatch, declaration):
-    """An omitted or intentionally unbounded OS cap is not a declared envelope."""
+def test_pseudo_needs_no_execution_envelope(tmp_path, monkeypatch, declaration):
+    """An omitted or zero ceiling must not prevent a no-subprocess smoke."""
     monkeypatch.delenv("SIDERIUS_SUBPROCESS_RSS_GB", raising=False)
     if declaration is not None:
         monkeypatch.setenv("SIDERIUS_SUBPROCESS_RSS_GB", declaration)
-    with pytest.raises(PseudoEnvelopeRequired, match="PSEUDO_ENVELOPE_REQUIRED"):
+    result = _run(tmp_path, hardware_context=None, pseudo_training=True)
+    assert result["feasible"] is True
+    assert result["pseudo_admission"]["decision"] == (
+        "pseudo: no execution envelope (StubSandbox launches no subprocess)"
+    )
+    assert result["pseudo_admission"]["inference"]["gib"] == (None if declaration is None else 0)
+
+
+def test_pseudo_still_validates_optional_override(tmp_path, monkeypatch):
+    """Pseudo routing must not discard a malformed operator declaration."""
+    monkeypatch.setenv("SIDERIUS_SUBPROCESS_RSS_GB", "training=16,inference=bad,scoring=4")
+    with pytest.raises(MalformedCeilingOverride):
         _run(tmp_path, hardware_context=None, pseudo_training=True)
     assert not (tmp_path / "preflight_workers").exists()
 

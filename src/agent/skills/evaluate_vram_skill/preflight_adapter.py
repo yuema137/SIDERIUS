@@ -285,14 +285,14 @@ def run_production_preflight(
     rather than evidence that the model is too large for the GPU.
     """
     if pseudo_training:
-        from core.pseudo_admission import resolve_pseudo_envelope
+        from core.pseudo_admission import resolve_pseudo_admission
 
-        envelope = resolve_pseudo_envelope()
+        admission = resolve_pseudo_admission()
         result = {
             "status": "success",
             "feasible": True,
-            "preflight_outcome": "PSEUDO_DECLARED_ENVELOPE",
-            "pseudo_envelope": envelope.model_dump(mode="json"),
+            "preflight_outcome": "PSEUDO_NO_EXECUTION_ENVELOPE",
+            "pseudo_admission": admission.model_dump(mode="json"),
             "message": "Synthetic admission only; no candidate capacity was measured.",
         }
         from core.durable_io import publish_json_atomically

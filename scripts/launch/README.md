@@ -20,16 +20,14 @@ for the supported scoring route and threshold rules.
 ## CPU pseudo smoke runs
 
 Use `--is_pseudo_llm --is_pseudo_training` to exercise the chain with canned
-LLM and execution results. Declare positive address-space limits for all three
-execution roles through `SIDERIUS_SUBPROCESS_RSS_GB` before launch. For example,
-`SIDERIUS_SUBPROCESS_RSS_GB=16 bash scripts/launch/run_chain.sh --mode lilab ...
---is_pseudo_llm --is_pseudo_training` declares 16 GiB for each role; replace
-`...` with your workspace, run name, task composition and data-directory flags.
-Choose the limits explicitly for your run; 16 GiB is an example, not a default.
+LLM and execution results. No API key, GPU or memory-limit setup is needed.
+Add both flags to your normal task launch command.
 
-Pseudo admission records that declaration without probing a GPU or estimating
-candidate memory. Missing or zero limits stop launch with
-`PSEUDO_ENVELOPE_REQUIRED`. A positive declaration admits only synthetic
-execution: it does not establish that a real model fits on CPU or GPU, and it
-does not cap the chain parent's memory. Task validation and Health checks still
-run, so a pseudo chain can fail later if its canned outputs lack required evidence.
+The execution stub starts no subprocess, so pseudo admission records that no
+execution envelope is needed. If you set `SIDERIUS_SUBPROCESS_RSS_GB`, its value
+is validated and recorded, but it limits nothing in the stub. A malformed value
+stops launch with `LAUNCH REFUSED` and exit code 2.
+
+Pseudo admission does not establish that a real model fits on CPU or GPU.
+Task validation and Health checks still run, so a pseudo chain can fail later
+if its canned outputs lack required evidence.

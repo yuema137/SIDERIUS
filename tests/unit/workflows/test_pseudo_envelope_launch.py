@@ -1,17 +1,16 @@
-"""Missing CPU pseudo envelope refuses before workflow or workspace setup."""
+"""Malformed optional pseudo ceiling uses the standard launch refusal."""
 
 import sys
 from pathlib import Path
 
 import pytest
 
-from core.pseudo_admission import PseudoEnvelopeRequired
 from workflows import run_one_iteration
 
 
-def test_launch_refuses_missing_envelope_before_iteration_setup(tmp_path, monkeypatch):
+def test_launch_refuses_malformed_override_before_iteration_setup(tmp_path, monkeypatch, capsys):
     """Removing launch-time resolution would reach the forbidden setup seam."""
-    monkeypatch.delenv("SIDERIUS_SUBPROCESS_RSS_GB", raising=False)
+    monkeypatch.setenv("SIDERIUS_SUBPROCESS_RSS_GB", "invalid")
     data = tmp_path / "data"
     data.mkdir()
     monkeypatch.setattr(
@@ -39,8 +38,10 @@ def test_launch_refuses_missing_envelope_before_iteration_setup(tmp_path, monkey
     )
 
     def forbidden(*args, **kwargs):
-        pytest.fail("missing pseudo envelope reached iteration setup")
+        pytest.fail("malformed pseudo override reached iteration setup")
 
     monkeypatch.setattr(run_one_iteration, "prepare_iteration_dir", forbidden)
-    with pytest.raises(PseudoEnvelopeRequired, match="PSEUDO_ENVELOPE_REQUIRED"):
+    with pytest.raises(SystemExit) as exc:
         run_one_iteration.main()
+    assert exc.value.code == 2
+    assert "LAUNCH REFUSED:" in capsys.readouterr().err

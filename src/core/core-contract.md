@@ -86,19 +86,21 @@ workflow · calibration observations.
 
 ## Pseudo resource admission
 
-`pseudo_admission.resolve_pseudo_envelope` resolves all three roles through
-`execution_calibration.resolve_role_ceiling`; it never discovers hardware or
-adds an override layer. Pseudo training requires explicitly declared positive
-GiB values for training, inference and scoring. Omitted or zero declarations
-raise `PseudoEnvelopeRequired` with code `PSEUDO_ENVELOPE_REQUIRED`; malformed
-values retain `MalformedCeilingOverride`. The standard launcher checks before
-workflow setup; direct production-preflight calls check again before admission.
+`pseudo_admission.resolve_pseudo_admission` resolves all three optional role
+ceilings through `execution_calibration.resolve_role_ceiling`; it never discovers
+hardware or adds an override layer. `StubSandbox` launches no subprocess, so
+pseudo training requires no host ceiling. `PseudoAdmission.decision` records
+`pseudo: no execution envelope (StubSandbox launches no subprocess)`.
+Omitted and zero declarations are valid. A supplied `SIDERIUS_SUBPROCESS_RSS_GB`
+is validated and recorded, but enforces nothing in the stub. Malformed values
+retain `MalformedCeilingOverride`; the standard launcher prints `LAUNCH REFUSED`
+and exits 2 before workflow setup. Direct preflight callers retain the typed exception.
 
-`PseudoEnvelope` carries the resolved `RoleCeiling` objects. The pseudo adapter
-persists them in `preflight_workers/<label>.json` with outcome
-`PSEUDO_DECLARED_ENVELOPE`. This is synthetic admission, not a GPU measurement,
-model-fit assertion or parent-process memory enforcement. No real worker is
-launched. Real training retains the existing GPU snapshot and isolated probe.
+The pseudo adapter persists the decision and resolved `RoleCeiling` declarations
+in `preflight_workers/<label>.json`, under `pseudo_admission`, with outcome
+`PSEUDO_NO_EXECUTION_ENVELOPE`. This is not a GPU measurement, model-fit assertion
+or parent-process memory enforcement. Real training retains the existing GPU
+snapshot and isolated probe.
 
 ## State and filesystem effects
 

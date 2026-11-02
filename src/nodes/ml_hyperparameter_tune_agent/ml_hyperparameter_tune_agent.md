@@ -2397,8 +2397,8 @@ budgets does not change the resolved Formal workload.
 ### Pseudo resource admission selection
 
 `execution.run_admission_preflight` passes `pseudo_training=True` only for a
-`StubSandbox` instance (including subclasses). The core's declared-envelope
-resolver owns pseudo admission. GPU visibility never selects this route, and
+`StubSandbox` instance (including subclasses). The core's no-execution-envelope
+decision owns pseudo admission; optional ceilings are validated and recorded. GPU visibility never selects this route, and
 `--is_pseudo_llm` alone does not change resource admission. Subsequent task checks,
 training/inference/scoring stubs and Health policy retain their existing behavior.
 
