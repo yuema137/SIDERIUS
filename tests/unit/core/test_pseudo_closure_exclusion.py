@@ -3,7 +3,10 @@
 ``core-contract.md`` states that ``core/stub_sandbox.py`` and its pseudo helpers
 ``core/pseudo_deliverables.py`` and ``core/pseudo_scoring.py`` are outside every
 assembly digest closure, so a pseudo-only edit moves no identity that
-siderius-exp qualifies (#1475). Each digest owner builds its file list inline,
+siderius-exp qualifies (#1475). The owners covered are the four assembly
+digests, ``runtime_environment_identity`` and the planner strategy assembly
+(``PlannerStrategyIdentity.assembly_sha256``, pinned by siderius-exp
+planner_compat). Each owner builds its file list inline,
 so this test records the source files the owner actually reads while computing
 its value instead of copying the lists. If a closure gains a pseudo-only file,
 ``test_pseudo_only_modules_outside_closure`` names the owner and the file.
@@ -16,8 +19,10 @@ from pathlib import Path
 
 import pytest
 
+import agent.planner_strategy as planner_strategy
 import agent.prompt_rendering as prompt_rendering
 from agent.data_analysis.generated_programs import runtime_environment_identity
+from core.planner_strategy_identity import PlannerStrategyIdentity
 from core.preflight_estimation import estimation_assembly_digest
 from core.runtime_control.gpu_protection import protection_mechanism_digest
 from core.runtime_control.verifier_provider import verifier_assembly_digest
@@ -31,6 +36,20 @@ PSEUDO_ONLY_MODULES = frozenset(
         "core/pseudo_scoring.py",
     }
 )
+
+
+def planner_strategy_assembly() -> str:
+    """Pin a stub strategy; the assembly digest ignores the strategy's own content."""
+    stub = planner_strategy.PlannerStrategy(
+        identity=PlannerStrategyIdentity(name="stub", version="0", content_sha256="0" * 64),
+        system_template="",
+        user_renderer=lambda *_args, **_kwargs: "",
+        uses_timing_context=False,
+    )
+    pinned = planner_strategy._with_assembly_identity(stub, expected=None)  # pyright: ignore[reportPrivateUsage]
+    assert pinned.identity.assembly_sha256 is not None
+    return pinned.identity.assembly_sha256
+
 
 # Each owner hashes its own module, which proves the read capture saw the closure.
 CLOSURE_OWNERS: tuple[tuple[str, Callable[[], str], str], ...] = (
@@ -58,6 +77,11 @@ CLOSURE_OWNERS: tuple[tuple[str, Callable[[], str], str], ...] = (
         "runtime_environment_identity",
         runtime_environment_identity,
         "agent/data_analysis/generated_programs.py",
+    ),
+    (
+        "planner_strategy_assembly",
+        planner_strategy_assembly,
+        "agent/planner_strategy.py",
     ),
 )
 
