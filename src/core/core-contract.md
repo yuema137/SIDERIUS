@@ -203,10 +203,11 @@ The task codec owns scope ordering, source context and storage. Batch size one
 bounds framework tensor lifetime, not task dataset/writer memory. The pseudo
 evaluation ceiling bounds the row count: `StubSandbox.execute_inference`
 forwards `runtime_policy["validation_max_samples"]` as `max_samples`, and
-`write_pseudo_deliverable` constructs `validation_dataset` to compare its
-length before any prediction; `run_generic_inference` constructs it again to
-iterate. Construction must therefore stay cheap (lazy rows), as the generic
-iterator already requires. A longer scope (a task whose
+`write_pseudo_deliverable` passes it to `run_generic_inference(max_samples=...)`,
+which compares the length of the one `validation_dataset` it constructs before
+any prediction and raises `EvaluationSampleCeilingExceeded`; the pseudo path
+translates that into its own refusal, so the scope is constructed once (#1488).
+Real inference passes no ceiling and checks nothing. A longer scope (a task whose
 `build_eval_scope` ignores `ScopeBuildRequest.max_samples`) raises
 `PseudoEvidenceUnsupported` naming the task, the count and the ceiling;
 nothing is written. `None` (direct callers without a runtime policy) skips the
