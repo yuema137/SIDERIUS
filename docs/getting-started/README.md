@@ -28,7 +28,9 @@ see [Try the browser console (experimental)](#try-the-browser-console-experiment
    dataset location and an external project directory. You do not need a
    prepared manifest. Agree on the prediction target, splits, score and budgets;
    the agent creates your [task package](../reference/task-composition.md) and
-   experiment files there. For an existing scientific task, start from a
+   experiment files there. If "best" means more than one metric, for example
+   accuracy traded against a second error measure, ask the agent to declare it
+   as the [evaluation guide](../guides/evaluation/README.md) shows. For an existing scientific task, start from a
    [companion tutorial](https://github.com/yuema137/siderius-exp/blob/main/tutorials/README.md).
 3. Save a reviewed [LLM profile](../../configs/llm/README.md) in your project.
    This JSON file selects the experiment's providers and models by role;
@@ -163,6 +165,12 @@ check installation and task contracts, not scientific hardware or model
 performance. A real run, including a Quickstart research chain, needs an NVIDIA
 GPU with CUDA; the chain header and the console run review say so, and a launch
 on a machine without one stops before any model call.
+
+To check your own task package end to end on a CPU without an API key, add
+`--is_pseudo_llm --is_pseudo_training` to a CLI launch (see
+[entrypoints](../reference/entrypoints.md)). A pseudo run uses synthetic models
+and scores, so it tests wiring, not science. Success: the run exits 0. A task
+shape the pseudo model cannot produce is refused up front with the reason.
 
 To let an LLM orchestrator choose the research steps instead of a fixed
 `workflow.py`, use the [external orchestration guide](../../src/tools/orchestration_setup/README.md).
