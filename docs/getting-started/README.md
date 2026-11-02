@@ -176,17 +176,19 @@ workspace folder for each check:
   --workspace /absolute/project/pseudo_ws --run_name pseudo_check --iteration 1 \
   --task_composition /absolute/project/task.yaml --data_dir /absolute/project/data \
   --healthgate_mode blocking --result_authority scientific \
-  --max_rounds 1 --formal_portion 1.0 \
   --is_pseudo_llm --is_pseudo_training
 ```
 
 A pseudo run uses synthetic models and scores, so it tests wiring, not
-science. `--max_rounds 1 --formal_portion 1.0` runs one formal tuning round on
-the whole training scope, which keeps a small task from failing a too-small
-trial round. Success: the command exits 0 and ends with an `ITERATION 1
-COMPLETE` banner. Exit 0 alone is not enough: if every attempt failed, the run
-still exits 0 but prints `No models passed gates this iteration` with
-`status=no_records`; the `Loop Error` lines above it name the cause. A task
+science. Success: the command exits 0 and ends with an `ITERATION 1 COMPLETE`
+banner, after a line such as `Completed 3 tuning rounds`. Exit 0 alone is not
+enough: if every attempt failed, the run still exits 0 but prints
+`No models passed gates this iteration` with `status=no_records`; the
+`Loop Error` lines above it name the cause. On a small dataset, a common cause
+is an `exact` batch-size rule that a small trial round cannot fill; use a
+`range` rule as the
+[CSV template](../../examples/task_templates/csv_classification/README.md#small-datasets-and-trial-batches)
+does. A task
 shape the synthetic model cannot produce is refused before any work, with the
 reason. Other flags are in [entrypoints](../reference/entrypoints.md).
 
