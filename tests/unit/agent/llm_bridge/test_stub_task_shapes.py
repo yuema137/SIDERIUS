@@ -79,3 +79,60 @@ def test_unresolved_output_symbol_is_named_before_plugin_execution() -> None:
     contract = _contract(("B", 4), ("B", "unbound"), None)
     with pytest.raises(UnsupportedStubShapeError, match=r"output axis 1.*unbound"):
         stub_model_code(contract)
+
+
+def _bound_stub(contract: ModelIOContract):
+    """Assemble the pseudo plugin exactly as the implementor admits it."""
+    forward = ForwardContract(model_io=contract)
+    with bind_task_config({"forward_contract": forward.model_dump()}):
+        bridge = StubLLMBridge()
+        code = bridge._synthesise_json("implementor.code")
+        inp = ImplementorInput(
+            model_name="stub_dtype_test",
+            model_description="Synthetic dtype witness",
+            mathematical_definition="Scalar projection",
+            forward_contract=forward,
+            baseline_config=bridge._synthesise_json("proposer.proposing")["baseline_config"],
+            output_type=contract.legacy_output_type,
+        )
+        failure = MLModelImplementor._validate_code(code, inp, PROBE_SEED)
+    namespace: dict = {}
+    exec(_assemble_plugin(inp, code), namespace)
+    model = namespace["PLUGIN_MODEL_CLASS"](namespace["PLUGIN_CONFIG_CLASS"](segmentation_size=7))
+    return failure, model
+
+
+def _with_output_dtypes(contract: ModelIOContract, admissible: list[str]) -> ModelIOContract:
+    raw = contract.model_dump(mode="json")
+    raw["output"]["dtype"] = {"admissible": admissible}
+    return ModelIOContract.model_validate(raw)
+
+
+@pytest.mark.parametrize(
+    ("admissible", "expected"),
+    [(["float64"], torch.float64), (["int64", "bfloat16", "float32"], torch.bfloat16)],
+)
+def test_stub_emits_the_first_admissible_floating_output_dtype(admissible, expected) -> None:
+    """A float32-only stub fails the candidate check for float64-only contracts."""
+    contract = _with_output_dtypes(_contract(("B", 2, 16), ("B", 1), None), admissible)
+    failure, model = _bound_stub(contract)
+    assert failure is None
+    output = model(torch.zeros(2, 2, 16))
+    assert output.dtype == expected
+    output.float().mean().backward()
+
+
+def test_stub_refuses_a_non_floating_output_contract_before_plugin_code() -> None:
+    """Otherwise the refusal only surfaces through a repeated smoke/repair cycle."""
+    contract = _with_output_dtypes(_contract(("B", 4), ("B", 3), 1), ["int64", "uint8"])
+    with pytest.raises(UnsupportedStubShapeError, match=r"output dtype \['int64', 'uint8'\]"):
+        stub_model_code(contract)
+
+
+def test_stub_output_owns_storage_for_in_place_loss_steps() -> None:
+    """An expanded scalar aliases one element; in-place writes on it raise."""
+    _, model = _bound_stub(_contract(("B", "T"), ("B", 256, "T"), 1))
+    output = model(torch.zeros(2, 5))
+    with torch.no_grad():
+        output[:, 0] = 1.0
+    assert output[:, 1:].abs().max().item() == 0.0
