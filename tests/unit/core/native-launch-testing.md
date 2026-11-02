@@ -37,3 +37,10 @@ by 1.1 seconds, beyond the synthetic observation's one-second age limit. Against
 the original matrix this stops before spawn and surfaces a missing-ACK message;
 the typed protection receipt identifies expired coverage and no child PID. With
 the wiring clocks, the same delay preserves success without changing policy.
+
+Shared startup construction lives in `tests/helpers/inference_startup.py`.
+Clock injection and explicit preparation/acknowledgment budgets are independent;
+existing native-launch callers retain their selected defaults. The offline
+storage witness exercises the production post-publication ACK window across
+the preparation deadline and rejects expiry even when a consumed receipt exists.
+It does not monkeypatch a peer test module or assert only a fixture constant.
