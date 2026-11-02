@@ -320,6 +320,13 @@ refused, with `parallel_unit_exceeds_capacity` and a message naming that node. W
 `budget`. The exact rules are in the
 [worker contract](../candidate_worker/candidate-worker-contract.md#parallel-dispatch).
 
+Before starting work, a placed child checks that its reservation is still held.
+If that check cannot acquire the ledger lock within 30 seconds, the operation
+ends without running and reports `host_reservation_busy`. This indicates lock
+contention; retry as a new operation after contention clears.
+`host_reservation_unconfirmed` means the reservation could not be verified for
+another reason, such as removal or an unreadable ledger.
+
 Only waiting runs poll the ledger. A finished run's reservation is returned the
 next time a waiting run polls or any submission uses the ledger. If a crash leaves a reservation behind,
 release it explicitly:
