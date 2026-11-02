@@ -6,7 +6,7 @@ import {createRequire} from 'node:module';
 import {tmpdir} from 'node:os';
 import {join, resolve, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 import {showAllConsoleSections} from './console_view_flags.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -20,14 +20,8 @@ const server = spawn(
   ['-m', 'tests.browser.workflow_editor_server'],
   {cwd: root, stdio: ['ignore', 'pipe', 'pipe']},
 );
-let serverErrors = '';
-server.stderr.on('data', chunk => { serverErrors += chunk; });
-const lines = createInterface({input: server.stdout});
-const metadata = await new Promise((resolveMetadata, reject) => {
-  lines.once('line', line => resolveMetadata(JSON.parse(line)));
-  server.once('exit', code => reject(new Error(`server exit ${code}: ${serverErrors}`)));
-  setTimeout(() => reject(new Error(`server startup timeout: ${serverErrors}`)), 15000);
-});
+server.stderr.resume();
+const metadata = await waitForMetadata(server);
 let browser;
 async function waitUntil(predicate) {
   const deadline = Date.now() + 15000;
