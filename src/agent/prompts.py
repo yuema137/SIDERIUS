@@ -1343,7 +1343,8 @@ def get_planner_user_prompt(
      in the supplied run configuration; reason within the disclosed controls.
 2. **Follow Expert Advice**: Prioritize the direction suggested by the human expert.
 3. **Formulate Hypothesis**: Predict the outcome of this new trial.{model_constraint}
-4. **Choose Trial or Formal Mode**: Decide whether to run a fast trial or a full formal evaluation.
+4. **Choose Trial or Formal Mode**: Decide whether to run a fast trial or a formal round on the
+   run's configured Formal training and evaluation scopes (not necessarily the full data).
 5. **Propose Parameters**: Provide the JSON configuration for the next run.
 
 ### OUTPUT FORMAT (Strict JSON):

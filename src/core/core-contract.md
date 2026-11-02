@@ -187,21 +187,54 @@ task's codec to write training/evaluation artifacts under the sandbox configs
 directory. Binding/codec errors propagate from these stub methods. The real
 scoring method retains its ordinary-error result envelope.
 
-Pseudo execution still launches no child, produces no scientific deliverable,
-and consumes the existing seeded synthetic result stream. Fixed inference
+Pseudo execution launches no child and consumes the existing seeded synthetic
+result stream. For an evaluation scope, `core.pseudo_deliverables` supplies
+CPU predictions through `run_generic_inference` and the task's ordinary
+`write_deliverable` codec. This reads task input data and writes synthetic
+artifacts for normal Health checks; it does not train a model or provide
+scientific measurements. Predictions use the declared output geometry and
+dtype, varying class indices across samples and non-class positions, or bounded
+continuous values. They do not inspect labels, task names or Health thresholds.
+Unresolvable geometry and non-floating continuous output dtypes raise
+`PseudoEvidenceUnsupported`; task codec and data errors propagate. Legacy calls without evaluation scopes remain artifact-free.
+
+The task codec owns scope ordering, source context and storage. Batch size one
+bounds framework tensor lifetime, not task dataset/writer memory. A
+`pseudo_inference_<exp_id>_<run_name>.json` sidecar records `_pseudo_origin`
+and inference sample/batch counts. The existing saved-record marker remains
+required: synthetic Health success is only wiring evidence. Fixed inference
 timings, absent runtime verification, training-cache merge order, legacy
 SampleSet scope checks and saved `_pseudo_origin` provenance remain in force.
 Caller regression: `tests/unit/core/test_stub_composed_scope.py`.
 
 Before scope artifact writes, pseudo execution requires `exp_id` to pass the
 existing `validate_generated_artifact_name` component rule. Calls with no
-training scope retain the legacy pseudo API without an `exp_id` path check.
+training or evaluation scope retain the legacy pseudo API without an `exp_id`
+path check.
 
 `verifier_provider.verifier_assembly_digest` includes the entire
 `sandbox_executor.py`; changes confined to its pseudo methods still change the
 runtime assembly identity. Historical runtime profiles can therefore refuse a
 new build until separately qualified. Synthetic parity does not establish
 historical campaign, paper, or resume compatibility.
+
+When the bound manifest (`active_task_manifest_path`) declares a formula
+`evaluation` selection, `StubSandbox.execute_scoring` returns formula evidence
+from `core.pseudo_scoring.synthetic_formula_scoring`. It composes that manifest
+through `compose_scoring_child_bindings`, as the scoring child does, draws one
+synthetic scalar per primary/secondary source metric, and passes them through
+`execute_tools.evaluation_child.aggregate_child_outcome`; it implements no
+aggregation arithmetic. A manifest without an `evaluation` key is detected from
+its raw YAML and never re-composed. A formula-referenced metric draws inside its
+term's `[lower, upper]`, so `refuse` terms accept it; an unreferenced metric,
+and the primary's nine-value `per_sample`, keep the legacy synthetic band. Success adds `evaluation_result`, `metric_result` and
+the secondary result lists; `denoising_score` is the effective aggregate and
+`file_vector` is null, as from the real child. A non-scoreable aggregation
+returns status `error` with `not_scoreable` and `evaluation_result`. The
+parent's `validate_child_evaluation` checks this payload unchanged. Runs without
+a bound manifest or formula terms keep the legacy payload and random stream.
+Values are synthetic wiring evidence, not measurements. Regression:
+`tests/unit/core/test_stub_formula_scoring.py`.
 
 ## Versioned non-finite record JSON (issue #1111)
 
