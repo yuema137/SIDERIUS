@@ -444,5 +444,6 @@ Because it is the ordinary `validation_max_samples`, it also bounds an optional
 disclosed (constraint disclosure, tuner timing context, setup-review packet;
 prompt bytes change only for `--is_pseudo_training` with a real LLM), and is
 pinned in the run-invariants lock: a pseudo workspace created before this
-default recorded `None` and refuses resume unless relaunched with an explicit
-matching value.
+default recorded `None`, which `--validation_max_samples` (an integer) cannot
+express, so resuming it raises `RunInvariantsViolation`; continue that smoke in
+a new workspace.
