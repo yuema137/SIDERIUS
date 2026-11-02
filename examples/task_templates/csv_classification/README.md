@@ -2,8 +2,8 @@
 
 Copy this folder to package your own tabular dataset as a SIDERIUS task. It is
 a complete, working task package: it reads your CSV files, scores predictions
-with balanced accuracy, checks them with two Health checks and locks one
-training setting. You change only the lines marked `EDIT HERE`.
+with balanced accuracy, checks them with two Health checks and limits the
+training batch size to at most 32. You change only the lines marked `EDIT HERE`.
 
 A *task package* is the folder that tells SIDERIUS what your scientific problem
 is: where the data is, what the model receives and returns, how a result is
@@ -50,7 +50,7 @@ scored and when a result is invalid. The folder holds no data.
 | Path | What it is | Edit? |
 | --- | --- | --- |
 | `workflow.py` | Optional workflow for the non-console route: declares full Formal training scope and two tuning rounds. | paths and budgets |
-| `task.yaml` | The manifest: names every other file below, plus your CSV file names, label column, class labels, feature count and locked parameters. Paths are relative to this folder. | yes |
+| `task.yaml` | The manifest: names every other file below, plus your CSV file names, label column, class labels, feature count and parameter rules. Paths are relative to this folder. | yes |
 | `declared/task_config.yaml` | The task description the agents read, and the model input and output sizes. | yes |
 | `declared/task_health.yaml` | The two Health checks, their thresholds and the number of classes. | yes |
 | `declared/dataset_profile.json` | The two data partitions (0 = training file, 1 = validation file) and a one-line data source note. | the note only |
@@ -85,7 +85,7 @@ SIDERIUS checkout's root folder.
    | File | What to set |
    | --- | --- |
    | `task.yaml` | `train_file` and `validation_file`: your file names. `label_column`: the label's column name. `classes`: every label value exactly as written in the CSV; the first is class 0. `id_column`: your ID column, or `null` to number the rows. `feature_count`: how many feature columns. Every column except the label and ID is a feature, unless you list the ones to use under `feature_columns:`. |
-   | `task.yaml` | `parameter_rules`: keep `train_config.batch_size: exact: 32`, change the number, or delete the rule to let the agents choose. |
+   | `task.yaml` | `parameter_rules`: keep `train_config.batch_size: range: {min: 1, max: 32}`, change `max`, or delete the rule to let the agents choose any batch size. Keep `min: 1` if your training file is small; see [Small datasets and Trial batches](#small-datasets-and-trial-batches) before changing the rule to `exact`. |
    | `declared/task_config.yaml` | `task_description`: your data, target and score in plain words. The two `fixed:` sizes: the feature count (input) and the number of classes (output). Update the descriptions and `output_head_note` to match. |
    | `declared/task_health.yaml` | `symbol_cardinality`: the number of classes. `max_dominant_fraction`: a value above your largest class's share of `validation.csv` (for example 0.8 when the largest class is 60% of rows). |
    | `declared/dataset_profile.json` | `source`: one sentence on where the data comes from and how you split it. |
@@ -122,7 +122,8 @@ SIDERIUS checkout's root folder.
    - **Main score**: `balanced_accuracy`, higher is better;
    - **Health checks**: `predicts_more_than_one_class` marked **Blocking** and
      `dominant_class_fraction` marked **Recording**;
-   - **Locked parameters**: `train_config.batch_size` fixed to 32;
+   - **Locked parameters**: `train_config.batch_size` with rule **Range** and
+     value `{"min": 1.0, "max": 32.0}`;
    - the data folder with your two CSV files.
 
    Select **Count samples**. It reads both files through the package and shows
@@ -155,6 +156,35 @@ counts before you prepare a run.
 ## Choose the training scope
 
 These small-task settings use `formal_portion=1.0` and `max_rounds=2`; see [Trial and Formal training](../../../src/tools/candidate_console/README.md#trial-and-formal-training) for scope, round limits and framework defaults.
+
+### Small datasets and Trial batches
+
+A Trial round trains on a small share of `train.csv`, so on a small file it may
+have fewer rows than one batch. Unless your workflow sets them, the planner
+chooses the Trial portions, and its defaults are `trial_portion=0.02` (2% of
+the rows form the Trial training scope) and `train_portion=0.1` (10% of that
+scope is used each epoch). The package always keeps at least one row. With 120
+training rows and the defaults, a Trial round trains on 1 row.
+
+A batch larger than the available rows would train zero steps, so the run
+lowers the batch size to the row count for that attempt. That is why the rule
+is a range starting at 1: with `exact: 32` the run may not lower it, every
+Trial attempt is refused with `TrainingBatchPlanError ... prevents clamping`,
+no model is ever recorded and the run ends with manifest `status=no_records`.
+
+How to recognise it worked: the iteration ends with `ITERATION 1 COMPLETE`
+and its `manifest.json` has `status` `completed`. When the planner asked for a
+larger batch than the rows allow, the run log also shows a line such as
+`[training_batch] trial batch_size clamped from 32 to 1: the training scope has 1 samples`.
+The Formal round still trains on every row of `train.csv`
+(`formal_portion=1.0`).
+
+A Trial score from one or a few rows says little about a model; treat it as a
+check that the model runs, not as evidence. For a more informative Trial round,
+use more training rows, or set larger `trial_portion` and `train_portion`
+values (between 0.01 and 1.0) in the `training_settings` launch block of
+`workflow.py` (in the console: **Train & tune → Training settings**). Larger
+portions make each Trial round take longer.
 
 ## What the two Health checks do
 
