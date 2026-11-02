@@ -66,6 +66,14 @@ no hidden contracts, no silent defaults.
   it does not combine or rank them. Each review and the complete collection
   must fit the 65,536-byte limit owned by
   `proposer_literature_evidence.py`.
+- `ProposalOutput.baseline_config` validates supplied `train_config` through
+  `TrainConfig` before the proposer exits structural repair. It forwards normalized
+  supplied values without filling omissions or removing extension keys. Null or
+  non-object supplied training sections refuse. Segmentation sizes reject bool
+  before task-specific divisibility validation; absent/null segmentation retains
+  the existing optional-dimension behavior. See the
+  [proposal contract](../../nodes/ml_model_proposal_agent/ml_model_proposal_agent.md)
+  for advisory and retry ordering.
 - Record vocabularies (statuses, verdicts as persisted strings) are declared
   here and are load-bearing for persisted history — additive evolution only.
 - `extra="forbid"` on record-facing types where a misspelled key must refuse.
@@ -145,6 +153,17 @@ tuner_input = local_validated_model(validation_output, ...)  # the ONLY mapping 
 `tests/unit/agent/` per-node schema suites and
 `tests/unit/agent/protocols/`; golden record baselines under the tuner's
 test goldens pin persisted shapes.
+
+## Persisted output encoding
+
+Native output schemas derive from `core.record_encoding.RecordModel` (literature
+through `ExternalAgentOutput`). Its validation entry points decode versioned
+non-finite record metadata before running native validators; field declarations,
+JSON schema and in-memory dumps are unchanged. `ExperimentRecord` uses the same
+reader. The [core contract](../../core/core-contract.md#versioned-non-finite-record-json-issue-1111)
+owns the encoding and legacy behavior. Do not reimplement null/string conversion
+in a node or protocol. The census walks all reachable output field annotations,
+including `Any` containers and required float leaves.
 
 ## Conditional loss rules and attempt receipts
 

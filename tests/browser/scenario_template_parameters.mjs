@@ -7,7 +7,7 @@ import {createRequire} from 'node:module';
 import {tmpdir} from 'node:os';
 import {join, resolve, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) {
@@ -18,12 +18,7 @@ await mkdir(evidence, {recursive: true});
 const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.workflow_editor_server'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
 let serverErrors = '';
 server.stderr.on('data', chunk => { serverErrors += chunk; });
-const lines = createInterface({input: server.stdout});
-const metadata = await new Promise((resolveMetadata, reject) => {
-  lines.once('line', line => resolveMetadata(JSON.parse(line)));
-  server.once('exit', code => reject(new Error(`server exit ${code}: ${serverErrors}`)));
-  setTimeout(() => reject(new Error(`server startup timeout: ${serverErrors}`)), 15000);
-});
+const metadata = await waitForMetadata(server, {timeoutMs: 15000});
 // The fixture's "reusable" project: an unbound reusable source with its own task references.
 const parsed = () => JSON.parse(execFileSync(process.env.EDITOR_PYTHON, ['-c',
   'import sys; from pathlib import Path; from workflows.definition import parse_workflow_source; print(parse_workflow_source(Path(sys.argv[1]).read_text()).model_dump_json())',

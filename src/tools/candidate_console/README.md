@@ -330,8 +330,10 @@ A successful data command ends with `Data ready in .../data/NAME`.
    enter its complete operation UUID (Settings › Show advanced tools). You can also open a link such as
    `http://127.0.0.1:8740/#monitor/22222222-2222-4222-8222-222222222222`
    (replace the example UUID), then Connect. No task or editor project selection
-   is needed. The optional remembered ID is labelled **Last opened on this browser**;
-   it is separate from the Recent operations list. Expand Operation facts, Reported
+   is needed. After connecting, the optional remembered ID is labelled **Last opened
+   on this browser for this operations store**. Switching to another operations store
+   restores that store's remembered ID, if any. An explicit UUID link takes precedence;
+   the remembered ID is separate from the Recent operations list. Expand Operation facts, Reported
    token table, or Activity and logs when needed. When a workflow run has
    finished, **Workflow training results** shows the tuner report of each
    verified iteration separately; it never combines or ranks iterations.
@@ -527,7 +529,10 @@ external inputs such as storage. Only existing inputs can be rewired here.
 
 A large workflow opens zoomed out (never below 75%, so text stays readable; scroll the
 canvas for the rest). The controls at the bottom right of the canvas (zoom, **Actual
-size**, **Fit to view**) change only the view. Optional inputs that no wire feeds are
+size**, **Fit to view**) change only the view. If the whole graph cannot fit at 75%,
+**Fit to view** brings the selected module into view, or the first module if none is
+selected. The note below the canvas explains the limit; scroll inside the canvas
+to reach the remaining modules. Optional inputs that no wire feeds are
 folded into a "+N optional" row on each card; expand it to connect one. If saved cards overlap, the canvas says so;
 **Tidy up** arranges them (one edit you can undo).
 
@@ -930,6 +935,29 @@ optional [Workflow Editor](../workflow_authoring/README.md). It has its own sour
 review/save flow. Saving changes the source available to a subsequent New run;
 it never changes an existing captured run.
 Existing console configurations need no editor project to monitor operations.
+
+## Trial and Formal training
+
+A Trial tuning round lets the planner explore; a Formal tuning round uses the
+configured training scope and a separate evaluation scope. With
+`force_formal_round=True` (the default), the last tuning round of **each
+iteration** is forced Formal. With `max_rounds=1` there is no Trial round;
+with `max_rounds=2` the first may be Trial and the second is Formal. Increasing
+**Final iteration** repeats the loop; it does not add tuning rounds inside it.
+
+The framework's `formal_portion=0.1` uses 10% of the training scope. For example,
+1,077 CSV training rows × 0.1 gives about 108 rows: **3 steps/epoch** with batch
+size 32 and the incomplete batch dropped. Keeping that batch adds a step.
+Formal does not mean full-data training. `formal_train_portion` can further
+reduce the rows used each epoch; `formal_eval_portion` separately controls the
+evaluation scope and defaults to 1.0.
+
+New console templates declare `formal_portion=1.0` and `max_rounds=2` so small
+user datasets are not silently reduced to 10% and Trial has an opportunity to
+run. Review portions and budgets for larger datasets. In **Train & tune →
+Training settings**, **Default** removes the template's explicit value:
+Formal portion then returns to 0.1. Trial budgets and epoch ceilings only apply
+to tuning rounds that actually run as Trial.
 
 ## Edit reusable training settings
 

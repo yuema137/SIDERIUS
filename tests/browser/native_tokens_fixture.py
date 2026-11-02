@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 import uvicorn
 
+from tests.browser.fixture_metadata import emit_metadata
 from tests.unit.tools.candidate_operations.test_native_resume import history, reserve
 from tests.unit.tools.candidate_operations.test_native_tokens import ledger
 from tools.candidate_console import ConsoleConfig
@@ -45,17 +46,14 @@ def main():
         auth_token_file=str(token),
     )
     (directory / "store.json").write_text(root.config.model_dump_json())
-    print(
-        json.dumps(
-            dict(
-                origin=config.browser_origin,
-                token=token.read_text(),
-                root_id=str(root.submission.request_id),
-                successor_id=str(successor.submission.request_id),
-                expected=expected.model_dump(mode="json"),
-            )
-        ),
-        flush=True,
+    emit_metadata(
+        dict(
+            origin=config.browser_origin,
+            token=token.read_text(),
+            root_id=str(root.submission.request_id),
+            successor_id=str(successor.submission.request_id),
+            expected=expected.model_dump(mode="json"),
+        )
     )
     uvicorn.run(
         create_app(config),

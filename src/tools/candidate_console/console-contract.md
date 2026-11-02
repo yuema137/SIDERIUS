@@ -1648,8 +1648,9 @@ Canvas view state (zoom, scroll, expanded optional rows) is owned by
 viewing sends no request and cannot change saved bytes. The canvas is a CSS
 `transform: scale()` of the world, with positions kept in document pixels
 (drags divide screen deltas by the zoom). On opening a graph it fits once
-(`editorCircuitGeometry.fitScale`: never above 100 %, never below 40 %, then the
-canvas scrolls); the toolbar offers Fit to view, zoom out/in, Actual size, Check
+(`editorCircuitGeometry.fitScale` with the canvas's 75% floor; manual zoom reaches
+40%); oversized graphs scroll with selected/first-module framing as specified below.
+The toolbar offers Fit to view, zoom out/in, Actual size, Check
 the loop and Tidy up (the one layout tool; the former display-only Arrange view was
 removed because a drag in it saved the arranged layout, red-team A-1). The canvas
 grows with its zoomed content up to `clamp(420px, 100vh - 200px, 860px)`, shows edge
@@ -2371,7 +2372,8 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   flex column with `overflow: clip` (never scrolled, not even by `scrollIntoView`) whose
   `#editor-graph` (`flex: 1 1 0`) grid gives `.circuit-viewport` exactly the remaining
   height; the viewport scrolls and zooms inside it. Fit frames the union of every card's
-  box plus a 40 px margin (`FIT_PAD`), scrolled to that box's origin, within the visible viewport.
+  box plus a 40 px margin (`FIT_PAD`), scrolled to that box's origin when it fits.
+  At the 75% floor, an oversized graph uses selected/first-module framing (see below).
   Open disclosures in the panel (port-type legend, canvas help and connection
   mappings 120 px) scroll internally. Invariant (witnessed by `layout_onboarding.mjs`
   and `first_use_journey.mjs`): viewport inside the canvas panel, viewport height ≤
@@ -2437,8 +2439,14 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   controls get a one-line tooltip from `data-tip-label`.
 - Cards fold every optional input that is not fed by a wire (not connected, or fed by an
   external input) into one `+N optional` row. Fit to view never zooms below 75% (the legibility floor, `FIT_MIN`);
-  a larger graph scrolls inside the viewport and the view note says "Scroll the canvas". Manual
-  zoom out still reaches 40%.
+  a larger graph scrolls inside the viewport. The visible live view note counts partly
+  off-screen modules, explains the 75% Fit floor, and directs users to scroll. When the
+  padded graph exceeds the viewport at the fitted scale, Fit centres the selected module
+  (first module if none selected). For a module larger than the viewport, it aligns its
+  leading edge/heading instead. This is view-only: no saved positions, dirty state or
+  mutation requests change. Manual zoom out still reaches 40%.
+  `tests/browser/editor_fit_overflow.mjs` covers tall/wide/offset overflow, desktop and
+  narrow viewports, selected/first framing, scroll reachability and source-byte preservation.
 - Canvas controls are one secondary icon cluster bottom-right (zoom out, zoom %, zoom
   in, Actual size, Fit, Check the workflow, Tidy up); the connector legend is a bottom-left
   chip whose content opens as a two-column popover above it.
@@ -2595,6 +2603,29 @@ console and theme browser harnesses exercise the shared shell and disclosures.
 These are local browser witnesses; they do not qualify native execution, complete
 circuit editing, results, resume or production deployment.
 
+Remembered Monitor input is scoped by `session.js` to
+`siderius.operation_id.v1/<operations_store_id>`. Its `rememberOperation` and
+`rememberedOperation` methods are the sole persistence owner for Monitor and the
+legacy preparation, candidate and native-chain launch controls. The old global
+`siderius.operation_id` is ignored, never migrated: it has no attributable store.
+Connect clears the previous session's store identity. Without an explicit Monitor
+UUID, the convenience input is cleared during reconnection and restored only after
+validated choices identify the current store; malformed stored UUIDs are ignored.
+Disconnect, 401 and Connect retain the last Monitor observation (facts, logs and
+tokens), including observations opened by legacy Prepare/Launch without a route UUID.
+The page retains the last identified store separately from session connection state.
+Across connection changes, a different identified store resets that observation;
+same-store reconnect preserves it. An explicit route UUID is then selected again
+against the new store.
+Restoration only fills the input; it never submits a read or launch. Explicit UUID
+routes win and retain independent operation-only authentication. Until choices
+identify the store, reads/writes of remembered selection are no-ops; storage failures
+also leave explicit monitoring available. No credential or request payload is stored.
+`tests/browser/operation_selection.mjs` covers shared-origin store switching, reload,
+legacy isolation, 401-after-Prepare observation retention, same-store reconnect,
+changed-store observation reset, explicit route precedence, native launch persistence
+and unavailable localStorage using synthetic observations, without native execution.
+
 
 ## Reusable capture consumption
 
@@ -2718,7 +2749,13 @@ could not train. An unreadable profile is `stale_review`. Training admission
 (`candidate_worker.training_admission.refuse_untrainable_launch`, after
 `run_launch_self_test`) and tuner startup (`validate_training_mode_startup`, composed
 runs only) ask the same owner again. Templates declare `is_trial: true`,
-`healthgate_mode: blocking` and `result_authority: scientific` (`templates.DECLARED_LAUNCH_POLICY`).
+`healthgate_mode: blocking`, `result_authority: scientific`, `formal_portion: 1.0`
+and `max_rounds: 2` (`templates.DECLARED_LAUNCH_POLICY`). They explicitly allow
+Trial before forced Formal and use the full declared training scope; native
+launch defaults remain .1 and 10. The editor projects descriptions for
+`is_trial`, `max_rounds` and `formal_portion` from `WorkflowLaunchConfig` through
+`training.control_help`, including the per-iteration last-round rule and the
+Default reset behavior. No browser-side execution/default authority is added.
 Prepare reuses the same review, so the refusal there carries
 `admission_not_attempted`. The browser keeps the version name
 as `source_version` beside, not inside, the retained intent payload. Both use the

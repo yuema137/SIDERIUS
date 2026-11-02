@@ -77,6 +77,40 @@ def compose(task, evaluation):
     return compose_run_task_bindings(str(path))
 
 
+@pytest.mark.parametrize("field", ["meaning", "units", "guidance", "components", "constraints"])
+def test_oversized_author_fields_refuse_composition_before_component_loading(
+    task, monkeypatch, field
+):
+    """Public composition errors retain field names and never reach plugin loaders."""
+    raw = declaration(task)
+    if field in ("meaning", "units"):
+        raw["components"][0][field] = "x" * (1001 if field == "meaning" else 129)
+    elif field == "guidance":
+        raw["selection"] = {
+            "kind": "rubric_balance",
+            "rubric": {"id": "unused", "version": "1"},
+            "guidance": "x" * 1001,
+            "deterministic_ranking": {"kind": "primary"},
+        }
+    elif field == "components":
+        raw["components"] = [dict(raw["components"][0], id=f"quality_{i}") for i in range(33)]
+    else:
+        raw["constraints"] = [{"component": "quality", "op": ">", "threshold": 0.0}] * 65
+    registry = builtin_registry()
+    loaded = []
+    original = registry["metric"].load
+
+    def load(component, context):
+        loaded.append(component.id)
+        return original(component, context)
+
+    registry["metric"] = replace(registry["metric"], load=load)
+    monkeypatch.setattr("workflows.evaluation_composition.builtin_registry", lambda: registry)
+    with pytest.raises(TaskCompositionError, match=field):
+        compose(task, raw)
+    assert not loaded
+
+
 def formula(evaluation):
     evaluation["selection"] = {
         "kind": "formula",
@@ -113,7 +147,6 @@ def test_composes_but_launch_names_every_missing_capability(task, tmp_path):
             pytest.fail("unimplemented evaluation launched")
     for name in (
         "composition succeeded",
-        "evaluation rendering",
         "formula aggregation",
         "feasibility constraints",
     ):
@@ -292,7 +325,9 @@ def test_scoring_child_cannot_bypass_launch_capability_guard(task):
     from workflows.task_composition import compose_metric_from_manifest
 
     compose(task, declaration(task))
-    with pytest.raises(TaskCompositionError, match="evaluation rendering"):
+    assert compose_metric_from_manifest(str(task / "composition.yaml")).spec.id
+    compose(task, formula(declaration(task)))
+    with pytest.raises(TaskCompositionError, match="formula aggregation"):
         compose_metric_from_manifest(str(task / "composition.yaml"))
 
 
@@ -418,3 +453,18 @@ def test_plugin_programming_error_is_not_reclassified_as_configuration(task):
     (task / "kind.py").write_text(source)
     with pytest.raises(RuntimeError, match="broken plugin implementation"):
         compose(task, spec)
+
+
+def test_primary_evaluation_binds_prompt_context_and_refuses_lost_binding(task, tmp_path):
+    from agent.evaluation_context import bind_evaluation_prompt_context
+    from agent.prompt_templates.constraints import append_constraint_disclosure
+    from workflows.task_composition import CompositionNotBoundError, verify_composition_is_bound
+
+    composed = compose(task, declaration(task))
+    with bind_run_task_composition(composed, physical_data_root=str(tmp_path)):
+        verify_composition_is_bound(composed)
+        assert "Coverage of the evaluation bands." in append_constraint_disclosure("prompt", None)
+        with bind_evaluation_prompt_context(None, composed.metric.spec, None):
+            with pytest.raises(CompositionNotBoundError, match="evaluation"):
+                verify_composition_is_bound(composed)
+    assert "[TASK EVALUATION]" not in append_constraint_disclosure("prompt", None)

@@ -18,8 +18,9 @@ Start here when connecting a new task or investigating an execution failure.
 
 Both `run_experiment_streaming` and the legacy `run_experiment` require a
 `TrainingSeedPlan`. Build it from the run's recorded `SeedContext` and pass it
-as `seed_plan=plan`; a missing plan stops before model construction. The
-trainer CLI resolves its seed context for you. See the
+as the required keyword argument `seed_plan=plan`. Omitting it raises
+`TypeError`; passing `None` raises `MissingRunSeed`. Both stop before model
+construction. The trainer CLI resolves its seed context for you. See the
 [seed contract](../../docs/agent-reference/mechanisms/seeding.md#trainer-seeding)
 for seed transport and reproducibility limits.
 

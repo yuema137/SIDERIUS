@@ -69,6 +69,17 @@ def rendering_assembly_digest() -> str:
     paths += [
         root.parent / "workflows" / "constraint_disclosure.py",
     ]
+    paths += [
+        root.parent / name
+        for name in (
+            "agent/evaluation_context.py",
+            "execute_tools/evaluation_component_rendering.py",
+            "execute_tools/evaluation_registry.py",
+            "execute_tools/evaluation_spec.py",
+            "execute_tools/evaluation_validation.py",
+            "execute_tools/metric_order.py",
+        )
+    ]
     return source_fingerprint({str(p.relative_to(root.parent)): p.read_bytes() for p in paths})
 
 

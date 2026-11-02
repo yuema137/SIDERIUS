@@ -181,7 +181,7 @@ def test_literature_writer_uses_top_level_name_and_skips_missing_local(tmp_path)
     )
     agent._write_output(inp, output)
     path = tmp_path / "ml_literature_review_研究-v2.1.json"
-    assert path.read_text() == output.model_dump_json(indent=2)
+    assert LiteratureReviewOutput.model_validate_json(path.read_bytes()) == output
     inp.storage.local = None
     inp.run_name = "../unused"
     agent._write_output(inp, output)

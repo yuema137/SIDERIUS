@@ -219,9 +219,9 @@ class TestUnusableValues:
         """
         assert (
             resolve_model_field(
-                "punet", {"segmentation_size": True}, "segmentation_size", safety_margin=1
+                _UNDECLARED, {"segmentation_size": True}, "segmentation_size", safety_margin=7
             )
-            == 1
+            == 7
         )
 
 
