@@ -19,7 +19,7 @@ import {createRequire} from 'node:module';
 import {tmpdir} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 import {showAllConsoleSections} from './console_view_flags.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -28,12 +28,7 @@ const evidence = process.env.CONSOLE_EVIDENCE_DIR || join(tmpdir(), 'siderius-ed
 await mkdir(evidence, {recursive: true});
 const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.workflow_editor_server'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
 let serverErrors = ''; server.stderr.on('data', chunk => { serverErrors += chunk; });
-const lines = createInterface({input: server.stdout});
-const metadata = await new Promise((accept, reject) => {
-  lines.once('line', line => accept(JSON.parse(line)));
-  server.once('exit', code => reject(new Error(`server exit ${code}: ${serverErrors}`)));
-  setTimeout(() => reject(new Error(`server startup timeout: ${serverErrors}`)), 15000);
-});
+const metadata = await waitForMetadata(server, {timeoutMs: 15000});
 // An overlapping saved layout (hypothesis drawn over interpret), rendered by the fixture's own source writer.
 const overlapping = execFileSync(process.env.EDITOR_PYTHON, ['-c',
   'from tests.browser.workflow_editor_server import five_node_source; print(five_node_source((("interpret", 0.0, 0.0), ("hypothesis", 100.0, 40.0), ("build", 640.0, 0.0), ("check", 960.0, 0.0), ("fit", 1280.0, 0.0))), end="")'],
@@ -99,7 +94,7 @@ try {
         `${label}: ${card.node} is outside the ${result.window.width}x${result.window.height} window`);
     }
     assert.equal(result.outside, '0', `${label}: the canvas reports cards outside the view`);
-    assert.match(await page.locator('.circuit-view-note').textContent(), /All 5 capabilities are in view/);
+    assert.match(await page.locator('.circuit-view-note').textContent(), /All 5 modules are in view/);
   };
   // Fit never zooms below 75% (cards stay legible); a graph larger than the canvas at 75%
   // scrolls inside the viewport, and the canvas says so.

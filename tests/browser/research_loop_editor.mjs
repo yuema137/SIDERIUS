@@ -6,7 +6,7 @@ import {createRequire} from 'node:module';
 import {tmpdir} from 'node:os';
 import {join, resolve, dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 import {showAllConsoleSections} from './console_view_flags.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -22,12 +22,7 @@ const server = spawn(
 );
 let serverErrors = '';
 server.stderr.on('data', chunk => { serverErrors += chunk; });
-const lines = createInterface({input: server.stdout});
-const metadata = await new Promise((resolveMetadata, reject) => {
-  lines.once('line', line => resolveMetadata(JSON.parse(line)));
-  server.once('exit', code => reject(new Error(`server exit ${code}: ${serverErrors}`)));
-  setTimeout(() => reject(new Error(`server startup timeout: ${serverErrors}`)), 15000);
-});
+const metadata = await waitForMetadata(server, {timeoutMs: 15000});
 const python = script => execFileSync(process.env.EDITOR_PYTHON, ['-c', script, metadata.interpretation_source], {cwd: root, encoding: 'utf8'});
 const parsed = () => JSON.parse(python('import sys; from pathlib import Path; from workflows.definition import parse_workflow_source; print(parse_workflow_source(Path(sys.argv[1]).read_text()).model_dump_json())'));
 // Start from the same five-node declaration without its loop (canonical bytes).
