@@ -1,5 +1,15 @@
 # HyperparamTuningAgent
 
+
+## Structured evaluation prompt context
+
+Planner and reflector receive the shared block through their existing constraint append calls. deterministic_ranking is visible when declared; this renderer does not implement formula or rubric execution.
+
+The run-scoped composition supplies this context through the shared append path.
+Absence adds no bytes and never enters the new boundary under historical profiles.
+The [evaluation contract](../../execute_tools/evaluation-contract.md#evaluation-prompt-rendering)
+owns formatting, profile admission and runtime capability distinctions.
+
 ## Live output names
 
 After native input validation, `run()` checks `storage.local.run_name` whenever
