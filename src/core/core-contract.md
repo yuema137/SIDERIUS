@@ -209,10 +209,10 @@ from `core.pseudo_scoring.synthetic_formula_scoring`. It composes that manifest
 through `compose_scoring_child_bindings`, as the scoring child does, draws one
 synthetic scalar per primary/secondary source metric, and passes them through
 `execute_tools.evaluation_child.aggregate_child_outcome`; it implements no
-aggregation arithmetic. A formula-referenced metric draws inside the
-intersection of its terms' `[lower, upper]` (the earlier interval when terms
-are disjoint), so `refuse` terms accept it; an unreferenced primary keeps the
-legacy synthetic scalar. Success adds `evaluation_result`, `metric_result` and
+aggregation arithmetic. A manifest without an `evaluation` key is detected from
+its raw YAML and never re-composed. A formula-referenced metric draws inside its
+term's `[lower, upper]`, so `refuse` terms accept it; an unreferenced metric,
+and the primary's nine-value `per_sample`, keep the legacy synthetic band. Success adds `evaluation_result`, `metric_result` and
 the secondary result lists; `denoising_score` is the effective aggregate and
 `file_vector` is null, as from the real child. A non-scoreable aggregation
 returns status `error` with `not_scoreable` and `evaluation_result`. The

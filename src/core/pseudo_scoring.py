@@ -14,7 +14,10 @@ from __future__ import annotations
 
 import random
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
+
+import yaml
 
 from execute_tools.evaluation_child import aggregate_child_outcome
 from execute_tools.evaluation_metric import EvaluationMetric, MetricResult, NotScoreableResult
@@ -24,23 +27,23 @@ from workflows.task_composition import active_task_manifest_path, compose_scorin
 
 
 def _term_bounds(composition: Any) -> dict[str, tuple[float, float]]:
-    """Map each formula-referenced metric id to the interval all its terms accept."""
+    """Map each formula-referenced metric id to its term's ``[lower, upper]``.
+
+    Terms name distinct components and components name distinct metrics
+    (``evaluation_validation``), so each metric has at most one term.
+    """
     components = {c.id: c for c in composition.evaluation.spec.components}
-    bounds: dict[str, tuple[float, float]] = {}
-    for term in formula_terms(composition.evaluation.spec):
-        component = components[term.component]
-        if not isinstance(component, MetricComponent):
-            continue
-        previous = bounds.get(component.metric)
-        if previous is None:
-            bounds[component.metric] = (term.lower, term.upper)
-            continue
-        lower, upper = max(previous[0], term.lower), min(previous[1], term.upper)
-        # Disjoint terms cannot all accept one value: keep the earlier interval
-        # so the aggregation owner reports the refusal a real value would get.
-        if lower <= upper:
-            bounds[component.metric] = (lower, upper)
-    return bounds
+    return {
+        component.metric: (term.lower, term.upper)
+        for term in formula_terms(composition.evaluation.spec)
+        if isinstance(component := components[term.component], MetricComponent)
+    }
+
+
+def _declares_evaluation(manifest: str) -> bool:
+    """Cheap pre-check so runs without ``evaluation`` never re-compose per call."""
+    raw = yaml.safe_load(Path(manifest).read_text(encoding="utf-8"))
+    return isinstance(raw, dict) and raw.get("evaluation") is not None
 
 
 def _synthetic_result(
@@ -76,7 +79,7 @@ def synthetic_formula_scoring(
     (for example, a non-metric component) returns the child's refusal fields.
     """
     manifest = active_task_manifest_path()
-    if manifest is None:
+    if manifest is None or not _declares_evaluation(manifest):
         return None
     metric, composition = compose_scoring_child_bindings(manifest)
     if composition is None or composition.evaluation is None:

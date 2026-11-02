@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from core.sandbox_executor import StubSandbox
-from execute_tools.evaluation_child import validate_child_evaluation
+from execute_tools.evaluation_child import EvaluationNotScoreableError, validate_child_evaluation
 from tests.helpers.tuner_composed_fixture import _isolated_registrations
 from tests.unit.nodes.test_formula_selection_tuner_wiring import FORMULA, _masked_manifest
 from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
@@ -62,3 +62,21 @@ def test_plain_composition_keeps_the_legacy_payload_and_stream(tmp_path):
             calls = [sandbox.execute_scoring(*ARGS)["results"] for _ in range(2)]
     assert [(r["denoising_score"], r["file_vector"]) for r in calls] == expected
     assert not any("evaluation_result" in r for r in calls)
+
+
+def test_refused_formula_evidence_reaches_the_parent_as_a_typed_refusal(tmp_path, monkeypatch):
+    """Without declared bounds the legacy band violates ``refuse`` terms.
+
+    The stub must then return the child's refusal envelope (status ``error``
+    with component evidence), which the parent raises as a typed refusal
+    instead of a transport error or a silent success.
+    """
+    import core.pseudo_scoring as pseudo_scoring
+
+    monkeypatch.setattr(pseudo_scoring, "_term_bounds", lambda composition: {})
+    scored = _score(tmp_path, FORMULA, "refused")
+    outcome = scored["outcome"]
+    assert outcome["status"] == "error"
+    assert outcome["results"]["denoising_score"] is None
+    with pytest.raises(EvaluationNotScoreableError):
+        validate_child_evaluation(outcome["results"], scored["composition"])
