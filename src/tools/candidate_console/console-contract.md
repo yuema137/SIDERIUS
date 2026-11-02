@@ -1646,8 +1646,9 @@ Canvas view state (zoom, scroll, expanded optional rows) is owned by
 viewing sends no request and cannot change saved bytes. The canvas is a CSS
 `transform: scale()` of the world, with positions kept in document pixels
 (drags divide screen deltas by the zoom). On opening a graph it fits once
-(`editorCircuitGeometry.fitScale`: never above 100 %, never below 40 %, then the
-canvas scrolls); the toolbar offers Fit to view, zoom out/in, Actual size, Check
+(`editorCircuitGeometry.fitScale` with the canvas's 75% floor; manual zoom reaches
+40%); oversized graphs scroll with selected/first-module framing as specified below.
+The toolbar offers Fit to view, zoom out/in, Actual size, Check
 the loop and Tidy up (the one layout tool; the former display-only Arrange view was
 removed because a drag in it saved the arranged layout, red-team A-1). The canvas
 grows with its zoomed content up to `clamp(420px, 100vh - 200px, 860px)`, shows edge
@@ -2369,7 +2370,8 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   flex column with `overflow: clip` (never scrolled, not even by `scrollIntoView`) whose
   `#editor-graph` (`flex: 1 1 0`) grid gives `.circuit-viewport` exactly the remaining
   height; the viewport scrolls and zooms inside it. Fit frames the union of every card's
-  box plus a 40 px margin (`FIT_PAD`), scrolled to that box's origin, within the visible viewport.
+  box plus a 40 px margin (`FIT_PAD`), scrolled to that box's origin when it fits.
+  At the 75% floor, an oversized graph uses selected/first-module framing (see below).
   Open disclosures in the panel (port-type legend, canvas help and connection
   mappings 120 px) scroll internally. Invariant (witnessed by `layout_onboarding.mjs`
   and `first_use_journey.mjs`): viewport inside the canvas panel, viewport height ≤
@@ -2435,8 +2437,14 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   controls get a one-line tooltip from `data-tip-label`.
 - Cards fold every optional input that is not fed by a wire (not connected, or fed by an
   external input) into one `+N optional` row. Fit to view never zooms below 75% (the legibility floor, `FIT_MIN`);
-  a larger graph scrolls inside the viewport and the view note says "Scroll the canvas". Manual
-  zoom out still reaches 40%.
+  a larger graph scrolls inside the viewport. The visible live view note counts partly
+  off-screen modules, explains the 75% Fit floor, and directs users to scroll. When the
+  padded graph exceeds the viewport at the fitted scale, Fit centres the selected module
+  (first module if none selected). For a module larger than the viewport, it aligns its
+  leading edge/heading instead. This is view-only: no saved positions, dirty state or
+  mutation requests change. Manual zoom out still reaches 40%.
+  `tests/browser/editor_fit_overflow.mjs` covers tall/wide/offset overflow, desktop and
+  narrow viewports, selected/first framing, scroll reachability and source-byte preservation.
 - Canvas controls are one secondary icon cluster bottom-right (zoom out, zoom %, zoom
   in, Actual size, Fit, Check the workflow, Tidy up); the connector legend is a bottom-left
   chip whose content opens as a two-column popover above it.
