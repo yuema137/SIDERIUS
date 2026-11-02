@@ -20,7 +20,6 @@ from core.runtime_control.gpu_execution_policy import GpuExecutionPolicy
 from core.runtime_control.inference_startup import (
     InferenceStartup,
     InferenceStartupMessage,
-    InferenceStartupRequest,
     load_and_wait_for_authorization,
     publish_message,
     read_message,
@@ -28,11 +27,9 @@ from core.runtime_control.inference_startup import (
 from core.runtime_control.measurement_allowance import MeasurementAllowance
 from core.runtime_control.observed_subprocess import supervise_process
 from core.training_seeds import SeedContext
+from tests.helpers.inference_startup import OFFLINE_IO_BUDGET_SECONDS, startup_fixture
 from tests.unit.core.test_checkpoint_inference_measurement import bound_spec
 from tests.unit.core.test_gpu_runtime_protection import Clock, policy
-
-# Success-path process tests include durable I/O on slow scratch storage.
-OFFLINE_IO_BUDGET_SECONDS = 600.0
 
 
 @pytest.fixture(autouse=True)
@@ -73,36 +70,6 @@ def test_shared_allowance_excludes_execution_and_does_not_reset():
     with pytest.raises(RuntimeError, match="no measurement"):
         allowance.finish("duplicate")
     assert [r.spent_seconds for r in allowance.receipts] == [20, 41]
-
-
-def startup_fixture(tmp_path, spec, *, clock=None, child_pid=1234):
-    # Controlled-clock expiry witnesses retain their small, exact boundaries.
-    preparation_seconds = 10.0 if clock is not None else OFFLINE_IO_BUDGET_SECONDS
-    ack_seconds = 1.0 if clock is not None else OFFLINE_IO_BUDGET_SECONDS
-    clock = clock or time.monotonic
-    directory = tmp_path / "startup"
-    directory.mkdir()
-    request = InferenceStartupRequest(
-        nonce="attempt",
-        spec=spec,
-        deadline_at=clock() + preparation_seconds,
-        ack_timeout_seconds=ack_seconds,
-        poll_seconds=0.01,
-        receipt_limit_bytes=1024**2,
-    )
-    path = directory / "request.json"
-    publish_message(path, request, request.receipt_limit_bytes)
-    publications = []
-    startup = InferenceStartup(
-        path, request, rss_limit_bytes=1024**3, on_publication=publications.append, clock=clock
-    )
-    message = InferenceStartupMessage(
-        nonce=request.nonce,
-        child_pid=child_pid,
-        reference=spec.inference_checkpoint,
-        binding_sha256=spec.inference_binding.request_sha256,
-    )
-    return startup, message, publications
 
 
 def test_startup_publication_then_consumption_has_one_charge(tmp_path, bound_spec):
