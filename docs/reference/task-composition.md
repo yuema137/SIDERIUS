@@ -1058,3 +1058,5 @@ existing symbol loader. Measurement schemas are deferred to their runtime owner;
 `kind: measurement` is not a builtin yet. Exact models, defaults, registry interfaces,
 identity and downstream Health/threshold boundaries are owned by the
 [evaluation contract](../../src/execute_tools/evaluation-contract.md).
+The task-author walkthrough, with worked utility arithmetic and the inspection
+script, is [declare how your task judges candidates](../guides/evaluation/README.md).
