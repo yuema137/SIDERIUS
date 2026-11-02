@@ -644,7 +644,11 @@ Selection is conservative:
   hook templates. Directory entries conservatively include all descendants,
   including nested node Markdown. Packaging ownership is additive to existing
   readers and area suites; these declarations remain explicit even where a
-  full-suite trigger currently covers the input;
+  full-suite trigger currently covers the input. The packaging module's
+  `test_resource_census_and_selection_declarations_stay_in_sync` executes the
+  actual census and rejects uncovered assets or declarations matching no assets.
+  A census edit selects this guard itself, so adding a resource family cannot
+  silently leave the selector's declarations behind;
 - every path under `examples/`, `configs/task_composition/`, or
   `tests/fixtures/step10_p1/` triggers the full
   unit suite, including Markdown, declared assets, nested task templates and
