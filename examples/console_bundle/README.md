@@ -224,3 +224,7 @@ It prints the path of `siderius-example-quickstart-<version>.zip` (version from
 `pyproject.toml`, or `--version`). Two builds of the same checkout are byte for
 byte identical. The format is specified in the
 [console contract](https://github.com/yuema137/SIDERIUS/blob/master/src/tools/candidate_console/console-contract.md#example-bundles-add-task---from-bundle).
+
+## Training settings in the imported setup
+
+These small-task settings use `formal_portion=1.0` and `max_rounds=2`; see [Trial and Formal training](../../src/tools/candidate_console/README.md#trial-and-formal-training) for scope, round limits and framework defaults.

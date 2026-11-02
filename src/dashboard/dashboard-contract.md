@@ -167,3 +167,13 @@ Consequences an operator will actually see:
 `PostgresDataSource.__init__` raises `NotImplementedError`. Selecting
 `data_source.type: postgres` cannot activate a working backend, and there is
 no shipped ingestion command. Implementing that backend is future work.
+
+## Versioned record reads (#1111)
+
+LocalJsonDataSource summary loading and exploration-route summary/run-output
+loading call `core.record_encoding.decode_record` before filtering, ranking
+or response projection. The decoder owns both legacy and versioned formats;
+data-source callers receive native float/None values without encoding metadata.
+HTTP response models retain their existing non-finite JSON presentation.
+Regression coverage includes LocalRecorder-written scores 0.5, -inf and 0.4,
+plus +inf/NaN and the actual HTTP run-record endpoint.

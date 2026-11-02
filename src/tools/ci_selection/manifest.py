@@ -47,13 +47,19 @@ HUBS: tuple[str, ...] = (
 )
 
 # ---------------------------------------------------------------------------
-# 3. FULL-SUITE TRIGGERS — infrastructure, or the selector itself
+# 3. FULL-SUITE TRIGGERS — infrastructure and unbounded input dependencies
 # ---------------------------------------------------------------------------
 #: A broken selector can select "nothing" and report green, so any change to it
 #: must be validated against everything. The root conftests are autouse
 #: (`tests/unit/conftest.py` installs `forbid_real_heavy_subprocess`), so their
 #: blast radius is the whole suite by construction.
 FULL_SUITE_TRIGGERS: tuple[str, ...] = (
+    # Composition follows YAML references and fingerprints package directories.
+    # Python imports/literal test paths cannot prove every consumer; an area
+    # owner misses cross-area identity tests. Include assets and nested packs.
+    "examples/",
+    "configs/task_composition/",
+    "tests/fixtures/step10_p1/",
     "src/tools/ci_selection/",
     "tests/unit/tools/ci_selection/",
     "tests/conftest.py",
@@ -232,7 +238,6 @@ GATE_REQUIREMENTS: dict[str, tuple[str, ...]] = {
 AREA_OWNERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("src/dashboard/", ("tests/unit/dashboard/",)),
     ("src/tools/claude_hooks/", ("tests/unit/tools/claude_hooks/",)),
-    ("examples/", ("tests/unit/examples/",)),
     ("scripts/launch/", ("tests/unit/sdsc_submission_scripts/",)),
     ("scripts/slurm/", ("tests/unit/sdsc_submission_scripts/",)),
     ("scripts/", ("tests/unit/scripts/",)),

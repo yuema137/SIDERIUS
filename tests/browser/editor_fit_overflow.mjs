@@ -7,18 +7,14 @@ import {readFile, writeFile} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 import {showAllConsoleSections} from './console_view_flags.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.workflow_editor_server'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
-let errors = '';
-server.stderr.on('data', chunk => { errors += chunk; });
-const lines = createInterface({input: server.stdout});
-const metadata = await new Promise((accept, reject) => {
-  const timer = setTimeout(() => reject(new Error(`server timeout: ${errors}`)), 15000);
-  lines.once('line', line => { clearTimeout(timer); accept(JSON.parse(line)); });
-  server.once('exit', code => { clearTimeout(timer); reject(new Error(`server exit ${code}: ${errors}`)); });
+server.stderr.resume();
+const metadata = await waitForMetadata(server, {timeoutMs: 15000}).catch(error => {
+  server.kill('SIGTERM'); throw error;
 });
 const source = (dx, dy) => execFileSync(process.env.EDITOR_PYTHON, ['-c',
   'import sys; from tests.browser.workflow_editor_server import five_node_source; nodes=("interpret", "hypothesis", "build", "check", "fit"); print(five_node_source(tuple((n, 400+i*float(sys.argv[1]), 300+i*float(sys.argv[2])) for i,n in enumerate(nodes))), end="")',

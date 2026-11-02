@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny, field_validator, model_validator
 
+from core.record_encoding import RecordModel
 from workflows.definition.catalog import METRIC_SCORED_CONTRACTS, VALIDITY_GATED_CONTRACTS
 from workflows.definition.models import ExternalSource, Identifier, ResultSource, SelectedSource
 
@@ -26,7 +27,7 @@ class AdaptorStrategyError(ValueError):
     """A declared strategy cannot be applied to these inputs; never coerced."""
 
 
-class AdaptorModel(BaseModel):
+class AdaptorModel(RecordModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
 
