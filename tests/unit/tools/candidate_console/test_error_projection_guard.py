@@ -22,7 +22,12 @@ def _logging(node: ast.AST) -> bool:
 
 def _mentions_exception(node: ast.AST, caught: set[str]) -> bool:
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-        if node.func.id in {"console_error_message", "summary_error_message", "error_category"}:
+        if node.func.id in {
+            "console_error_message",
+            "advice_error_message",
+            "summary_error_message",
+            "error_category",
+        }:
             return False
     if isinstance(node, ast.Name):
         return node.id in caught

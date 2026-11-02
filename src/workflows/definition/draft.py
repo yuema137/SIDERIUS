@@ -149,7 +149,7 @@ def inspect_draft(draft: WorkflowDraft) -> DraftInspection:
     except ValidationError as error:
         return DraftInspection(
             status="invalid",
-            diagnostics=(str(error),),
+            diagnostics=tuple(item["msg"] for item in error.errors(include_url=False)),
             problems=tuple(
                 DraftProblem(
                     code="declaration_invalid",
