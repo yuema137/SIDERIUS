@@ -207,11 +207,14 @@ def test_conditional_provider_system_text_reaches_final_request(monkeypatch):
 # shared transport owner change assembly bytes, not planner content_sha256.
 # Resume with the previous 2c170d92... assembly remains refused; freeze batches
 # must requalify the new assembly instead of rewriting archived workspace pins.
+# Deliberately moved by #1289: the planner's mode-choice step names the run's
+# configured Formal scopes instead of "a full formal evaluation" (previous
+# content ec2b0c06..., assembly 19e97084...).
 NATIVE_PLANNER_IDENTITY_PIN = {
     "name": "native-timing-v1",
     "version": "1",
-    "content_sha256": "ec2b0c06e5bc3607209008b16ce8302dff3293e133602f7cd2404939d993ec66",
-    "assembly_sha256": "19e970841d37ac7fb2d310f0b88552b124918246e955bff48982a7afbf2deef8",
+    "content_sha256": "8e373ea3ed2ebbcf7e8de9033a4206e375643eeecbb3f3fad403c383f58455e2",
+    "assembly_sha256": "bb5eaf83cb8390e8e59895a216247ff16f21d10164398140661127ecd61d9b2b",
 }
 
 
