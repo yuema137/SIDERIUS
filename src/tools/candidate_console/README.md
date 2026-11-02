@@ -526,7 +526,10 @@ not included.
 An export name that is already used is refused with a free name to try; exports
 are never overwritten. The export is also refused when the saved workflow
 changed on disk while you exported, when it does not parse, or when the task's
-model profile would be refused by `--llm_config`; the message says which.
+model profile would be refused by `--llm_config`; the message identifies the failed
+step. Profile and advice parsing failures show a safe error category. Check the
+console server diagnostic log for details; advice errors also list the supported
+keys and required value format.
 Exporting needs the same `browser_writable` setting as saving.
 
 When you review a new run on the **Run** page, the details also say where the
@@ -960,6 +963,11 @@ configured training scope and a separate evaluation scope. With
 iteration** is forced Formal. With `max_rounds=1` there is no Trial round;
 with `max_rounds=2` the first may be Trial and the second is Formal. Increasing
 **Final iteration** repeats the loop; it does not add tuning rounds inside it.
+
+If a one-tuning-round edit is refused because your Trial settings would never apply,
+select **Train & tune**, open **Training settings**, and set **Tuning rounds per iteration**
+to at least 2. The field's help explains the policy and shows its minimum of 1;
+the review reminder names the same control.
 
 The framework's `formal_portion=0.1` uses 10% of the training scope. For example,
 1,077 CSV training rows × 0.1 gives about 108 rows: **3 steps/epoch** with batch

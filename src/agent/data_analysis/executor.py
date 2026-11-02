@@ -23,8 +23,13 @@ from agent.schemas.data_analysis.skills import (
     SkillResult,
 )
 from core.durable_io import publish_bytes_write_once
-from core.execution_deadline import bounded_timeout
-from core.runtime_control.process_group import process_group_alive, signal_group, tree_rss_bytes
+from core.execution_deadline import remaining_seconds
+from core.runtime_control.process_group import (
+    process_group_alive,
+    signal_group,
+    terminate_observed_group,
+    tree_rss_bytes,
+)
 from core.subprocess_env import subprocess_env
 
 from .discovery import DiscoveredSkill
@@ -102,18 +107,25 @@ def certify_analysis_coverage(
     )
 
 
+_POLL_S = 0.02
+_TERMINATION_GRACE_S = 1.0
+
+
 def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
-    pgid = process.pid
-    signal_group(pgid, signal.SIGTERM)
-    deadline = time.monotonic() + 1.0
-    while process_group_alive(pgid) and time.monotonic() < deadline:
-        time.sleep(0.02)
-    if process_group_alive(pgid):
-        signal_group(pgid, signal.SIGKILL)
+    # The shared owner reaps the leader while waiting. Without that, a leader
+    # that exited on SIGTERM stays a zombie, keeps its group observable and
+    # turns every termination into the full grace period (#1425).
+    terminate_observed_group(
+        process.pid,
+        grace_seconds=_TERMINATION_GRACE_S,
+        poll_seconds=_POLL_S,
+        child=process,
+        retain_unknown=False,
+    )
     try:
         process.wait(timeout=1.0)
     except subprocess.TimeoutExpired:
-        signal_group(pgid, signal.SIGKILL)
+        signal_group(process.pid, signal.SIGKILL)
         process.wait()
 
 
@@ -124,7 +136,12 @@ def _run_worker(
     timeout_s: float,
     max_host_memory_gb: float | None,
 ) -> WorkerObservation:
-    timeout_s = bounded_timeout(timeout_s, "analysis.worker")
+    # Capture the continuing allocation's absolute expiry at admission, so
+    # parent-side request publication (an fsync that can stall for seconds
+    # under I/O load) is charged to the allocation rather than added after it
+    # (#1425). The per-skill timeout still starts at process launch.
+    remaining = remaining_seconds("analysis.worker")
+    allocation_expires_at = None if remaining is None else time.monotonic() + remaining
     control_directory.mkdir(parents=True, exist_ok=False)
     request_path = control_directory / "request.json"
     response_path = control_directory / "response.json"
@@ -133,6 +150,9 @@ def _run_worker(
     publish_bytes_write_once(str(request_path), canonical_json_bytes(request))
     started_at = utc_now()
     started = time.monotonic()
+    stop_at = started + timeout_s
+    if allocation_expires_at is not None:
+        stop_at = min(stop_at, allocation_expires_at)
     memory_ceiling = None if max_host_memory_gb is None else int(max_host_memory_gb * 1024**3)
     with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
         process = subprocess.Popen(
@@ -160,11 +180,11 @@ def _run_worker(
                 disposition = "memory_limit_exceeded"
                 _terminate_process_group(process)
                 break
-            if time.monotonic() - started >= timeout_s:
+            if time.monotonic() >= stop_at:
                 disposition = "timed_out"
                 _terminate_process_group(process)
                 break
-            time.sleep(0.02)
+            time.sleep(_POLL_S)
         peak_rss = max(peak_rss, tree_rss_bytes(process.pid))
         if process.poll() is None:
             _terminate_process_group(process)

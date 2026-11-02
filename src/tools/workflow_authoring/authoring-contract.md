@@ -301,6 +301,11 @@ without a separate browser default. Existing native validation remains authorita
 including refusal of trial-scoped overrides when `is_trial=true`, `max_rounds=1`
 and `force_formal_round=true` would discard them. This limit applies within each
 research-loop iteration, independently of the loop's iteration count.
+The native launch JSON schema exposes a minimum of 1 and explains the forced-Formal
+last tuning round. Its description is shared with the editor's one-round review
+reminder; the browser does not reproduce the native admission predicate. Raising
+the control to at least 2 permits Trial tuning rounds before the final Formal tuning
+round, but does not force the planner to choose Trial.
 `TrainingInspector.policy` (`TrainingChoiceControl`, `policy_controls`) projects the two
 required launch choices training admission has no default for: **Health checks**
 (`healthgate_mode`: Record only = `observe_only`, Block on failure = `blocking`) and
@@ -589,7 +594,12 @@ Browser document proposals compare numeric values in binary64, because JavaScrip
 cannot distinguish `2.0` from `2`, signed zero after serialization, or integers
 that round to the same Number. Such unchanged projections keep the source value,
 including its Python type and full integer precision. This is numeric comparison,
-not JS number formatting. To change those distinctions or literal spelling,
+not JS number formatting. Changed browser integers retain an existing float type:
+`2.0` edited to `3` becomes `3.0`. The shared `source_updates._browser_scalar`
+rule applies both before admission and during source-less document patching;
+booleans and newly added values are not coerced. Changed integers outside float
+range are refused as validation diagnostics (HTTP 422), before any save.
+To change numeric type or literal spelling,
 submit exact Python through `SourceProposal`; the source editor remains exact.
 The non-browser patcher defaults to type- and signed-zero-sensitive comparison.
 No-op proposals retain the complete source and digest. Explicitly edited values
@@ -604,7 +614,8 @@ escaped strings, booleans/null, CRLF and exact saved bytes.
 bounded `source` before native model admission, including integers beyond the
 binary64 range (which JSON.stringify turns into null). `DraftRequest` also carries
 this source, so binding inspection uses the same recovery as Review. Recovery
-retains only values indistinguishable from the baseline browser projection;
+retains values indistinguishable from the baseline browser projection and the
+authored float type for changed integer inputs;
 changed/new values still pass through the native JSON model validator. Exact
 Python source is required to distinguish a deliberate null from overflow or to
 edit a numeric type/precision that JavaScript cannot represent.
@@ -619,3 +630,8 @@ as the numeric comparison authority.
 Already-canonical sources remain canonical after patching. The updater first
 retains source values, then uses the existing canonical renderer, preserving
 canonical loop add/remove byte parity and the renderer's validation diagnostics.
+
+Draft inspection and review diagnostics use the native `definition.draft`
+projection of validator messages, preserving field/contract recovery guidance
+without forwarding Pydantic input snapshots. Combined-node drafts reuse that
+owner; the console settings/import error audit is documented in its own contract.

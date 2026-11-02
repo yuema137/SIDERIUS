@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.metadata
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -45,6 +46,7 @@ from agent.schemas.data_analysis.skills import (
 )
 from agent.schemas.data_analysis.time import FixedTimePrecisionRequirement
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from core.execution_deadline import execution_deadline
 
 
 def _skill_source(
@@ -568,6 +570,65 @@ def test_timeout_terminates_the_worker_process_tree(tmp_path: Path) -> None:
     child_pid = int((staging / "child.pid").read_text())
     with pytest.raises(ProcessLookupError):
         os.kill(child_pid, 0)
+
+
+@pytest.mark.allow_real_subprocess
+@pytest.mark.parametrize(("ignores_sigterm", "bound_s"), [(False, 0.75), (True, 1.75)])
+def test_worker_stops_at_the_continuing_allocation_within_the_termination_bound(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    ignores_sigterm: bool,
+    bound_s: float,
+) -> None:
+    """#1425: request publication and SIGTERM reaping are charged to the allocation.
+
+    A 1.0 s publication stall stands in for the multi-second fsync stalls
+    measured under I/O load. The bound is measured from the later of expiry
+    and the end of that uninterruptible publication. Granting the full
+    remaining time after publication, or waiting out the grace on a zombie
+    leader, overruns by about 2 s; enforcement leaves only the poll interval,
+    or the 1 s SIGTERM grace for a child that ignores SIGTERM.
+    """
+    from agent.data_analysis import executor
+
+    pack_ref = _make_pack(tmp_path / "pack", _skill_source(), skill_id="bounded_skill")
+    skill = discover_skills((pack_ref,)).skills[0]
+    publish = executor.publish_bytes_write_once
+    popen = executor.subprocess.Popen
+    # A compliant child must already be in an interruptible sleep at expiry: an
+    # interpreter still paging in its startup under host I/O load cannot act on
+    # SIGTERM and would measure the kernel, not the supervisor.
+    sleep_executable = shutil.which("sleep")
+    assert sleep_executable is not None
+    child = (
+        [
+            sys.executable,
+            "-c",
+            "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)",
+        ]
+        if ignores_sigterm
+        else [sleep_executable, "60"]
+    )
+
+    published_at: list[float] = []
+
+    def stalled_publish(path: str, payload: bytes) -> None:
+        publish(path, payload)
+        time.sleep(1.0)
+        published_at.append(time.monotonic())
+
+    def controlled_child(cmd: list[str], *args, **kwargs):
+        assert cmd[1:3] == ["-m", "agent.data_analysis.worker_main"]
+        return popen(child, *args, **kwargs)
+
+    monkeypatch.setattr(executor, "publish_bytes_write_once", stalled_publish)
+    monkeypatch.setattr(executor.subprocess, "Popen", controlled_child)
+    with execution_deadline(1.5) as allocation:
+        with pytest.raises(SkillExecutorError, match="timed_out"):
+            resolve_skill_interface(skill, control_directory=tmp_path / "control", timeout_s=30.0)
+        overrun_s = time.monotonic() - max(allocation.expires_at, *published_at)
+
+    assert overrun_s < bound_s
 
 
 @pytest.mark.allow_real_subprocess
