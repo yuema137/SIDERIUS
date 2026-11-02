@@ -198,8 +198,8 @@ Owners: `seed_admission.py` (`admission_seed`, `require_root_seed`,
 tools.candidate_operations.child`, no shell, stdin DEVNULL, stdout/stderr to
 exclusive private `operation.log`, close_fds=True and start_new_session=True.
 There are no pipes owned by the submitting process. The child writes its boot
-ID/PID/start-ticks identity before entering native invocation. Runtime binding
-compares interpreter path/resolved target, environment prefix, source root and
+ID, PID, PID namespace inode and start ticks before entering native invocation.
+Runtime binding compares interpreter path/resolved target, environment prefix, source root and
 observed Git revision. These facts do not pin a clean tree or arbitrary plugin
 imports against changes; selected-file identities retain their native limitations.
 
@@ -311,7 +311,12 @@ code and leaves no claim, reservation or child):
    CPU-only declaration that binds device nodes (`request.devices`):
    `placement_unreachable`;
 6. `plan_dispatch` refusal (cannot fit even an idle budget):
-   `resource_refused` with its `escalated to operator` reasons. Otherwise the
+   `resource_refused` with its `escalated to operator` reasons. For a parallel
+   run every envelope quantity is clamped to the budget but never below the
+   run's own `resources` declaration, and a unit that fits no slot alone was
+   already refused `parallel_unit_exceeds_capacity`; so this refusal can only
+   mean that declaration exceeds the idle budget, and its message says so
+   ("the run's resources declaration exceeds this host budget ..."). Otherwise the
    ledger is first promoted (below), then this unit is planned behind every
    remaining waiter, `plan_dispatch((*queued, unit), reservations, budget,
    on_refusal="continue")`: it is placed only when every earlier waiter is
@@ -325,8 +330,9 @@ code and leaves no claim, reservation or child):
    reason names the contention. `host_capacity` is no longer returned.
 
 Placement and spawn. After the claim the reservation (or queue entry) is
-written (process unbound, so a crash fails closed). A placed unit's `Placement`
-is published write-once as `operations/<UUID>/placement.json`; a queued unit
+written (process unbound, so a crash fails closed). A placed unit publishes
+write-once `operations/<UUID>/host_reservation.json` (`HostReservationTicket`:
+`ledger_root`), then its `Placement` as `operations/<UUID>/placement.json`; a queued unit
 publishes `operations/<UUID>/queued.json` instead (below). For a GPU unit the launch mapping is
 overlaid before every later name check and the child environment: the slot UUID
 replaces any inherited `CUDA_VISIBLE_DEVICES` (the sandbox sees the slot as
@@ -337,6 +343,24 @@ and bound. A `Popen` `OSError` removes the reservation and publishes
 `placement.json` and `spawn_failure.json`; the placement then names a
 reservation that no longer exists. Any other failure after the write keeps the
 reservation unbound.
+
+Placed-child confirmation (#1108). The submitter holds the ledger lock from
+writing the entry until it has bound the child or removed the entry. A directly
+placed operation child (it sees `placement.json` and no `queued.json`), right
+after publishing `process.json` and checking its runtime binding and before any
+reusable verification or native dispatch, calls `host_queue.confirm_reservation`:
+under the ledger lock it requires a reservation with its `operation_id`,
+`request_digest` and the published `placement`. Absent (or the ledger busy past
+`LEDGER_LOCK_WAIT_SECONDS`, or unreadable), the child publishes
+`Completion(outcome="pre_dispatch_failure", reason="host_reservation_unconfirmed")`
+and never runs. This closes two windows with one rule: a `KeyboardInterrupt`
+inside `Popen` after the fork (the submitter removes the entry, but the child
+already exists in its own session), and a submitter killed after `Popen`
+returned but before the child published `process.json` (the sweep releases the
+entry on the submitter's positive exit). Once `process.json` exists the sweep
+sees a live child and keeps the entry, so a confirmed reservation stays held.
+A queued child needs no separate step: each `_poll` already reads its own entry
+under the lock, and a missing one ends it with `host_queue_failed`.
 
 Sandbox identity. A placed operation's child (it sees `placement.json`) passes
 `on_sandbox_spawn` to `launch_candidate`, which publishes the bwrap process
@@ -369,24 +393,51 @@ never sees the sandbox.
   and the entry would otherwise hold capacity, or the head of the queue,
   forever. An interrupted spawn that does not kill the submitter (any
   non-`OSError`, such as `KeyboardInterrupt`) removes the entry itself before
-  re-raising. With no identity and no recorded or exited submitter, a
+  re-raising; a child already forked then fails its confirmation (above) and
+  never runs. With no identity and no recorded or exited submitter, a
   mismatched published identity, or any unreadable record, the entry is kept
   (no exception).
 - Operator, `release_reservation` (CLI `release-reservation --host-ledger DIR
   --operation-id UUID`), for a stuck reservation. It refuses `not_reserved`,
   `session_live` (the child or sandbox leader alive, or any member in A or B),
-  `liveness_unobservable` (a leader unknown with its session unreadable), or
+  `liveness_unobservable` (a leader unknown with its session unreadable, or
+  an unbound entry with an unknown recorded submitter), or
   `integrity` (a published identity names another operation). Otherwise it
   releases, including an unbound reservation whose child never published an
-  identity, on the operator's word.
+  identity when evidence is observable and no child or sandbox session appears live.
 
-Known caveats (not covered by the evidence above):
+Known caveats and observation boundaries (also apply to admission release and End):
+
+- PID namespace: new `ProcessIdentity.pid_namespace_inode` values record the inode
+  of `/proc/self/ns/pid` in the process capturing the identity. If capture cannot
+  read that inode, it records `0`, an explicit unknown value that never matches,
+  even after access recovers. `process.observe` first checks the boot ID; a
+  different boot proves exit. On the same boot, a recorded namespace mismatch
+  returns `unknown` (`pid_namespace_mismatch`); a recorded `0` or unreadable
+  reader namespace returns `unknown` (`pid_namespace_unobservable`).
+  No PID stat or session scan can prove death in these cases.
+  `host_liveness.session_evidence` returns an unknown leader and `members=None`,
+  so automatic ledger sweeps, operator release, operation-store admission
+  release and End of an abandoned successor cannot release it. Unbound entries
+  with an unknown submitter also refuse operator release. Reopen from the
+  original PID namespace to observe records with a captured inode.
+- Compatibility: old ledger/process markers without the field remain readable
+  with `None` and retain the pre-field assumption that reader and writer share
+  a PID namespace. PID and session observations can still establish exit and
+  authorize admission release, ledger release and End without a reboot or
+  migration. This preserves upgrade behavior but cannot detect cross-namespace
+  readers of legacy records: keep those readers in the original namespace.
+  New records always carry a captured inode or explicit `0`; failed capture
+  affects only that record. A completed receipt alone does not prove exit.
+- Serial operations have no published sandbox identity and rely on
+  `--die-with-parent`; the bwrap startup window below therefore also limits
+  admission release and End for serial operations.
 
 - Submitter window: if the submitter is killed after `Popen` returned but
   before the child published `process.json` (its first action), the entry is
-  released while that child starts. A queued child then finds its entry gone
-  and ends without running (`host_queue_failed`); a placed child would run
-  unaccounted until it exits.
+  released while that child starts. The child then finds its entry gone and
+  ends without running: a queued child with `host_queue_failed`, a placed one
+  with `host_reservation_unconfirmed` (placed-child confirmation, above).
 
 - bwrap startup window: `--die-with-parent` takes effect only once bwrap has
   set its parent-death signal during startup. If the operation child dies in
@@ -423,12 +474,21 @@ to the slot UUID (for a GPU unit) and continues as a placed operation
 (`sandbox.json`, release). Submissions also promote: admission promotes the
 swept ledger before planning the new unit.
 
-Waiting cost (known limit). Each waiting child is a full operation child that
-has already imported the operation stack: about 0.56 GiB resident while idle
-(review measurement, 2026-10-28). That memory is not counted in any reservation,
-and the queue has no length cap, so many queued submissions can exhaust host
-memory before any of them runs. Tracked in #1073 (lazy imports in the waiting
-child and/or a queue cap).
+Waiting cost and bound. Native-chain hardware review imports its environment
+inspection only when `review()` runs; importing the operation child/queue does
+not import PyTorch. Waiters still have Python, schema and control-stack overhead,
+which is not included in placed reservations. Operators must leave memory headroom.
+`HostBudget.max_queued_operations` is a strict nonnegative integer, default zero
+(no waiting). Set it explicitly in the shared budget file to permit a bounded
+number of waiting children. After sweep and FIFO promotion, admission refuses a
+new queued decision with `host_queue_full` when the remaining queue is at the
+limit, before claim or spawn. Immediately placeable operations remain accepted.
+The check and insertion share the ledger lock across stores. Cancelled/dead
+waiters free space through the existing queue/liveness owners. This bounds
+waiting entries, not running reservations or in-process worker ready queues.
+Nonzero limits participate in the budget digest; zero is omitted to retain
+existing zero-wait budget bytes. Changing a limit with live entries requires
+draining the ledger first (`budget_mismatch`).
 
 Snapshot. While `queued.json` exists without `placement.json` and the child is
 alive, `read_operation` reports `state="queued"`, `reason="host_queued"`;
@@ -453,8 +513,10 @@ holds the budget digest: while one exists a different budget is refused
 
 Loop resume. A `candidate_loop_resume` under a ledger reserves with its root
 candidate's `resources` and launch request (timeout, environment names,
-devices), placed or queued like a candidate; a root without `resources` still
-refuses `resources_required`. A placed segment publishes `sandbox.json` like a
+devices), placed or queued like a candidate. Waiting resumes consume the same
+`max_queued_operations` allowance; a full or disabled queue refuses
+`host_queue_full`. A root without `resources` still refuses
+`resources_required`. A placed segment publishes `sandbox.json` like a
 candidate. A resume submitted without a ledger whose root ran placed (the root's
 operation directory holds `placement.json`) refuses `host_ledger_required`
 before any claim: it would otherwise run unaccounted beside placed runs.
@@ -508,10 +570,13 @@ It binds and observes the process identity before reading completion/spawn-failu
 markers. A completion published immediately before the observed wrapper exit
 therefore participates in that same read, including an `unknown` completion that
 must keep admission blocked.
-Linux process observation compares boot ID, PID and `/proc/PID/stat` start ticks.
-Readers and operation processes must share the same host PID namespace. PID
-reuse and zombies establish original-process exit within that namespace. Unreadable/malformed
-identity is unknown. Presence only describes the wrapper, not provider progress.
+Linux process observation compares boot ID, PID namespace inode, PID and
+`/proc/PID/stat` start ticks. On the same boot, the reader must match the recorded
+namespace before PID reuse, absence or zombies establish exit. Recorded unknown,
+mismatched or unreadable namespace evidence is unknown; legacy missing fields
+retain the same-namespace assumption; see the Host reservation ledger
+observation boundaries above. Unreadable/malformed process identity is unknown.
+Presence only describes the wrapper, not provider progress.
 No persisted monotonic clock or elapsed-time timeout inference exists.
 
 A submission handle may say `starting` (or `queued` for a host-ledger waiter);
@@ -1301,9 +1366,12 @@ native receipt projects `state="operation_failed", reason="loop_process_exited"`
 only when both its wrapper exit and ended wrapper/sandbox sessions are verified.
 Wrapper exit with live or unobservable sessions stays `state="unknown",
 reason="loop_process_exiting"`; it is not a terminal failure.
-`process.observe` binds boot ID and PID start ticks: absent PIDs on an observable
-`/proc`, reused PIDs, zombies/dead processes and a different boot prove exit;
-unreadable identities stay unknown. Marker integrity and native receipt validation
+`process.observe` binds boot ID, PID namespace inode and PID start ticks. In a
+matching recorded namespace, absent PIDs on an observable `/proc`, reused PIDs
+and zombies/dead processes prove exit; a different boot independently proves
+exit. Recorded unknown, mismatched or unreadable namespace identities stay
+unknown; legacy missing fields retain the same-namespace assumption (see Known
+caveats above). Marker integrity and native receipt validation
 still precede this projection; no completion or scientific receipt is fabricated.
 Both failure projection and release require `host_liveness.reservation_evidence`
 to prove that the wrapper session and any published sandbox session ended;

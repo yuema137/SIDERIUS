@@ -40,6 +40,7 @@ from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.training_diagnosis import TrainingDiagnosis
 from agent.schemas.vocab import VocabEntry
+from core.record_encoding import RecordModel
 from core.runtime_control.records import RealizedPhaseMemory
 from core.runtime_control.training_budget import TrainingBudgetReceipt
 from execute_tools.evaluation_metric import (
@@ -1024,7 +1025,7 @@ class InterpretationInput(BaseModel):
         return self
 
 
-class InterpretationOutput(BaseModel):
+class InterpretationOutput(RecordModel):
     """
     Output of result_interpretation_agent.
 

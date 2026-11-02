@@ -35,7 +35,6 @@ from execute_tools.evaluation_metric import (
     MetricSpec,
     metric_spec_from_declaration,
 )
-from execute_tools.scoring_utils import coerce_nonfinite_to_none
 from tests.helpers.metric_fixtures import accuracy_like_spec
 from tests.helpers.step00_pseudo_iteration import run_bounded_pseudo_iteration
 
@@ -75,9 +74,9 @@ class TestTheLivePathStampsTheRunSpec:
 
     def test_the_persisted_json_revalidates_to_an_equal_spec(self, pseudo_run):
         """The round trip the transport depends on, through the REAL writer's
-        serialization path (``coerce_nonfinite_to_none`` -> ``json``)."""
-        output, _bridge, _sandbox, _ws = pseudo_run
-        on_disk = json.loads(json.dumps(coerce_nonfinite_to_none(output.model_dump())))
+        serialization path, read from its published artifact."""
+        output, _bridge, _sandbox, workspace = pseudo_run
+        on_disk = json.loads((Path(workspace) / f"run_output_{output.run_name}.json").read_text())
         reloaded = HyperparamTuningOutput.model_validate(on_disk)
         assert reloaded.metric_spec == output.metric_spec
         assert reloaded.metric_spec is not None
@@ -104,7 +103,7 @@ class TestTheDegradedWriterKeepsTheLaunchFact:
     (a real run launched with ``--healthgate_mode blocking`` wrote
     ``healthgate_mode: null`` because it failed).
 
-    Forced at ``coerce_nonfinite_to_none`` — the single call site, reached
+    Forced at ``encoded_record`` — the single call site, reached
     only on the healthy branch, immediately after validation. That makes the
     REAL ``finalize_run_output`` take its REAL except path rather than a
     simulated one.
@@ -127,7 +126,7 @@ class TestTheDegradedWriterKeepsTheLaunchFact:
             raise RuntimeError("forced serialization failure")
 
         try:
-            mp.setattr(_records, "coerce_nonfinite_to_none", _boom)
+            mp.setattr(_records, "encoded_record", _boom)
             output, _bridge, _sandbox, workspace = run_bounded_pseudo_iteration(
                 tmp, mp, preflight_results=preflight
             )

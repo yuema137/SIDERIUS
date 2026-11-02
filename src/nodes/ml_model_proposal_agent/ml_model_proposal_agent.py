@@ -61,6 +61,7 @@ from agent.utils.proposer_preflight import estimate_proposal_time
 from core.capability_registry import CapabilityRegistry
 from core.generated_artifact_name import validate_generated_artifact_name
 from core.hardware_context import HardwareContext
+from core.record_encoding import decode_record, record_json
 from execute_tools.dataset_config import (
     DatasetConfig,
     declares_tidmad_topology,
@@ -1694,7 +1695,7 @@ class MLModelProposalAgent:
             os.makedirs(workspace, exist_ok=True)
             out_path = os.path.join(workspace, f"proposal_{run_name}.json")
             with open(out_path, "w", encoding="utf-8") as f:
-                f.write(output.model_dump_json(indent=4))
+                f.write(record_json(output, indent=4).decode())
             print(f"Proposal saved -> {out_path}")
 
         return output
@@ -2649,7 +2650,7 @@ def main():
             f"Run result_interpretation_agent first, or check --workspace and --run_name."
         )
     with open(interp_path, encoding="utf-8") as f:
-        interpretation = json.load(f)
+        interpretation = decode_record(json.load(f))
 
     # PR 01a: the standalone CLI must supply the task declaration.
     # Before the commit-prompt extraction an absent contract was harmless

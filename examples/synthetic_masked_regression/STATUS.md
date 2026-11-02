@@ -40,3 +40,13 @@ deviation (`ddof=0`) is always zero for one sample. Coverage still does not
 guarantee a passing dispersion verdict. The proof uses
 scope metadata; disk/supervision consistency remains a materialization check.
 Regression evidence: `tests/unit/examples/test_masked_health_coverage.py`.
+
+## Sampling seed contract (#1169)
+
+Scope and epoch subsampling now raise `core.seeding.MissingRunSeed` when the
+caller omits the seed. Explicitly seeded results and fixed generated shard
+bytes are unchanged. Editing `_masked_task.py` changes its content hash and
+both shipped and modular composition fingerprints, so previous workspace
+locks cannot resume against this revision. Archived qualification receipts
+retain their original identities; this change claims no new GPU qualification.
+Regression: `tests/unit/examples/test_example_sampling_seeds.py`.

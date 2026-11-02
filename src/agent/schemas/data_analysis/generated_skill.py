@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import Field, model_validator
 
+from core.record_encoding import model_record_value
+
 from .action_identity import GeneratedProgramIdentity
 from .common import CertifiedArtifactRef, FrozenModel, NonEmptyStr, Sha256, canonical_sha256
 from .skills import ResolvedSkillInterface, SkillDeclaration, SkillIdentity
@@ -76,7 +78,7 @@ class GeneratedExperimentSkill(FrozenModel):
         return self
 
     def executable_identity_body(self) -> dict[str, Any]:
-        return self.model_dump(mode="json", exclude={"promotion_provenance"})
+        return model_record_value(self, exclude={"promotion_provenance"})
 
 
 class GeneratedExperimentSkillRegistry(FrozenModel):
@@ -100,7 +102,7 @@ class GeneratedExperimentSkillRegistry(FrozenModel):
         return {
             "schema_version": self.schema_version,
             "registry_id": self.registry_id,
-            "skills": [item.model_dump(mode="json") for item in self.skills],
+            "skills": [model_record_value(item) for item in self.skills],
         }
 
 

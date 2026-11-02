@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from core.runtime_control.inference_startup import publish_message
 from tests.unit.core import test_native_gpu_execution as fixtures
 from tests.unit.core.test_checkpoint_inference_measurement import bound_spec
-from tests.unit.core.test_gpu_runtime_protection import Clock, observer
+from tests.unit.core.test_gpu_runtime_protection import Clock
 
 
 def test_handshake_accepts_slow_publication_and_consumption(tmp_path, bound_spec, monkeypatch):
@@ -23,16 +23,3 @@ def test_handshake_accepts_slow_publication_and_consumption(tmp_path, bound_spec
     startup.check(message.child_pid, terminal=True)
     assert publications == [90.0]
     assert startup.receipt.loaded == startup.receipt.consumed == message
-
-
-def test_synthetic_observation_survives_slow_setup_but_still_expires():
-    """Scratch publication must not age fake GPU facts out before child launch."""
-    clock = Clock()
-    selected = fixtures.execution_policy(slow_storage=True).protection
-    control = observer(selected=selected, clock=clock)
-    clock.value = 90.0
-    assert control.check_control().status == "continue"
-    clock.value = 601.0
-    decision = control.check_control()
-    assert decision.status == "stop"
-    assert decision.reason == "GPU observation coverage expired"

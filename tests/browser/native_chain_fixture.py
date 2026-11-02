@@ -16,6 +16,7 @@ from pathlib import Path
 
 import uvicorn
 
+from tests.browser.fixture_metadata import emit_metadata
 from tests.integration.workflows.test_captured_native_chain import _task_manifest
 from tests.unit.tools.test_workflow_authoring import SOURCE
 from tools.candidate_console import CandidateConsole, ConsoleConfig
@@ -175,11 +176,8 @@ def main() -> None:
         handle = NativeChainConsole(CandidateConsole(config)).launch(selection)
         print(handle.model_dump_json(), flush=True)
         return
-    print(
-        json.dumps(
-            dict(origin=config.browser_origin, token=Path(config.auth_token_file).read_text())
-        ),
-        flush=True,
+    emit_metadata(
+        dict(origin=config.browser_origin, token=Path(config.auth_token_file).read_text())
     )
     uvicorn.run(
         create_app(config),

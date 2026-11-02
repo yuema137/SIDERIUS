@@ -9,7 +9,7 @@ import {createRequire} from 'node:module';
 import {mkdir, writeFile} from 'node:fs/promises';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 import {showAllConsoleSections} from './console_view_flags.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const key of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE', 'CONSOLE_EVIDENCE_DIR']) assert.ok(process.env[key], `Set ${key}`);
@@ -21,11 +21,7 @@ const faults = [], calls = [], responses = [];
 server.stderr.on('data', data => {stderr += data;});
 const timer = setTimeout(() => {console.error('Native token witness timed out'); server.kill('SIGTERM'); process.exit(2);}, 60000);
 try {
-  const lines = createInterface({input: server.stdout});
-  const metadata = await new Promise((accept, reject) => {
-    lines.once('line', line => accept(JSON.parse(line)));
-    server.once('exit', code => reject(new Error(`Fixture exited ${code}: ${stderr}`)));
-  });
+  const metadata = await waitForMetadata(server, {timeoutMs: 30000});
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
   showAllConsoleSections(browser);

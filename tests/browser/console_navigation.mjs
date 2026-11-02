@@ -7,13 +7,12 @@ import {spawn} from 'node:child_process';
 import {createRequire} from 'node:module';
 import {dirname, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 import {showAllConsoleSections} from './console_view_flags.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[name], `Set ${name}`);
 const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.workflow_editor_server'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
 let errors = ''; server.stderr.on('data', chunk => {errors += chunk;});
-const lines = createInterface({input: server.stdout});
 let browser;
 const operation = '22222222-2222-4222-8222-222222222222', remembered = '33333333-3333-4333-8333-333333333333';
 async function waitUntil(predicate) {
@@ -21,11 +20,7 @@ async function waitUntil(predicate) {
   while (!(await predicate())) { if (Date.now() > deadline) throw new Error('Condition timed out'); await new Promise(resolve => setTimeout(resolve, 50)); }
 }
 try {
-  const metadata = await new Promise((accept, reject) => {
-    const timer = setTimeout(() => reject(new Error('Server startup timeout')), 15000);
-    lines.once('line', line => {clearTimeout(timer); accept(JSON.parse(line));});
-    server.once('exit', code => {clearTimeout(timer); reject(new Error(`Server ${code}: ${errors}`));});
-  });
+  const metadata = await waitForMetadata(server, {timeoutMs: 15000});
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
   showAllConsoleSections(browser);
@@ -217,4 +212,4 @@ try {
   assert.deepEqual(faults, []);
   await context.close();
   console.log('PASS: independent direct operation connection, unavailable auth, UUID validation/precedence, one shell/poller, history cursor retention, project failure isolation, 401/reconnect, stale initial project load, pending draft and exit guard; Authorization-only credentials and GET-only navigation.');
-} finally { if (browser) await browser.close(); server.kill('SIGTERM'); lines.close(); }
+} finally { if (browser) await browser.close(); server.kill('SIGTERM'); }

@@ -291,6 +291,8 @@ def _claim_and_spawn(
     except BaseException as error:
         if not isinstance(error, OSError):
             # Interrupted before any child was bound: leave no ledger entry behind.
+            # A child already forked (Ctrl-C inside Popen) finds its entry gone when
+            # it confirms it under the ledger lock, and ends without running (#1108).
             slot.spawn_failed(submission.request_id)
             raise
         slot.spawn_failed(submission.request_id)

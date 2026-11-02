@@ -289,3 +289,5 @@ completed, stopped or failed terminal run cannot use this paused-loop route.
 
 For the authoritative controls, see the
 [loop-control CLI contract](../../src/tools/candidate_operations/candidate-operations-contract.md#control-an-authored-loop-from-code-or-the-cli).
+
+These small-task settings use `formal_portion=1.0` and `max_rounds=2`; see [Trial and Formal training](../../src/tools/candidate_console/README.md#trial-and-formal-training) for scope, round limits and framework defaults.

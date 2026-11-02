@@ -100,6 +100,7 @@ def build_standard_launch_config(
         validation_max_samples=args.validation_max_samples,
         validation_max_phase_seconds=args.validation_max_phase_seconds,
         skip_formal_min_delta=args.skip_formal_min_delta,
+        score_units_metric=args.score_units_metric,
         bypass_formal_time_budget_min_delta=args.bypass_formal_time_budget_min_delta,
         bypass_formal_time_budget_minutes=args.bypass_formal_time_budget_minutes,
         trial_time_budget_minutes=args.trial_time_budget_minutes,

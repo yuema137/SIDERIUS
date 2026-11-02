@@ -12,6 +12,13 @@ CLI, passing `--is_trial` explicitly also pins the trial sampling portions.
 Use `--no-is_trial` only for legacy single-file execution on a task with TIDMAD
 topology. See the [full guide](ml_hyperparameter_tune_agent.md) for these controls.
 
+Before each attempt runs, the console shows effective configuration changes
+and their override authority, followed by the planner's original proposal.
+For example, if `full_clone` inherits batch size 4 after the planner proposed 8,
+the log shows `8 -> effective 4` and labels the proposal as superseded. The
+preceding inheritance line identifies the winning trial. These are prepared
+request values; training results are reported separately after execution.
+
 - [Public entry and CLI](ml_hyperparameter_tune_agent.py) · [full guide](ml_hyperparameter_tune_agent.md)
   (`cli.py` is a private parser/input adapter used by that entrypoint.)
 - Input/output owners: [HyperparamTuningInput/HyperparamTuningOutput](../../agent/schemas/hyperparam_tuning.py)

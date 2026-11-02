@@ -6,6 +6,7 @@ from uuid import UUID
 from core.control_json import encode_control
 from core.durable_io import publish_bytes_write_once
 from core.runtime_control.scheduling import HostBudget
+from workflows.evaluation_selection import selection_metric
 from workflows.llm_config import WorkflowLLMConfig
 from workflows.task_composition import RunTaskComposition
 
@@ -74,13 +75,20 @@ def execute_loop(
     from .loop_evidence import advance_body, initial_history
 
     require_loop(request)
+    from workflows.evaluation_admission import admit_formula_definition
+
+    admit_formula_definition(composition, request.preview.document.definition)
     loop = request.preview.document.definition.loop
     assert loop is not None
     if loop.stop_conditions:
         from .loop_judge import admit_judge_route
 
         # Before any dispatch: a mismatch found after body 1 would orphan its records.
-        admit_stop_conditions(loop, captured_metric(request, initial), composition.metric.spec)
+        admit_stop_conditions(
+            loop,
+            captured_metric(request, initial),
+            selection_metric(composition, composition.metric.spec),
+        )
         admit_judge_route(loop, config)
     history = initial_history(request, initial)
     attempted = 0

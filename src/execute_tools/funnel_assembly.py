@@ -44,6 +44,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from core.record_encoding import decode_record
 from execute_tools.impl_attempts import stage_artifact_dir
 
 #: Stage names, in funnel order. ``stopped_at_stage`` is one of these or
@@ -153,7 +154,7 @@ class IterationFunnel(BaseModel):
 def _read_json(path: str) -> tuple[dict[str, Any] | None, UnreadableArtifact | None]:
     try:
         with open(path, encoding="utf-8") as fh:
-            payload = json.load(fh)
+            payload = decode_record(json.load(fh))
     except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
         return None, UnreadableArtifact(path=path, error=f"{type(exc).__name__}: {exc}")
     if not isinstance(payload, dict):

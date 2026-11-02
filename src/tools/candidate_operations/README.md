@@ -120,6 +120,17 @@ To stop a running candidate, see
 [Stop a running candidate now](#stop-a-running-candidate-now). Captured native
 continuation is limited to the explicit route below.
 
+Keep status readers and the console in the same container/PID namespace that
+launched the operation. Containers can give the same process different PID
+numbers, so a reader in another namespace cannot safely decide that it ended.
+That uncertainty blocks release of its slot and End of an abandoned loop.
+Older records without namespace information retain the previous same-namespace
+assumption, so they can still release capacity after an upgrade. They cannot
+detect readers in another namespace. New records whose namespace cannot be
+read stay unknown and cannot release capacity; see the
+[observation boundaries](candidate-operations-contract.md#host-reservation-ledger)
+for the compatibility rule.
+
 Use `--kind operation` for wrapper output. Logs and full native receipts are
 trusted local data and may contain sensitive task or plugin output. Byte cursors
 advance using `next_offset`; chunks can split UTF-8 characters. An offset beyond
@@ -251,7 +262,9 @@ the reservation back when its processes, including training, have ended.
    create it.
 2. Write a budget file for this host: each GPU's UUID, hardware and memory
    ceiling, plus host memory, CPU slots and the maximum number of concurrent
-   operations. The [budget format](../../core/runtime_control/scheduling.md#budget-intake-run-invariants-and-child-environment)
+   operations. Add `"max_queued_operations": 2` to allow up to two waiting
+   operations; omit it or use zero to refuse submissions that must wait.
+   Leave memory headroom for these waiting processes. The [budget format](../../core/runtime_control/scheduling.md#budget-intake-run-invariants-and-child-environment)
    lists every field. Nothing in it is guessed for you.
 3. Add a `resources` object to each candidate submission saying what that run
    needs, for example
@@ -277,9 +290,9 @@ directory gains `placement.json`, which names the GPU it was given. If the budge
 is currently full, the submission returns `queued`: it waits its turn, in the
 order submissions arrived, and starts by itself once earlier runs end (status
 shows `queued` until then). To drop a waiting run, cancel it; it is removed from
-the queue without running. Each waiting run keeps a process of about 0.56 GiB of
-memory open while it waits, and nothing limits how many can wait, so do not
-queue more runs than the host's memory can hold. A run that could never fit is refused with
+the queue without running. Waiting processes defer PyTorch loading. Once the
+queue reaches `max_queued_operations`, submission returns `host_queue_full`
+without starting another process; retry when space becomes available. A run that could never fit is refused with
 `resource_refused`. Two runs sharing one GPU slow each other
 down, which can change what a time budget admits. So a `time_budgeted` run is only
 placed on a GPU no other run is using, and no run is placed beside it. If every

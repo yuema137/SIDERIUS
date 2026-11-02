@@ -12,6 +12,7 @@ import os
 
 from fastapi import APIRouter, HTTPException, Query
 
+from core.record_encoding import decode_record
 from dashboard.api.models import (
     ExperimentRecord,
     FrontendConfig,
@@ -454,7 +455,7 @@ def get_exploration_records(
             summary_path = os.path.join(iter_dir, model_name, f"summary_{run_name}.json")
             if os.path.isfile(summary_path):
                 with open(summary_path) as f:
-                    records = json.load(f)
+                    records = decode_record(json.load(f))
                 break
     else:  # chain — concatenate records from every chain iteration that ran this model
         for chain_iter_dir in sorted(glob.glob(os.path.join(run_dir, "iter_*"))):
@@ -463,7 +464,7 @@ def get_exploration_records(
                 summary_path = os.path.join(inner, model_name, f"summary_{iter_name}.json")
                 if os.path.isfile(summary_path):
                     with open(summary_path) as f:
-                        records.extend(json.load(f))
+                        records.extend(decode_record(json.load(f)))
 
     if not records:
         raise HTTPException(
@@ -613,7 +614,7 @@ def iteration_table(run_name: str):
                 continue
             try:
                 with open(ro_path) as f:
-                    run_output = json.load(f)
+                    run_output = decode_record(json.load(f))
             except (json.JSONDecodeError, OSError):
                 # Partial / corrupt run_output (common after disk-full or
                 # mid-write crash). Don't let one bad file 500 the table —
@@ -648,7 +649,7 @@ def iteration_table(run_name: str):
                 continue
             try:
                 with open(ro_path) as f:
-                    run_output = json.load(f)
+                    run_output = decode_record(json.load(f))
             except (json.JSONDecodeError, OSError):
                 # Partial / corrupt run_output (common after disk-full or
                 # mid-write crash). Don't let one bad file 500 the table —
