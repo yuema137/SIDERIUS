@@ -181,7 +181,7 @@
       const broken = node('p', 'The research loop feeds back between deleted modules. Undo the delete, or remove the research loop.', parent);
       broken.id = 'editor-loop-broken'; broken.className = 'field-problem-text';
     } else for (const section of sections) section(parent, state, actions);
-    if (state.profile !== 'native-interpretation-candidate/v1') {
+    if (state.profile !== window.executionProfiles.nativeInterpretation) {
       node('p', 'Only the native interpretation execution profile runs a research loop; preparation or launch admission refuses this declaration otherwise.', parent).className = 'muted';
     }
     const remove = control(node('button', 'Remove research loop', parent));

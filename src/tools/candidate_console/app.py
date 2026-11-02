@@ -27,8 +27,10 @@ from .models import (
     OperationCancelSelection,
     PreparedSelection,
     PrepareSelection,
+    ReservationSelection,
 )
 from .native_chain_routes import native_chain_router
+from .profile_assets import add_profile_assets
 from .reusable_models import ReusableAdmissionNotAttempted
 from .reusable_preparation_routes import reusable_preparation_router
 from .reusable_routes import reusable_router
@@ -76,6 +78,14 @@ LOOP_RESUME_REFUSALS = {
         "or it changed since review; read status and review again"
     ),
     "runtime": "the console runtime differs from the one that started this loop",
+    "resources_required": "this console shares a host ledger and the loop's first run "
+    "declared no host resources: declare them for the resumed segment, then review again",
+    "run_resources_conflict": "the loop's first run already declares host resources; "
+    "review again without overriding them",
+    "host_ledger_missing": "host resources need a host ledger in the console "
+    "configuration; review without them",
+    "parallel_budget": "the loop's first run brings its own parallel budget, which a "
+    "host ledger does not accept; resume it from the command line without --host-ledger",
 }
 
 
@@ -262,6 +272,15 @@ def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -
         except OperationFailure as error:
             return refusal(LOOP_RESUME_REFUSALS, error)
 
+    @app.post("/api/operations/{operation_id}/loop-resume-review")
+    async def loop_resume_review_with_resources(operation_id: UUID, request: Request):
+        """The same review with the segment's reservation in the body (#1385)."""
+        selection = ReservationSelection.model_validate_json(await request.body())
+        try:
+            return await run_in_threadpool(service.review_loop_resume, operation_id, selection)
+        except OperationFailure as error:
+            return refusal(LOOP_RESUME_REFUSALS, error)
+
     @app.post("/api/loop-resumes", status_code=202)
     async def loop_resume(request: Request):
         selection = LoopResumeSelection.model_validate_json(await request.body())
@@ -297,6 +316,7 @@ def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -
             LogReadRequest(operation_id=operation_id, kind=kind, offset=offset, max_bytes=max_bytes)
         )
 
+    add_profile_assets(app)
     assets = Path(__file__).parent / "static"
 
     @app.get("/")

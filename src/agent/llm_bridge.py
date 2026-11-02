@@ -2701,39 +2701,14 @@ class StubLLMBridge(LLMBridge):
         )
 
     def _synth_implementor_code(self) -> dict:
-        """Snippets that, after ``_assemble_plugin``, produce a plugin
-        functionally equivalent to the synthetic model-plugin contract fixture.
+        """Build pseudo snippets from the same bound contract as candidate checks."""
+        from agent.stub_model import stub_model_code
+        from workflows.task_config import resolve_bound_task_config, run_bound_model_io_contract
 
-        The bridge cannot return the template's flat source string
-        directly — the implementor's caller treats the response as a
-        6-key dict and formats the snippets into ``PLUGIN_TEMPLATE``
-        (see ``nodes/ml_model_implementor.py:594-646``). The assembled
-        plugin matches the template's architecture
-        (``Embedding(256, h) → Linear(h, 256) → transpose``) and the
-        ``[B, T] int → [B, 256, T] float`` forward contract.
-
-        Notes:
-          - ``hidden_dim`` is the only tunable field. Its default
-            ``8`` MUST match between ``config_fields_code`` (parsed by
-            the ``_check_config_field_consistency`` regex) and the
-            ``config_fields`` dict (read by the scalar-type check).
-          - Indentation is normalised by ``_assemble_plugin`` via
-            ``textwrap.dedent`` then re-indented to 8 spaces, so the
-            snippets are written at zero indent for readability.
-        """
-        return {
-            "extra_imports": "",
-            "config_fields_code": "    hidden_dim: int = Field(default=8, ge=1, le=256)",
-            "config_validators_code": "",
-            "init_body": (
-                "self.embedding = nn.Embedding(256, config.hidden_dim)\n"
-                "self.head = nn.Linear(config.hidden_dim, 256)"
-            ),
-            "forward_body": (
-                "x = self.embedding(x.long())\nx = self.head(x)\nreturn x.transpose(1, 2)"
-            ),
-            "config_fields": {"hidden_dim": 8},
-        }
+        contract = (
+            run_bound_model_io_contract() if resolve_bound_task_config() is not None else None
+        )
+        return dict(stub_model_code(contract))
 
     def _synth_implementor_repair(self) -> dict:
         """Identical payload to ``implementor.code``.
