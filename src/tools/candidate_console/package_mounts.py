@@ -24,6 +24,7 @@ from tools.workspace_sandbox.profile import (
 )
 from workflows.task_package_refs import ManifestReference, manifest_references
 
+from .error_messages import console_error_message
 from .models import ConsoleConfig, TaskChoice
 from .settings_file import SettingsInvalid
 
@@ -90,12 +91,16 @@ def device_problem(device: str) -> str | None:
 
     Calls the sandbox's own admission, ``SandboxProfile.device_paths`` (a
     canonical existing path under ``/dev`` that is a character device), and
-    returns its refusal reason; this module adds no second device rule.
+    returns a safe error category with fixed recovery guidance; this module adds
+    no second device rule.
     """
     try:
         SandboxProfile.device_paths((Path(device),))
     except ValueError as error:
-        return str(error)
+        return (
+            console_error_message(error)
+            + " Use existing canonical character-device paths under /dev."
+        )
     return None
 
 

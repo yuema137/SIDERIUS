@@ -615,3 +615,8 @@ as the numeric comparison authority.
 Already-canonical sources remain canonical after patching. The updater first
 retains source values, then uses the existing canonical renderer, preserving
 canonical loop add/remove byte parity and the renderer's validation diagnostics.
+
+Draft inspection and review diagnostics use the native `definition.draft`
+projection of validator messages, preserving field/contract recovery guidance
+without forwarding Pydantic input snapshots. Combined-node drafts reuse that
+owner; the console settings/import error audit is documented in its own contract.

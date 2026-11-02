@@ -19,6 +19,18 @@ def console_error_message(error: Exception) -> str:
     }[error_category(error)]
 
 
+def advice_error_message(error: Exception) -> str:
+    """Retain actionable advice format guidance without quoting uploaded keys or causes."""
+    from workflows.advice import ADVICE_RECOGNISED_KEYS
+
+    return (
+        console_error_message(error)
+        + " Advice needs nonempty text or lists of text under recognised keys: "
+        + ", ".join(ADVICE_RECOGNISED_KEYS)
+        + "."
+    )
+
+
 def safe_observation(observation: CompositionObservation) -> CompositionObservation:
     """Copy a native observation for HTTP; retain private diagnostics in the server log."""
     from tools.setup_review.summary_errors import summary_error_message

@@ -3206,3 +3206,41 @@ projection independently of this syntactic guard. The editor browser witness
 renders real sanitized HTTP observations through the production JSON details
 component, using synthetic visibility gates only; it does not qualify saving or
 scientific compatibility.
+
+### Settings, import and authoring error projections (#1328)
+
+`error_messages.console_error_message` remains the console projection owner and
+uses `setup_review.summary_errors.error_category`; raw causes and custom exception
+class names are diagnostic-log data, not response messages. Settings profile
+upload/export, external-manifest inspection, package-copy OSError, add-task folder
+creation and entry validation, device warnings and host-ledger intake use that
+owner. Existing refusal codes and no-write/partial-copy recovery hints remain.
+Device warnings retain the explicitly configured device and give fixed guidance
+to use existing canonical character-device paths under `/dev`.
+
+`advice_error_message` adds the advice owner's recognised key inventory and
+nonempty text/list requirements to the safe category. Library upload, inline
+export and settings advice loading share it. Unknown uploaded keys, parser text
+and nested causes are not forwarded. This changes console diagnostics only;
+`workflows.advice` still owns parsing and consumability and its runtime behavior
+is unchanged.
+
+Typed-carrier provenance audit:
+
+| Carrier | Reviewed sources and projection rule |
+| --- | --- |
+| `SettingsInvalid` | `settings_file`, `package_mounts`, `workspace`, `config`: fixed field/path/permission recovery guidance; nested advice causes use `advice_error_message`. |
+| `AdviceArtifactError` | `workflows.advice` can contain unknown keys and nested parser/file errors; console adapters categorise rather than trust the carrier text. |
+| `AuthoringError` | `service`, task publication, node edits, source edits and version records: retain fixed policy/conflict/recovery guidance and explicit authored identifiers. Native `definition.draft.inspect_draft` now projects validator messages rather than `str(ValidationError)` input snapshots, also protecting draft and node-draft views. |
+| `TemplateRefusal` | `templates.import_template`: fixed unsupported-source guidance. |
+| `WorkspaceRefused` | `workspace.ensure_owned_directory` and init: fixed ownership/permission recovery with explicit paths and stat fields; package-copy forwarding is restricted to this typed carrier, while OSError is categorised. |
+| `AddTaskRefused` | `add_task`, `example_bundle`: fixed planning/recovery text; generic inspection/copy/entry errors are categorised; custom exception names are not shown. |
+| `MissingConfigFile` | `config_errors`: configured resource field and path; existing name/path recovery guidance remains. |
+| launch policy / judge route | `validate_declared_policy` and `loop_judge.admit_judge_route`: fixed framework policy/budget/route guidance; no nested arbitrary cause is interpolated. |
+
+The exact AST baseline removes repaired raw projections and documents the narrow
+WorkspaceRefused forwarding statement; it is not an exemption for arbitrary typed
+errors. HTTP/CLI sentinel tests live in `test_remaining_error_projections.py`.
+Authoring validation retains the validator's field/contract guidance, but omits
+Pydantic's input snapshot. No scientific defaults, prompt bytes, protected digest
+algorithms or experiment-owned settings change.

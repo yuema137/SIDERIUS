@@ -7,40 +7,23 @@
       "raise ReusableAdmissionNotAttempted(error.detail.code, error.detail.message) from error"
     ],
     "add_task.py": [
-      "print(f\"Creating the task's folders stopped: {error}.\", file=sys.stderr)",
-      "print(f\"Creating the task's folders stopped: {error}.\", file=sys.stderr)",
       "print(f'The task was added, but its first experiment setup was not created: {error.message}. Create one in the Workflow tab instead.', file=sys.stderr)",
       "print(f'add-task refused: {error}.', file=sys.stderr)",
       "print(f'add-task refused: {error}.', file=sys.stderr)",
       "print(f'add-task refused: {error}.{left}', file=sys.stderr)",
-      "raise AddTaskRefused(f\"cannot read {error.filename or 'the given file'}\") from None",
-      "raise AddTaskRefused(f'the new task entry is not valid ({type(error).__name__}); console.json was not changed') from None",
-      "raise AddTaskRefused(str(error)) from None",
       "raise AddTaskRefused(str(error)) from None"
     ],
     "settings_file.py": [
-      "raise SettingsInvalid(f'global settings file is not valid {SETTINGS_SCHEMA} JSON at {invalid_fields(error, payload)}') from None",
-      "raise SettingsInvalid(str(error)) from None"
-    ],
-    "settings_export.py": [
-      "raise ExportRefused(422, 'invalid_advice', str(error)) from None",
-      "raise ExportRefused(422, 'invalid_profile', f\"the task's LLM profile is not usable with --llm_config: {error}\") from None"
+      "raise SettingsInvalid(f'global settings file is not valid {SETTINGS_SCHEMA} JSON at {invalid_fields(error, payload)}') from None"
     ],
     "setup_routes.py": [
       "content: dict[str, object] = {'error': {'code': error.code, 'message': error.message}}"
     ],
-    "settings_library.py": [
-      "raise LibraryRefused(422, 'invalid_file', f'Not an LLM profile: {error}') from None",
-      "raise LibraryRefused(422, 'invalid_file', str(error)) from None"
-    ],
     "editor.py": [
       "return JSONResponse(status_code=409, content={'error': {'code': error.code, 'message': str(error)}, 'current': error.current.model_dump(mode='json') if error.current else None, 'proposal': safe_review(error.proposal).model_dump(mode='json') if error.proposal else None})"
     ],
-    "config.py": [
-      "raise ValueError(f'configured host ledger is unusable: {error}') from error"
-    ],
     "example_bundle.py": [
-      "raise AddTaskRefused(f'copying the task package failed ({error}){left}') from None"
+      "message = str(error) if isinstance(error, WorkspaceRefused) else console_error_message(error)"
     ],
     "app.py": [
       "message = error.detail.message if error.detail.code in ('credentials', 'launch_policy', 'judge_route', 'loop_end', 'candidate_preflight', 'reusable_preflight', 'native_chain_admission') else {'native_chain_policy': 'native chain choice is unavailable or overlaps editor writes', 'not_supported': 'native-chain token aggregation is not supported', 'example': 'recorded example is not configured', 'example_path': 'recorded example is unavailable', 'busy': 'another operation is active or unresolved', 'conflict': 'operation ID already identifies different content', 'stale_review': 'reviewed source or bindings changed; review again', 'unsupported': 'saved declaration bindings cannot be reviewed; inspect source and prepared context', 'context': 'saved declaration differs from selected prepared context', 'editor_policy': 'project is not enabled for candidate runs', 'task_policy': 'preparation does not match the configured task policy', 'not_prepared': 'preparation has no verified candidate to review', 'host_ledger_missing': 'host resources and parallel nodes need a host ledger in the console configuration; review without them', 'resources_required': \"this console shares a host ledger: declare the run's host resources, then review again\"}.get(error.detail.code, 'native operation could not be verified')",
@@ -50,9 +33,6 @@
     "reusable_preparation.py": [
       "raise OperationFailure('launch_policy', str(error)) from error",
       "raise ReusableAdmissionNotAttempted(error.detail.code, error.detail.message) from error"
-    ],
-    "package_mounts.py": [
-      "return str(error)"
     ],
     "__main__.py": [
       "print(f'  .venv/bin/python -m tools.candidate_console check --config {error.config_path}', file=sys.stderr)",
@@ -85,7 +65,8 @@
   "reviewed_safe_statements": {
     "setups.py": "Exact args equality against the two framework-owned registry literals returns the literal, never arbitrary exception text.",
     "editor.py": "Existing AuthoringError carrier now projects its ReviewView proposal through safe_review; raw AuthoringError guidance remains in #1328.",
-    "app.py": "Existing typed operation error/message/UUID carriers, now visible to the stronger chain scan; audit nested sources in #1328."
+    "app.py": "Existing typed operation error/message/UUID carriers, now visible to the stronger chain scan; audit nested sources in #1328.",
+    "example_bundle.py": "Only WorkspaceRefused is forwarded: workspace.ensure_owned_directory constructs fixed permission/ownership guidance from explicit paths and stat fields. Raw OSError uses console_error_message; no arbitrary exception text or custom class name is forwarded."
   },
   "guard_limits": "https://github.com/Galileo-Sandbox/SIDERIUS/issues/1339"
 }

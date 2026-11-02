@@ -645,3 +645,9 @@ from null as well as rounded integers and floats. Authoring models own invoking
 it with bounded source and revalidating its result through the native schema.
 Already-canonical inputs remain canonical after patching, using retained source
 values and the existing renderer; new generation and identity rules are unchanged.
+
+Draft inspection validation diagnostics retain native validator messages and
+located `DraftProblem` guidance, without Pydantic input snapshots (`input_value`
+or `input_type`). `draft.inspect_draft` owns this projection, shared by the editor
+draft, review and combined-node draft routes. Validation and declaration identity
+are unchanged.
