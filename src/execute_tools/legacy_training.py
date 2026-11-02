@@ -24,7 +24,7 @@ def run_experiment(
     model_io: ModelIOContract | None = None,
     expected_custom_loss_snapshot: CapabilityContractSnapshot | None = None,
     *,
-    seed_plan: TrainingSeedPlan | None = None,
+    seed_plan: TrainingSeedPlan,
 ) -> dict[str, Any]:
     """Train with a caller-owned loader and a required run-derived seed plan.
 

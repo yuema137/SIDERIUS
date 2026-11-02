@@ -27,7 +27,7 @@ def error_category(error: Exception | str) -> Literal["filesystem", "invalid", "
     return "unexpected"
 
 
-def summary_error_message(error: Exception) -> str:
+def summary_error_message(error: Exception | str) -> str:
     """Use fixed categories: exception text and task-defined class names may contain secrets."""
     return {
         "filesystem": "Filesystem error while reading task summary facts.",

@@ -556,3 +556,133 @@ def test_last_unit_verified_forecast_cannot_reject_completed_actual(
             assert component.prediction.predicted_seconds == 1000
             assert component.completion.verification_basis == "verified"
             assert component.actual_seconds < 30
+
+
+@pytest.mark.parametrize(
+    "actual,predicted,expected", [(430, 533, "admitted"), (530, 430, "rejected")]
+)
+@pytest.mark.parametrize("policy", ["completed-workload-v1", "verified-prediction-v1"])
+def test_validation_admission_charges_completed_training(
+    tiny_setup, tmp_path, monkeypatch, actual, predicted, expected, policy
+):
+    """Reverting final optimizer publication reverses both admission decisions."""
+    from types import SimpleNamespace
+
+    import core.runtime_control.session as session_module
+    from core.runtime_control.adaptive import AdaptiveUnitVerification
+
+    clock = [100.0]
+    fake_time = SimpleNamespace(
+        perf_counter=lambda: clock[0], strftime=session_module.time.strftime
+    )
+    monkeypatch.setattr(tes, "time", fake_time)
+    monkeypatch.setattr(session_module, "time", fake_time)
+    monkeypatch.setattr(sys.modules[__name__], "N_PSD_SEGMENTS", 4)
+
+    class TimedTraining(_VerificationDataset):
+        def __getitem__(self, index):
+            clock[0] += actual / 4
+            return super().__getitem__(index)
+
+    class TimedValidation(_VerificationDataset):
+        def __getitem__(self, index):
+            clock[0] += 1
+            return super().__getitem__(index)
+
+    class PathWithValidation(_VerificationDataPath):
+        def training_dataset(self, scope, params):
+            clock[0] += 7
+            return TimedTraining()
+
+        def validation_dataset(self, scope, params):
+            return TimedValidation()
+
+    original_feed = AdaptiveUnitVerification.feed
+    monkeypatch.setattr(
+        AdaptiveUnitVerification,
+        "feed",
+        lambda self, unit_ms, **kwargs: original_feed(self, 1, elapsed_ms=1),
+    )
+    original_prediction = AdaptiveUnitVerification.prediction
+
+    def prediction(self, workload, *args, **kwargs):
+        result = original_prediction(self, workload, *args, **kwargs)
+        return result.model_copy(
+            update={"predicted_seconds": predicted if workload.phase == "training" else 120}
+        )
+
+    monkeypatch.setattr(AdaptiveUnitVerification, "prediction", prediction)
+    session = RuntimeVerificationSession(
+        str(tmp_path / "validation-admission.json"),
+        policy=RuntimeControlPolicy(
+            operator_budget_seconds=600,
+            safety_factor=1,
+            runtime_completion_policy=policy,
+            verification=AdaptiveVerificationConfig(
+                steady=SteadyStateConfig(window=2, stable_windows=2, rel_spread_tol=0.99),
+                min_timed_steps=1,
+                min_timed_ms=0,
+            ),
+        ),
+    )
+    decisions = []
+    decide = session.decide_admission
+
+    def capture(stage="post_setup"):
+        result = decide(stage)
+        if stage == "post_validation_verification":
+            decisions.append(result)
+        return result
+
+    monkeypatch.setattr(session, "decide_admission", capture)
+    with bind_task_data_path(PathWithValidation()):
+        result = _run(
+            tiny_setup,
+            session,
+            "validation-admission",
+            task_eval_scope=object(),
+            validation_requested_rows=4,
+        )
+    decision = decisions[0]
+    if policy == "verified-prediction-v1":
+        expected = "rejected" if predicted == 533 else "admitted"
+    assert decision.decision == expected
+    assert (result is not None) == (expected == "admitted")
+    training = session.observation.components["training"]
+    if policy == "completed-workload-v1":
+        assert training.actual_seconds == pytest.approx(actual)
+        assert training.completion is not None
+        assert f"known cost {7 + actual + 120:.1f}s" in decision.reason
+    if expected == "rejected":
+        assert session.observation.components["validation"].completion is None
+        assert not list((tmp_path / "cached_models").glob("*.pth"))
+
+
+def test_only_final_planned_epoch_completes_training_before_validation(
+    tiny_setup, tmp_path, monkeypatch
+):
+    """An earlier validation pass must never erase remaining optimizer work."""
+    monkeypatch.setattr(sys.modules[__name__], "N_PSD_SEGMENTS", 4)
+    tiny_setup["train_cfg"] = tiny_setup["train_cfg"].model_copy(update={"epochs": 3})
+    session = RuntimeVerificationSession(
+        str(tmp_path / "epoch-boundaries.json"),
+        policy=RuntimeControlPolicy(verification=_cross_epoch_config()),
+    )
+    completions = []
+
+    class ObservedValidation(_ObservedDataPath):
+        def validation_dataset(self, scope, params):
+            completions.append(session.observation.components["training"].completion)
+            return super().validation_dataset(scope, params)
+
+    with bind_task_data_path(ObservedValidation()):
+        result = _run(
+            tiny_setup,
+            session,
+            "epoch-boundaries",
+            task_eval_scope=object(),
+            validation_requested_rows=4,
+        )
+    assert result is not None
+    assert [item is not None for item in completions] == [False, False, True]
+    assert session.observation.components["training"].workload.unit_count == 12
