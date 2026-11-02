@@ -25,6 +25,15 @@ supervision. The direct core imports are the owners whose symbols the
 supervisor calls; their own dependencies (for example ``core.seeding`` behind
 ``training_seeds``) serve other callers. A supervision helper moved into a
 non-core package outside step 1 would not be followed.
+
+Boundary: the walk starts only at ``analysis_code_sandbox.py``. Direct core
+imports of the other hashed modules are intentionally not classified:
+``executor.py`` imports ``core.subprocess_env``, which builds the skill-worker
+environment and is not on the generated-program path; ``generated_programs.py``
+imports ``core.generated_seed_scan``, which writes write-once seed-call
+provenance, so a changed scan fails closed with a collision instead of
+silently reusing a record. Their other core imports (``campaign_identity``,
+``durable_io``, ``execution_deadline``) are already classified by step 2.
 """
 
 from __future__ import annotations
