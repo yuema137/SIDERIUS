@@ -31,6 +31,7 @@ from .test_finite_loop import loop_tuner as loop_tuner
 from .test_interpretation import interpretation_provider as interpretation_provider
 from .test_native import native_runner as native_runner
 from .test_training import training_runner as training_runner
+from .validation_child import install_fresh_validation_units
 
 #: Names the offline fixtures bind in the test process that a real launcher would
 #: provide some other way; every other inherited name is dropped like Popen(env=...).
@@ -44,13 +45,14 @@ FIXTURE_ENVIRONMENT = (
 
 
 @pytest.fixture
-def process_segments(monkeypatch):
-    """Fork retains only SDK doubles; each native segment runs in a separate process."""
+def process_segments(native_runner, monkeypatch, tmp_path):
+    """Fork SDK doubles; exec validation so parent autograd state cannot leak."""
     from core.runtime_control.process_group import terminate_observed_group
     from tools.candidate_operations.child import execute as operation
     from tools.candidate_worker.child import execute
     from tools.candidate_worker.loop_resume import execute_continuation
 
+    install_fresh_validation_units(monkeypatch, tmp_path)
     operations = []
 
     def observed(profile, argv, *, cancel_requested=None, **_supervision):
@@ -806,24 +808,9 @@ def test_resumed_segment_bounds_validator_pytest_by_its_own_worker_budget(
     """Fails if loop.py or the continuation entry drops ``budget=`` (issue #984)."""
     from tools.candidate_worker import training
 
-    validator = importlib.import_module("nodes.ml_code_validator_agent.ml_code_validator_agent")
+    # The fresh validation child records the real generated-pytest call and limit.
     record = tmp_path / "pytest_limits.jsonl"
 
-    # Forked segments inherit this double; a file carries their observations back.
-    def launched(test_file_path, env, *, limit=None):
-        with record.open("a") as stream:
-            stream.write(
-                json.dumps(
-                    {
-                        "path": test_file_path,
-                        "limit": None if limit is None else limit.model_dump(),
-                    }
-                )
-                + "\n"
-            )
-        return True, "1 passed"
-
-    monkeypatch.setattr(validator, "run_generated_pytest", launched)
     request = loop_request(prepared, final_iteration=2)
     config = OperationStoreConfig(
         state_root=str(tmp_path / "operations"),
