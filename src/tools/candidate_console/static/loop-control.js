@@ -14,6 +14,15 @@
   // (loop.stop_requested/pause_requested, read from the worker's durable markers), so a
   // reload or another tab still sees it (M-1); the receipt decides what took effect.
   let request = null, last = null;
+  // The Resume panel's host-resources fieldset (#1385), read and filled by run-scheduling.js.
+  const RESOURCES = 'loop-resume-resources';
+  // Typed refusals the console or host admission returns before any operation is claimed
+  // (an admitted request UUID replays before these checks), so a retained request refused
+  // with one can never have started and is dropped, like a 422.
+  const PRE_CLAIM = new Set(['stale_review', 'resources_required', 'run_resources_conflict', 'host_ledger_missing',
+    'host_ledger_required', 'parallel_budget', 'parallel_budget_required', 'resource_refused',
+    'parallel_unit_exceeds_capacity', 'placement_unreachable']);
+  const sameReservation = (kept, review) => JSON.stringify(kept.resources ?? null) === JSON.stringify(review.resources ?? null);
   const counted = (status, verb) => status.outcome?.completed_iterations == null
     ? `${verb}; the iteration count is unavailable.`
     : `${verb} after ${status.outcome.completed_iterations} of ${status.loop.final_iteration} completed iteration${status.loop.final_iteration === 1 ? '' : 's'}.`;
@@ -94,7 +103,9 @@
     } catch (_) { /* An unreadable legacy record is ignored. */ }
     const prior = retainedRecord(review, store);
     if (prior) return prior;
-    const value = {origin: location.origin, expected_receipt_digest: review.expected_receipt_digest, request_id: crypto.randomUUID(), ...(advice ? {operator_advice: advice} : {})};
+    // A reviewed reservation is kept with the UUID too, with the digest that binds it.
+    const value = {origin: location.origin, expected_receipt_digest: review.expected_receipt_digest, request_id: crypto.randomUUID(), ...(advice ? {operator_advice: advice} : {}),
+      ...(review.resources ? {resources: review.resources, expected_review_digest: review.review_digest} : {})};
     localStorage.setItem(key, JSON.stringify(value));
     return value;
   }
@@ -149,8 +160,10 @@
     if (!status?.loop) { panel.hidden = true; return; }
     if (request?.id !== status.operation_id) {
       const blank = () => ({pending: false, acknowledged: false, error: ''});
-      request = {id: status.operation_id, stop: blank(), pause: blank(), resume: {...blank(), review: null, locked: false}};
+      // resume.resources: this segment must declare host resources (the review said so).
+      request = {id: status.operation_id, stop: blank(), pause: blank(), resume: {...blank(), review: null, locked: false, resources: false}};
       $('loop-resume-advice').value = '';
+      window.runScheduling.fillResources(RESOURCES, null);
     }
     panel.hidden = false;
     $('loop-state').textContent = describe(status);
@@ -192,9 +205,15 @@
     $('loop-resume').hidden = !resumable || !review;
     $('loop-resume-advice-group').hidden = !resumable || !review;
     $('loop-resume-advice').readOnly = !!resume.locked;
+    // Shown only after the owner asked for it (a `resources_required` refusal, which only a
+    // console with a host ledger returns) or for a retained reserved request. Not gated on
+    // session().hostLedger: a Monitor deep link connects without reading /api/choices.
+    $(RESOURCES).hidden = !resumable || !resume.resources;
+    $(RESOURCES).disabled = !!resume.locked || resume.pending;
     $('loop-resume').disabled = resume.pending || pending || !connected || !review?.credential_readiness.ready;
     $('loop-resume-summary').textContent = !review ? '' : `Resume continues with iteration ${review.completed_iterations + 1} of ${review.final_iteration} in a new segment of the same run. ` +
-      (review.credential_readiness.ready ? 'Credentials: ready (names only checked).' : 'Credentials not ready; missing: ' + (review.credential_readiness.missing_names.join(', ') || 'none') + '. ' + review.credential_readiness.instructions.join(' '));
+      (review.credential_readiness.ready ? 'Credentials: ready (names only checked).' : 'Credentials not ready; missing: ' + (review.credential_readiness.missing_names.join(', ') || 'none') + '. ' + review.credential_readiness.instructions.join(' ')) +
+      (review.resources ? ' Host resources: ' + window.runScheduling.describe(review) : '');
     $('loop-resume-status').textContent = !resumable ? '' : resume.pending ? 'Submitting…' : resume.error;
   }
   async function control(kind) {
@@ -218,15 +237,40 @@
   async function reviewResume() {
     const current = request, resume = current?.resume;
     if (!last || !resume || resume.pending || current.stop.pending || stopRecorded(last) || !session().connected) return;
+    // A shown fieldset is part of what is reviewed: its reservation is sent with the review.
+    let reserved;
+    if (!$(RESOURCES).hidden) {
+      const read = window.runScheduling.readResources(RESOURCES);
+      if (read.error) { resume.error = 'Resume review not sent: ' + read.error; render(last); return; }
+      if (read.value) reserved = {resources: read.value};
+    }
+    // The fieldset is disabled while the review is pending, so the values sent are the ones shown.
     resume.pending = true; resume.error = ''; resume.review = null; render(last);
     try {
-      resume.review = await session().request(`operations/${current.id}/loop-resume-review`);
-      // Prefill: a retained (possibly already sent) request's advice, else this segment's own.
-      const kept = retainedRecord(resume.review, await storeId());
+      const review = await session().request(`operations/${current.id}/loop-resume-review`, reserved);
+      // Prefill: a retained (possibly already sent) request's advice and reservation, else this segment's own advice.
+      const store = await storeId();
+      let kept = retainedRecord(review, store);
+      if (kept && !sameReservation(kept, review)) {
+        // Never adopt another reservation silently. Only a typed absence proves the retained
+        // UUID was never admitted; then it is dropped and this review stands.
+        try {
+          await session().request('operations/' + kept.request_id);
+        } catch (error) {
+          if (error.code !== 'unknown_operation') throw error;
+          localStorage.removeItem(retainedKey(store, review.predecessor_operation_id));
+          kept = null; resume.locked = false;
+        }
+        if (kept) resume.error = 'A Resume with other host resources was already admitted; Resume reconnects to it.';
+      }
       const box = $('loop-resume-advice');
-      if (kept) { box.value = kept.operator_advice || ''; resume.locked = true; }
-      else if (!resume.locked) box.value = last.loop?.operator_advice || '';
+      if (kept) {
+        box.value = kept.operator_advice || ''; resume.locked = true;
+        if (kept.resources) { resume.resources = true; window.runScheduling.fillResources(RESOURCES, kept.resources); }
+      } else if (!resume.locked) box.value = last.loop?.operator_advice || '';
+      resume.review = kept ? {...review, resources: kept.resources, review_digest: kept.expected_review_digest} : review;
     } catch (error) {
+      if (error.code === 'resources_required') resume.resources = true;
       if (!error.stale) resume.error = 'Resume review refused: ' + error.message;
     } finally {
       resume.pending = false;
@@ -245,16 +289,19 @@
       $('loop-resume-advice').value = kept.operator_advice || '';
       const body = {request_id: kept.request_id, predecessor_operation_id: review.predecessor_operation_id, expected_receipt_digest: review.expected_receipt_digest};
       if (kept.operator_advice) body.operator_advice = kept.operator_advice;
+      if (kept.resources) Object.assign(body, {resources: kept.resources, expected_review_digest: kept.expected_review_digest});
       const handle = await session().request('loop-resumes', body);
       if (current === request) location.hash = 'monitor/' + handle.operation_id;
     } catch (error) {
       if (error.stale) return;
-      if (error.status === 422) {
-        // Refused before admission: nothing was reserved, so the advice may be edited again.
+      if (error.status === 422 || PRE_CLAIM.has(error.code)) {
+        // Refused before admission: nothing was claimed, so the request is not retained and
+        // the advice and host resources may be edited again.
         localStorage.removeItem(retainedKey(store, review.predecessor_operation_id));
         resume.locked = false;
       }
       if (error.status) resume.review = null;
+      if (error.code === 'resources_required') resume.resources = true;
       resume.error = 'Resume was not submitted: ' + error.message + (error.status ? ' Review again before retrying.' : ' The outcome is unconfirmed; retrying reuses the same request.');
     } finally {
       resume.pending = false;
@@ -270,6 +317,13 @@
   $('loop-pause').addEventListener('click', () => { void control('pause'); });
   $('loop-resume-review').addEventListener('click', () => { void reviewResume(); });
   $('loop-resume').addEventListener('click', () => { void submitResume(); });
+  // A reviewed Resume carries exactly the reviewed reservation: any edit needs a new review.
+  $(RESOURCES).addEventListener('input', () => {
+    const resume = request?.resume;
+    if (!resume || resume.locked) return;
+    if (resume.review) { resume.review = null; resume.error = 'Host resources changed. Review again before resuming.'; }
+    if (last) render(last);
+  });
   window.renderLoopControl = status => {
     if (status === null) { request = null; last = null; $('loop-control').hidden = true; return; }
     render(status);

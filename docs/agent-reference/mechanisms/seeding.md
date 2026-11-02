@@ -418,7 +418,8 @@ from `run_seed`.
 ## RNG census guard
 
 `tests/unit/core/test_rng_census.py` (census in `tests/unit/core/rng_census.py`)
-walks every `src/**/*.py` with the AST, resolving import aliases, and flags:
+walks every `src/**/*.py` and `examples/**/*.py` (including
+`examples/task_templates/`) with the AST, resolving import aliases, and flags:
 `random.<draw|seed|Random>`, `np.random.<legacy draw|seed|default_rng|state>`,
 `torch.<rand*|manual_seed|Generator|…>` and `torch.cuda.manual_seed[_all]`,
 any `secrets.*`, `hash(` in `execute_tools/` or `nodes/`, and a
@@ -426,9 +427,21 @@ any `secrets.*`, `hash(` in `execute_tools/` or `nodes/`, and a
 `*_main.py`, a top-level `main()` or a `__main__` guard) that reaches torch,
 directly or through any chain of `src` imports, must call `seed_process`,
 `apply_process_seeds` or `seeded_scope`, or be enumerated with a reason. Every remaining site is listed in
-`ALLOWLIST` / `ENTRY_ALLOWLIST`, keyed by `(module, function, call)` with a
+`ALLOWLIST` / `ENTRY_ALLOWLIST` for source and `EXAMPLE_ALLOWLIST` for examples, keyed by `(module, function, call)` with a
 reason; an unlisted site and a stale entry both fail. The exp-side census
 (task data paths) is E3.
+
+Quickstart and synthetic masked regression consume `ScopeBuildRequest.seed`
+for scope sampling and `EpochSamplingParams.epoch_seed` for epoch sampling.
+Callers supply run-derived seeds through the existing tuner and
+`TrainingSeedPlan` owners; the plugins raise `core.seeding.MissingRunSeed`
+before a sampling draw if the required seed is absent. Full-scope selection
+and deterministic prefix ceilings do not require a seed. The CSV template
+also refuses absent seeds, including when its ceiling selects a random subset.
+Fixed `(GENERATOR_SEED, shard)` dataset streams are explicitly exempt: they
+identify the synthetic dataset, independently of run sampling.
+`tests/unit/examples/test_example_sampling_seeds.py` exercises both examples'
+training/evaluation scopes and epoch datasets through these public methods.
 
 ## Not yet provided
 

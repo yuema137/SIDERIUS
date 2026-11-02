@@ -1,4 +1,4 @@
-"""AST census of RNG use in ``src/**/*.py`` (issue #983 S8, seed contract §8.4).
+"""AST census of RNG use in source, examples and templates (issue #983 S8, seed contract §8.4).
 
 Kept test-side: a pure reader of the checkout's own source tree. Every finding
 is keyed by ``(module, function, call)`` so an allowlist entry names one site.
@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[3] / "src"
+EXAMPLES = SRC.parent / "examples"
 
 _PY_RANDOM = frozenset(
     {

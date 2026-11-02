@@ -108,15 +108,17 @@ def host_scheduling(config: ConsoleConfig) -> HostScheduling | None:
     """Load the configured host ledger once (B3-4c); ``None`` keeps every launch serial.
 
     The directory must already exist with owned mode 0700 (``ledger_directory``);
-    the budget file is read only through ``load_host_budget_file``. Either
-    failure stops the console from starting rather than launching unbudgeted.
+    the budget file must be a canonical absolute path like the ledger root and is
+    read only through ``load_host_budget_file``. Either failure stops the console
+    from starting rather than launching unbudgeted.
     """
     selection = config.host_ledger
     if selection is None:
         return None
     try:
         ledger_directory(selection.ledger_root)
-        budget = load_host_budget_file(Path(selection.budget_file).absolute())
+        # Canonical like the ledger root: never resolved against the console's cwd.
+        budget = load_host_budget_file(canonical(selection.budget_file))
     except (OperationFailure, HostBudgetFileError) as error:
         raise ValueError(
             f"configured host ledger is unusable: {console_error_message(error)} "

@@ -327,8 +327,11 @@ Optional `host_ledger` (`ConsoleHostLedger`: `ledger_root`, `budget_file`;
 omitted when absent, so existing configurations keep their bytes and every
 launch stays serial and unbudgeted). `CandidateConsole.__init__` loads it once
 (`config.host_scheduling`): the directory must already exist with owned mode
-0700 (`host_ledger.ledger_directory`) and the budget is read only through
-`budget_intake.load_host_budget_file`. Either failure raises `ValueError`
+0700 (`host_ledger.ledger_directory`), `budget_file` must be a canonical
+absolute path (`files.canonical`, the rule every configured path follows; a
+relative path is never resolved against the console's working directory), and
+the budget is read only through `budget_intake.load_host_budget_file`. Any of
+these failures raises `ValueError`
 ("configured host ledger is unusable") and the console does not start; it never
 falls back to unbudgeted launches.
 
@@ -357,7 +360,10 @@ different values therefore refuses `stale_review`, and a retried launch replays
 idempotently: the replay check recomputes the same bound digest from the stored
 operation. `with_run_resources` attaches them, revalidating through the
 operation and request owners; without them the reviewed operation is submitted
-byte for byte.
+byte for byte. It sets only the supplied fields: an absent one keeps what the
+reviewed operation already carries (`CandidateOperation.resources`,
+`request.parallel`), and a supplied one that differs from a value the operation
+already carries refuses `run_resources_conflict` instead of replacing it.
 
 Review-time refusals (B3-4c UI review). `CandidateConsole.require_reviewable_resources`
 runs at every candidate review (prepared, edited, reusable): without a host
@@ -367,6 +373,36 @@ with a ledger, a selection without `resources` refuses `resources_required`, the
 ledger's own launch code, so nothing reaches Launch that Launch would refuse or
 silently ignore. `ChoicesView.host_ledger` (omitted when false) tells the browser
 whether a ledger is configured.
+
+Loop resume reservation (#1385). A loop whose root candidate ran without
+`resources` (serially) resumes under the console's ledger with a reservation
+for the resumed segment. `ReservationSelection` (`resources` only; the base of
+`RunResourcesSelection`, which owns `bound_digest`) is the body of
+`POST /api/operations/{UUID}/loop-resume-review`; the `GET` route is the same
+review without one. `CandidateConsole.review_loop_resume(UUID, selection)`
+runs the owner review, then the operations owner's
+`loop_resume_resources(root, selection.resources, ledger=self.host is not None)`,
+so the review refuses what admission would: `resources_required` (ledger, root
+without `resources`, none supplied), `run_resources_conflict` (supplied beside
+the root's own declaration, even an equal one; unlike `with_run_resources`, which
+accepts an equal value, see the operations contract "Loop resume" for why),
+`host_ledger_missing` (supplied without a ledger) and `parallel_budget` (a root whose
+request carries `parallel.budget`), each 409 with a route-local fixed message. A
+supplied reservation is echoed as `LoopResumeReview.resources` and bound into
+`review_digest = bound_digest(expected_receipt_digest)`; both are omitted
+without one, so existing reviews keep their bytes. `LoopResumeSelection` carries
+`resources` and `expected_review_digest` (both omitted when absent, so existing
+Resume bodies are unchanged). `resume_loop` refuses `stale_review` before any
+read or submission when either is present and `expected_review_digest` is not
+`bound_digest(expected_receipt_digest)` of the sent `resources`; otherwise it
+passes `resources` into `CandidateLoopResumeRequest.resources`, and admission
+applies the same rule again. Each resume of an undeclared root supplies its own
+reservation. Witnesses: `test_host_ledger.py`
+(`test_resume_review_binds_the_segment_reservation_of_an_undeclared_root`,
+`test_resume_review_refuses_a_reservation_admission_would_refuse`,
+`test_resume_carries_only_the_reviewed_reservation`,
+`test_candidate_review_digests_are_unchanged_by_the_shared_reservation_binding`)
+and `tests/browser/loop_resume_resources.mjs`.
 
 Prepared review facts (`capture_facts.py`): `ReusableCaptureReview.facts` carries
 `training` (nullable `TrainingReview`) and `task_parameter_rules` (nullable
@@ -438,9 +474,13 @@ panel edit after review discards the review. `operation-outcome.js` renders
 `reason="cancelled_while_queued"` as "cancelled before start" (not a failure;
 `OperationListItemView.reason` carries the reason for `operation_failed` rows
 only). The native-chain card states native chains are serial-only. Under the ledger, `parallel.budget` is refused
-`parallel_budget`; without a configured ledger a `parallel` launch without its
+`parallel_budget`. The shared budget's `max_queued_operations` bounds waiting
+children; admission returns `host_queue_full` before claim/spawn when full
+(default zero disables waiting). See the operations queue contract. Without a configured ledger a `parallel` launch without its
 own budget is refused `parallel_budget_required`. A loop resume inherits its
-root's `resources` and `parallel`. Every refusal reaches the browser as the
+root's `parallel` and, when the root declared them, its `resources`; a root
+without `resources` resumes under the ledger only with the segment's own
+reviewed reservation (see "Loop resume reservation" above). Every refusal reaches the browser as the
 operation owner's typed code. Status: `StatusView.state` and the list state
 include `queued` (B3-5b); its presentation, and "Cancelled before start" for
 `operation_failed` + `cancel_requested` + `cancelled_while_queued`, are the UI
@@ -845,7 +885,8 @@ raw native receipts, arbitrary exception strings, storage paths or scores.
 | POST /api/operations/{UUID}/loop-stop | empty `LoopStopSelection` `{}` → `LoopStopAcknowledgement` (`outcome="requested"`), 200 |
 | POST /api/operations/{UUID}/loop-pause | empty `LoopPauseSelection` `{}` → `LoopPauseAcknowledgement` (`outcome="requested"`), 200 |
 | GET /api/operations/{UUID}/loop-resume-review | `LoopResumeReview` (owner-verified paused segment, digest, bound, names-only `credential_readiness`) |
-| POST /api/loop-resumes | `LoopResumeSelection` (`request_id`, `predecessor_operation_id`, `expected_receipt_digest`) → OperationHandle, 202 |
+| POST /api/operations/{UUID}/loop-resume-review | `ReservationSelection` (optional `resources`) → the same `LoopResumeReview`, plus the echoed `resources` and `review_digest` when supplied (#1385), 200 |
+| POST /api/loop-resumes | `LoopResumeSelection` (`request_id`, `predecessor_operation_id`, `expected_receipt_digest`, optional `operator_advice`, optional `resources` with `expected_review_digest`) → OperationHandle, 202 |
 
 Outer ASGI RequestBoundary checks exact Host (configured bind/browser authorities),
 rejects proxy/forwarded headers and requires constant-time bearer authentication
@@ -1155,9 +1196,13 @@ the owner's `conflict`. If the request UUID is
 already admitted it replays with an empty environment before any root or credential
 read, so a retry after an unconfirmed outcome returns the same operation. Otherwise
 the root's `environment_names` are read from the configured `credential_file` with
-the same `credentials` helper as Launch. Refusals on both routes: `loop_resume`
+the same `credentials` helper as Launch. Under a host ledger a loop whose root
+declared no `resources` is reviewed and resumed with the segment's reservation
+(see "Loop resume reservation" under Host reservation ledger). Refusals on both
+routes: `loop_resume`
 (not an exited, cleanly paused segment, already continued, terminal, or a stale
-digest), `kind`, `not_ready` and `runtime` 409 with route-local fixed messages;
+digest), `kind`, `not_ready`, `runtime`, `resources_required`,
+`run_resources_conflict` and `host_ledger_missing` 409 with route-local fixed messages;
 `credentials` 409 carrying missing names only; `busy`/`conflict` use the global
 messages. Unknown predecessor 404.
 
@@ -1207,7 +1252,9 @@ and retains it in `localStorage` at
 opaque operations store id; `<predecessor>` is the lowercase predecessor operation
 UUID. The JSON record contains `origin` (`location.origin`),
 `expected_receipt_digest` (the reviewed receipt digest), `request_id` (the generated
-UUID), and optional `operator_advice` (trimmed text, omitted when empty). Reuse
+UUID), optional `operator_advice` (trimmed text, omitted when empty), and optional
+`resources` with `expected_review_digest` (the reviewed reservation and its
+`review_digest`, omitted without one). Reuse
 requires a matching origin and receipt digest. A legacy
 `siderius.loop-resume.v1:<UUID>` record with that origin and digest is moved on
 first use only when no store-scoped record exists. A retry reuses the record, and the
@@ -1218,7 +1265,35 @@ with this paused segment's own `operator_advice`. The first Resume attempt trims
 text and fixes it: the retained record stores the request UUID together with
 `operator_advice` (omitted when empty), and the textarea becomes read-only, so a
 retry is byte-identical. Only a 422 (refused before admission) clears the record and
-unlocks the textarea. Empty advice sends no `operator_advice` key. A 409 clears the review. On success the monitor selects the resumed
+unlocks the textarea. Empty advice sends no `operator_advice` key. A 409 clears the review.
+Host resources for the resumed segment (#1385): the `#loop-resume-resources`
+fieldset (`loop-resume-resources-declare`, `-gpu`, `-vram`, `-memory`, `-cpus`,
+`-timed`, read and filled by `run-scheduling.js` `readResources(prefix)` /
+`fillResources(prefix, value)`, the same rules as the Run lane's panel) is hidden
+until a review or Resume is refused `resources_required` (only a console with
+`host_ledger` returns it), or a retained record carries `resources`. It is not
+gated on `ChoicesView.host_ledger`: a `#monitor/<UUID>` deep link connects through
+`GET /api/operations/<UUID>` and never reads `/api/choices`, so
+`consoleSession.hostLedger` stays `null` there. While shown, Review
+resume sends its declared values as `POST .../loop-resume-review {resources}`
+(`GET` otherwise); an invalid value is shown in `#loop-resume-status` and nothing
+is sent. The summary appends "Host resources: " and the `describe` sentence of the
+echoed reservation. Any fieldset edit discards the review ("Host resources changed.
+Review again before resuming."); the fieldset is disabled while a review is pending, so the values sent are the ones shown. The Resume POST sends the
+retained `resources`/`expected_review_digest`; once retained, the fieldset is
+disabled like the advice textarea and is refilled from the record on re-review.
+A Resume refused with 422, or 409 with a code returned before any operation is
+claimed (`stale_review`, `resources_required`, `run_resources_conflict`,
+`host_ledger_missing`, `host_ledger_required`, `parallel_budget`,
+`parallel_budget_required`, `resource_refused`, `parallel_unit_exceeds_capacity`,
+`placement_unreachable`; an admitted request UUID replays before any of them), drops
+the retained record and unlocks the advice and fieldset. A retained record whose
+`resources` differ from a newer successful review never overrides it silently: the
+client reads `GET /api/operations/<retained request_id>`; only `unknown_operation`
+drops the record (the newer review stands, with a new UUID on Resume). A readable
+operation keeps the record and its values, shown with "A Resume with other host
+resources was already admitted; Resume reconnects to it."; any other error refuses
+the review. On success the monitor selects the resumed
 segment, which reads "Resumed segment." and shows Stop and Pause while active and
 its per-body results once completed. A continued predecessor shows "Continued by
 <UUID>" (a Slow-control link) and no Resume. Witnesses:
@@ -1646,8 +1721,9 @@ Canvas view state (zoom, scroll, expanded optional rows) is owned by
 viewing sends no request and cannot change saved bytes. The canvas is a CSS
 `transform: scale()` of the world, with positions kept in document pixels
 (drags divide screen deltas by the zoom). On opening a graph it fits once
-(`editorCircuitGeometry.fitScale`: never above 100 %, never below 40 %, then the
-canvas scrolls); the toolbar offers Fit to view, zoom out/in, Actual size, Check
+(`editorCircuitGeometry.fitScale` with the canvas's 75% floor; manual zoom reaches
+40%); oversized graphs scroll with selected/first-module framing as specified below.
+The toolbar offers Fit to view, zoom out/in, Actual size, Check
 the loop and Tidy up (the one layout tool; the former display-only Arrange view was
 removed because a drag in it saved the arranged layout, red-team A-1). The canvas
 grows with its zoomed content up to `clamp(420px, 100vh - 200px, 860px)`, shows edge
@@ -2369,7 +2445,8 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   flex column with `overflow: clip` (never scrolled, not even by `scrollIntoView`) whose
   `#editor-graph` (`flex: 1 1 0`) grid gives `.circuit-viewport` exactly the remaining
   height; the viewport scrolls and zooms inside it. Fit frames the union of every card's
-  box plus a 40 px margin (`FIT_PAD`), scrolled to that box's origin, within the visible viewport.
+  box plus a 40 px margin (`FIT_PAD`), scrolled to that box's origin when it fits.
+  At the 75% floor, an oversized graph uses selected/first-module framing (see below).
   Open disclosures in the panel (port-type legend, canvas help and connection
   mappings 120 px) scroll internally. Invariant (witnessed by `layout_onboarding.mjs`
   and `first_use_journey.mjs`): viewport inside the canvas panel, viewport height ≤
@@ -2435,8 +2512,14 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   controls get a one-line tooltip from `data-tip-label`.
 - Cards fold every optional input that is not fed by a wire (not connected, or fed by an
   external input) into one `+N optional` row. Fit to view never zooms below 75% (the legibility floor, `FIT_MIN`);
-  a larger graph scrolls inside the viewport and the view note says "Scroll the canvas". Manual
-  zoom out still reaches 40%.
+  a larger graph scrolls inside the viewport. The visible live view note counts partly
+  off-screen modules, explains the 75% Fit floor, and directs users to scroll. When the
+  padded graph exceeds the viewport at the fitted scale, Fit centres the selected module
+  (first module if none selected). For a module larger than the viewport, it aligns its
+  leading edge/heading instead. This is view-only: no saved positions, dirty state or
+  mutation requests change. Manual zoom out still reaches 40%.
+  `tests/browser/editor_fit_overflow.mjs` covers tall/wide/offset overflow, desktop and
+  narrow viewports, selected/first framing, scroll reachability and source-byte preservation.
 - Canvas controls are one secondary icon cluster bottom-right (zoom out, zoom %, zoom
   in, Actual size, Fit, Check the workflow, Tidy up); the connector legend is a bottom-left
   chip whose content opens as a two-column popover above it.
@@ -2593,6 +2676,29 @@ console and theme browser harnesses exercise the shared shell and disclosures.
 These are local browser witnesses; they do not qualify native execution, complete
 circuit editing, results, resume or production deployment.
 
+Remembered Monitor input is scoped by `session.js` to
+`siderius.operation_id.v1/<operations_store_id>`. Its `rememberOperation` and
+`rememberedOperation` methods are the sole persistence owner for Monitor and the
+legacy preparation, candidate and native-chain launch controls. The old global
+`siderius.operation_id` is ignored, never migrated: it has no attributable store.
+Connect clears the previous session's store identity. Without an explicit Monitor
+UUID, the convenience input is cleared during reconnection and restored only after
+validated choices identify the current store; malformed stored UUIDs are ignored.
+Disconnect, 401 and Connect retain the last Monitor observation (facts, logs and
+tokens), including observations opened by legacy Prepare/Launch without a route UUID.
+The page retains the last identified store separately from session connection state.
+Across connection changes, a different identified store resets that observation;
+same-store reconnect preserves it. An explicit route UUID is then selected again
+against the new store.
+Restoration only fills the input; it never submits a read or launch. Explicit UUID
+routes win and retain independent operation-only authentication. Until choices
+identify the store, reads/writes of remembered selection are no-ops; storage failures
+also leave explicit monitoring available. No credential or request payload is stored.
+`tests/browser/operation_selection.mjs` covers shared-origin store switching, reload,
+legacy isolation, 401-after-Prepare observation retention, same-store reconnect,
+changed-store observation reset, explicit route precedence, native launch persistence
+and unavailable localStorage using synthetic observations, without native execution.
+
 
 ## Reusable capture consumption
 
@@ -2716,7 +2822,13 @@ could not train. An unreadable profile is `stale_review`. Training admission
 (`candidate_worker.training_admission.refuse_untrainable_launch`, after
 `run_launch_self_test`) and tuner startup (`validate_training_mode_startup`, composed
 runs only) ask the same owner again. Templates declare `is_trial: true`,
-`healthgate_mode: blocking` and `result_authority: scientific` (`templates.DECLARED_LAUNCH_POLICY`).
+`healthgate_mode: blocking`, `result_authority: scientific`, `formal_portion: 1.0`
+and `max_rounds: 2` (`templates.DECLARED_LAUNCH_POLICY`). They explicitly allow
+Trial before forced Formal and use the full declared training scope; native
+launch defaults remain .1 and 10. The editor projects descriptions for
+`is_trial`, `max_rounds` and `formal_portion` from `WorkflowLaunchConfig` through
+`training.control_help`, including the per-iteration last-round rule and the
+Default reset behavior. No browser-side execution/default authority is added.
 Prepare reuses the same review, so the refusal there carries
 `admission_not_attempted`. The browser keeps the version name
 as `source_version` beside, not inside, the retained intent payload. Both use the
@@ -3244,3 +3356,11 @@ errors. HTTP/CLI sentinel tests live in `test_remaining_error_projections.py`.
 Authoring validation retains the validator's field/contract guidance, but omits
 Pydantic's input snapshot. No scientific defaults, prompt bytes, protected digest
 algorithms or experiment-owned settings change.
+
+### Execution profile browser binding
+
+`profile_assets.add_profile_assets` serves `/execution-profiles.js` from the
+workflow declaration owner `NATIVE_INTERPRETATION_PROFILE`. The index loads it
+before editor and captured-run scripts; `window.executionProfiles.nativeInterpretation`
+is their shared lookup. It contains no task state or credentials and changes no
+profile admission or serialized identifier.

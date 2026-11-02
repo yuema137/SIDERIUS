@@ -123,6 +123,12 @@ requires separate integration and experiment-owned historical configuration.
 
 ## Authored loop
 
+`models.NativeInterpretationProfile` owns the native interpretation profile type;
+`models.NATIVE_INTERPRETATION_PROFILE` owns its runtime value. Python consumers
+reuse these names, including Literal unions; the transparent alias preserves
+existing JSON Schema enum ordering and serialized bytes. The console serves the
+same value through `/execution-profiles.js` before its browser consumers load.
+
 `WorkflowDefinition.loop` and `ReusableWorkflowDefinition.loop` optionally carry
 `AuthoredLoop(final_iteration, feedback, stop_conditions=())`. `final_iteration`
 is a positive body count; it is a ceiling, not a budget or a promise that every
@@ -170,6 +176,16 @@ conditions are unchanged. Execution semantics, `stop`-before-`request_input`
 precedence, the input anchor and readback belong to the candidate-worker contract
 ("Deterministic stop conditions", "Judge stop condition" and "Condition input
 pause").
+
+### Formula threshold admission
+
+When evaluation selection is a formula, `metric_threshold`, `MetricAtLeast` and
+metric `threshold/v1` declarations name the generated effective metric id.
+Worker admission checks every declaration before dispatch, including unvisited
+branches. A source metric id is not an implicit unit conversion; raw component
+targets are unsupported. See the
+[evaluation contract](../../execute_tools/evaluation-contract.md#deterministic-selection-runtime)
+for the owning rule and effective id inspection.
 
 ## Route declarations
 

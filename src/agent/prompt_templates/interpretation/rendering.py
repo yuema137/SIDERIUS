@@ -504,6 +504,35 @@ def format_interpretation_score(score: float | None) -> str:
     return "skipped" if score is None else format_evidence_float(score)
 
 
+def _render_score_header(summary: ModelRunSummary) -> list[str]:
+    from agent.evaluation_context import active_evaluation_prompt_context
+
+    worst_label = (
+        "Worst recorded score "
+        if active_evaluation_prompt_context() is not None
+        else "Worst denoising score"
+    )
+    lines = [
+        f"## Model: {summary.model_type}",
+        f"Run: {summary.run_name} | Status: {summary.status} | Rounds: {summary.completed_rounds}",
+    ]
+    # Step 09b C3 — what the scores below ARE and which way is better, stated
+    # beside the D1 field labels rather than replacing them (the 07b Q-07b-3
+    # precedent: the LLM reads `denoising_score` out of the record, and the
+    # identity line says what that field measures).
+    identity_line = render_metric_identity(summary.metric_identity)
+    if identity_line is not None:
+        lines.append(f"Metric               : {identity_line}")
+    lines += [
+        f"Raw best score       : {summary.best_denoising_score} "
+        f"(health={summary.best_raw_health_validity})",
+        f"Best valid score     : {summary.best_valid_denoising_score}",
+        f"{worst_label}: {summary.worst_denoising_score}",
+    ]
+
+    return lines
+
+
 @prompt_boundary("interpretation.model_user")
 def _build_per_model_prompt(
     summary: ModelRunSummary,
@@ -535,23 +564,7 @@ def _build_per_model_prompt(
             "diagnostics, which requires the run's MetricOrder. Pass order=; the "
             "direction is never assumed."
         )
-    lines = [
-        f"## Model: {summary.model_type}",
-        f"Run: {summary.run_name} | Status: {summary.status} | Rounds: {summary.completed_rounds}",
-    ]
-    # Step 09b C3 — what the scores below ARE and which way is better, stated
-    # beside the D1 field labels rather than replacing them (the 07b Q-07b-3
-    # precedent: the LLM reads `denoising_score` out of the record, and the
-    # identity line says what that field measures).
-    identity_line = render_metric_identity(summary.metric_identity)
-    if identity_line is not None:
-        lines.append(f"Metric               : {identity_line}")
-    lines += [
-        f"Raw best score       : {summary.best_denoising_score} "
-        f"(health={summary.best_raw_health_validity})",
-        f"Best valid score     : {summary.best_valid_denoising_score}",
-        f"Worst denoising score: {summary.worst_denoising_score}",
-    ]
+    lines = _render_score_header(summary)
 
     # Formal score (if available and distinct from best)
     if summary.formal_score is not None:

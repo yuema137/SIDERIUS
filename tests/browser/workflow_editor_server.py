@@ -8,6 +8,7 @@ from pathlib import Path
 
 import uvicorn
 
+from tests.browser.fixture_metadata import emit_metadata
 from tests.unit.tools.candidate_console.conftest import console_config
 from tests.unit.tools.candidate_prepare.conftest import selection
 from tests.unit.tools.test_workflow_authoring import SOURCE
@@ -309,19 +310,16 @@ def main() -> None:
                 ),
             }
         )
-        print(
-            json.dumps(
-                {
-                    "origin": origin,
-                    "source": str(source),
-                    "reusable_source": str(reusable_source),
-                    "five_node_source": str(five_node),
-                    "five_node_partial_source": str(five_node_partial),
-                    "interpretation_source": str(interpretation_source),
-                    "token": Path(config.auth_token_file).read_text(),
-                }
-            ),
-            flush=True,
+        emit_metadata(
+            {
+                "origin": origin,
+                "source": str(source),
+                "reusable_source": str(reusable_source),
+                "five_node_source": str(five_node),
+                "five_node_partial_source": str(five_node_partial),
+                "interpretation_source": str(interpretation_source),
+                "token": Path(config.auth_token_file).read_text(),
+            }
         )
         uvicorn.run(
             create_app(config),
