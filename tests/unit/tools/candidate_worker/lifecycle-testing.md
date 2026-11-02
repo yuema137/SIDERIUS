@@ -12,10 +12,13 @@ autograd in the pytest parent before any segment forks. This reproduces the
 ordering precondition of a broad package run even when one lifecycle test is
 selected alone. It does not perform optimizer steps or GPU work.
 
-Validation graph units execute in a new interpreter through the existing core
-subprocess supervisor. The test launcher derives this checkout from its own
+Validation graph units execute in a new interpreter through production
+`unit_runner.spawn_unit`, including its `unit_env()` and success/failure stderr
+relay. Only `unit_command` is scoped to an offline test entrypoint. The test launcher derives this checkout from its own
 file and selects its Python executable with `sys.executable`; it does not borrow
-another environment or set `PYTHONPATH`. The child installs the existing offline
+another environment or set `PYTHONPATH`. The bootstrap inserts only the trusted
+checkout path derived from this helper, never the candidate workspace, so it can
+load the test-only provider under Python safe-path mode. The child installs the existing offline
 `test_native.Provider` only for validator LLM calls, then runs the production
 `unit_child.run_invocation_file` entry. Model import, forward/backward probes,
 generated pytest, typed transport, workspace/composition checks, budget transport,
@@ -38,6 +41,23 @@ fixture; this change isolates the demonstrated autograd failure, not all
 possible fork-sensitive libraries.
 
 Validation must include the complete candidate-worker test directory after a
-CPU backward pass in the parent, plus an isolated lifecycle witness. Removing
-the fresh validation dispatch while retaining the parent warm-up must make
-native validation reject and the existing pause/resume assertions fail.
+CPU backward pass in the parent, plus an isolated lifecycle witness. The original
+inherited-autograd symptom depends on the host's native thread state: reverting
+the fresh dispatch may still pass on CPU-only CI hosts. Warm-up establishes the
+ordering precondition, not a portable guarantee of that failure.
+
+The G4 run-total-token witness independently checks the exec boundary. It creates
+`<tmp_path>/reported_calls.log` to explicitly opt in to `provider_usage` reporting;
+the fresh validator installs that same wrapper only when this file exists. Each
+provider response appends the fixed offline usage row to its production-bound
+run ledger and a JSON witness containing label, iteration, PID, safe-path flag
+and hash seed. No arbitrary parent monkeypatch or secret environment value is
+transported. Non-G4 tests do not enable usage reporting.
+
+G4 requires validator calls from both iterations, PIDs distinct from the inherited
+providers, safe-path startup and the production default hash seed. Its total-token
+assertions include those validator rows. These checks discriminate on CPU-only
+hosts even when inherited autograd happens to work. Mutations disabling reporting,
+using the raw ambient environment or dispatching validation in the inherited
+process must fail G4. These are test-fixture witnesses; production already owns
+the process/environment semantics and is unchanged.
