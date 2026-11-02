@@ -86,7 +86,8 @@ this classification; silently dropping a signature assertion is not a runtime fi
 `test_adaptor_waits_for_the_source_of_a_skipped_route_arm` supplies checked-slot
 facts directly to `_check_causality`: `check0 -> X -> pick`, where `X` is
 `skipped/route_not_selected` and has no dispatch receipt. The adaptor is
-`skipped/no_admissible_input`, a dispatched adaptor outcome with a receipt.
+`rejected/no_admissible_input`, a dispatched adaptor outcome with a receipt
+(an executed adaptor never ends `skipped`, see "Dispatched adaptor states").
 The valid order is check0 start/end = 1/2, pick start/end = 3/4. Swapping check0's
 end with pick's start preserves internal ordering and the body event permutation
 but must raise `ValueError` because pick starts before its deciding source ends.
@@ -99,3 +100,34 @@ The valid control still passes and the forged case fails with `DID NOT RAISE`.
 Disabling all of `_check_causality` must also continue to break the three
 production-path direct/route/fan-in forgeries. Mutations are in-memory validation
 experiments, never committed source edits.
+
+## Dispatched adaptor states
+
+Issue #1454 asked whether an executed adaptor can end `skipped`, which the
+receipt check (`parallel_evidence._dispatched`, then `state != "blocked"` for
+adaptors) treated as dispatched while the readiness replay accepts only
+`graph_models.DISPATCHED_STATES`. It cannot: `adaptor_phase.execute_adaptor`
+closes an executed adaptor with `AdaptorOutcome.status` (typed exactly
+`succeeded`/`rejected`/`failed`) or `failed` on an exception, and readiness
+closes an undispatched adaptor only as `blocked`. `_dispatched` now uses
+`DISPATCHED_STATES` for units and adaptors alike.
+
+- `test_adaptor_states_share_the_one_dispatched_definition` binds the
+  `AdaptorOutcome.status` literal to `DISPATCHED_STATES` and enumerates every
+  pair of terminal source states (with and without abort): readiness either
+  dispatches `pick` or closes it `blocked`/`dependency_not_successful`.
+- `test_real_dispatcher_adaptor_states_verify[succeeded|rejected|failed|blocked]`
+  runs the S1 fan-in (`selection_request`) through the real parallel dispatcher
+  (in-process `_Starter`) to each reachable adaptor state, requires a receipt iff
+  the state is in `DISPATCHED_STATES`, and verifies the trace. In the `rejected`
+  case the adaptor relabelled `skipped`/`insufficient_items` without a record
+  (its consumer stays `blocked`) must be refused: with its receipt by the
+  receipt check (`receipt contradicts its state`), without it by the replay
+  (`violates serial readiness`). About 60 s for the four runs.
+
+Mutation witnesses (in-memory edits, `PYTHONDONTWRITEBYTECODE=1`): restoring the
+old `state != "blocked"` adaptor rule fails `[rejected]` (the forged entry is then
+refused by the replay instead of the receipt check, and vice versa); adding
+`"skipped"` to `AdaptorOutcome.status`, or having readiness close an adaptor
+`skipped`, fails the guard; treating only `succeeded` adaptors as dispatched fails
+`[rejected]` and `[failed]`.
