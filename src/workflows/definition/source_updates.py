@@ -10,7 +10,7 @@ import math
 from collections.abc import Sequence
 
 from .models import AuthoredWorkflowDocument, DeclarationModel
-from .source import _render_value, parse_workflow_source, render_workflow_source
+from .source import _fail, _render_value, parse_workflow_source, render_workflow_source
 from .source_edits import _apply, _Bytes, _import_edit, _root
 
 
@@ -83,6 +83,16 @@ def _restore(old: object, new: object) -> object:
             else item
             for index, item in enumerate(new)
         ]
+    return _browser_scalar(old, new)
+
+
+def _browser_scalar(old: object, new: object) -> object:
+    """JSON integers cannot express an intentional change of an authored float type."""
+    if type(old) is float and type(new) is int:
+        try:
+            return float(new)
+        except OverflowError:
+            _fail("validation", "edited value exceeds the authored float range")
     return new
 
 
@@ -120,7 +130,7 @@ class _Update:
             and isinstance(node, (ast.List, ast.Tuple))
         ):
             return self.sequence(node, old, new)
-        return self.render(new)
+        return self.render(_browser_scalar(old, new) if self.browser_numbers else new)
 
     def model(self, node: ast.Call, old: DeclarationModel, new: object) -> bytes:
         keywords = {item.arg: item.value for item in node.keywords}

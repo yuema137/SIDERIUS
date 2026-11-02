@@ -73,7 +73,12 @@ try {
   await page.locator('#editor-training-settings').evaluate(el => { el.open = true; });
   await page.locator('[data-training="formal_time_budget_minutes"]').fill('7');
   await save();
-  expected = expected.replace('"formal_time_budget_minutes": 5.0', '"formal_time_budget_minutes": 7');
+  expected = expected.replace('"formal_time_budget_minutes": 5.0', '"formal_time_budget_minutes": 7.0');
+  assert.equal(await readFile(metadata.reusable_source, 'utf8'), expected);
+
+  await page.locator('[data-training="trial_time_budget_minutes"]').fill('3');
+  await save();
+  expected = expected.replace('"trial_time_budget_minutes": 2.0', '"trial_time_budget_minutes": 3.0');
   assert.equal(await readFile(metadata.reusable_source, 'utf8'), expected);
 
   await page.locator('#circuit-fit').click();
