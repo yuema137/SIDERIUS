@@ -111,6 +111,8 @@ def runtime_environment_identity() -> str:
     )
     module_root = Path(__file__).resolve().parent
     schema_root = module_root.parent / "schemas" / "data_analysis"
+    # process_group owns the signalling and reaping behind terminate_process_group.
+    core_process_group = module_root.parent.parent / "core" / "runtime_control" / "process_group.py"
     runtime_paths = (
         Path(__file__).resolve(),
         module_root / "analysis_code_sandbox.py",
@@ -119,6 +121,7 @@ def runtime_environment_identity() -> str:
         module_root / "executor.py",
         module_root / "persistence.py",
         module_root / "process_termination.py",
+        core_process_group,
         schema_root / "generated_program.py",
         schema_root / "view_formats.py",
         schema_root / "skills.py",

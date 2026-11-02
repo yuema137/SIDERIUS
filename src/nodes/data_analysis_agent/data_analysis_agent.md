@@ -294,7 +294,11 @@ Termination uses the same wrapper as skill workers,
 `agent.data_analysis.process_termination.terminate_process_group`, which owns
 the shared poll interval (`SUPERVISION_POLL_S`, 0.02 s), SIGTERM grace
 (`TERMINATION_GRACE_S`, 1.0 s) and leader wait over the core
-`terminate_observed_group` owner. The capability probe has a 10 s ceiling
+`terminate_observed_group` owner. `runtime_environment_identity`
+(`generated_programs.py`) hashes the sandbox, this wrapper and core
+`core/runtime_control/process_group.py`, so a change to any of them changes
+`runtime_environment_sha256`. A persisted generated program whose recorded
+identity no longer matches fails closed on reuse (#1493). The capability probe has a 10 s ceiling
 (`PROBE_TIMEOUT_S`) and is also bounded by the remaining allocation, both in
 `execute` and in the pre-materialization probe in `execute_resolved_action`. A
 probe cut short by the allocation is a timeout, not missing isolation: the
