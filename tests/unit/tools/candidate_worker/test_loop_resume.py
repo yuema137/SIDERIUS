@@ -632,37 +632,11 @@ def test_resumed_segment_reports_run_total_tokens_from_both_segments(
 
     witness = tmp_path / "reported_calls.log"
 
-    def report(bridge):
-        context = bridge.context
-        assert context is not None, "provider called without a bound run context"
-        row = {
-            "ts": "2026-10-27T10:00:00Z",
-            "run_id": context["run_id"],
-            "run_name": context["run_name"],
-            "label": "response",
-            "provider": "openai",
-            "model": "fixture-model",
-            "served_model": None,
-            "tokens": {"prompt": 11, "completion": 2, "total": 13},
-            "chars": {"system": 0, "user": 0, "total": 0},
-        }
-        with (Path(context["workspace"]) / "token_usage.jsonl").open("a") as ledger:
-            ledger.write(json.dumps(row) + "\n")
-        with witness.open("a") as stream:
-            stream.write("call\n")
+    from .provider_usage import install_reporting
 
-    def reporting(method):
-        def call(self, *args, **kwargs):
-            result = method(self, *args, **kwargs)
-            report(self)
-            return result
-
-        return call
-
+    witness.touch()  # Explicitly enable the same reporter in the exec-created validator.
     for owner in (native_runner, interpretation_provider):
-        for name in ("generate", "generate_text"):
-            if name in vars(owner):  # wrap each provider method exactly once
-                monkeypatch.setattr(owner, name, reporting(vars(owner)[name]))
+        install_reporting(monkeypatch, owner, witness)
 
     request = loop_request(prepared, final_iteration=2)
     config = OperationStoreConfig(
@@ -704,7 +678,14 @@ def test_resumed_segment_reports_run_total_tokens_from_both_segments(
     process_segments()
     second = read_operation(config, next_id)
     assert second.receipt is not None and second.receipt.status == "completed", second
-    all_calls = len(witness.read_text().splitlines())
+    calls = [json.loads(line) for line in witness.read_text().splitlines()]
+    validators = [call for call in calls if call["label"] == "validator.code_review"]
+    assert {call["iteration"] for call in validators} == {1, 2}
+    assert all(call["safe_path"] and call["hash_seed"] == "0" for call in validators)
+    assert {call["pid"] for call in validators}.isdisjoint(
+        call["pid"] for call in calls if call["label"] != "validator.code_review"
+    )
+    all_calls = len(calls)
     assert all_calls > first_segment_calls  # the successor segment reported usage too
 
     segment = read_operation_tokens(config, next_id)
