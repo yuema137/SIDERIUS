@@ -141,6 +141,16 @@ class LedgerSlot(HostSlot):
         ).replacing((*prior.entries(), entry))
         # Fail closed: the entry exists before any child can.
         write_state(self.root, state)
+        try:
+            self._publish(path)
+        except BaseException:
+            # No spawn can occur until publication returns. Release under the
+            # admission lock even if publication was interrupted midway.
+            self.spawn_failed(record.submission.request_id)
+            raise
+
+    def _publish(self, path: Path) -> None:
+        placement = self.admitted.placement
         if placement.decision == "queued":
             ticket = HostQueueTicket(
                 ledger_root=self.host.ledger_root,

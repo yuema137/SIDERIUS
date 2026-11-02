@@ -30,7 +30,16 @@ from tools.candidate_worker.parallel_models import HostGrant
 from tools.workflow_preview.models import PreviewModel
 
 from .files import publish, read_model
-from .host_ledger import locked_ledger, promote, read_state, sweep, without, write_state
+from .host_ledger import (
+    HostLedgerState,
+    HostReservation,
+    locked_ledger,
+    promote,
+    read_state,
+    sweep,
+    without,
+    write_state,
+)
 from .host_liveness import GRANT_FILE, PLACEMENT_FILE
 from .models import OperationFailure, OperationRecord
 
@@ -106,9 +115,9 @@ def _poll(ticket: HostQueueTicket, operation_id: UUID) -> Placement | None:
         if error.detail.code == "ledger_busy":
             return None  # another submission holds the lock; try again next poll
         raise
-    held = [r.placement for r in state.reservations if r.operation_id == operation_id]
-    if held:
-        return held[0]
+    held = _held_reservation(state, operation_id)
+    if held is not None:
+        return held.placement
     if not any(entry.operation_id == operation_id for entry in state.queued):
         raise OperationFailure("host_queue", "queued operation left the host ledger")
     return None
@@ -126,12 +135,17 @@ def confirm_reservation(path: Path, record: OperationRecord) -> None:
     placement = read_model(path / PLACEMENT_FILE, Placement, private_file=True)
     with locked_ledger(ticket.ledger_root) as root:
         state = read_state(root)
-    if not any(
-        entry.operation_id == record.submission.request_id
-        and entry.request_digest == record.request_digest
-        and entry.placement == placement
-        for entry in state.reservations
+    entry = _held_reservation(state, record.submission.request_id)
+    if (
+        entry is None
+        or entry.request_digest != record.request_digest
+        or entry.placement != placement
     ):
         raise OperationFailure(
             "host_reservation", "placed operation is not held in the host ledger"
         )
+
+
+def _held_reservation(state: HostLedgerState, operation_id: UUID) -> HostReservation | None:
+    """Locate a child's held entry in a snapshot read under the ledger lock."""
+    return next((entry for entry in state.reservations if entry.operation_id == operation_id), None)
