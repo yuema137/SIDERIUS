@@ -29,6 +29,7 @@ from agent.schemas.data_analysis.skills import (
     SkillIdentity,
     SkillPackManifest,
 )
+from core.record_encoding import model_record_value
 
 _IGNORED_GENERATED_DIRECTORIES = frozenset(
     {".git", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
@@ -64,7 +65,7 @@ class DiscoveredGeneratedExperimentSkill(FrozenModel):
     program_declaration_ref: CertifiedArtifactRef
 
     def identity_dump(self) -> dict[str, object]:
-        return self.model_dump(mode="json", exclude={"registry_root"})
+        return model_record_value(self, exclude={"registry_root"})
 
 
 DiscoveredAnalysisSkill = DiscoveredSkill | DiscoveredGeneratedExperimentSkill

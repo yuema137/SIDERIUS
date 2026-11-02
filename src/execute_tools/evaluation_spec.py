@@ -64,13 +64,13 @@ class EvaluationRubricRef(EvaluationModel):
 class ComponentSpec(EvaluationModel):
     kind: Text
     id: Identifier
-    meaning: Text
+    meaning: Text = Field(max_length=1000)
 
 
 class MetricComponent(ComponentSpec):
     kind: Literal["metric"]
     metric: Text
-    units: Text | None = None
+    units: Text | None = Field(default=None, max_length=128)
     range: ValueRange | None = None
 
 
@@ -125,7 +125,7 @@ DeterministicRanking = Annotated[PrimarySelection | FormulaSelection, Field(disc
 class RubricBalanceSelection(EvaluationModel):
     kind: Literal["rubric_balance"]
     rubric: EvaluationRubricRef
-    guidance: Text
+    guidance: Text = Field(max_length=1000)
     deterministic_ranking: DeterministicRanking
 
 
@@ -143,9 +143,11 @@ class EvaluationConstraint(EvaluationModel):
 class EvaluationSpec(EvaluationModel):
     schema_version: Literal["siderius.evaluation/v1"] = "siderius.evaluation/v1"
     component_kinds: dict[Text, SymbolRef] = Field(default_factory=dict)
-    components: tuple[SerializeAsAny[ComponentSpec], ...] = Field(min_length=1, strict=False)
+    components: tuple[SerializeAsAny[ComponentSpec], ...] = Field(
+        min_length=1, max_length=32, strict=False
+    )
     selection: EvaluationSelection
-    constraints: tuple[EvaluationConstraint, ...] = Field(default=(), strict=False)
+    constraints: tuple[EvaluationConstraint, ...] = Field(default=(), max_length=64, strict=False)
 
     @field_validator("components", mode="before")
     @classmethod

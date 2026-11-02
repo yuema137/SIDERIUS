@@ -411,3 +411,76 @@ def test_guardrail_step_pricing_counts_a_sampled_template_epoch(
             )
     assert workload.detail["samples_per_epoch"] == rows
     assert workload.unit_count == optimizer_steps_for_rows(rows, 4, drop_last=True) * 2
+
+
+def test_copied_workflow_uses_all_csv_training_rows(tmp_path):
+    """Reverting the template portion silently reduces 60 training rows to 6.
+
+    Read the copied workflow through native preparation admission, then resolve
+    its Formal workload against the composed CSV task, not an invented row count.
+    """
+    from agent.schemas.hyperparam_tuning import ExperimentPlan, HyperparamTuningInput
+    from nodes.ml_hyperparameter_tune_agent.policy import _resolve_sample_set_cfg
+    from tools.candidate_prepare.reusable_training import settings_payload
+    from workflows.candidate_training_settings import parse_training_settings
+    from workflows.definition import ReusableWorkflowDocument, parse_workflow_source
+
+    manifest = copy_template(tmp_path / "own-task")
+    document = parse_workflow_source((manifest.parent / "workflow.py").read_text())
+    assert isinstance(document, ReusableWorkflowDocument)
+    data = write_csv_dataset(manifest.parent / document.definition.task.data_root)
+    payload = settings_payload(document)
+    assert payload is not None
+    launch = parse_training_settings(payload).launch
+    assert launch.max_rounds == 2
+    inp = HyperparamTuningInput(
+        model_type="csv_reference_mlp",
+        file_index=0,
+        formal_portion=launch.formal_portion,
+        formal_train_portion=launch.formal_train_portion,
+        formal_eval_portion=launch.formal_eval_portion,
+    )
+    workload = _resolve_sample_set_cfg("formal", inp, ExperimentPlan(trial_portion=0.02))
+    with run_registration_scope():
+        composition = compose_run_task_bindings(
+            str(manifest.parent / document.definition.task.manifest)
+        )
+        scope = composition.task_data_path.build_training_scope(
+            ScopeBuildRequest(
+                round_kind="formal",
+                selection_strategy=workload["trial_strategy"],
+                portion=workload["trial_portion"],
+            )
+        )
+        dataset = composition.task_data_path.training_dataset(
+            scope, EpochSamplingParams(data_dir=str(data))
+        )
+        assert len(dataset) == TRAIN_ROWS
+
+
+def test_uncommented_evaluation_example_binds_and_reaches_agent_prompts(
+    tmp_path: Path, data_dir: Path
+) -> None:
+    """Defect: the commented ``evaluation:`` example in ``task.yaml`` drifts from
+    the schema, names a metric the template does not declare, or needs a runtime
+    capability that is not implemented, so a user who uncomments it gets a
+    refusal. Composition, the launch guard in ``bind_run_task_composition`` or
+    the rendered-meaning assertion fails respectively."""
+    from agent.prompt_templates.evaluation import append_evaluation_spec
+
+    manifest = copy_template(tmp_path / "own-task")
+    lines = manifest.read_text().splitlines()
+    start = lines.index("# evaluation:")
+    end = next(i for i in range(start, len(lines)) if not lines[i].startswith("#"))
+    assert all(line.startswith("# ") for line in lines[start:end])
+    lines[start:end] = [line[2:] for line in lines[start:end]]
+    manifest.write_text("\n".join(lines) + "\n")
+    meaning = yaml.safe_load(manifest.read_text())["evaluation"]["components"][0]["meaning"]
+
+    with run_registration_scope():
+        composition = compose_run_task_bindings(str(manifest))
+        assert composition.evaluation is not None
+        with bind_run_task_composition(composition, physical_data_root=str(data_dir)):
+            rendered = append_evaluation_spec("")
+    assert f"Meaning: {meaning}" in rendered
+    assert "Deterministic ranking: balanced_accuracy; maximize" in rendered

@@ -924,6 +924,7 @@ def test_budgeted_resume_reaches_its_segment_placed_or_queued(
         host_memory_gib=64.0,
         cpu_slots=16,
         max_concurrent_units=4,
+        max_queued_operations=1,
         source="file",
     )
     ledger = tmp_path / "ledger"

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import numpy as np
 from pydantic import BaseModel, ConfigDict
 
+from core.seeding import MissingRunSeed
 from execute_tools.task_data_path import (
     DeliverableWriteRequest,
     EpochSamplingParams,
@@ -209,6 +210,8 @@ class SyntheticMaskedTaskDataPath:
         rows = list(self._require_scope(scope).rows)
         if params.train_portion is not None and params.train_portion < 1.0:
             keep = max(1, math.floor(len(rows) * params.train_portion))
+            if params.epoch_seed is None:
+                raise MissingRunSeed("training subsampling requires epoch_seed")
             rng = np.random.default_rng(params.epoch_seed)
             chosen = sorted(rng.choice(len(rows), keep, replace=False).tolist())
             rows = [rows[index] for index in chosen]
@@ -282,6 +285,8 @@ class SyntheticMaskedTaskDataPath:
         rows = [row for shard in shards for row in _rows_for_shard(shard)]
         keep = max(1, math.floor(len(rows) * request.portion))
         if keep < len(rows):
+            if request.seed is None:
+                raise MissingRunSeed("scope subsampling requires request.seed")
             rng = np.random.default_rng(request.seed)
             rows = [rows[index] for index in sorted(rng.choice(len(rows), keep, replace=False))]
         if request.max_samples is not None:

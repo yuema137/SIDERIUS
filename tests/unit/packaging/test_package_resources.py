@@ -46,6 +46,23 @@ def test_package_data_covers_runtime_readers():
     _assert_declared(config["tool"]["setuptools"]["package-data"])
 
 
+def test_resource_census_and_selection_declarations_stay_in_sync() -> None:
+    """A new resource family must not silently escape selective CI.
+
+    Use the actual census, not a second expected-family list. Keeping this guard
+    here ensures a census edit selects the guard itself. Full-suite triggers
+    cannot mask missing declarations, and stale declarations fail too.
+    """
+    from tools.ci_selection.manifest import DIRECTORY_SCANS
+
+    assets = {"src/" + path.as_posix() for path in _required_assets()}
+    scans = DIRECTORY_SCANS["tests/unit/packaging/test_package_resources.py"]
+    uncovered = {asset for asset in assets if not any(asset.startswith(root) for root in scans)}
+    stale = {root for root in scans if not any(asset.startswith(root) for asset in assets)}
+    assert not uncovered, f"packaging assets missing selection declarations: {sorted(uncovered)}"
+    assert not stale, f"selection declarations missing packaging assets: {sorted(stale)}"
+
+
 def test_removed_prompt_declaration_is_detected():
     """A packaging-only deletion must fail even while editable prompt reads work."""
     config = tomllib.loads((REPO / "pyproject.toml").read_text())

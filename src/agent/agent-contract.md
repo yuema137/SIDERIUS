@@ -20,7 +20,7 @@ executes training, inference or scoring.
 | `llm_transport/` | Optional provider adapters; [transport contract](llm_transport/transport-contract.md) owns selection, protocol translation, limitations and validation |
 | `credential_environment.py` | `load_compatibility_dotenv` (python-dotenv default search, `override=False`; logs the loaded path once per process at INFO and warns when it is outside the checkout or group/other-accessible) and `warn_if_blank_credential` (warns by name for a set-but-blank key). Logs paths, modes and names only, never values |
 | `llm_settings.py` | Pure provider/model/timeout and reflector-inheritance resolution used by the bridge and offline inspection; no credentials or client construction |
-| `prompts.py` + `prompt_templates/` | per-node prompt rendering (`proposal/`, `implementor/`, `interpretation/`, `tuner/`, `literature_review/`). Task science enters ONLY as caller-supplied task-blocks values parsed by `prompt_templates/_task_blocks_loader.py` — the shared mechanics of the three adapters (proposal / implementor / interpretation) |
+| `prompts.py` + `prompt_templates/` | per-node prompt rendering (`proposal/`, `implementor/`, `interpretation/`, `tuner/`, `literature_review/`). Task science comes from validated task declarations: task-block values parsed by `prompt_templates/_task_blocks_loader.py` and the composed evaluation context rendered by `evaluation.spec`. The loader remains the shared owner for the proposal / implementor / interpretation block adapters |
 | `judge/` | LLM judge call/evidence core: one bounded `run_judge_call` through `LLMBridge`, write-once `JudgeCallEvidence`, provider-free replay; see the [judge contract](judge/judge-contract.md) |
 | `schemas/` | node input/output contracts and the typed edge protocols — see [`schemas/README.md`](schemas/README.md) |
 | `skills/` | atomic tools invoked by agents: `training_skill`, `inference_skill`, `denoising_score_skill`, `evaluate_time_skill` (+ the `~/.siderius` calibration store), `evaluate_vram_skill`, `check_config_format_skill`, `model_io_probe_skill.py`, `forbidden_pattern_skill.py`, `paper_resolver_skill` |
@@ -164,10 +164,12 @@ records remain null. The detailed serialization/paper-impact owner is
 ## Structured evaluation declaration boundary
 
 Task compositions may carry an opt-in `evaluation` declaration with component
-meanings, quantitative selection and constraints, or rubric references. E1 validates
-and fingerprints this declaration; agent prompts do not consume it yet. Launch
-therefore refuses the `evaluation rendering` capability until #1293 wires the shared
-renderer. An absent declaration keeps existing prompt bytes. Rubric judgment is
+meanings, quantitative selection and constraints, or rubric references. Composition validates and fingerprints the declaration.
+The shared constraint
+append path renders it through `evaluation.spec` using a scoped, copyable context.
+The absent-spec gate is outside the boundary, preserving historical profile
+admission and message bytes. Primary-only metric evaluation can launch; other
+evaluation capabilities retain their own guards. Rubric judgment is
 never arithmetic in MetricOrder; #1297 owns any new candidate-result projector and
 versioned judge evidence. The exact schema and future Health/source-metric binding
 are in the [evaluation contract](../execute_tools/evaluation-contract.md).

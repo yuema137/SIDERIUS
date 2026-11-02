@@ -8,12 +8,11 @@ import {spawn} from 'node:child_process';
 import {createRequire} from 'node:module';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const name of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE']) assert.ok(process.env[name], `Set ${name}`);
 const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.workflow_editor_server'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
 let errors = ''; server.stderr.on('data', chunk => {errors += chunk;});
-const lines = createInterface({input: server.stdout});
 let browser;
 const SCHEMA = 'siderius.console-global-settings/v1';
 const DEFAULT = {source: 'library', name: 'default-9f0124a7c346.json', sha256: '9f0124a7c346' + 'f'.repeat(52)};
@@ -37,11 +36,7 @@ function settingsView({writable = true, settings = pending, sha = 'a'.repeat(64)
   };
 }
 try {
-  const metadata = await new Promise((accept, reject) => {
-    const timer = setTimeout(() => reject(new Error('Server startup timeout')), 15000);
-    lines.once('line', line => {clearTimeout(timer); accept(JSON.parse(line));});
-    server.once('exit', code => {clearTimeout(timer); reject(new Error(`Server ${code}: ${errors}`));});
-  });
+  const metadata = await waitForMetadata(server, {timeoutMs: 15000});
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
   const page = await browser.newPage({viewport: {width: 1280, height: 900}}), faults = [], puts = [];
@@ -163,4 +158,4 @@ try {
   if (process.env.CONSOLE_SCREENSHOT_DIR) await page.screenshot({path: join(process.env.CONSOLE_SCREENSHOT_DIR, 'settings-mobile.png'), fullPage: true});
   assert.deepEqual(faults, []);
   console.log('PASS: settings view, profile/advice cards, advice import, export and bearer download, allowlist choice, no-follow folder picking, CAS PUT with refs only, restart notice, stale refusal, unconfirmed-durability notice and read-only mode.');
-} finally { if (browser) await browser.close(); server.kill('SIGTERM'); lines.close(); }
+} finally { if (browser) await browser.close(); server.kill('SIGTERM'); }
