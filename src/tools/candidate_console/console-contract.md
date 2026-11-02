@@ -3255,7 +3255,11 @@ scientific compatibility.
 ### Execution profile browser binding
 
 `profile_assets.add_profile_assets` serves `/execution-profiles.js` from the
-workflow declaration owner `NATIVE_INTERPRETATION_PROFILE`. The index loads it
-before editor and captured-run scripts; `window.executionProfiles.nativeInterpretation`
-is their shared lookup. It contains no task state or credentials and changes no
+workflow declaration owners `NATIVE_INTERPRETATION_PROFILE`,
+`NATIVE_LITERATURE_PROFILE` and `NATIVE_PROPOSAL_FAMILIES_PROFILE`. The index loads
+it before editor and captured-run scripts. The frozen `window.executionProfiles`
+object exposes `nativeInterpretation`, `nativeLiterature` and
+`nativeProposalFamilies`; captured-run descriptions use these keys, and editor
+loop controls use `nativeInterpretation`. Fanout has no JavaScript consumer and
+is not exported. The asset contains no task state or credentials and changes no
 profile admission or serialized identifier.
