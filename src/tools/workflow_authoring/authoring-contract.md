@@ -305,7 +305,7 @@ The native launch JSON schema exposes a minimum of 1 and explains the forced-For
 last tuning round. Its description is shared with the editor's one-round review
 reminder; the browser does not reproduce the native admission predicate. Raising
 the control to at least 2 permits Trial tuning rounds before the final Formal tuning
-round, but does not force the planner to choose Trial. Default remains 10.
+round, but does not force the planner to choose Trial.
 `TrainingInspector.policy` (`TrainingChoiceControl`, `policy_controls`) projects the two
 required launch choices training admission has no default for: **Health checks**
 (`healthgate_mode`: Record only = `observe_only`, Block on failure = `blocking`) and

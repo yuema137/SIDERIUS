@@ -409,12 +409,6 @@ A successful data command ends with `Data ready in .../data/NAME`.
    Implement → Validate → Train & tune. A **tuning round** plans and runs one training
    configuration inside Train & tune; **Tuning rounds per iteration** sets its limit
    independently of **Final iteration**. A tuning round can need several attempts.
-   By default, each iteration ends with a Formal tuning round, so a limit of 1 leaves
-   no Trial tuning round.
-   If the editor refuses that limit because your Trial settings would never apply,
-   open **Training settings** on **Train & tune** and set **Tuning rounds per iteration**
-   to at least 2. This allows Trial before Formal; the planner may still choose Formal
-   earlier. The field's help explains the policy and shows its minimum of 1.
    A **Judge** stop condition takes what the judge should look for, the first iteration it
    judges after, and what a failed judge call does; the judge model and its call limit
    come from the console operator's model settings.
@@ -943,6 +937,11 @@ configured training scope and a separate evaluation scope. With
 iteration** is forced Formal. With `max_rounds=1` there is no Trial round;
 with `max_rounds=2` the first may be Trial and the second is Formal. Increasing
 **Final iteration** repeats the loop; it does not add tuning rounds inside it.
+
+If a one-tuning-round edit is refused because your Trial settings would never apply,
+select **Train & tune**, open **Training settings**, and set **Tuning rounds per iteration**
+to at least 2. The field's help explains the policy and shows its minimum of 1;
+the review reminder names the same control.
 
 The framework's `formal_portion=0.1` uses 10% of the training scope. For example,
 1,077 CSV training rows × 0.1 gives about 108 rows: **3 steps/epoch** with batch
