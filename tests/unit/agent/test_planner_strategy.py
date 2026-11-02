@@ -201,11 +201,13 @@ def test_conditional_provider_system_text_reaches_final_request(monkeypatch):
 # Deliberately moved by #1111: prompt entry points decode persisted history.
 # Finite text is unchanged; non-finite evidence no longer leaks storage strings.
 # Combined with #1314's retention of inactive-rule receipts in condensed history.
+# Deliberately moved by #1322: planner history retains resolution_events and
+# labels a superseded proposal (previous content b11d3c2f..., assembly 79bb612d...).
 NATIVE_PLANNER_IDENTITY_PIN = {
     "name": "native-timing-v1",
     "version": "1",
-    "content_sha256": "b11d3c2f0413ee1018e7afffafa6f6ec073b9b43f487ce6586ad2f696ccbe72e",
-    "assembly_sha256": "be3166feef8d55178a7bde01ba8d0244fc8602d4f981049c57ac551d2c7152b5",
+    "content_sha256": "ec2b0c06e5bc3607209008b16ce8302dff3293e133602f7cd2404939d993ec66",
+    "assembly_sha256": "2c170d924df88bbac10e15560d682a86bbc05de6a5e1a52c85993bb5c0d1a2a2",
 }
 
 
