@@ -37,6 +37,7 @@ from agent.schemas.proposer_data_analysis_evidence import (
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
 from nodes.data_analysis_agent import DataAnalysisAgent
+from tests.helpers.data_analysis_resources import REAL_WORKER_TIMEOUT_SECONDS
 
 FixtureKind = Literal["regular_periodic_drift", "irregular_periodic"]
 BudgetName = Literal["exhausted", "low", "medium", "high"]
@@ -93,10 +94,10 @@ _BUDGETS: dict[BudgetName, tuple[float, float]] = {
     # Leave loaded-CI headroom; precise deadline regressions use synthetic clocks.
     # The exhausted case still requests the entire allocation as its minimum
     # remaining threshold, so it starts no scientific invocation.
-    "exhausted": (60.0, 10.0),
-    "low": (60.0, 10.0),
-    "medium": (120.0, 10.0),
-    "high": (240.0, 10.0),
+    "exhausted": (60.0, REAL_WORKER_TIMEOUT_SECONDS),
+    "low": (60.0, REAL_WORKER_TIMEOUT_SECONDS),
+    "medium": (120.0, REAL_WORKER_TIMEOUT_SECONDS),
+    "high": (240.0, REAL_WORKER_TIMEOUT_SECONDS),
 }
 
 
