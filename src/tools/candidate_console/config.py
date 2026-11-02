@@ -8,6 +8,7 @@ from tools.candidate_operations.host_ledger import HostScheduling, ledger_direct
 from tools.candidate_operations.models import OperationFailure
 
 from .config_errors import MissingConfigFile
+from .error_messages import console_error_message
 from .files import canonical, config_bytes, credential_values, require_owner_only_file, token
 from .models import ConsoleConfig
 from .settings_models import ResolvedConsole
@@ -119,7 +120,10 @@ def host_scheduling(config: ConsoleConfig) -> HostScheduling | None:
         # Canonical like the ledger root: never resolved against the console's cwd.
         budget = load_host_budget_file(canonical(selection.budget_file))
     except (OperationFailure, HostBudgetFileError) as error:
-        raise ValueError(f"configured host ledger is unusable: {error}") from error
+        raise ValueError(
+            f"configured host ledger is unusable: {console_error_message(error)} "
+            "Check host_ledger.ledger_root and host_ledger.budget_file."
+        ) from None
     return HostScheduling(ledger_root=selection.ledger_root, budget=budget)
 
 

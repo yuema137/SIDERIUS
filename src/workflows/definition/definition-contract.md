@@ -123,11 +123,21 @@ requires separate integration and experiment-owned historical configuration.
 
 ## Authored loop
 
-`models.NativeInterpretationProfile` owns the native interpretation profile type;
-`models.NATIVE_INTERPRETATION_PROFILE` owns its runtime value. Python consumers
-reuse these names, including Literal unions; the transparent alias preserves
-existing JSON Schema enum ordering and serialized bytes. The console serves the
-same value through `/execution-profiles.js` before its browser consumers load.
+`models.py` owns the native profile types and runtime values:
+
+| Transparent Literal alias | Final runtime constant |
+| --- | --- |
+| `NativeInterpretationProfile` | `NATIVE_INTERPRETATION_PROFILE` |
+| `NativeLiteratureProfile` | `NATIVE_LITERATURE_PROFILE` |
+| `NativeProposalFamiliesProfile` | `NATIVE_PROPOSAL_FAMILIES_PROFILE` |
+| `NativeProposalFanoutProfile` | `NATIVE_PROPOSAL_FANOUT_PROFILE` |
+
+Python consumers reuse these names, including Literal unions. Plain assignment
+aliases preserve inline JSON Schema enums, member order and serialized bytes in
+validation and serialization modes. The console serves the profiles its JavaScript
+consumes through `/execution-profiles.js` before those browser consumers load.
+The ownership and served-byte guards live in
+`tests/unit/tools/candidate_console/test_profile_assets.py`.
 
 `WorkflowDefinition.loop` and `ReusableWorkflowDefinition.loop` optionally carry
 `AuthoredLoop(final_iteration, feedback, stop_conditions=())`. `final_iteration`
@@ -663,3 +673,9 @@ from null as well as rounded integers and floats. Authoring models own invoking
 it with bounded source and revalidating its result through the native schema.
 Already-canonical inputs remain canonical after patching, using retained source
 values and the existing renderer; new generation and identity rules are unchanged.
+
+Draft inspection validation diagnostics retain native validator messages and
+located `DraftProblem` guidance, without Pydantic input snapshots (`input_value`
+or `input_type`). `draft.inspect_draft` owns this projection, shared by the editor
+draft, review and combined-node draft routes. Validation and declaration identity
+are unchanged.

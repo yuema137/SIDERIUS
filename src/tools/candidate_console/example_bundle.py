@@ -37,6 +37,7 @@ from tools.candidate_operations.models import OperationFailure
 from tools.workflow_authoring.templates import TemplateId
 from tools.workflow_preview.models import PreviewModel
 
+from .error_messages import console_error_message
 from .files import canonical, config_bytes, open_directory
 from .settings_models import Id, Label
 
@@ -283,7 +284,10 @@ def copy_package(bundle: VerifiedBundle, target: ImportTarget) -> Path:
             write_once(opened[parent], PurePosixPath(name).name, payload)
     except (OSError, WorkspaceRefused) as error:
         left = f"; {target.package} was left in place" if opened else ""
-        raise AddTaskRefused(f"copying the task package failed ({error}){left}") from None
+        message = (
+            str(error) if isinstance(error, WorkspaceRefused) else console_error_message(error)
+        )
+        raise AddTaskRefused(f"copying the task package failed ({message}){left}") from None
     finally:
         for descriptor in opened.values():
             os.close(descriptor)

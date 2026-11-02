@@ -1893,16 +1893,24 @@ resolution — and returns the original record/memory object when there is no
 receipt, so records without divergence and all archived histories render
 byte-identically. Persisted records are never mutated.
 
-Size bound: event values are `repr` text, and list-valued fields
+**Per-value summary only; no per-entry budget.** Event values are `repr` text, and list-valued fields
 (`target_files`, file orders) grow with the task's file count, so copying them
 into every condensed entry would grow the prompt as records x files. Condensed
 entries therefore pass `resolution_events` through
 `_condensed_resolution_events`: each `proposed`/`executed` string longer than
 `CONDENSED_EVENT_VALUE_CHARS` (120) becomes its first 60 and last 20 characters
 around the marker `… (<N> chars; full value in the persisted record) …`
-(at most about 140 characters). Shorter values, `field_path` and `authority`
-are unchanged; the summary is deterministic. The verbatim window and the
-persisted record keep the full text.
+(80 source characters plus the marker and decimal length). The 120-character
+constant is the summarization threshold, not the final rendered length.
+Shorter values, `field_path` and `authority` are unchanged; no event is omitted
+or reordered. The projection does not cap event count, field-path length or
+total serialized entry size. A wide LLM-authored `model_cfg` therefore produces
+a larger condensed entry even when each value is summarized. This preserves
+the complete list of changed fields; it does not promise a total history/token
+budget. The summary is deterministic. The verbatim window and persisted record
+keep the full text. `test_condensed_history_width.py` exercises 1 and 256 events
+with long model field names and values through the real planner projection,
+checking complete paths, summarized values and unchanged persisted history.
 
 Divergence follows the existing tracker: formal-round `is_trial` lockout and
 `resolved_round_workload` portions are events, so most formal attempts in
@@ -2425,3 +2433,15 @@ Console templates and small executable examples explicitly choose
 settings remain unchanged. `WorkflowLaunchConfig` owns editor help metadata,
 not a second execution policy. Changing the final iteration count or Trial
 budgets does not change the resolved Formal workload.
+
+### Pseudo resource admission selection
+
+`execution.run_admission_preflight` passes `pseudo_training=True` only for a
+`StubSandbox` instance (including subclasses). The core's no-execution-envelope
+decision owns pseudo admission; optional ceilings are validated and recorded. GPU visibility never selects this route, and
+`--is_pseudo_llm` alone does not change resource admission. Subsequent task checks,
+training/inference/scoring stubs and Health policy retain their existing behavior.
+
+`runtime._handle_prephase_gpu_measurement` also excludes `StubSandbox` before
+device/topology inspection: a real GPU identity retained for provenance must not
+activate the legacy formal prephase fallback. Real sandbox applicability is unchanged.

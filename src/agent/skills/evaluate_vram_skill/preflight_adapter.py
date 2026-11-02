@@ -243,6 +243,7 @@ def run_production_preflight(
     model_io_contract: ModelIOContract | None = None,
     task_probe_data: TaskProbeDataSpec | None = None,
     expected_custom_loss_snapshot: CapabilityContractSnapshot | None = None,
+    pseudo_training: bool = False,
 ) -> dict[str, Any]:
     """Run one candidate's pre-flight in a child and return the legacy dict.
 
@@ -283,6 +284,24 @@ def run_production_preflight(
     It is independent of the GPU VRAM ceiling and a breach remains inconclusive
     rather than evidence that the model is too large for the GPU.
     """
+    if pseudo_training:
+        from core.pseudo_admission import resolve_pseudo_admission
+
+        admission = resolve_pseudo_admission()
+        result = {
+            "status": "success",
+            "feasible": True,
+            "preflight_outcome": "PSEUDO_NO_EXECUTION_ENVELOPE",
+            "pseudo_admission": admission.model_dump(mode="json"),
+            "message": "Synthetic admission only; no candidate capacity was measured.",
+        }
+        from core.durable_io import publish_json_atomically
+
+        result_path = Path(workspace) / "preflight_workers" / f"{label}.json"
+        result_path.parent.mkdir(parents=True, exist_ok=True)
+        publish_json_atomically(str(result_path), result)
+        return result
+
     from core.inference_preflight_policy import active_inference_preflight_policy
     from core.runtime_control.inference_measurement_binding import measurement_sources
     from core.subprocess_env import subprocess_env

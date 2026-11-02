@@ -12,13 +12,25 @@ from .adaptor_strategies import DistributeStrategy, SelectStrategy
 from .base import DeclarationModel, Identifier, Location
 from .llm_strategies import AdaptorCombine
 
-# Single owner of the native interpretation execution profile identifier. The alias is a
+# Single owners of the native execution profile identifiers. The alias is a
 # plain assignment (not a PEP 695 ``type`` alias) so nested Literal unions stay transparent
 # and JSON Schema keeps an inline enum; pyright checks the constant against the alias.
 NativeInterpretationProfile = Literal["native-interpretation-candidate/v1"]
 NATIVE_INTERPRETATION_PROFILE: Final[NativeInterpretationProfile] = (
     "native-interpretation-candidate/v1"
 )
+
+
+NativeLiteratureProfile = Literal["native-literature-candidate/v1"]
+NATIVE_LITERATURE_PROFILE: Final[NativeLiteratureProfile] = "native-literature-candidate/v1"
+
+NativeProposalFamiliesProfile = Literal["native-proposal-families/v1"]
+NATIVE_PROPOSAL_FAMILIES_PROFILE: Final[NativeProposalFamiliesProfile] = (
+    "native-proposal-families/v1"
+)
+
+NativeProposalFanoutProfile = Literal["native-proposal-fanout/v1"]
+NATIVE_PROPOSAL_FANOUT_PROFILE: Final[NativeProposalFanoutProfile] = "native-proposal-fanout/v1"
 
 
 class TaskReferences(DeclarationModel):
@@ -438,9 +450,9 @@ class ReusableWorkflowDocument(DeclarationModel):
 
     execution_profile: (
         Literal[
-            "native-proposal-fanout/v1",
-            "native-proposal-families/v1",
-            "native-literature-candidate/v1",
+            NativeProposalFanoutProfile,
+            NativeProposalFamiliesProfile,
+            NativeLiteratureProfile,
             NativeInterpretationProfile,
         ]
         | None
