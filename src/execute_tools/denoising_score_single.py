@@ -349,7 +349,9 @@ def _emit_outcome(args, outcome, *, secondaries: dict | None = None) -> None:
                 "denoising_score": None,
                 "file_vector": None,
                 "not_scoreable": outcome.model_dump(mode="json"),
-                **(secondaries or {}),
+                # Legacy refusals omit observational secondaries; only formula
+                # refusals need the extra evidence transported to the parent.
+                **(secondaries if secondaries and "evaluation_result" in secondaries else {}),
             },
         )
         sys.exit(1)
