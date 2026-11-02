@@ -20,7 +20,10 @@ from execute_tools.evaluation_metric import MetricIdentityConflictError, MetricS
 from execute_tools.metric_order import MetricOrder
 from tests.helpers.tuner_composed_fixture import _isolated_registrations
 from tests.unit.nodes.test_formula_selection_tuner_wiring import FORMULA, _masked_manifest
-from tests.unit.workflows.test_model_exploration import _make_tuning_output
+from tests.unit.workflows.test_model_exploration import (
+    _make_tuning_output,
+    workflow_env,
+)
 from workflows import model_exploration
 from workflows.run_config import WorkflowLaunchConfig
 from workflows.task_composition import (
@@ -205,3 +208,35 @@ def test_resume_ranks_persisted_formula_records_by_effective_utility(compose):
     with pytest.raises(MetricIdentityConflictError):
         _rankable_pool(mixed, parsed, context="test")
     assert json.loads(parsed.model_dump_json())["metric_spec"]["id"] == effective.id
+
+
+def test_workflow_completed_history_uses_effective_metric(compose, workflow_env, tmp_path):
+    """A source-spec mutation at the real history call must fail closed.
+
+    Three mocked tuning calls let the real workflow fold 0.7 then 0.3 and
+    transport the unchanged incumbent into the third tuner input.
+    """
+    from workflows.llm_config import TunerLLMConfig, WorkflowLLMConfig
+
+    composition = compose()
+    effective = _effective(composition)
+    seed = _persisted(0.1, effective, "seed")
+    seed.task_composition_fingerprint = composition.semantic_fingerprint
+    source = tmp_path / "seed.json"
+    source.write_text(seed.model_dump_json())
+    outputs = [_persisted(value, effective, "punet") for value in (0.7, 0.3, 0.5)]
+    for output in outputs:
+        output.task_composition_fingerprint = composition.semantic_fingerprint
+        output.best_valid_formal_denoising_score = output.best_denoising_score
+    workflow_env["tune"].return_value.run.side_effect = outputs
+    with bind_run_task_composition(composition, physical_data_root=str(tmp_path)):
+        results = model_exploration.run_workflow(
+            workspace=workflow_env["workspace"],
+            run_name="formula_history",
+            launch=WorkflowLaunchConfig(source_paths=[str(source)], max_iterations=3),
+            llm_config=WorkflowLLMConfig(tune=TunerLLMConfig(planner_strategy="native-timing-v1")),
+            task_composition=composition,
+        )
+    assert results == outputs
+    inputs = [call.args[0] for call in workflow_env["tune"].return_value.run.call_args_list]
+    assert [item.current_run_best_formal_score for item in inputs] == [None, 0.7, 0.7]
