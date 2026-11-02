@@ -30,6 +30,7 @@ from agent.prompt_templates.timing_attribution import TIMING_SPLIT_SEMANTICS
 from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.custom_loss_contract import CustomLossApplicability, TaskOwnedCustomLoss
 from agent.schemas.data_analysis.trained_model import TrainedModelArtifactRef
+from agent.schemas.execution_provenance import ResolutionEvent
 from agent.schemas.health_feedback import FormalValidityFeedback, TrialValidityFeedback
 from agent.schemas.judge import JudgeRoutes
 from agent.schemas.llm_retry import RetryPolicy
@@ -425,6 +426,15 @@ class ExperimentRecord(RecordModel):
         default=(),
         exclude_if=lambda value: not value,
         description="Rules inactive for this attempt's selected loss; not applied constraints.",
+    )
+    resolution_events: tuple[ResolutionEvent, ...] = Field(
+        default=(),
+        exclude_if=lambda value: not value,
+        description=(
+            "Final ExecutionProvenance.events: each authored plan value the framework "
+            "resolved to a different effective value before this attempt. Empty (omitted) "
+            "when nothing diverged or when the record predates the field (issue #1322)."
+        ),
     )
     record_type: Literal["experiment", "attempt_failure"] = "experiment"
     exp_id: str

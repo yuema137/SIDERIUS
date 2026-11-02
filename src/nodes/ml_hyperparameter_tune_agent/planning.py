@@ -44,6 +44,7 @@ from nodes.ml_hyperparameter_tune_agent.health_coverage import (
 )
 from nodes.ml_hyperparameter_tune_agent.parameter_rule_receipts import (
     inactive_parameter_rule_record,
+    resolution_event_record,
 )
 from nodes.ml_hyperparameter_tune_agent.plan_logging import render_effective_plan
 from nodes.ml_hyperparameter_tune_agent.policy import (
@@ -975,6 +976,7 @@ def prepare_attempt(
     # Clean params for records — exclude bulky SampleSet dicts
     record_params = {
         **inactive_parameter_rule_record(plan),
+        **resolution_event_record(execution_provenance),
         **training_batch_fit_record(execution_provenance),
         "exp_id": exp_id,
         "run_name": run_name,
