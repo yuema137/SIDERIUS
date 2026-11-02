@@ -205,7 +205,7 @@ NATIVE_PLANNER_IDENTITY_PIN = {
     "name": "native-timing-v1",
     "version": "1",
     "content_sha256": "b11d3c2f0413ee1018e7afffafa6f6ec073b9b43f487ce6586ad2f696ccbe72e",
-    "assembly_sha256": "79bb612dd9c1516b6fb7cef28b79f6e376b630f3996244ce7eb8ca0b44cd0523",
+    "assembly_sha256": "be3166feef8d55178a7bde01ba8d0244fc8602d4f981049c57ac551d2c7152b5",
 }
 
 
