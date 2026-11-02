@@ -1,5 +1,15 @@
 # MLModelImplementor
 
+
+## Structured evaluation prompt context
+
+Model and custom-loss reasoning, code generation and repair receive the shared block. Evaluation preference does not change the declared training objective or grant measurement capability.
+
+The run-scoped composition supplies this context through the shared append path.
+Absence adds no bytes and never enters the new boundary under historical profiles.
+The [evaluation contract](../../execute_tools/evaluation-contract.md#evaluation-prompt-rendering)
+owns formatting, profile admission and runtime capability distinctions.
+
 ## Live output names
 
 `ImplementorInput.validate_for_implementation()`, called first by `run()`,
@@ -339,12 +349,3 @@ strict JSON, preserving typed non-finite floats. Load with the output schema's
 [core contract](../../core/core-contract.md#versioned-non-finite-record-json-issue-1111)
 owns metadata, legacy projection and digest impact. Legacy records may contain null where a float was non-finite. New native output
 and `LocalRecorder` writes preserve that float through the versioned encoding.
-
-## Structured evaluation prompt context
-
-Model and custom-loss reasoning, code generation and repair receive the shared block. Evaluation preference does not change the declared training objective or grant measurement capability.
-
-The run-scoped composition supplies this context through the shared append path.
-Absence adds no bytes and never enters the new boundary under historical profiles.
-The [evaluation contract](../../execute_tools/evaluation-contract.md#evaluation-prompt-rendering)
-owns formatting, profile admission and runtime capability distinctions.

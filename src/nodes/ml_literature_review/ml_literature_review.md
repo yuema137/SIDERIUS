@@ -1,5 +1,15 @@
 # MLLiteratureReviewAgent
 
+
+## Structured evaluation prompt context
+
+Search decisions and synthesis receive the shared block. Paper extraction is excluded so published facts are not rewritten to match the task preferences.
+
+The run-scoped composition supplies this context through the shared append path.
+Absence adds no bytes and never enters the new boundary under historical profiles.
+The [evaluation contract](../../execute_tools/evaluation-contract.md#evaluation-prompt-rendering)
+owns formatting, profile admission and runtime capability distinctions.
+
 ## Live output names
 
 When `storage.local` exists, `run()` and the independent `_write_output()`
@@ -313,12 +323,3 @@ strict JSON, preserving typed non-finite floats. Load with the output schema's
 [core contract](../../core/core-contract.md#versioned-non-finite-record-json-issue-1111)
 owns metadata, legacy projection and digest impact. Legacy records may contain null where a float was non-finite. New native output
 and `LocalRecorder` writes preserve that float through the versioned encoding.
-
-## Structured evaluation prompt context
-
-Search decisions and synthesis receive the shared block. Paper extraction is excluded so published facts are not rewritten to match the task preferences.
-
-The run-scoped composition supplies this context through the shared append path.
-Absence adds no bytes and never enters the new boundary under historical profiles.
-The [evaluation contract](../../execute_tools/evaluation-contract.md#evaluation-prompt-rendering)
-owns formatting, profile admission and runtime capability distinctions.

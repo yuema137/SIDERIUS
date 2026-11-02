@@ -1,5 +1,15 @@
 # MLModelProposalAgent
 
+
+## Structured evaluation prompt context
+
+Legacy and pipeline messages, including corrections/retries, receive the shared user-message block. Comparison and causal metric context refer to that block; prediction direction/refutation rules still apply to their named metric.
+
+The run-scoped composition supplies this context through the shared append path.
+Absence adds no bytes and never enters the new boundary under historical profiles.
+The [evaluation contract](../../execute_tools/evaluation-contract.md#evaluation-prompt-rendering)
+owns formatting, profile admission and runtime capability distinctions.
+
 ## Live output names
 
 `run()` checks `storage.local.run_name` before proposal work when the local
@@ -503,12 +513,3 @@ present; train/model-only and empty-rule prompts keep their prior bytes.
 rule-fixed loss type fail, while planner-selected inactive fields are skipped
 with log disclosure. Unknown proposal types defer activity. The tuner recomputes
 and persists typed attempt receipts; proposal metadata is not receipt authority.
-
-## Structured evaluation prompt context
-
-Legacy and pipeline messages, including corrections/retries, receive the shared user-message block. Comparison and causal metric context refer to that block; prediction direction/refutation rules still apply to their named metric.
-
-The run-scoped composition supplies this context through the shared append path.
-Absence adds no bytes and never enters the new boundary under historical profiles.
-The [evaluation contract](../../execute_tools/evaluation-contract.md#evaluation-prompt-rendering)
-owns formatting, profile admission and runtime capability distinctions.
