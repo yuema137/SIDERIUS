@@ -261,3 +261,57 @@ def test_advice_file_is_saved_in_the_resume_request_and_invalid_advice_writes_no
         assert (status, out, json.loads(err)["code"]) == (2, "", "invalid_input_or_record")
         assert "secret" not in err and not refused.exists()
     assert len(reviews) == 2
+
+
+def test_resources_file_is_saved_in_the_resume_request_and_invalid_resources_write_nothing(
+    store, tmp_path, monkeypatch, capsys
+):
+    """#1385: the CLI had no way to supply a segment reservation for a loop whose root
+    declared none. Fails if ``--resources-file`` does not reach the saved request, or if an
+    invalid declaration reaches review or leaves a request file behind."""
+    from tools.candidate_operations.models import OperationResources
+
+    _, path = store
+    reviews = []
+
+    def review(config_arg, operation_id):
+        reviews.append(operation_id)
+        return SimpleNamespace(receipt_digest=DIGEST)
+
+    monkeypatch.setattr(cli, "review_loop_resume", review)
+    args = ("--store-config", str(path), "--operation-id", str(UUID(int=7)))
+    declared = OperationResources(
+        gpu_count=0, host_memory_gib=2.0, cpu_slots=1, time_budgeted=False
+    )
+    resources = tmp_path / "resources.json"
+    resources.write_text(declared.model_dump_json())
+    output = tmp_path / "reserved.json"
+    status, _, _ = invoke(
+        monkeypatch,
+        capsys,
+        "write-loop-resume",
+        *args,
+        "--output",
+        str(output),
+        "--resources-file",
+        str(resources),
+    )
+    assert status == 0
+    saved = CandidateLoopResumeOperation.model_validate_json(output.read_bytes())
+    assert saved.request.resources == declared
+    assert len(reviews) == 1
+    # A GPU unit without its memory is refused by ResourceRequest's own rules.
+    resources.write_text(json.dumps({**declared.model_dump(mode="json"), "gpu_count": 1}))
+    refused = tmp_path / "refused.json"
+    status, out, err = invoke(
+        monkeypatch,
+        capsys,
+        "write-loop-resume",
+        *args,
+        "--output",
+        str(refused),
+        "--resources-file",
+        str(resources),
+    )
+    assert (status, out, json.loads(err)["code"]) == (2, "", "invalid_input_or_record")
+    assert not refused.exists() and len(reviews) == 1
