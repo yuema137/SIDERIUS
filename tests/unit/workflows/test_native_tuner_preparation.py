@@ -245,11 +245,12 @@ def test_production_tuner_input_matches_pre_extraction_oracle(
     # The content hash changed because #1111 decodes persisted history before
     # rendering, combined with #1314 retaining condensed inactive-rule receipts
     # and #1322 retaining resolution_events with a superseded-proposal label.
+    # #1289 then reworded the mode-choice step (Formal is not full-data).
     # Preserve the archived oracle and pin the reviewed new bytes.
     baseline_content = expected["expected_planner_strategy"].pop("content_sha256")
     assert baseline_content == "73b7df9cad19e398695f057ef322e3ad01d07e1d3e0a6c0f85e918d06594c562"
     assert payload["expected_planner_strategy"].pop("content_sha256") == (
-        "ec2b0c06e5bc3607209008b16ce8302dff3293e133602f7cd2404939d993ec66"
+        "8e373ea3ed2ebbcf7e8de9033a4206e375643eeecbb3f3fad403c383f58455e2"
     )
     # Issue #983 — the workflow generates a run seed per run (a seed-owned
     # path); the oracle predates it. Keep its bytes and check the forwarded

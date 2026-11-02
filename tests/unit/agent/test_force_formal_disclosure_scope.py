@@ -96,3 +96,52 @@ def test_fallback_reports_bounded_error_without_raw_llm_input(
     assert plan.hypothesis == secret
     assert plan.trial_portion == 0.02
     assert rejected is None
+
+
+@pytest.mark.parametrize("formal_portion", [0.1, 1.0])
+def test_formal_round_instruction_names_configured_scope_not_full_data(
+    tmp_path: Path, formal_portion: float
+):
+    """Issue #1289: the planner must not be told Formal is a full-data evaluation.
+
+    Formal trains on formal_portion (default 0.1). The mode-choice instruction must
+    point at the run's configured Formal scopes, and the same provider-bound prompt
+    must carry the actual portion and its source, so a 10% Formal round is not read
+    as a broken full-data run. Reverting the instruction to "a full formal
+    evaluation" fails the first assertion.
+    """
+    context = workflow_constraint_context(
+        WorkflowLaunchConfig(force_formal_round=True, formal_portion=formal_portion), None
+    )
+    inp = HyperparamTuningInput(
+        model_type="fixture_model",
+        file_index=0,
+        force_formal_round=True,
+        formal_portion=formal_portion,
+        max_rounds=2,
+        storage=StorageConfig(
+            backend="local", local=LocalStorageConfig(workspace=str(tmp_path), run_name="scope")
+        ),
+    )
+    timing = build_timing_context(
+        inp,
+        trial_allowed=True,
+        is_formal_round=True,
+        current_round=2,
+        trial_winner=None,
+        memory_history=[],
+        scope_is_partial=False,
+    )
+    bridge = BoundaryRecorderBridge()
+    bridge.plan(
+        **(planner_kwargs() | {"current_round": 2, "max_rounds": 2}),
+        timing_context=timing,
+        constraint_context=context,
+    )
+    user = " ".join(bridge.captures[0][3].split())
+    assert "full formal evaluation" not in user
+    assert "a formal round on the run's configured Formal training and evaluation scopes" in user
+    assert (
+        f'"field": "trial_portion", "owner": "run", "source": "formal_portion", '
+        f'"value": {formal_portion}' in user
+    )

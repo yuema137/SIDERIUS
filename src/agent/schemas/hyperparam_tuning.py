@@ -1144,10 +1144,23 @@ class TrialConfig(BaseModel):
     """
 
     is_trial: bool = Field(
-        description="Whether this round uses trial (sparse) or formal (full) mode.",
+        description=(
+            "Whether this round is a Trial round (True) or a Formal round "
+            "(False). Trial rounds train on the planner-requested trial "
+            "workload (trial_portion / train_portion) within the run's "
+            "constraints and Trial budgets. Formal rounds train on "
+            "formal_portion of the training data (operator-set on "
+            "HyperparamTuningInput, default 0.1; the plan's portions when "
+            "formal_training_scope_source='agent'), so Formal does not "
+            "imply full-data training, and score on formal_eval_portion."
+        ),
     )
     mode: Literal["trial", "formal", "single_file"] = Field(
-        description="Execution mode: trial (sparse multi-file), formal (full multi-file), or single_file (legacy).",
+        description=(
+            "Execution mode: trial (planner-requested trial workload), formal "
+            "(formal_strategy / formal_portion training scope, formal_eval_portion "
+            "evaluation scope), or single_file (legacy)."
+        ),
     )
 
     # --- Training data ---
@@ -1317,7 +1330,16 @@ class ExperimentPlan(BaseModel):
     # --- Trial/formal decision (per-round) ---
     is_trial: bool = Field(
         default=True,
-        description="Whether this round uses trial (sparse) or formal (full) mode.",
+        description=(
+            "Whether this round is a Trial round (True) or a Formal round "
+            "(False). Trial rounds train on the planner-requested trial "
+            "workload (trial_portion / train_portion) within the run's "
+            "constraints and Trial budgets. Formal rounds train on "
+            "formal_portion of the training data (operator-set on "
+            "HyperparamTuningInput, default 0.1; the plan's portions when "
+            "formal_training_scope_source='agent'), so Formal does not "
+            "imply full-data training, and score on formal_eval_portion."
+        ),
     )
 
     # Training data
@@ -2034,8 +2056,8 @@ class HyperparamTuningInput(BaseModel):
             "  ``train_config.epochs``, and ``train_config.batch_size`` "
             "  from the highest-scoring trial-mode success record in the "
             "  current iteration. Maximum execution certainty: the formal "
-            "  round is a longer training of the trial winner with full "
-            "  eval — not a sandbox for new architectures, losses, or "
+            "  round is a longer training of the trial winner on the "
+            "  configured Formal scopes — not a sandbox for new architectures, losses, or "
             "  hyperparameters. Required for the trial→formal "
             "  inference-time measurement reuse landed in commits B-D of "
             "  ``docs/refine_inference_time_estimator.md``.\n"
@@ -2044,7 +2066,7 @@ class HyperparamTuningInput(BaseModel):
             "  planner's ``model_config``, ``train_config.epochs``, and "
             "  ``train_config.batch_size`` survive verbatim. Audit / "
             "  exploration use case: lock the evaluation surface (loss + "
-            "  lr) but let the LLM scale capacity for the full-data pass. "
+            "  lr) but let the LLM scale capacity for the Formal pass. "
             "  The time gate may reject the planner's heavier choice; "
             "  that is the trade-off.\n"
             "* ``independent`` — the planner's choices for the formal "
@@ -2411,8 +2433,12 @@ class HyperparamTuningInput(BaseModel):
             "gates rounds where the planner picks formal mode (plan.is_trial=False). "
             "None = formal gate disabled; the tuner prints a one-time warning "
             "at startup and skips the time check for formal rounds. Sized "
-            "independently from the trial budget because formal runs use the "
-            "full dataset and have a wall-time scale 50-100× longer."
+            "independently from the trial budget because formal rounds train "
+            "on the Formal training scope (formal_portion × "
+            "formal_train_portion, default 0.1 × 1.0; the plan's portions when "
+            "formal_training_scope_source='agent') and score on "
+            "formal_eval_portion (default 1.0), so their wall time can differ "
+            "greatly from trial rounds."
         ),
     )
     runtime_completion_policy: RuntimeCompletionPolicy = "completed-workload-v1"
@@ -2634,8 +2660,9 @@ class HyperparamTuningInput(BaseModel):
             "where the planner picks formal mode (plan.is_trial=False). "
             "None = formal VRAM gate disabled; the tuner prints a one-time "
             "warning at startup and skips the VRAM check for formal rounds. "
-            "Sized independently from the trial budget because formal runs may "
-            "use larger batch sizes or full-dataset sampling."
+            "Sized independently from the trial budget because formal rounds "
+            "may use larger batch sizes or a larger training scope "
+            "(formal_portion, default 0.1) than trial rounds."
         ),
     )
     vram_probe_step_timeout_seconds: float = Field(
@@ -3952,7 +3979,7 @@ class HyperparamTuningOutput(RecordModel):
         default=None,
         description=(
             "Score comparison table from the most recent successful formal "
-            "(full 20-file) round. Distinct from best_score_table because "
+            "round (configured Formal evaluation scope). Distinct from best_score_table because "
             "cross-architecture comparability only holds at formal scope — "
             "the interpreter prefers this table when deciding which models "
             "to promote. None when no formal round succeeded."
