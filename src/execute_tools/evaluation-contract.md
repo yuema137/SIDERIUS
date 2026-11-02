@@ -314,8 +314,12 @@ bindings only when its manifest declares `evaluation`; absent-evaluation childre
 compose the metric section alone. Structured refusal evidence survives child exit
 1 into `error_scoring` / `failure_type=not_scoreable` and `metric_refusal`.
 Scope and package-integrity exceptions retain their existing terminal handling.
-The record field is omitted when evaluation is absent. Historical records are not
-recomputed. Existing composition locks and metric reconciliation reject changed
+On refusal, `denoising_score_single._emit_outcome` merges secondary fields only
+when `evaluation_result` is present. Without evaluation, the child JSON retains
+the pre-formula refusal bytes even when observational secondaries were computed;
+`test_scoring_refusal_payload.py` checks a fixed historical literal and formula
+refusal evidence preservation. The record field is omitted when evaluation is
+absent. Historical records are not recomputed. Existing composition locks and metric reconciliation reject changed
 formula identities and mixed source/effective ranking histories.
 
 Health receives the original source scalar and vector through
@@ -325,7 +329,10 @@ Existing Health validity filtering still precedes MetricOrder ranking. Consumers
 bound to the effective spec and exercised offline under formula selection: tuner
 run order and planner request, tuner run-output `metric_spec` stamps, attempt-record
 evidence, workflow seed/interpretation reconciliation (`_declared_metric_spec`), the
-native completed-history chain incumbent, the resume record fold, worker loop stop
+native completed-history chain incumbent (through `run_workflow` in
+`test_workflow_completed_history_uses_effective_metric`, including transport to
+the next tuner input; reverting that call site to the source spec fails), the
+resume record fold, worker loop stop
 admission, worker interpretation seeds and prepared candidate payloads. The
 effective `MetricSpec` round-trips through JSON (`evaluation_inputs/v1` is a
 framework scoreability contract), so persisted stamps compare equal on readback.
