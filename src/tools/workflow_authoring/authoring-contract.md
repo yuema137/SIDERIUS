@@ -301,6 +301,11 @@ without a separate browser default. Existing native validation remains authorita
 including refusal of trial-scoped overrides when `is_trial=true`, `max_rounds=1`
 and `force_formal_round=true` would discard them. This limit applies within each
 research-loop iteration, independently of the loop's iteration count.
+The native launch JSON schema exposes a minimum of 1 and explains the forced-Formal
+last tuning round. Its description is shared with the editor's one-round review
+reminder; the browser does not reproduce the native admission predicate. Raising
+the control to at least 2 permits Trial tuning rounds before the final Formal tuning
+round, but does not force the planner to choose Trial. Default remains 10.
 `TrainingInspector.policy` (`TrainingChoiceControl`, `policy_controls`) projects the two
 required launch choices training admission has no default for: **Health checks**
 (`healthgate_mode`: Record only = `observe_only`, Block on failure = `blocking`) and

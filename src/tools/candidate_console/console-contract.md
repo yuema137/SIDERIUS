@@ -1712,6 +1712,16 @@ by the task manifest, shown as `definition.task.manifest` and any task binding;
 no control edits them). A card whose server inventory has a required unbound input
 gets `.has-required-unbound` and a small `.circuit-problem-badge` count; the soft red
 ring is on the unconnected socket itself.
+For a refused one-tuning-round review, `editorNodeParameters.reviewHint` appends
+the native `max_rounds` help description and names **Tuning rounds per iteration**
+in **Training settings**. It is a settings reminder, not a diagnosis or a browser
+admission rule: it applies only to explicit `max_rounds=1` with HTTP 422 request
+validation, or source diagnostics containing a `validation` code. Conflict,
+authentication and source syntax errors do not earn this reminder. Loop reviews
+retain their existing loop-specific guidance. Native error redaction is unchanged.
+`tests/browser/editor_max_rounds_help.mjs` exercises schema help/minimum projection,
+the refused one-round edit and successful correction to two with a preserved Trial
+override; neither review writes the source or launches training.
 `#editor-problems` (`editor-problems.js`, beside Review) lists "N problems" from
 server diagnostics only: draft `problems` (`DraftProblem`) and source diagnostics
 (`SourceDiagnostic`). It is hidden when empty. A located item selects its node and
