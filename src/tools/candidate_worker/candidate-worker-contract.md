@@ -1966,8 +1966,8 @@ check `verify_graph_trace` calls). `scheduling="parallel-v1"` must equal
 parallel trace: (e) `parallel_budget.json` must have the digest of the run's
 admitted budget (`parallel.budget`, or the `run_budget()` of the host grant of
 the segment that ran the iteration); (d) a receipt exists exactly for every
-dispatched entry (a unit with an outcome; an adaptor readiness did not block)
-and names it; (b) a placement exists exactly for a declared unit, names it and
+dispatched entry (a unit or adaptor whose state is in
+`graph_models.DISPATCHED_STATES`) and names it; (b) a placement exists exactly for a declared unit, names it and
 the budget, and an undeclared unit overlapped no other unit; (c) the exit agrees
 with the state (`returned` for an outcome with a record, `raised` or
 `process_failed` for a failure without one; adaptors `raised` iff failed);
@@ -1984,8 +1984,17 @@ including route control edges and every fan-in source. It reuses
 for sources closed without dispatch it follows their predecessors to the latest
 recorded end. Thus a skipped route arm consumed by an adaptor needs no invented
 receipt, but its deciding source must have ended. Violations raise `ValueError`
-(`started before its sources ended`). `graph_models.DISPATCHED_STATES` owns
-the shared unit outcome states; adaptors may also dispatch and return skipped.
+(`started before its sources ended`). `graph_models.DISPATCHED_STATES`
+(`succeeded`, `rejected`, `failed`) is the one definition of "dispatched" for
+units and adaptors, used by the receipt check (`parallel_evidence._dispatched`),
+the readiness replay (`graph_evidence._replay_step`) and the adaptor entry
+check (#1454). An executed adaptor never ends `skipped`: `execute_adaptor`
+closes it with `AdaptorOutcome.status`, whose type is exactly those three
+states, or `failed` on an exception, and readiness closes an undispatched
+adaptor only as `blocked`/`dependency_not_successful`. A `skipped` adaptor
+entry is therefore refused: with a receipt by (d), without one by the
+readiness replay. `test_parallel_causality.py` guards both facts and runs the
+real dispatcher to each reachable adaptor state.
 Serial verification and serialized trace/digest bytes are unchanged.
 
 `replay_readiness(..., drained=window)` replays a parallel trace without the

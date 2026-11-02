@@ -58,7 +58,7 @@ def drained_entries(
         raise ValueError("parallel body budget differs from the run's admitted budget")
     entries = {item.node_id: item for item in (*trace.nodes, *trace.adaptors)}
     adaptors = frozenset(item.node_id for item in trace.adaptors)
-    receipts = _receipts(initial, entries, adaptors, iteration)
+    receipts = _receipts(initial, entries, iteration)
     declared = frozenset(declared_units(request))
     for node_id, receipt in receipts.items():
         _check_receipt(entries[node_id], receipt, node_id in declared, node_id in adaptors, budget)
@@ -89,22 +89,28 @@ def admitted_budget(
     return grant.run_budget()
 
 
-def _dispatched(item: GraphNodeEvidence, adaptor: bool) -> bool:
-    """Readiness closes an adaptor only as blocked; a unit is dispatched iff it has an outcome."""
-    return item.state != "blocked" if adaptor else item.state in DISPATCHED_STATES
+def _dispatched(item: GraphNodeEvidence) -> bool:
+    """An entry, unit or adaptor, is dispatched iff it has an outcome (``DISPATCHED_STATES``).
+
+    One definition with the readiness replay (#1454): an executed adaptor closes
+    with its ``AdaptorOutcome.status`` (succeeded, rejected or failed) or fails on
+    an exception, and readiness closes an undispatched adaptor only as
+    ``blocked``. So no valid trace holds a ``skipped`` adaptor; one that does is
+    refused here if it has a receipt, else by the replay.
+    """
+    return item.state in DISPATCHED_STATES
 
 
 def _receipts(
     initial: CandidateRunReceipt,
     entries: Mapping[str, GraphNodeEvidence],
-    adaptors: frozenset[str],
     iteration: int,
 ) -> dict[str, UnitReceipt]:
     """(d) a receipt exists exactly for every dispatched entry, and names it."""
     receipts: dict[str, UnitReceipt] = {}
     for node_id, item in entries.items():
         path = unit_paths(initial, node_id, iteration=iteration)[0].with_name(_RECEIPT_FILE)
-        dispatched = _dispatched(item, node_id in adaptors)
+        dispatched = _dispatched(item)
         if path.exists() != dispatched:
             raise ValueError(f"parallel trace entry {node_id!r} receipt contradicts its state")
         if dispatched:

@@ -7,12 +7,13 @@ from pathlib import Path
 import pytest
 
 from tests.helpers.candidate_fanout import FALLBACK_ROUTE, routed_request, selection_request
-from tools.candidate_worker import launch_candidate, parallel_dispatch
+from tools.candidate_worker import adaptor_phase, launch_candidate, parallel_dispatch, readiness
 from tools.candidate_worker.graph_evidence import DrainWindow, verify_graph_trace
-from tools.candidate_worker.graph_models import GraphNodeEvidence
+from tools.candidate_worker.graph_models import DISPATCHED_STATES, GraphNodeEvidence
 from tools.candidate_worker.models import CandidateRunReceipt
 from tools.candidate_worker.parallel_evidence import _check_causality
 from tools.candidate_worker.parallel_models import UnitReceipt
+from tools.candidate_worker.unit_models import unit_paths
 
 from .test_native import native_runner
 from .test_parallel_dispatch import _budget, _parallel, _Starter
@@ -210,7 +211,7 @@ def test_adaptor_waits_for_the_source_of_a_skipped_route_arm():
             capability="adaptor",
             predecessors=("X",),
             storage="pick",
-            state="skipped",
+            state="rejected",
             reason="no_admissible_input",
         ),
     }
@@ -246,3 +247,102 @@ def test_adaptor_waits_for_the_source_of_a_skipped_route_arm():
             entries,
             DrainWindow(ended={"check0": 3, "pick": 4}, failure_end=None),
         )
+
+
+# Dispatched adaptor states (#1454): see parallel-causality-testing.md.
+_TERMINAL = (
+    ("succeeded", None),
+    ("rejected", "validation_rejected"),
+    ("failed", "native_failure"),
+    ("blocked", "dependency_not_successful"),
+    ("skipped", "route_not_selected"),
+    ("skipped", "insufficient_items"),
+)
+
+
+def test_adaptor_states_share_the_one_dispatched_definition():
+    """Fails if an adaptor can end ``skipped`` (or any non-dispatched state) after
+    running, or readiness can close one other than ``blocked``: then a valid
+    parallel trace's receipt check (``_dispatched``) and readiness replay
+    (``DISPATCHED_STATES``) would disagree about that adaptor."""
+    from typing import get_args
+
+    from workflows.adaptors.run import AdaptorOutcome
+
+    assert frozenset(get_args(AdaptorOutcome.model_fields["status"].annotation)) == (
+        DISPATCHED_STATES
+    )
+    for (left, left_reason), (right, right_reason), aborted in product(
+        _TERMINAL, _TERMINAL, (False, True)
+    ):
+        nodes = (
+            readiness.NodeReadiness(node_id="a", predecessors=(), state=left, reason=left_reason),
+            readiness.NodeReadiness(node_id="b", predecessors=(), state=right, reason=right_reason),
+            readiness.NodeReadiness(
+                node_id="pick", predecessors=("a", "b"), state="pending", kind="adaptor"
+            ),
+        )
+        step = readiness.next_dispatch(readiness.ReadinessInput(nodes=nodes, aborted=aborted))
+        assert step.next == "pick" or step.terminal == (
+            ("pick", "blocked", "dependency_not_successful"),
+        ), (left, right, aborted, step)
+
+
+def _selection_run(prepared, monkeypatch, failing: frozenset[str] = frozenset()):
+    """S1 fan-in (``pick``) under the real parallel dispatcher."""
+    base = _parallel(prepared, _budget(units=4))
+    request = selection_request(prepared).model_copy(update={"parallel": base.parallel})
+    monkeypatch.setattr(parallel_dispatch, "start_unit", _Starter(0, failing=failing))
+    monkeypatch.setattr(parallel_dispatch, "POLL_SECONDS", 0)
+    receipt = launch_candidate(request)
+    assert receipt.graph_trace is not None, receipt.error
+    return request, receipt
+
+
+@pytest.mark.parametrize("outcome", ["succeeded", "rejected", "failed", "blocked"])
+def test_real_dispatcher_adaptor_states_verify(
+    prepared, native_runner, training_runner, monkeypatch, outcome
+):
+    """Each reachable adaptor state, produced by the real parallel dispatcher, is
+    accepted, and it has a receipt iff it is in ``DISPATCHED_STATES``. Fails if the
+    receipt check and the replay define an executed adaptor differently.
+
+    The rejected adaptor relabelled ``skipped`` (no record, a skip reason; its
+    consumer stays blocked) is refused with its receipt (receipt check) and
+    without it (readiness replay): no run produces that state, so neither
+    definition may accept it."""
+    if outcome == "rejected":  # every validation rejects: nothing admissible
+        native_runner.reject = True
+    elif outcome == "failed":
+
+        def raising(*args, **kwargs):
+            raise RuntimeError("adaptor fault")
+
+        monkeypatch.setattr(adaptor_phase, "decide", raising)
+    # A failed source closes the adaptor undispatched.
+    failing = frozenset({"check0"} if outcome == "blocked" else ())
+    request, receipt = _selection_run(prepared, monkeypatch, failing)
+    (pick,) = receipt.graph_trace.adaptors
+    assert pick.state == outcome
+    initial = _launched(receipt)
+    path = unit_paths(initial, "pick", iteration=1)[0].with_name("placement.json")
+    assert path.exists() == (pick.state in DISPATCHED_STATES)
+    verify_graph_trace(request, initial, receipt)
+    if outcome != "rejected":
+        return
+    forged = pick.model_copy(
+        update={
+            "state": "skipped",
+            "reason": "insufficient_items",
+            "record_path": None,
+            "record_sha256": None,
+        }
+    )
+    skipped = receipt.model_copy(
+        update={"graph_trace": receipt.graph_trace.model_copy(update={"adaptors": (forged,)})}
+    )
+    with pytest.raises(ValueError, match="'pick' receipt contradicts its state"):
+        verify_graph_trace(request, initial, skipped)
+    path.rename(path.with_name("placement.json.moved"))
+    with pytest.raises(ValueError, match="violates serial readiness"):
+        verify_graph_trace(request, initial, skipped)
