@@ -268,13 +268,17 @@ A run can launch with a formula, and the step 6 check prints
   `--target_score_metric <effective_metric_id>`, and research-loop stop
   conditions that compare a score must use the same id. A threshold written
   for the main metric is refused rather than compared with the utility;
-- tuner settings measured in score units (enabled formal skip/bypass gates
-  and the degeneration penalty) need `--score_units_metric
-  <effective_metric_id>` for the same reason;
+- two optional tuner settings are measured in score units:
+  `--enable_chain_incumbent_formal_gates` (the formal skip/bypass gates) and
+  `--degenerate_penalty_score`. When you set either one, also pass
+  `--score_units_metric <effective_metric_id>` for the same reason;
 - formulas work only when your task's own metric code scores the candidates
-  (the CSV template does). Other scoring routes are refused at launch
-  (anchor-normalized scoring and an external `CandidateEvaluationExecutor`;
-  see the [evaluation contract](../../../src/execute_tools/evaluation-contract.md)).
+  (the CSV template does). Other scoring routes are refused: an external
+  `CandidateEvaluationExecutor` when the run binds the task, and
+  anchor-normalized scoring before the first training attempt. The step 6
+  check does not test the scoring route, so `Launch check: admitted` does not
+  prove your task scores its own candidates; see the
+  [evaluation contract](../../../src/execute_tools/evaluation-contract.md).
 
 ## Step 4: a balancing rule in words
 
@@ -418,7 +422,9 @@ model plugins and can be ignored. It prints three things:
 
 1. **The block the agents see**, from `[TASK EVALUATION]` to
    `[END TASK EVALUATION]`.
-2. **The inspection**: `warnings`, `marginal_rates` (step 3),
+2. **The inspection**: for a formula first `effective_metric_id`,
+   `effective_direction` and `effective_units`; then `warnings`,
+   `marginal_rates` (step 3),
    `required_capabilities` (the runtime parts your declaration needs) and
    `identity` (a 64-character fingerprint of the declaration).
 3. **The launch check.** For the step 2 example it ends with
