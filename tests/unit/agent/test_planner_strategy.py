@@ -213,11 +213,15 @@ def test_conditional_provider_system_text_reaches_final_request(monkeypatch):
 # Deliberately moved by #1403: StubLLMBridge derives pseudo proposal semantics
 # from the bound contract through agent.stub_model; planner content is
 # unchanged (previous assembly bb5eaf83...).
+# Deliberately moved by #1472: the reflector's Data Volume Context (prompts.py)
+# names the round mode and the knob that set each executed portion, so a Formal
+# round no longer shows formal_portion as trial_portion (previous content
+# 8e373ea3..., assembly 35069313...).
 NATIVE_PLANNER_IDENTITY_PIN = {
     "name": "native-timing-v1",
     "version": "1",
-    "content_sha256": "8e373ea3ed2ebbcf7e8de9033a4206e375643eeecbb3f3fad403c383f58455e2",
-    "assembly_sha256": "3506931323ef7fa81c392ecb67280bc8e5fa3c6973376c9f0bd88e526aaf0f8c",
+    "content_sha256": "4f99e7be90242ec6e8628b734a7f06cf2843e12f575290c60649390462e75f51",
+    "assembly_sha256": "55576b32d4ebf7de9adb05b7398c1e3de242d6ad517fdcdd30b7379028461234",
 }
 
 

@@ -643,9 +643,10 @@ class BestTracks:
     filters are what carry the meaning:
 
     * ``top`` — any successful, finite-scored record;
-    * ``formal`` — of those, the full-scope (non-trial) ones. Formal records
-      have no ``is_trial`` key (it is set only when ``trial_config.is_trial``);
-      absence == formal;
+    * ``formal`` — of those, the Formal-round (non-trial) ones, which train on
+      the run's Formal training scope (``formal_portion`` by default, not
+      necessarily full data). Formal records have no ``is_trial`` key (it is
+      set only when ``trial_config.is_trial``); absence == formal;
     * ``valid`` — of those, the HealthGate-valid ones;
     * ``valid_formal`` — valid AND formal (the chain incumbent's source);
     * ``valid_trial`` — valid AND trial. V19 PR 1 (P1-C4) bookkeeping,
