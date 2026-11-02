@@ -126,7 +126,7 @@ stale:
 
   The §8 composition cell, by contrast, IS pure recomputation and has been
   re-derived from the committed pack (`60fde910197c…`, fingerprint
-  `f6ffd579815e0a14…`). A reader comparing §8 against §10 will therefore
+  `b1c916f8fc5e53b3…`). A reader comparing §8 against §10 will therefore
   see them disagree; the disagreement is real, explained here, and the
   §8 values are the ones that describe the pack you have.
 
