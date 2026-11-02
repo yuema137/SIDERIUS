@@ -8,3 +8,9 @@ The single provider boundary is [`src/agent/llm_bridge.py`](../../../../src/agen
 with an offline HTTP transport. It checks complete declared calls, rejected
 ambiguous or malformed results, billed usage, and deadline precedence. The
 Direct API witnesses exercise the same admission rules through its adapter.
+
+Whenever `llm_bridge.py` changes, also run
+`.venv/bin/python -m pytest tests/unit/agent/test_planner_strategy.py -q`.
+The native planner pins the bridge source for workspace resume, even when
+planner prompt content is unchanged. A moved assembly pin needs an explicit
+compatibility note and freeze-batch requalification.

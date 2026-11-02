@@ -174,6 +174,12 @@ all Python sources beneath `llm_transport`, in addition to the existing prompt
 owners. A transport or routing source change after preflight therefore refuses
 the pinned planner identity before the provider request. Source identity does
 not establish equivalence of live model outputs or qualify dependency upgrades.
+The native planner's `content_sha256` fingerprints `prompts.py`, while its
+`assembly_sha256` also fingerprints bridge and transport sources. Admission-only
+changes can therefore preserve content identity while refusing resume against
+an older workspace assembly pin. Such changes require deliberate pin updates
+in `tests/unit/agent/test_planner_strategy.py` and freeze-batch requalification;
+run that test whenever `llm_bridge.py` changes. Do not rewrite archived pins.
 This intentionally changes the assembly digest; existing run locks and archived
 paper identities are not rewritten or treated as equivalent.
 
