@@ -723,8 +723,9 @@ select a finite 600-second worker budget. CPU child-process success tests in
 `tests/unit/core/test_native_gpu_execution.py` select the same 600-second ceiling
 for preparation, acknowledgement, watchdog and observation-barrier waits. The
 launch matrix retains its fixed wiring clocks and original synthetic observation
-freshness policy (see `tests/unit/core/native-launch-testing.md`). These are test inputs: durable fixture publication and receipt reads consume wall time
-on slow scratch storage. They do not measure production latency. No production
+freshness policy (see `tests/unit/core/native-launch-testing.md`). These are test
+inputs: durable fixture publication and receipt reads consume wall time on slow
+scratch storage. They do not measure production latency. No production
 deadline, scientific default, prompt or identity changes with these selections.
 
 Controlled-clock expiry cases retain their exact small boundaries. The real
