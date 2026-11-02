@@ -31,3 +31,10 @@ contributor named `reviewer`, then a newline, then `### forged` appears as
 `### "reviewer\n### forged"` instead of opening a second heading. Card fields
 such as `coverage`, and item `content`, keep their text. Duplicate items are
 still matched on the stored `source_ref` before it is encoded for display.
+
+Data Analysis evidence follows the same rule for its identifiers: the report
+reference, each question and finding ID, each method ID on the `Methods:`
+line, and each measurement's result key and unit. For example, a finding ID
+`f1`, then a newline, then `### forged` appears as
+`- Finding "f1\n### forged" [...]` instead of opening a heading. Summaries,
+statements, measurement values and descriptions keep their text.

@@ -131,8 +131,9 @@ def _single_line_label(label: str) -> str:
     """Render a label on one line while keeping distinct raw labels distinguishable.
 
     The one presentation owner for contributor names, contribution IDs, source
-    names and citation labels on every proposal evidence surface (#1462,
-    #1465). Labels containing a line break, or starting with a double quote,
+    names, citation labels and Data Analysis identifiers (report reference,
+    question, finding, method, result key and unit) on every proposal evidence
+    surface (#1462, #1465, #1497). Labels containing a line break, or starting with a double quote,
     render as JSON strings; every other label, including the empty string,
     keeps its bytes. Evidence prose is never passed through here.
     """
@@ -278,7 +279,9 @@ def render_data_analysis_evidence(evidence) -> str:
 
     ``None`` deliberately renders no bytes so analysis-disabled proposal
     prompts retain their legacy shape.  The renderer never opens report or
-    skill artifact references.
+    skill artifact references.  Identifier labels pass through
+    ``_single_line_label`` so a line separator inside one cannot forge a
+    bullet or heading; summaries, statements and descriptions stay prose.
     """
 
     if evidence is None:
@@ -288,32 +291,33 @@ def render_data_analysis_evidence(evidence) -> str:
 
     lines = [
         "## Data Analysis Evidence",
-        f"Report: {evidence['report_ref']['logical_ref']} "
+        f"Report: {_single_line_label(evidence['report_ref']['logical_ref'])} "
         f"(sha256={evidence['report_ref']['sha256']})",
         f"Executive summary: {evidence['executive_summary']}",
     ]
     for outcome in evidence.get("question_outcomes", []):
         lines.append(
-            f"- Question {outcome['question_id']} [{outcome['status']}]: {outcome['summary']}"
+            f"- Question {_single_line_label(outcome['question_id'])} "
+            f"[{outcome['status']}]: {outcome['summary']}"
         )
     for finding in evidence.get("findings", []):
         lines.append(
-            f"- Finding {finding['finding_id']} "
+            f"- Finding {_single_line_label(finding['finding_id'])} "
             f"[{finding['confidence_level']} confidence]: {finding['statement']}"
         )
         lines.append(f"  Modeling relevance: {finding['modeling_relevance']}")
         methods = [
-            *(f"skill:{item}" for item in finding.get("method_skill_ids", [])),
+            *(f"skill:{_single_line_label(item)}" for item in finding.get("method_skill_ids", [])),
             *(
-                f"generated_program:{item}"
+                f"generated_program:{_single_line_label(item)}"
                 for item in finding.get("method_generated_program_ids", [])
             ),
         ]
         lines.append(f"  Methods: {', '.join(methods)}")
         for measurement in finding.get("quantitative_evidence", []):
-            unit = f" {measurement['unit']}" if measurement.get("unit") else ""
+            unit = f" {_single_line_label(measurement['unit'])}" if measurement.get("unit") else ""
             lines.append(
-                f"  Measurement {measurement['result_key']}: "
+                f"  Measurement {_single_line_label(measurement['result_key'])}: "
                 f"{measurement['value']}{unit} ({measurement['description']})"
             )
     for limitation in evidence.get("limitations", []):
