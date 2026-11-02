@@ -207,9 +207,7 @@ def get_run(
     run_name: str,
     limit: int = Query(default=200, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
-    status: str | None = Query(
-        default=None, description="Filter by status: success | skipped_oom_risk"
-    ),
+    status: str | None = Query(default=None, description="Filter by persisted experiment status"),
 ):
     """
     Paginated experiment records for a model/run combination.
@@ -435,7 +433,11 @@ def list_exploration_models(run_name: str):
     return {"run_name": run_name, "models": sorted(set(models))}
 
 
-@router.get("/exploration/runs/{run_name}/models/{model_name}", tags=["exploration"])
+@router.get(
+    "/exploration/runs/{run_name}/models/{model_name}",
+    response_model=RunSummary,
+    tags=["exploration"],
+)
 def get_exploration_records(
     run_name: str,
     model_name: str,

@@ -47,8 +47,8 @@ _C_MUTED = "#a0aec0"
 def _gapped(series: list[float | None]) -> list[float]:
     """A diverged epoch becomes an explicit NaN, so the curve BREAKS there.
 
-    A ``None`` element is the storage image of a non-finite objective
-    (``coerce_nonfinite_to_none`` writes JSON null for NaN/inf; ``#299`` made
+    A ``None`` element is the legacy storage image of a non-finite objective
+    (before #1111 ``coerce_nonfinite_to_none`` wrote JSON null for NaN/inf; ``#299`` made
     ``TrainingHistory`` and this report's projection declare the tolerant
     element type to match). matplotlib already coerces such an element to
     ``NaN`` internally and draws a gap — this makes that meaning EXPLICIT at
