@@ -29,6 +29,9 @@ from core.training_seeds import SeedContext
 from tests.unit.core.test_checkpoint_inference_measurement import bound_spec
 from tests.unit.core.test_gpu_runtime_protection import Clock, policy
 
+# Success-path process tests include durable I/O on slow scratch storage.
+OFFLINE_IO_BUDGET_SECONDS = 600.0
+
 
 @pytest.fixture(autouse=True)
 def no_optimizer_updates(monkeypatch):
@@ -39,13 +42,13 @@ def no_optimizer_updates(monkeypatch):
         monkeypatch.setattr(optimizer, "step", forbidden)
 
 
-def execution_policy():
+def execution_policy(*, slow_storage: bool = False):
     return GpuExecutionPolicy(
-        phase_measurement_budget_seconds=60.0,
+        phase_measurement_budget_seconds=OFFLINE_IO_BUDGET_SECONDS if slow_storage else 60.0,
         worker_rss_limit_bytes=1024**3,
-        startup_ack_timeout_seconds=2.0,
+        startup_ack_timeout_seconds=OFFLINE_IO_BUDGET_SECONDS if slow_storage else 2.0,
         startup_receipt_limit_bytes=1024**2,
-        protection=policy(),
+        protection=policy(age=OFFLINE_IO_BUDGET_SECONDS if slow_storage else 1.0),
     )
 
 
@@ -71,14 +74,17 @@ def test_shared_allowance_excludes_execution_and_does_not_reset():
 
 
 def startup_fixture(tmp_path, spec, *, clock=None, child_pid=1234):
+    # Controlled-clock expiry witnesses retain their small, exact boundaries.
+    preparation_seconds = 10.0 if clock is not None else OFFLINE_IO_BUDGET_SECONDS
+    ack_seconds = 1.0 if clock is not None else OFFLINE_IO_BUDGET_SECONDS
     clock = clock or time.monotonic
     directory = tmp_path / "startup"
     directory.mkdir()
     request = InferenceStartupRequest(
         nonce="attempt",
         spec=spec,
-        deadline_at=clock() + 10,
-        ack_timeout_seconds=1.0,
+        deadline_at=clock() + preparation_seconds,
+        ack_timeout_seconds=ack_seconds,
         poll_seconds=0.01,
         receipt_limit_bytes=1024**2,
     )
@@ -274,7 +280,7 @@ def test_real_child_handshake_owns_group_and_records_consumption(tmp_path, bound
         observer=obs,
         control=obs,
         startup=startup,
-        deadline_provider=(lambda: (2.0, "test")) if watchdog else None,
+        deadline_provider=(lambda: (OFFLINE_IO_BUDGET_SECONDS, "test")) if watchdog else None,
     )
     assert result.completed.stdout.strip() == "child completed"
     assert startup.receipt.loaded == startup.receipt.consumed
@@ -400,7 +406,7 @@ def test_native_adapter_preserves_ordinary_call_and_selected_typed_lifecycle(mon
     assert len(calls) == 1
 
 
-def selected_state(spec, phase):
+def selected_state(spec, phase, *, slow_storage: bool = False):
     """Supply typed completed measurement facts; no GPU work is performed."""
     from core.runtime_control.gpu_execution_evidence import AttemptGpuExecution, PreparedGpuPhase
     from core.runtime_control.inference_measurement_assessment import InferenceMeasurementAssessment
@@ -427,8 +433,13 @@ def selected_state(spec, phase):
     assessment_type = (
         TrainingMeasurementAssessment if phase == "training" else InferenceMeasurementAssessment
     )
-    selected = execution_policy()
-    state = AttemptGpuExecution("attempt", "exp-a", selected, MeasurementAllowance(60.0))
+    selected = execution_policy(slow_storage=slow_storage)
+    state = AttemptGpuExecution(
+        "attempt",
+        "exp-a",
+        selected,
+        MeasurementAllowance(selected.phase_measurement_budget_seconds),
+    )
     state.phases[phase] = PreparedGpuPhase(
         attempt_token="attempt",
         spec=spec,
@@ -472,7 +483,7 @@ def test_actual_native_launch_and_terminal_receipt(
         from ml_models.plugin_loader import PLUGIN_OUTPUT_TYPE_REGISTRY
 
         monkeypatch.setitem(PLUGIN_OUTPUT_TYPE_REGISTRY, bound_spec.request.model_type, "regressor")
-        state = selected_state(bound_spec, phase)
+        state = selected_state(bound_spec, phase, slow_storage=True)
         sandbox.gpu_execution = state
         # Validation/source freshness has separate direct witnesses below; this
         # matrix exercises the four actual process branches and terminal owner.
@@ -515,7 +526,7 @@ def test_actual_native_launch_and_terminal_receipt(
                                 released = True
 
                     # Bound a broken observation handshake without sleep polling.
-                    timer = threading.Timer(60.0, expire_barrier)
+                    timer = threading.Timer(OFFLINE_IO_BUDGET_SECONDS, expire_barrier)
 
                     def release_after_observation():
                         nonlocal released
@@ -535,9 +546,7 @@ def test_actual_native_launch_and_terminal_receipt(
                         timer.cancel()
                         timer.join()
                         if expired:
-                            pytest.fail(
-                                "GPU observation barrier was not released within 60 seconds"
-                            )
+                            pytest.fail("GPU observation barrier exhausted the offline I/O budget")
             else:
                 assert "--inference_startup_json" in cmd
                 path = Path(cmd[cmd.index("--inference_startup_json") + 1])
@@ -547,7 +556,7 @@ def test_actual_native_launch_and_terminal_receipt(
         monkeypatch.setattr(native, "supervise_subprocess", scientific_child)
         scopes = SimpleNamespace(training=object(), evaluation=object())
         runtime = {
-            "operator_budget_seconds": 10.0,
+            "operator_budget_seconds": OFFLINE_IO_BUDGET_SECONDS,
             "watchdog": {"enabled": watchdog, "poll_seconds": 0.01, "grace_seconds": 0.1},
         }
         if phase == "training":

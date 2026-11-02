@@ -683,3 +683,26 @@ comments, docstrings and schema descriptions use normal CI; no semantic equivale
 inferred from a small textual diff. Normal PRs keep the affected-test selector, and
 master pushes, scheduled/manual runs and unknown impact keep their existing full-suite
 policy. Production and paper experiment configuration are unchanged.
+
+## Offline success-path budgets on slow scratch storage
+
+Candidate-worker `prepared` requests in `tests/unit/tools/candidate_worker/conftest.py`
+select a finite 600-second worker budget. CPU child-process success tests in
+`tests/unit/core/test_native_gpu_execution.py` select the same 600-second ceiling
+for preparation, acknowledgement, watchdog and observation-barrier waits, plus
+the freshness of synthetic GPU observations while publishing startup files. These
+are test inputs: durable fixture publication and receipt reads consume wall time
+on slow scratch storage. They do not measure production latency. No production
+deadline, scientific default, prompt or identity changes with these selections.
+
+Controlled-clock expiry cases retain their exact small boundaries. The real
+missing-acknowledgement test still selects 0.1 seconds and requires timeout,
+process-group cleanup and absence of forward execution. Successful runs still
+require complete receipts and native validation; they are never retried. The
+worker budget transport assertions still require a positive remaining limit no
+larger than the request budget, including resumed segments.
+
+Use an explicit `TMPDIR` and pytest `--basetemp` on the selected scratch filesystem,
+with the thread limits in section 3.1. Even these finite test ceilings require
+storage that makes progress within 600 seconds; a stall beyond that bound is a
+test-resource limitation to diagnose, not grounds to bypass supervision.
