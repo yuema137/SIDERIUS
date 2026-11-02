@@ -48,6 +48,12 @@ uses native JSON-object output when the model adapter declares support; otherwis
 JSON uses a result tool and requires compatible tool support. Truncated
 results are rejected rather than accepted as complete artifacts.
 
+Tool selection returns one complete call to a tool offered in that request,
+with a call ID and JSON-object arguments. This also applies to the default
+OpenAI-compatible route. Extra calls, truncation, or unknown tool names fail
+after usage is recorded; the bridge does not execute tools or retry an invalid
+returned selection.
+
 Before a campaign, test the actual model and operations your workflow needs.
 Offline adapter tests do not establish account access, quotas, or scientific
 quality. See the [transport contract](transport-contract.md) for protocol

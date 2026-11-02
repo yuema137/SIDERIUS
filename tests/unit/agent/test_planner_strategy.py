@@ -203,11 +203,15 @@ def test_conditional_provider_system_text_reaches_final_request(monkeypatch):
 # Combined with #1314's retention of inactive-rule receipts in condensed history.
 # Deliberately moved by #1322: planner history retains resolution_events and
 # labels a superseded proposal (previous content b11d3c2f..., assembly 79bb612d...).
+# Deliberately moved by #910 / PR #1457: bridge single-tool admission and its
+# shared transport owner change assembly bytes, not planner content_sha256.
+# Resume with the previous 2c170d92... assembly remains refused; freeze batches
+# must requalify the new assembly instead of rewriting archived workspace pins.
 NATIVE_PLANNER_IDENTITY_PIN = {
     "name": "native-timing-v1",
     "version": "1",
     "content_sha256": "ec2b0c06e5bc3607209008b16ce8302dff3293e133602f7cd2404939d993ec66",
-    "assembly_sha256": "2c170d924df88bbac10e15560d682a86bbc05de6a5e1a52c85993bb5c0d1a2a2",
+    "assembly_sha256": "19e970841d37ac7fb2d310f0b88552b124918246e955bff48982a7afbf2deef8",
 }
 
 
