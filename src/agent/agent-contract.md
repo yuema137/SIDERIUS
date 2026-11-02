@@ -173,3 +173,33 @@ evaluation capabilities retain their own guards. Rubric judgment is
 never arithmetic in MetricOrder; #1297 owns any new candidate-result projector and
 versioned judge evidence. The exact schema and future Health/source-metric binding
 are in the [evaluation contract](../execute_tools/evaluation-contract.md).
+
+## Pseudo model tensor geometry
+
+`StubLLMBridge` delegates implementor code and repair snippets to
+`stub_model.stub_model_code`. For composed runs it acquires the validated
+`ModelIOContract` through `workflows.task_config.run_bound_model_io_contract`.
+The stub accepts numeric tensors without treating values as vocabulary indices.
+It expands a differentiable scalar projection to the declared output: fixed
+extents remain fixed, and shared symbolic extents are read from the corresponding
+input axes at forward time. Batch size and symbolic sequence/row lengths are
+therefore not frozen to smoke-test sizes. The projection is a plumbing witness,
+not a scientific architecture or a useful predictor.
+
+An output extent that is neither fixed nor shared with the input raises
+`UnsupportedStubShapeError`, identifying the unresolved output axis before
+plugin execution. Unbound bridge fixtures and legacy prose-only declarations
+retain the historical 256-token sequence stub. The projection emits float32;
+output contracts excluding float32 remain unsupported and fail the existing candidate output check. Real provider calls,
+prompt templates and task declarations are unchanged. Explicit-contract pseudo
+plugin bytes and their downstream artifact identities change. The conservative
+`rendering_assembly_digest` and planner strategy assembly identity also change
+because their source closures include `llm_bridge.py`, even though real-provider
+prompt templates are unchanged. Resume/preflight identity checks remain strict.
+
+`tests/unit/agent/llm_bridge/test_stub_task_shapes.py` covers negative float
+inputs, image classification, sequence classification, row classification and
+continuous tensor outputs through candidate validation and forward/backward
+execution with changing runtime extents. Passing these checks establishes model
+shape compatibility; it does not establish that downstream pseudo training or
+resource admission supports a task or host.
