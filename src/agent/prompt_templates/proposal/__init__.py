@@ -307,11 +307,13 @@ def render_data_analysis_evidence(evidence) -> str:
     return "\n".join(lines)
 
 
-def _review_heading_label(label: str) -> str:
-    """Keep multiline IDs on one display line without changing their stored identity."""
-    # JSON quoting preserves the label, including Unicode line separators;
-    # ordinary labels keep their existing prompt bytes.
-    return json.dumps(label, ensure_ascii=True) if label.splitlines() != [label] else label
+def _literature_label(label: str) -> str:
+    """Render a label on one line while keeping distinct raw labels distinguishable."""
+    # Reserve leading quotes for JSON encoding so literal encoded-looking IDs
+    # cannot collide with multiline labels. Ordinary labels keep their bytes.
+    if label.startswith('"') or label.splitlines() != [label]:
+        return json.dumps(label, ensure_ascii=True)
+    return label
 
 
 def render_literature_review_evidence(evidence) -> str:
@@ -328,8 +330,8 @@ def render_literature_review_evidence(evidence) -> str:
             card = contribution["agent_card"]
             lines.extend(
                 [
-                    f"### Review: {_review_heading_label(review['contribution_id'])}",
-                    f"Contributor: {card['agent_name']} ({card['trust_level']})",
+                    f"### Review: {_literature_label(review['contribution_id'])}",
+                    f"Contributor: {_literature_label(card['agent_name'])} ({card['trust_level']})",
                     f"Coverage: {card['coverage']}",
                     f"Limitations: {card['limitations']}",
                 ]
@@ -338,7 +340,8 @@ def render_literature_review_evidence(evidence) -> str:
                 confidence = finding.get("confidence")
                 confidence_label = "unscored" if confidence is None else str(confidence)
                 lines.append(
-                    f"- Literature claim [{finding['source_ref']}; confidence={confidence_label}]: "
+                    f"- Literature claim [{_literature_label(finding['source_ref'])}; "
+                    f"confidence={confidence_label}]: "
                     f"{finding['content']}"
                 )
         lines.append(
@@ -349,7 +352,7 @@ def render_literature_review_evidence(evidence) -> str:
     card = evidence["agent_card"]
     lines = [
         "## Machine Learning Literature Review Evidence",
-        f"Contributor: {card['agent_name']} ({card['trust_level']})",
+        f"Contributor: {_literature_label(card['agent_name'])} ({card['trust_level']})",
         f"Coverage: {card['coverage']}",
         f"Limitations: {card['limitations']}",
     ]
@@ -357,7 +360,8 @@ def render_literature_review_evidence(evidence) -> str:
         confidence = finding.get("confidence")
         confidence_label = "unscored" if confidence is None else str(confidence)
         lines.append(
-            f"- Literature claim [{finding['source_ref']}; confidence={confidence_label}]: "
+            f"- Literature claim [{_literature_label(finding['source_ref'])}; "
+            f"confidence={confidence_label}]: "
             f"{finding['content']}"
         )
     lines.append(
