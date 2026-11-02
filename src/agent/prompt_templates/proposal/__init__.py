@@ -12,6 +12,7 @@ The pipeline runner loads and assembles prompts at runtime via
 load_stage_prompt() and render_expert_context().
 """
 
+import json
 import os
 
 from agent.prompt_rendering import prompt_boundary
@@ -306,6 +307,13 @@ def render_data_analysis_evidence(evidence) -> str:
     return "\n".join(lines)
 
 
+def _review_heading_label(label: str) -> str:
+    """Keep multiline IDs on one display line without changing their stored identity."""
+    # JSON quoting preserves the label, including Unicode line separators;
+    # ordinary labels keep their existing prompt bytes.
+    return json.dumps(label, ensure_ascii=True) if label.splitlines() != [label] else label
+
+
 def render_literature_review_evidence(evidence) -> str:
     """Render cited literature separately from observed experiment evidence."""
 
@@ -320,7 +328,7 @@ def render_literature_review_evidence(evidence) -> str:
             card = contribution["agent_card"]
             lines.extend(
                 [
-                    f"### Review: {review['contribution_id']}",
+                    f"### Review: {_review_heading_label(review['contribution_id'])}",
                     f"Contributor: {card['agent_name']} ({card['trust_level']})",
                     f"Coverage: {card['coverage']}",
                     f"Limitations: {card['limitations']}",

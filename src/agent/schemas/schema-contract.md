@@ -65,7 +65,9 @@ no hidden contracts, no silent defaults.
   collection preserves each contributor card, run identity, citation and claim;
   it does not combine or rank them. Each review and the complete collection
   must fit the 65,536-byte limit owned by
-  `proposer_literature_evidence.py`.
+  `proposer_literature_evidence.py`. IDs remain unchanged in typed/serialized
+  evidence; the [proposal renderer](../prompt_templates/proposal/README.md)
+  owns single-line heading presentation for multiline contribution labels.
 - `ProposalOutput.baseline_config` validates supplied `train_config` through
   `TrainConfig` before the proposer exits structural repair. It forwards normalized
   supplied values without filling omissions or removing extension keys. Null or
