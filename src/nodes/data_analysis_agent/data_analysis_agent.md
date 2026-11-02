@@ -302,6 +302,22 @@ invocation records status and `failure_type` `timed_out` without launching
 generated code (no `worker_pid` is recorded, because none exists). A probe that fails before expiry still refuses with
 `generated_code_sandbox_unavailable`.
 
+The local historical-model inference worker
+(`LocalPytorchHistoricalModelInferenceCapability.run_historical_inference`)
+receives the allocation's absolute expiry as
+`HistoricalModelInferenceRequest.deadline_monotonic_s`. Its clock starts
+before input verification, artifact staging and the fsync'd worker request
+publication, so all of them are charged to both the expiry and the per-skill
+timeout: the worker stops at `min(deadline_monotonic_s, start +
+per_skill_timeout_s)`. Unlike skill workers and generated programs, the
+per-skill timeout here therefore does not start at launch. Termination uses the
+same `terminate_process_group` wrapper, so a worker that exits on SIGTERM
+costs only its exit time (#1480); the receipt status stays `timed_out`
+(`inference_timeout`) or `failed` (`inference_host_memory_limit`). Measured with
+a sleeping child replacing the worker and a 1.0 s publication stall: overrun
+past the deadline 1.01–1.02 s before this change, 0.009–0.013 s after it
+(about 1.01 s either way for a SIGTERM-ignoring child, which needs SIGKILL).
+
 ### Generated artifact paths
 
 The generated function receives `output_directory`, the artifact certification
