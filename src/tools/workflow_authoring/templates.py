@@ -3,12 +3,14 @@
 A template is a typed reusable (v2) declaration *shape*: capabilities, protocols,
 managed external roles, positions and, for loops, the authored feedback with a
 finite iteration limit. It names no task, data path, model, advice text or
-training value. Instantiation copies the opened project's own task references
+implicit training value. It explicitly declares full Formal training scope and
+two tuning rounds for user-task starts; these are editable template choices, not
+framework defaults. Instantiation copies the opened project's own task references
 and accepted task binding into the shape and renders canonical source; the
 editor then reviews that source through the ordinary ``source`` proposal path,
 and only an explicit Save publishes it.
 
-Shapes reuse the audited native profiles (``native-interpretation-candidate/v1``
+Shapes reuse the audited native profiles (``NATIVE_INTERPRETATION_PROFILE``
 and the plain candidate preview) exactly as the reusable examples under
 ``examples/workflow_declarations`` and the reusable browser fixtures use them.
 A Literature review node is not offered inside a loop: the catalog has no
@@ -40,6 +42,7 @@ from workflows.definition import (
     WorkflowDocument,
     render_workflow_source,
 )
+from workflows.definition.models import NATIVE_INTERPRETATION_PROFILE
 
 TemplateId = Literal["single-research-loop", "single-loop-with-advice", "single-step"]
 
@@ -52,10 +55,15 @@ TemplateId = Literal["single-research-loop", "single-loop-with-advice", "single-
 # authoritative score (a diagnostic run excludes every result from it); the author
 # may change both in the Train & tune inspector. Templates also
 # declare the shared run-level trial/formal default visibly in authored source.
-DECLARED_LAUNCH_POLICY: dict[str, str | bool] = {
+# Two tuning rounds leave room for Trial before the forced Formal round. Full
+# Formal training avoids silently reducing a new user's small dataset to 10%.
+# Large-task users should choose portions and budgets before running.
+DECLARED_LAUNCH_POLICY: dict[str, str | bool | int | float] = {
     "healthgate_mode": "blocking",
     "result_authority": "scientific",
     "is_trial": DEFAULT_IS_TRIAL,
+    "formal_portion": 1.0,
+    "max_rounds": 2,
 }
 # The smallest valid loop bound, as for a one-click added loop (loop.py): an
 # imported loop costs no more than one body until the author raises it.
@@ -247,9 +255,8 @@ def _research_loop(with_advice: bool) -> ReusableWorkflowDocument:
             ),
         ),
         positions=_positions("interpret", "propose", "implement", "validate", "train"),
-        execution_profile="native-interpretation-candidate/v1",
-        # Native launch defaults apply until the author edits a training control; only the
-        # launch policy pair is declared, because training admission has no default for it.
+        execution_profile=NATIVE_INTERPRETATION_PROFILE,
+        # Declare the user-task starting settings visibly in the saved source.
         training_settings={"launch": dict(DECLARED_LAUNCH_POLICY)},
     )
 

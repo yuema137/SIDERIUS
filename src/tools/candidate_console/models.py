@@ -73,7 +73,31 @@ class ConsoleHostLedger(PreviewModel):
     budget_file: str
 
 
-class RunResourcesSelection(PreviewModel):
+class ReservationSelection(PreviewModel):
+    """The operator's host-ledger reservation for one reviewed launch (B3-4c, #1385).
+
+    ``resources`` is omitted when absent, so existing requests keep their bytes.
+    """
+
+    resources: OperationResources | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    def bound_digest(self, base: str) -> str:
+        """The reviewed digest with these inputs folded in; ``base`` when there are none.
+
+        A review returns it and its launch must echo it, so the reservation (and a
+        candidate's parallel opt-in) cannot change after review; existing clients
+        that send none keep their digest.
+        """
+        bound = self.model_dump(mode="json", include={"resources", "parallel"})
+        if not bound:
+            return base
+        encoded = json.dumps({"base": base, **bound}, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode()).hexdigest()
+
+
+class RunResourcesSelection(ReservationSelection):
     """Operator scheduling inputs added to a reviewed candidate launch (B3-4c).
 
     ``resources`` is the run's reservation in the host ledger (required when the
@@ -81,23 +105,7 @@ class RunResourcesSelection(PreviewModel):
     Both are omitted when absent, so existing launch requests keep their bytes.
     """
 
-    resources: OperationResources | None = Field(
-        default=None, exclude_if=lambda value: value is None
-    )
     parallel: ParallelDispatch | None = Field(default=None, exclude_if=lambda value: value is None)
-
-    def bound_digest(self, base: str) -> str:
-        """The reviewed digest with these inputs folded in; ``base`` when there are none.
-
-        A review returns it and its launch must echo it, so the reservation and the
-        parallel opt-in cannot change after review; existing clients that send
-        neither keep their digest.
-        """
-        if self.resources is None and self.parallel is None:
-            return base
-        payload = {"base": base, **self.model_dump(mode="json", include={"resources", "parallel"})}
-        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-        return hashlib.sha256(encoded.encode()).hexdigest()
 
 
 class ConsoleConfig(PreviewModel):
@@ -348,22 +356,33 @@ class OperationCancelAcknowledgement(PreviewModel):
     outcome: Literal["requested"] = "requested"
 
 
-class LoopResumeReview(PreviewModel):
-    """Verified paused segment the operator may continue; names-only credential facts."""
+class LoopResumeReview(ReservationSelection):
+    """Verified paused segment the operator may continue; names-only credential facts.
+
+    ``resources`` echoes the reservation reviewed for a loop whose root declared
+    none (#1385); ``review_digest`` then binds it to ``expected_receipt_digest``
+    (``bound_digest``). Both are omitted without one, so existing reviews keep
+    their bytes.
+    """
 
     predecessor_operation_id: UUID
     expected_receipt_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     completed_iterations: int = Field(gt=0)
     final_iteration: int = Field(gt=0)
     credential_readiness: CredentialReadiness
+    review_digest: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$", exclude_if=lambda value: value is None
+    )
 
 
-class LoopResumeSelection(PreviewModel):
+class LoopResumeSelection(ReservationSelection):
     """Client-retained request UUID plus the reviewed paused receipt digest.
 
     ``operator_advice`` is optional untrusted text for the resumed segment's proposals,
     validated by the operations owner's ``OperatorAdvice`` (422 when invalid). A retry
     must resend the same advice with the same UUID, else the owner reports a conflict.
+    ``resources`` with ``expected_review_digest`` is the reviewed reservation (#1385);
+    a pair that ``bound_digest`` does not reproduce refuses ``stale_review``.
     """
 
     request_id: UUID
@@ -371,6 +390,9 @@ class LoopResumeSelection(PreviewModel):
     expected_receipt_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     operator_advice: OperatorAdvice | None = Field(
         default=None, exclude_if=lambda value: value is None
+    )
+    expected_review_digest: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$", exclude_if=lambda value: value is None
     )
 
 

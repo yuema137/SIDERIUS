@@ -45,6 +45,7 @@ from execute_tools.deliverable_spec import (
     DeliverableNaming,
     default_deliverable_naming,
 )
+from execute_tools.evaluation_child import evaluation_record_fields
 from execute_tools.evaluation_metric import (
     NotScoreableError,
 )
@@ -81,13 +82,14 @@ from nodes.ml_hyperparameter_tune_agent.feedback import (
     _render_gate_exhaustion_log_line,
 )
 from nodes.ml_hyperparameter_tune_agent.parameter_rule_receipts import (
-    attach_inactive_parameter_rules,
+    attach_attempt_receipts,
 )
 from nodes.ml_hyperparameter_tune_agent.policy import (
     _compute_termination_state,
     _json_safe_reference,
     _select_best_records,
 )
+from workflows.evaluation_selection import selection_metric
 from workflows.task_composition import active_composition_fingerprint
 
 
@@ -778,7 +780,7 @@ def _emit_record(
     # emit a record its own labelled run refuses at the next resume.
     if experiment_arm is not None:
         record["experiment_arm"] = experiment_arm
-    attach_inactive_parameter_rules(record)
+    attach_attempt_receipts(record)
     ExperimentRecord.model_validate(record)
     sandbox.save_record(record)
 
@@ -989,6 +991,9 @@ def _build_scoring_failure_record(
     if isinstance(exc, NotScoreableError):
         # Step 06 C4 — the structured refusal, on the record (additive).
         record["metric_refusal"] = exc.result.model_dump(mode="json")
+        evidence = getattr(exc, "evaluation_result", None)
+        if evidence is not None:
+            record["evaluation_result"] = evidence.model_dump(mode="json")
     return record
 
 
@@ -1317,7 +1322,7 @@ def finalize_run_output(
         # this transports THAT value so the interpreter never derives a
         # second one. Passed as the instance: the field's validator accepts
         # a MetricSpec unchanged and rebinds only a mapping.
-        "metric_spec": bindings.run_metric.spec,
+        "metric_spec": selection_metric(bindings, bindings.run_metric.spec),
         # Step 10 / P2b — the run's DECLARED secondary set, stamped from the
         # same bound authorities and by the same single writer as `metric_spec`
         # above. This is what lets the interpreter report a declared secondary
@@ -1391,7 +1396,10 @@ def finalize_run_output(
             # stop existing because the tuner later failed. Dumped rather
             # than passed as an instance because this dict is written with
             # `json.dump(..., default=str)`, which would stringify the model.
-            "metric_spec": bindings.run_metric.spec.model_dump(),
+            "metric_spec": selection_metric(
+                bindings,
+                bindings.run_metric.spec,
+            ).model_dump(),
             # Step 10 / P2b — the same rule, for the same reason: which
             # secondaries this run DECLARED is a launch fact and does not stop
             # existing because the tuner later failed. Dumped rather than
@@ -1542,6 +1550,7 @@ def build_attempt_record(
         # readable (additive; None where scoring did not go through
         # the handle, e.g. a legacy child that predates C3).
         "metric_result": metric_payload,
+        **evaluation_record_fields(score_results),
         # Health-check failure reason from tuner-side gate
         # evaluation (commit-5b). Written unconditionally when
         # non-None — a failed trial-round gate also propagates its

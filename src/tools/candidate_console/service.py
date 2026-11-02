@@ -22,6 +22,7 @@ from tools.candidate_operations import (
     PrepareOperation,
     list_operations,
     loop_control_requests,
+    loop_resume_resources,
     loop_root_operation,
     loop_segment_advice,
     operation_admitted,
@@ -74,6 +75,7 @@ from .models import (
     PrepareSelection,
     RecordedExampleOption,
     RecordedExampleView,
+    ReservationSelection,
     RouteView,
     RunResourcesSelection,
     StatusView,
@@ -194,17 +196,28 @@ def with_run_resources(
 ) -> CandidateOperation:
     """Attach the operator's reservation and parallel opt-in after review (B3-4c).
 
-    Revalidated through the operation and request owners, so a ``parallel``
-    block on a non-graph request is refused here as anywhere else.
+    Only the supplied fields are set; one the reviewed operation already
+    carries is never replaced or cleared (``run_resources_conflict`` when they
+    differ). Revalidated through the operation and request owners, so a
+    ``parallel`` block on a non-graph request is refused here as anywhere else.
     """
     if selection.resources is None and selection.parallel is None:
         return operation
-    request = operation.request.model_copy(update={"parallel": selection.parallel})
+    resources = _merged(operation.resources, selection.resources, "resources")
+    parallel = _merged(operation.request.parallel, selection.parallel, "parallel")
+    request = operation.request.model_copy(update={"parallel": parallel})
     return CandidateOperation.model_validate_json(
-        operation.model_copy(
-            update={"request": request, "resources": selection.resources}
-        ).model_dump_json()
+        operation.model_copy(update={"request": request, "resources": resources}).model_dump_json()
     )
+
+
+def _merged[T](reviewed: T | None, supplied: T | None, name: str) -> T | None:
+    if reviewed is not None and supplied is not None and reviewed != supplied:
+        raise OperationFailure(
+            "run_resources_conflict",
+            f"the reviewed run already declares {name}; review again without overriding it",
+        )
+    return reviewed if supplied is None else supplied
 
 
 def preparation_error(snapshot: OperationSnapshot) -> str | None:
@@ -510,8 +523,19 @@ class CandidateConsole:
         request_loop_pause(self.config.operation_store, operation_id)
         return LoopPauseAcknowledgement(operation_id=operation_id)
 
-    def review_loop_resume(self, operation_id: UUID) -> LoopResumeReview:
-        """Owner review of one exited paused segment, plus names-only credential facts."""
+    def review_loop_resume(
+        self, operation_id: UUID, selection: ReservationSelection | None = None
+    ) -> LoopResumeReview:
+        """Owner review of one exited paused segment, plus names-only credential facts.
+
+        ``selection.resources`` is the segment's reservation when the loop root
+        declared none (#1385). The operations owner's ``loop_resume_resources``
+        refuses here what admission would refuse, and the reviewed value is bound
+        into ``review_digest``.
+        """
+        selection = ReservationSelection.model_validate_json(
+            (selection or ReservationSelection()).model_dump_json()
+        )
         snapshot = review_loop_resume(self.config.operation_store, operation_id)
         root = loop_root_operation(self.config.operation_store, operation_id)
         receipt = snapshot.receipt
@@ -521,17 +545,30 @@ class CandidateConsole:
             raise OperationFailure("integrity", "loop resume receipt missing trace")
         if snapshot.receipt_digest is None:
             raise OperationFailure("integrity", "loop resume receipt has no digest")
+        loop_resume_resources(root, selection.resources, ledger=self.host is not None)
         return LoopResumeReview(
             predecessor_operation_id=operation_id,
             expected_receipt_digest=snapshot.receipt_digest,
             completed_iterations=receipt.loop_trace.attempted_iterations,
             final_iteration=root.request.preview.document.definition.loop.final_iteration,
             credential_readiness=credential_readiness(root.request, self.config.credential_file),
+            resources=selection.resources,
+            review_digest=None
+            if selection.resources is None
+            else selection.bound_digest(snapshot.receipt_digest),
         )
 
     def resume_loop(self, selection: LoopResumeSelection) -> OperationHandle:
         """Submit one reviewed Resume; a known request UUID replays before credential reads."""
         selection = LoopResumeSelection.model_validate_json(selection.model_dump_json())
+        if (
+            selection.resources is not None or selection.expected_review_digest is not None
+        ) and selection.expected_review_digest != selection.bound_digest(
+            selection.expected_receipt_digest
+        ):
+            raise OperationFailure(
+                "stale_review", "resume resources changed since review; review again"
+            )
         store = self.config.operation_store
         submission = CandidateLoopResumeOperation(
             request_id=selection.request_id,
@@ -539,6 +576,7 @@ class CandidateConsole:
                 predecessor_operation_id=selection.predecessor_operation_id,
                 expected_receipt_digest=selection.expected_receipt_digest,
                 operator_advice=selection.operator_advice,
+                resources=selection.resources,
             ),
         )
         environment: dict[str, str] = {}

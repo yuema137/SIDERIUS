@@ -40,3 +40,15 @@ workspace safety.
 The example's workflow tests use typed offline agent responses. Live provider
 calls, network literature retrieval, and physical GPU claims are outside this
 pack's ordinary run.
+
+## Repeating a sampled run
+
+The generated dataset stays fixed. To repeat the random row selections in a
+run, use the same `--run_seed`; the framework supplies the scope and epoch
+sampling seeds. Direct plugin callers must supply `ScopeBuildRequest.seed`
+and `EpochSamplingParams.epoch_seed` when sampling, or receive `MissingRunSeed`.
+Selecting all rows or applying a prefix ceiling needs no seed.
+
+Updating a plugin changes the composition fingerprint that identifies the
+run's configuration and code. Start a new workspace after updating this pack;
+a workspace pinned to the previous plugin cannot resume with the new one.

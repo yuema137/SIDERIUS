@@ -101,6 +101,28 @@ class TestREC2CanonicalRecordProjection:
         formal = [r for r in output.all_records if r.status == "success" and not r.is_trial]
         assert len(formal) == 1
         projected = project_record(formal[0].model_dump(mode="json"))
+        # #1322 persists the final resolution events of a diverged attempt;
+        # keep the archived projection intact and pin the receipt literally.
+        assert projected.pop("resolution_events") == [
+            {
+                "authority": "resolved_round_workload",
+                "executed": "1.0",
+                "field_path": "eval_portion",
+                "proposed": "0.05",
+            },
+            {
+                "authority": "resolved_round_workload",
+                "executed": "1.0",
+                "field_path": "train_portion",
+                "proposed": "0.1",
+            },
+            {
+                "authority": "resolved_round_workload",
+                "executed": "0.1",
+                "field_path": "trial_portion",
+                "proposed": "0.05",
+            },
+        ]
         assert_json_golden(
             projected,
             GOLDENS / "rec2_formal_success_projection.json",
@@ -156,8 +178,15 @@ class TestREC3ArtifactShapes:
         assert isinstance(summary, list) and len(summary) == 3
         for entry in summary:
             ExperimentRecord.model_validate(entry)
+        # #1322: only the formal attempt diverged from its authored plan, so
+        # only it carries the receipt (last, after the shared emission stamps).
+        receipts = [list(e)[-2] == "resolution_events" for e in summary]
+        assert receipts == [e.get("is_trial") is False for e in summary]
         assert_json_golden(
-            [{"status": e.get("status"), "keys": list(e.keys())} for e in summary],
+            [
+                {"status": e.get("status"), "keys": [k for k in e if k != "resolution_events"]}
+                for e in summary
+            ],
             GOLDENS / "rec3_summary_entry_key_lists.json",
             surface="REC-3 summary-artifact per-entry key lists",
         )

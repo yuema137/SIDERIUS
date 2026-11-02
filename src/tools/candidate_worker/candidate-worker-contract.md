@@ -1930,7 +1930,11 @@ them. For the first ready node:
   `subprocess_env(cuda_visible_devices=placement.cuda_visible_devices)` (slot
   UUID, or `""` for a CPU unit, which hides every GPU) and
   `PYTEST_ADDOPTS` gaining `-p no:cacheprovider` (concurrent validators share no
-  `.pytest_cache`; serial pytest commands are unchanged). Queued: the loop waits
+  `.pytest_cache`; serial pytest commands are unchanged). A unit that cannot
+  start (publishing its invocation, `prepare_child`'s `LocalCodeError`, a
+  `Popen` `OSError`) fails alone, as in the serial path: `failed`, a `raised`
+  receipt carrying its placement, its routes decided, and running units drain
+  (#1108). Queued: the loop waits
   for a running unit to finish. Strict FIFO: nothing overtakes the first ready
   unit (decision B3-Q4).
 Before each readiness step the loop collects every unit that has already exited,
@@ -1957,7 +1961,7 @@ published write-once as `parallel_budget.json` in its control directory.
 
 Trace v2 verifier (`parallel_evidence.drained_entries`, the one parallel-v1
 check `verify_graph_trace` calls). `scheduling="parallel-v1"` must equal
-`request.parallel` being set; a serial trace returns no drained entries. For a
+`request.parallel` being set; a serial trace returns `None`. For a
 parallel trace: (e) `parallel_budget.json` must have the digest of the run's
 admitted budget (`parallel.budget`, or the `run_budget()` of the host grant of
 the segment that ran the iteration); (d) a receipt exists exactly for every
@@ -1969,18 +1973,40 @@ with the state (`returned` for an outcome with a record, `raised` or
 (a) start and end events are one permutation of 1..2n, and a queue mark precedes
 its start; (f) each placement, re-planned with `plan_dispatch` beside the
 placements running when it started, is placed on the slot it recorded; and no
-entry starts after the first failed entry ended.
-`replay_readiness(..., drained=...)` then accepts a dispatched node where the
-serial replay would close it as blocked only if its own sources permit it.
-Serial traces verify exactly as before.
+entry starts after the first failed entry ended. It returns a
+`graph_evidence.DrainWindow` (`ended`: the `ended_event` of every dispatched
+entry; `failure_end`: the `ended_event` of the first failed entry, `None`
+without a failure).
+
+`replay_readiness(..., drained=window)` replays a parallel trace without the
+declaration-order failure stop, because parallel dispatch follows completion
+order: a later-declared unit can fail while an earlier-declared sibling is
+still running, and then a node the serial order would dispatch next (for
+example `check0` after `build0`) is never dispatched (#1386). Per step: a node
+readiness dispatches must be recorded dispatched (its receipt already proves it
+started before the failure ended; readiness proves its sources permitted it);
+a node readiness closes must carry that closure. When `failure_end` is set, any
+entry may instead carry the drain closure `blocked`/`dependency_not_successful`,
+whatever the serial order would have done next; and a `skipped` closure is
+accepted only if every source (through sources closed without dispatch) ended
+before `failure_end`, since a closure decided after the failure was collected
+is `blocked`. Still refused: a `blocked` entry in a parallel trace without a
+failure, a dispatched entry whose own source failed or that lies in a
+non-selected arm, a selected arm recorded `skipped`, and a skip decided after
+the failure. Serial traces (`drained=None`) verify exactly as before.
 
 Cancellation. SIGTERM during parallel dispatch raises `UnitTerminated` in the
 worker (`unit_processes.TermGate`). Any exit from the loop with units running
 (that signal, an exception, `SystemExit`/`KeyboardInterrupt` re-raised from a
 unit) terminates every running unit's process group (`terminate_observed_group`,
-TERM, 1 s grace, KILL) before propagating. SIGTERM is held, then delivered,
+TERM, 1 s grace, KILL) before propagating. A `terminate` that raises for one
+unit does not stop the cleanup: every other group is still terminated, then the
+first error propagates. SIGTERM is held, then delivered,
 around the spawn-and-register of a unit (so a signal cannot orphan a unit not
-yet registered) and during that cleanup (so a second signal cannot abort it). An outer timeout or operator cancel kills the sandbox; every unit
+yet registered) and during that cleanup (so a second signal cannot abort it).
+A held signal is delivered when the outermost held block exits, however it
+exits: an exception leaving the block is chained as the `__cause__` of the
+`UnitTerminated`, so a failing cleanup never drops the termination (#1108). An outer timeout or operator cancel kills the sandbox; every unit
 is in its PID namespace and ends with it. Stop and Pause keep body-boundary
 meaning: the active body, including queued units, finishes (decision B3-Q5).
 
@@ -1997,7 +2023,11 @@ otherwise.
 
 Tests: `tests/unit/tools/candidate_worker/test_parallel_dispatch.py` (serial
 golden in any completion order, slot never exceeded, drain + forged receipt,
-SIGTERM kills real unit groups), `test_parallel_lock.py`,
+a later-declared failure draining an earlier-declared unit,
+SIGTERM kills real unit groups, a unit that cannot start fails alone, a held
+signal survives an exceptional exit, one failing termination), `test_readiness.py`
+(parallel replay: drain closures accepted, closures the drain cannot produce refused),
+`test_parallel_lock.py`,
 `tests/unit/agent/test_token_unit.py`.
 
 
@@ -2008,3 +2038,16 @@ reason `profile`, `shape` or `feedback`. Messages are fixed, path-free text;
 `require_loop` raises that refusal for existing effect and evidence boundaries.
 Operations must render this typed reason instead of inferring a policy from the
 request after catching an arbitrary `ValueError`.
+
+## Formula selection binding
+
+Worker graph and loop admission use the composed effective selection metric.
+Every formula metric threshold, including thresholds in unvisited branches and
+adaptors, must explicitly name that metric before dispatch. Captured interpretation
+and tuning evidence must reconcile to the same effective spec. Raw component
+threshold targets are refused; source metric values remain Health inputs.
+`score_units_metric` is a supported launch field: under formula selection a fresh
+training document with `degenerate_penalty_score` must set it to the effective id
+(the same `admit_evaluation_settings` rule as the direct workflow). The
+[evaluation contract](../../execute_tools/evaluation-contract.md#deterministic-selection-runtime)
+owns the schema, generated id and refusal rules.

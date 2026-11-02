@@ -2,7 +2,7 @@
 
 import hashlib
 import json
-from typing import Annotated, Literal, Self
+from typing import Annotated, Final, Literal, Self
 
 from pydantic import Field, JsonValue, StringConstraints, model_validator
 
@@ -11,6 +11,14 @@ from agent.schemas.output_types import OutputTypeName
 from .adaptor_strategies import DistributeStrategy, SelectStrategy
 from .base import DeclarationModel, Identifier, Location
 from .llm_strategies import AdaptorCombine
+
+# Single owner of the native interpretation execution profile identifier. The alias is a
+# plain assignment (not a PEP 695 ``type`` alias) so nested Literal unions stay transparent
+# and JSON Schema keeps an inline enum; pyright checks the constant against the alias.
+NativeInterpretationProfile = Literal["native-interpretation-candidate/v1"]
+NATIVE_INTERPRETATION_PROFILE: Final[NativeInterpretationProfile] = (
+    "native-interpretation-candidate/v1"
+)
 
 
 class TaskReferences(DeclarationModel):
@@ -433,7 +441,7 @@ class ReusableWorkflowDocument(DeclarationModel):
             "native-proposal-fanout/v1",
             "native-proposal-families/v1",
             "native-literature-candidate/v1",
-            "native-interpretation-candidate/v1",
+            NativeInterpretationProfile,
         ]
         | None
     ) = Field(default=None, exclude_if=lambda value: value is None)
@@ -446,7 +454,7 @@ class ReusableWorkflowDocument(DeclarationModel):
     def validate_training(self) -> Self:
         if (
             self.execution_profile is not None
-            and self.execution_profile != "native-interpretation-candidate/v1"
+            and self.execution_profile != NATIVE_INTERPRETATION_PROFILE
             and self.training_settings is not None
         ):
             raise ValueError("This reusable graph profile does not support training_settings")
@@ -473,7 +481,7 @@ class ReusableWorkflowDocument(DeclarationModel):
             parse_training_settings,
         )
 
-        if self.execution_profile == "native-interpretation-candidate/v1":
+        if self.execution_profile == NATIVE_INTERPRETATION_PROFILE:
             from .fanout import execution_families
 
             execution_families(self.definition, self.execution_profile)

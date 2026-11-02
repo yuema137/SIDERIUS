@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from tools.setup_review.route_models import LLMRoute
 from workflows.definition import WorkflowDocument
+from workflows.definition.models import NativeInterpretationProfile
 
 
 class PreviewModel(BaseModel):
@@ -20,7 +21,7 @@ class WorkflowPreviewRequest(PreviewModel):
             "native-proposal-fanout/v1",
             "native-proposal-families/v1",
             "native-literature-candidate/v1",
-            "native-interpretation-candidate/v1",
+            NativeInterpretationProfile,
             "native-proposal-fanout-selection/v1",
             "native-routed-candidate/v1",
             "native-literature-collection/v1",

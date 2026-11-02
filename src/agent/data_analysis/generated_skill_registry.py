@@ -35,6 +35,7 @@ from agent.schemas.data_analysis.skills import (
 )
 from core.campaign_identity import validate_path_component
 from core.durable_io import publish_bytes_write_once
+from core.record_encoding import model_record_value
 
 from .generated_programs import load_generated_program
 
@@ -328,7 +329,7 @@ def promote_generated_program(
     body = {
         "schema_version": 1,
         "registry_id": registry_id,
-        "skills": [item.model_dump(mode="json") for item in skills],
+        "skills": [model_record_value(item) for item in skills],
     }
     registry = GeneratedExperimentSkillRegistry(
         **body,

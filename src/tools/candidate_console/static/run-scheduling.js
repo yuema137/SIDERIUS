@@ -34,7 +34,10 @@
   const number = el => (el.value.trim() === '' ? null : Number(el.value));
   const positive = value => value !== null && Number.isFinite(value) && value > 0;
   const whole = value => positive(value) && Number.isInteger(value);
-  function readResources() {
+  // One resources fieldset: the run lane's `scheduling-*` fields, or another panel's
+  // fields with the same suffixes (the loop Resume panel's `loop-resume-resources-*`).
+  function readResources(prefix = 'scheduling') {
+    const $ = name => document.getElementById(`${prefix}-${name}`);
     if (!$('declare').checked) return {value: null};
     const gpu = $('gpu').value, vram = number($('vram')), memory = number($('memory')), cpus = number($('cpus'));
     if (gpu === '') return {error: 'Choose whether the run uses a GPU.'};
@@ -46,6 +49,16 @@
       Object.assign(value, {vram_gib: vram, vram_source: 'configured_cap'});
     } else if (vram !== null) return {error: 'GPU memory applies only to a run that uses a GPU.'};
     return {value};
+  }
+  /** Show a reservation (or none) in a resources fieldset, e.g. a retained request's. */
+  function fillResources(prefix, value) {
+    const $ = name => document.getElementById(`${prefix}-${name}`);
+    $('declare').checked = !!value;
+    $('gpu').value = value ? String(value.gpu_count) : '';
+    $('vram').value = value?.vram_gib ?? '';
+    $('memory').value = value?.host_memory_gib ?? '';
+    $('cpus').value = value?.cpu_slots ?? '';
+    $('timed').checked = !!value?.time_budgeted;
   }
   function readParallel() {
     const capabilities = {};
@@ -98,5 +111,5 @@
     document.getElementById('scheduling').addEventListener('input', () => { show(''); listeners.forEach(callback => callback()); });
     window.addEventListener('console-host-ledger', () => { reflect(); listeners.forEach(callback => callback()); });
   });
-  window.runScheduling = Object.freeze({read, describe, show, changed});
+  window.runScheduling = Object.freeze({read, readResources, fillResources, describe, show, changed});
 })();
