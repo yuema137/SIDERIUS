@@ -29,6 +29,7 @@ from .models import (
     PrepareSelection,
 )
 from .native_chain_routes import native_chain_router
+from .profile_assets import add_profile_assets
 from .reusable_models import ReusableAdmissionNotAttempted
 from .reusable_preparation_routes import reusable_preparation_router
 from .reusable_routes import reusable_router
@@ -297,6 +298,7 @@ def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -
             LogReadRequest(operation_id=operation_id, kind=kind, offset=offset, max_bytes=max_bytes)
         )
 
+    add_profile_assets(app)
     assets = Path(__file__).parent / "static"
 
     @app.get("/")
