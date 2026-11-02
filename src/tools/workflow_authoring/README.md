@@ -85,7 +85,8 @@ Caveats:
 
 - The editor is read-write. **Save** applies your reviewed changes to `workflow.py`.
   Untouched values retain their exact spelling, including `2.0`, numeric notation
-  and string escapes. Before you save, keep
+  and string escapes. Editing an existing `2.0` to `3` saves `3.0`; use the
+  Python source editor to deliberately change the numeric type. Before you save, keep
   a copy or commit the file to version control. Version history keeps recovery
   copies of the previous and proposed bytes, but `workflow.py` stays authoritative,
   so these copies are not a substitute for version control.

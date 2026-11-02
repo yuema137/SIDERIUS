@@ -5,7 +5,7 @@ import {mkdir} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {createInterface} from 'node:readline';
+import {waitForMetadata} from './fixture_metadata.mjs';
 import {showAllConsoleSections} from './console_view_flags.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 for (const key of ['EDITOR_PYTHON', 'CONSOLE_PLAYWRIGHT_MODULE', 'CONSOLE_BROWSER_EXECUTABLE', 'CONSOLE_EVIDENCE_DIR']) assert.ok(process.env[key], key);
@@ -14,14 +14,9 @@ await mkdir(evidence, {recursive: true});
 const server = spawn(process.env.EDITOR_PYTHON, ['-m', 'tests.browser.setups_fixture', '--error-projections'], {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
 let diagnostics = '', browser;
 server.stderr.on('data', chunk => { diagnostics += chunk; });
-const lines = createInterface({input: server.stdout});
 const secret = 'private-browser-secret-sentinel';
 try {
-  const metadata = await new Promise((accept, reject) => {
-    const timer = setTimeout(() => reject(new Error('Server startup timeout')), 30000);
-    lines.once('line', line => { clearTimeout(timer); accept(JSON.parse(line)); });
-    server.once('exit', code => { clearTimeout(timer); reject(new Error(`Server exited ${code}`)); });
-  });
+  const metadata = await waitForMetadata(server);
   const {chromium} = createRequire(import.meta.url)(process.env.CONSOLE_PLAYWRIGHT_MODULE);
   browser = await chromium.launch({headless: true, executablePath: process.env.CONSOLE_BROWSER_EXECUTABLE});
   showAllConsoleSections(browser);
@@ -85,6 +80,5 @@ try {
   console.log('PASS: Task/setup/editor HTTP and browser projections exclude private causes; server logs retain them');
 } finally {
   if (browser) await browser.close();
-  lines.close();
   server.kill('SIGTERM');
 }

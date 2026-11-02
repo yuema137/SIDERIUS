@@ -66,7 +66,7 @@ def test_browser_review_and_save_preserve_untouched_literals(tmp_path, edit, int
     elif edit in ("training", "draft", "nodes"):
         document["training_settings"]["launch"]["formal_time_budget_minutes"] = 7
         expected = source.replace(
-            '"formal_time_budget_minutes": 5.0', '"formal_time_budget_minutes": 7'
+            '"formal_time_budget_minutes": 5.0', '"formal_time_budget_minutes": 7.0'
         )
     elif edit == "position":
         document["positions"][0]["x"] = 321
@@ -100,7 +100,7 @@ def test_browser_review_and_save_preserve_untouched_literals(tmp_path, edit, int
     else:
         for literal in ("1e-3", "-0.0", integer, '"\\u96ea\\n"'):
             assert literal in review.source
-        assert '"formal_time_budget_minutes": 7' in review.source
+        assert '"formal_time_budget_minutes": 7.0' in review.source
     saved = editor.save(
         SaveRequest(
             source=review.source, proposal_sha256=review.sha256, expected_sha256=base.sha256
@@ -169,3 +169,36 @@ def test_source_less_document_review_preserves_browser_rounded_literals(tmp_path
         )
     )
     assert editor.project.source_file.read_bytes() == review.source.encode()
+
+
+@pytest.mark.parametrize("anchor", [True, False])
+def test_intentional_browser_edit_preserves_authored_float_type(tmp_path, anchor):
+    """Review and saved bytes must retain float type after a changed integer input."""
+    source = literal_source()
+    editor = editor_for(tmp_path, source)
+    base = editor.read()
+    document = browser_document(source)
+    document["training_settings"]["launch"]["trial_time_budget_minutes"] = 3
+    proposal = {"kind": "document", "document": document}
+    if anchor:
+        proposal["source"] = source
+    review = editor.review(
+        ReviewRequest.model_validate_json(
+            json.dumps(
+                {
+                    "expected_sha256": base.sha256,
+                    "proposal": proposal,
+                }
+            )
+        )
+    )
+    expected = source.replace(
+        '"trial_time_budget_minutes": 2.0', '"trial_time_budget_minutes": 3.0'
+    )
+    assert review.source == expected
+    editor.save(
+        SaveRequest(
+            source=review.source, proposal_sha256=review.sha256, expected_sha256=base.sha256
+        )
+    )
+    assert editor.project.source_file.read_bytes() == expected.encode()
