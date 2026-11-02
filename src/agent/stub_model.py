@@ -155,6 +155,15 @@ _LEGACY_SEMANTICS = StubProposalSemantics(
 _STUB_LOSS = {OutputSemantic.CATEGORICAL: "ce", OutputSemantic.CONTINUOUS: "smooth_l1"}
 
 
+def _stub_loss(semantic: OutputSemantic) -> str:
+    loss = _STUB_LOSS.get(semantic)
+    if loss is None:
+        raise UnsupportedStubShapeError(
+            f"Pseudo model has no loss for output semantic {semantic!r}"
+        )
+    return loss
+
+
 def stub_proposal_semantics(contract: ModelIOContract | None) -> StubProposalSemantics:
     """Describe the plugin ``stub_model_code`` emits for ``contract``.
 
@@ -172,7 +181,7 @@ def stub_proposal_semantics(contract: ModelIOContract | None) -> StubProposalSem
     mechanism = "scalar projection expanded to the declared output"
     return StubProposalSemantics(
         output_type=contract.legacy_output_type,
-        loss_type=_STUB_LOSS[semantic],
+        loss_type=_stub_loss(semantic),
         model_description=(
             f"Stub architecture: the input mean plus a learned bias, cast to {dtype} "
             f"and expanded to the declared {semantic.value} output {target}. A "
