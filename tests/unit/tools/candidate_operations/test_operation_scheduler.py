@@ -11,6 +11,7 @@ import signal
 import subprocess
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -585,9 +586,14 @@ def test_cancel_removes_a_queued_operation_without_running_it(
     assert not (workspace / "candidate_run").exists()
 
 
-def test_loop_resume_reserves_with_its_root_declaration(prepared, tmp_path, monkeypatch):
-    """A budgeted Resume was refused ``resources_required``: it carries no declaration."""
-    from tools.candidate_operations.host_admission import _declared
+def test_loop_resume_reserves_with_one_declaration_authority(prepared, tmp_path, monkeypatch):
+    """A budgeted Resume reserves the root's declaration, else its own (#1385).
+
+    Before #1385 a root without ``resources`` could never resume under a ledger. A
+    supplied declaration beside the root's is refused even when equal (one authority),
+    and without a ledger it is refused rather than silently ignored.
+    """
+    from tools.candidate_operations.host_admission import _declared, host_slot
     from tools.candidate_operations.models import (
         CandidateLoopResumeOperation,
         CandidateLoopResumeRequest,
@@ -595,22 +601,114 @@ def test_loop_resume_reserves_with_its_root_declaration(prepared, tmp_path, monk
 
     config = _store(tmp_path, "store-a")
     root = _gpu_operation(prepared, 2.0)
+    undeclared = root.model_copy(update={"resources": None})
+    own = OperationResources(gpu_count=0, host_memory_gib=1.0, cpu_slots=2, time_budgeted=False)
+
+    def resume(resources):
+        return CandidateLoopResumeOperation(
+            request_id=uuid4(),
+            request=CandidateLoopResumeRequest(
+                predecessor_operation_id=root.request_id,
+                expected_receipt_digest="a" * 64,
+                resources=resources,
+            ),
+        )
+
+    monkeypatch.setattr("tools.candidate_operations.host_admission.load_record", lambda c, i: i)
+    unplaced = Path(config.state_root) / "operations" / str(root.request_id)
+    unplaced.mkdir(mode=0o700, parents=True)
+    for part in (unplaced.parent, unplaced.parent.parent):
+        part.chmod(0o700)
+    monkeypatch.setattr(
+        "tools.candidate_operations.loop_resume.loop_chain",
+        lambda _: (SimpleNamespace(submission=SimpleNamespace(request_id=root.request_id)),),
+    )
+
+    def rooted(operation):
+        monkeypatch.setattr(
+            "tools.candidate_operations.loop_resume.root_record",
+            lambda _: SimpleNamespace(submission=operation),
+        )
+
+    rooted(root)
+    assert _declared(config, resume(None)) == (root, root.resources)
+    assert _code(lambda: _declared(config, resume(own))) == "run_resources_conflict"
+    assert _code(lambda: _declared(config, resume(root.resources))) == "run_resources_conflict"
+    rooted(undeclared)
+    assert _code(lambda: _declared(config, resume(None))) == "resources_required"
+    assert _declared(config, resume(own)) == (undeclared, own)
+
+    def serial(resources):
+        with host_slot(None, config, resume(resources)):
+            pass
+
+    serial(None)  # the serial default, unchanged
+    assert _code(lambda: serial(own)) == "host_ledger_missing"
+
+
+def test_a_resume_without_resources_keeps_its_pre_1385_bytes_and_digest():
+    """Records admitted before #1385 must replay and verify unchanged; the literals were
+    produced by the pre-change code (master cc0dee852), not by this implementation.
+    A supplied declaration is part of the request digest, so a retried request ID
+    with other resources is a ``conflict`` rather than a silent replay."""
+    from uuid import UUID
+
+    from tools.candidate_operations.models import (
+        CandidateLoopResumeOperation,
+        CandidateLoopResumeRequest,
+    )
+    from tools.candidate_operations.store import digest
+
+    def resume(resources=None):
+        return CandidateLoopResumeOperation(
+            request_id=UUID(int=1),
+            request=CandidateLoopResumeRequest(
+                predecessor_operation_id=UUID(int=2),
+                expected_receipt_digest="a" * 64,
+                resources=resources,
+            ),
+        )
+
+    assert resume().model_dump_json() == (
+        '{"kind":"candidate_loop_resume","request_id":"00000000-0000-0000-0000-000000000001",'
+        '"request":{"predecessor_operation_id":"00000000-0000-0000-0000-000000000002",'
+        '"expected_receipt_digest":"' + "a" * 64 + '"}}'
+    )
+    assert digest(resume()) == "dd205fdc7b49f09153df1e57ca0211a7a734a7c484110fc451cd96f01095f661"
+    own = OperationResources(gpu_count=0, host_memory_gib=1.0, cpu_slots=1, time_budgeted=False)
+    other = own.model_copy(update={"cpu_slots": 2})
+    assert len({digest(resume()), digest(resume(own)), digest(resume(other))}) == 3
+
+
+def test_a_supplied_resume_declaration_is_what_the_ledger_places(prepared, tmp_path, monkeypatch):
+    """The admitted reservation is the segment's own declaration, not an absent root one."""
+    from tools.candidate_operations.host_admission import host_slot
+    from tools.candidate_operations.models import (
+        CandidateLoopResumeOperation,
+        CandidateLoopResumeRequest,
+    )
+
+    config, host = _store(tmp_path, "store-a"), _ledger(tmp_path)
+    root = CandidateOperation(request_id=uuid4(), request=prepared)
+    own = OperationResources(gpu_count=0, host_memory_gib=3.0, cpu_slots=2, time_budgeted=False)
     resume = CandidateLoopResumeOperation(
         request_id=uuid4(),
         request=CandidateLoopResumeRequest(
-            predecessor_operation_id=root.request_id, expected_receipt_digest="a" * 64
+            predecessor_operation_id=root.request_id,
+            expected_receipt_digest="a" * 64,
+            resources=own,
         ),
     )
     monkeypatch.setattr("tools.candidate_operations.host_admission.load_record", lambda c, i: i)
-    for declared in (root, root.model_copy(update={"resources": None})):
-        monkeypatch.setattr(
-            "tools.candidate_operations.loop_resume.root_record",
-            lambda _, op=declared: type("Root", (), {"submission": op})(),
-        )
-        if declared.resources is None:
-            assert _code(lambda: _declared(config, resume)) == "resources_required"
-        else:
-            assert _declared(config, resume) == (root, root.resources)
+    monkeypatch.setattr(
+        "tools.candidate_operations.loop_resume.root_record",
+        lambda _: SimpleNamespace(submission=root),
+    )
+    with host_slot(host, config, resume) as slot:
+        placement = slot.admitted.placement
+    assert placement.decision == "placed" and placement.gpu_uuid is None
+    assert placement.unit_id == str(resume.request_id)
+    assert (placement.reserved.host_memory_gib, placement.reserved.cpu_slots) == (3.0, 2)
 
 
 def test_completion_records_the_host_placement_it_ran_under(prepared, tmp_path, children):
@@ -721,8 +819,12 @@ def test_a_queue_entry_whose_submitter_died_does_not_block_the_line(
     assert _queue(host) == ()
 
 
-def test_a_serial_resume_of_a_ledger_placed_root_is_refused(prepared, tmp_path, monkeypatch):
-    """Without the ledger the segment would run unaccounted beside placed runs."""
+def test_a_serial_resume_of_a_ledger_placed_loop_is_refused(prepared, tmp_path, monkeypatch):
+    """Without the ledger the segment would run unaccounted beside placed runs.
+
+    Any placed segment counts: an undeclared root runs serially while its resumes may
+    be placed with their own declaration (#1385), so checking only the root missed them.
+    """
     from tools.candidate_operations.host_admission import host_slot
     from tools.candidate_operations.models import (
         CandidateLoopResumeOperation,
@@ -732,33 +834,40 @@ def test_a_serial_resume_of_a_ledger_placed_root_is_refused(prepared, tmp_path, 
 
     config = _store(tmp_path, "a")
     root = _gpu_operation(prepared, 2.0)
+    segment = uuid4()
     resume = CandidateLoopResumeOperation(
         request_id=uuid4(),
         request=CandidateLoopResumeRequest(
-            predecessor_operation_id=root.request_id, expected_receipt_digest="a" * 64
+            predecessor_operation_id=segment, expected_receipt_digest="a" * 64
         ),
     )
+    chain = (
+        SimpleNamespace(submission=SimpleNamespace(request_id=segment)),
+        SimpleNamespace(submission=root),
+    )
     monkeypatch.setattr("tools.candidate_operations.host_admission.load_record", lambda c, i: i)
+    monkeypatch.setattr("tools.candidate_operations.loop_resume.loop_chain", lambda _: chain)
     monkeypatch.setattr(
         "tools.candidate_operations.loop_resume.root_record",
-        lambda _: type("Root", (), {"submission": root})(),
+        lambda _: SimpleNamespace(submission=root),
     )
     directory = Path(config.state_root)
-    for part in (
-        directory,
-        directory / "operations",
-        directory / "operations" / str(root.request_id),
-    ):
+    for part in (directory, directory / "operations"):
         part.mkdir(mode=0o700)
+    for operation_id in (segment, root.request_id):
+        (directory / "operations" / str(operation_id)).mkdir(mode=0o700)
     with host_slot(None, config, resume):
-        pass  # an unplaced root resumes serially as before
-    (operation_path(config, root.request_id) / "placement.json").write_text("{}")
+        pass  # an unplaced loop resumes serially as before
 
     def enter():
         with host_slot(None, config, resume):
             pass
 
-    assert _code(enter) == "host_ledger_required"
+    for placed in (segment, root.request_id):
+        marker = operation_path(config, placed) / "placement.json"
+        marker.write_text("{}")
+        assert _code(enter) == "host_ledger_required"
+        marker.unlink()
 
 
 @pytest.mark.parametrize("limit", [0, 2])
