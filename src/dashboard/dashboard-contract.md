@@ -174,6 +174,40 @@ LocalJsonDataSource summary loading and exploration-route summary/run-output
 loading call `core.record_encoding.decode_record` before filtering, ranking
 or response projection. The decoder owns both legacy and versioned formats;
 data-source callers receive native float/None values without encoding metadata.
-HTTP response models retain their existing non-finite JSON presentation.
+HTTP response models retain their existing non-finite JSON presentation:
+typed float fields serialize NaN/±inf as JSON `null`, never a bare token.
+Ranking uses `execute_tools.metric_order.finite_score` (#1316): the model
+overview's `best_agent_score` and the leaderboard skip a record whose
+`denoising_score` is null, NaN or ±inf, so a trial `failed_mode_collapse`
+record (whose non-finite score is kept as evidence) is never best or ranked.
 Regression coverage includes LocalRecorder-written scores 0.5, -inf and 0.4,
 plus +inf/NaN and the actual HTTP run-record endpoint.
+
+## Record-status HTTP projection
+
+`agent.schemas.hyperparam_tuning.ExperimentRecord.status` owns the persisted
+experiment-status vocabulary. The dashboard response model derives its status
+validator and OpenAPI enum from that field through a `TypeAdapter`; it does not
+maintain another Literal or silently accept statuses outside the owning schema.
+This projection does not validate the entire persisted record as a new tuner
+input: historical optional fields remain readable through the dashboard mirror.
+
+Ordinary run lists, individual experiment details, and exploration record lists
+share that projection. Exploration record lists explicitly declare `RunSummary`
+as their FastAPI response model, matching ordinary run lists; its JSON serializer
+renders non-finite numeric evidence as `null`. Returning an untyped model through
+FastAPI's generic encoder instead can leave native NaN/inf for a strict JSON
+response to reject. Storage evidence and the finite-score ranking owner remain
+unchanged. Status query filters accept strings, overview counts retain all
+statuses, and success-only chart/iteration filters are display selections, not
+alternative definitions of valid persisted statuses. Health and settings
+Literals describe separate dashboard-owned vocabularies.
+
+`tests/unit/dashboard/test_record_status_http.py` persists finite, NaN and ±inf
+records with `LocalRecorder` for every owning status, then uses the real
+`create_app` and `TestClient` to read lists, filtered lists, details, exploration,
+overview and leaderboard responses. The witness requires HTTP 200, exact status
+preservation, finite-only ranking, and JSON parsing that rejects non-standard
+numeric tokens. Reverting either the status projection or exploration response
+model must fail the relevant HTTP witness. No prompt, scientific record,
+protection/estimation assembly or verifier identity changes are involved.

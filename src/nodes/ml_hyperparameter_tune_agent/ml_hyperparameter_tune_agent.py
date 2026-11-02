@@ -71,7 +71,7 @@ from execute_tools.health_checks.config import (
     load_composed_health_config,
     load_health_gates_config,
 )
-from execute_tools.metric_order import MetricOrder
+from execute_tools.metric_order import MetricOrder, finite_score
 from execute_tools.sample_set_builder import build_sample_set
 from execute_tools.scoring_helpers import build_score_table
 from execute_tools.task_data_path import (
@@ -1633,7 +1633,7 @@ class HyperparamTuningAgent:
                     # (for example, a Health-invalid collapsed candidate).
                     # Such an attempt has a failure record, not scored model
                     # evidence that requires keeping an uncertified original.
-                    scored = score_results.get("denoising_score") is not None
+                    scored = finite_score(score_results.get("denoising_score"))
                     score_table = executed.score_table
                     train_results = executed.train_results
 

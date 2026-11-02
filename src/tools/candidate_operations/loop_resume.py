@@ -46,18 +46,25 @@ from .store import (
 )
 
 
-def root_record(record: OperationRecord) -> OperationRecord:
-    selected = record
+def loop_chain(record: OperationRecord) -> tuple[OperationRecord, ...]:
+    """``record`` and each predecessor record up to its authored-loop root, newest first."""
+    chain = [record]
     seen = set()
-    while selected.submission.kind == "candidate_loop_resume":
+    while (selected := chain[-1]).submission.kind == "candidate_loop_resume":
         identity = selected.submission.request_id
         if identity in seen:
             raise OperationFailure("integrity", "loop operation cycle")
         seen.add(identity)
-        selected = load_record(record.config, selected.submission.request.predecessor_operation_id)
-    if not is_authored_loop(selected):
+        chain.append(
+            load_record(record.config, selected.submission.request.predecessor_operation_id)
+        )
+    if not is_authored_loop(chain[-1]):
         raise OperationFailure("kind", "operation is not an authored loop")
-    return selected
+    return tuple(chain)
+
+
+def root_record(record: OperationRecord) -> OperationRecord:
+    return loop_chain(record)[-1]
 
 
 def loop_root_operation(

@@ -77,3 +77,59 @@ def test_adaptor_replay_uses_recorded_version_and_preserves_bytes(
         adaptor_phase.verify_adaptors(
             request, parent, (), (entry,), workspace=workspace, iteration=1
         )
+
+
+@pytest.mark.parametrize("number", [float("inf"), float("nan")])
+def test_version_downgrade_is_refused_by_the_trusted_record_anchor(prepared, monkeypatch, number):
+    """Threat model (#1326): ``encoding_version`` is dispatch, not authentication.
+
+    A forger rewrites a current record and its output consistently in the legacy
+    encoding. Recomputation fixes the numeric value, so the forgery can only respell
+    it and readback recomputation alone accepts it; the trace's unchanged
+    ``record_sha256`` anchor must refuse it. Dropping the anchor comparison from
+    ``_check_adaptor_entry`` lets the forged entry through and ``pytest.raises`` fails.
+    """
+    from tools.candidate_worker.graph_evidence import _check_adaptor_entry
+
+    request = selection_request(prepared)
+    parent = initial(request)
+    workspace = Path(parent.workspace)
+    adaptor = request.preview.document.definition.adaptors[0]
+    outcome = AdaptorOutcome(
+        status="succeeded",
+        admissions=(),
+        outputs=(AdaptorOutput(index=None, status="emitted", value=Value(score=number)),),
+    )
+    record = build_adaptor_record(
+        adaptor_id=adaptor.id,
+        iteration=1,
+        combine=adaptor.combine,
+        select=adaptor.select,
+        distribute=adaptor.distribute,
+        outcome=outcome,
+    )
+    monkeypatch.setattr(adaptor_phase, "decide", lambda *args, **kwargs: (outcome, record))
+    (slot,) = adaptor_phase.expected_adaptors(request, parent)
+    path = Path(slot.record_path)
+    path.parent.mkdir(parents=True)
+    output_path = adaptor_output_path(workspace, adaptor.id, "result", None)
+    current = canonical_json_bytes(record)
+    entry = slot.model_copy(
+        update={"state": "succeeded", "record_sha256": hashlib.sha256(current).hexdigest()}
+    )
+    states = dict.fromkeys(entry.predecessors, "succeeded")
+    path.write_bytes(current)
+    output_path.write_bytes(canonical_json_bytes(outcome.outputs[0].value))
+    _check_adaptor_entry(entry, slot, states)
+
+    # The consistent legacy forgery: same value, historical spelling, no version.
+    legacy_output = json.dumps({"score": number}, sort_keys=True, separators=(",", ":")).encode()
+    raw = record.model_dump(mode="json", exclude={"encoding_version"})
+    raw["outputs"][0]["sha256"] = hashlib.sha256(legacy_output).hexdigest()
+    path.write_bytes(json.dumps(raw, sort_keys=True, separators=(",", ":")).encode())
+    output_path.write_bytes(legacy_output)
+    assert adaptor_phase.verify_adaptors(
+        request, parent, (), (entry,), workspace=workspace, iteration=1
+    )
+    with pytest.raises(ValueError, match="graph adaptor record mismatch"):
+        _check_adaptor_entry(entry, slot, states)

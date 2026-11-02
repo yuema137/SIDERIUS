@@ -374,6 +374,36 @@ ledger's own launch code, so nothing reaches Launch that Launch would refuse or
 silently ignore. `ChoicesView.host_ledger` (omitted when false) tells the browser
 whether a ledger is configured.
 
+Loop resume reservation (#1385). A loop whose root candidate ran without
+`resources` (serially) resumes under the console's ledger with a reservation
+for the resumed segment. `ReservationSelection` (`resources` only; the base of
+`RunResourcesSelection`, which owns `bound_digest`) is the body of
+`POST /api/operations/{UUID}/loop-resume-review`; the `GET` route is the same
+review without one. `CandidateConsole.review_loop_resume(UUID, selection)`
+runs the owner review, then the operations owner's
+`loop_resume_resources(root, selection.resources, ledger=self.host is not None)`,
+so the review refuses what admission would: `resources_required` (ledger, root
+without `resources`, none supplied), `run_resources_conflict` (supplied beside
+the root's own declaration, even an equal one; unlike `with_run_resources`, which
+accepts an equal value, see the operations contract "Loop resume" for why),
+`host_ledger_missing` (supplied without a ledger) and `parallel_budget` (a root whose
+request carries `parallel.budget`), each 409 with a route-local fixed message. A
+supplied reservation is echoed as `LoopResumeReview.resources` and bound into
+`review_digest = bound_digest(expected_receipt_digest)`; both are omitted
+without one, so existing reviews keep their bytes. `LoopResumeSelection` carries
+`resources` and `expected_review_digest` (both omitted when absent, so existing
+Resume bodies are unchanged). `resume_loop` refuses `stale_review` before any
+read or submission when either is present and `expected_review_digest` is not
+`bound_digest(expected_receipt_digest)` of the sent `resources`; otherwise it
+passes `resources` into `CandidateLoopResumeRequest.resources`, and admission
+applies the same rule again. Each resume of an undeclared root supplies its own
+reservation. Witnesses: `test_host_ledger.py`
+(`test_resume_review_binds_the_segment_reservation_of_an_undeclared_root`,
+`test_resume_review_refuses_a_reservation_admission_would_refuse`,
+`test_resume_carries_only_the_reviewed_reservation`,
+`test_candidate_review_digests_are_unchanged_by_the_shared_reservation_binding`)
+and `tests/browser/loop_resume_resources.mjs`.
+
 Prepared review facts (`capture_facts.py`): `ReusableCaptureReview.facts` carries
 `training` (nullable `TrainingReview`) and `task_parameter_rules` (nullable
 `ParameterRules`). The adapter reads the reviewed request's `proposal.input` external observation,
@@ -448,7 +478,9 @@ only). The native-chain card states native chains are serial-only. Under the led
 children; admission returns `host_queue_full` before claim/spawn when full
 (default zero disables waiting). See the operations queue contract. Without a configured ledger a `parallel` launch without its
 own budget is refused `parallel_budget_required`. A loop resume inherits its
-root's `resources` and `parallel`. Every refusal reaches the browser as the
+root's `parallel` and, when the root declared them, its `resources`; a root
+without `resources` resumes under the ledger only with the segment's own
+reviewed reservation (see "Loop resume reservation" above). Every refusal reaches the browser as the
 operation owner's typed code. Status: `StatusView.state` and the list state
 include `queued` (B3-5b); its presentation, and "Cancelled before start" for
 `operation_failed` + `cancel_requested` + `cancelled_while_queued`, are the UI
@@ -853,7 +885,8 @@ raw native receipts, arbitrary exception strings, storage paths or scores.
 | POST /api/operations/{UUID}/loop-stop | empty `LoopStopSelection` `{}` → `LoopStopAcknowledgement` (`outcome="requested"`), 200 |
 | POST /api/operations/{UUID}/loop-pause | empty `LoopPauseSelection` `{}` → `LoopPauseAcknowledgement` (`outcome="requested"`), 200 |
 | GET /api/operations/{UUID}/loop-resume-review | `LoopResumeReview` (owner-verified paused segment, digest, bound, names-only `credential_readiness`) |
-| POST /api/loop-resumes | `LoopResumeSelection` (`request_id`, `predecessor_operation_id`, `expected_receipt_digest`) → OperationHandle, 202 |
+| POST /api/operations/{UUID}/loop-resume-review | `ReservationSelection` (optional `resources`) → the same `LoopResumeReview`, plus the echoed `resources` and `review_digest` when supplied (#1385), 200 |
+| POST /api/loop-resumes | `LoopResumeSelection` (`request_id`, `predecessor_operation_id`, `expected_receipt_digest`, optional `operator_advice`, optional `resources` with `expected_review_digest`) → OperationHandle, 202 |
 
 Outer ASGI RequestBoundary checks exact Host (configured bind/browser authorities),
 rejects proxy/forwarded headers and requires constant-time bearer authentication
@@ -1163,9 +1196,13 @@ the owner's `conflict`. If the request UUID is
 already admitted it replays with an empty environment before any root or credential
 read, so a retry after an unconfirmed outcome returns the same operation. Otherwise
 the root's `environment_names` are read from the configured `credential_file` with
-the same `credentials` helper as Launch. Refusals on both routes: `loop_resume`
+the same `credentials` helper as Launch. Under a host ledger a loop whose root
+declared no `resources` is reviewed and resumed with the segment's reservation
+(see "Loop resume reservation" under Host reservation ledger). Refusals on both
+routes: `loop_resume`
 (not an exited, cleanly paused segment, already continued, terminal, or a stale
-digest), `kind`, `not_ready` and `runtime` 409 with route-local fixed messages;
+digest), `kind`, `not_ready`, `runtime`, `resources_required`,
+`run_resources_conflict` and `host_ledger_missing` 409 with route-local fixed messages;
 `credentials` 409 carrying missing names only; `busy`/`conflict` use the global
 messages. Unknown predecessor 404.
 
@@ -1215,7 +1252,9 @@ and retains it in `localStorage` at
 opaque operations store id; `<predecessor>` is the lowercase predecessor operation
 UUID. The JSON record contains `origin` (`location.origin`),
 `expected_receipt_digest` (the reviewed receipt digest), `request_id` (the generated
-UUID), and optional `operator_advice` (trimmed text, omitted when empty). Reuse
+UUID), optional `operator_advice` (trimmed text, omitted when empty), and optional
+`resources` with `expected_review_digest` (the reviewed reservation and its
+`review_digest`, omitted without one). Reuse
 requires a matching origin and receipt digest. A legacy
 `siderius.loop-resume.v1:<UUID>` record with that origin and digest is moved on
 first use only when no store-scoped record exists. A retry reuses the record, and the
@@ -1226,7 +1265,35 @@ with this paused segment's own `operator_advice`. The first Resume attempt trims
 text and fixes it: the retained record stores the request UUID together with
 `operator_advice` (omitted when empty), and the textarea becomes read-only, so a
 retry is byte-identical. Only a 422 (refused before admission) clears the record and
-unlocks the textarea. Empty advice sends no `operator_advice` key. A 409 clears the review. On success the monitor selects the resumed
+unlocks the textarea. Empty advice sends no `operator_advice` key. A 409 clears the review.
+Host resources for the resumed segment (#1385): the `#loop-resume-resources`
+fieldset (`loop-resume-resources-declare`, `-gpu`, `-vram`, `-memory`, `-cpus`,
+`-timed`, read and filled by `run-scheduling.js` `readResources(prefix)` /
+`fillResources(prefix, value)`, the same rules as the Run lane's panel) is hidden
+until a review or Resume is refused `resources_required` (only a console with
+`host_ledger` returns it), or a retained record carries `resources`. It is not
+gated on `ChoicesView.host_ledger`: a `#monitor/<UUID>` deep link connects through
+`GET /api/operations/<UUID>` and never reads `/api/choices`, so
+`consoleSession.hostLedger` stays `null` there. While shown, Review
+resume sends its declared values as `POST .../loop-resume-review {resources}`
+(`GET` otherwise); an invalid value is shown in `#loop-resume-status` and nothing
+is sent. The summary appends "Host resources: " and the `describe` sentence of the
+echoed reservation. Any fieldset edit discards the review ("Host resources changed.
+Review again before resuming."); the fieldset is disabled while a review is pending, so the values sent are the ones shown. The Resume POST sends the
+retained `resources`/`expected_review_digest`; once retained, the fieldset is
+disabled like the advice textarea and is refilled from the record on re-review.
+A Resume refused with 422, or 409 with a code returned before any operation is
+claimed (`stale_review`, `resources_required`, `run_resources_conflict`,
+`host_ledger_missing`, `host_ledger_required`, `parallel_budget`,
+`parallel_budget_required`, `resource_refused`, `parallel_unit_exceeds_capacity`,
+`placement_unreachable`; an admitted request UUID replays before any of them), drops
+the retained record and unlocks the advice and fieldset. A retained record whose
+`resources` differ from a newer successful review never overrides it silently: the
+client reads `GET /api/operations/<retained request_id>`; only `unknown_operation`
+drops the record (the newer review stands, with a new UUID on Resume). A readable
+operation keeps the record and its values, shown with "A Resume with other host
+resources was already admitted; Resume reconnects to it."; any other error refuses
+the review. On success the monitor selects the resumed
 segment, which reads "Resumed segment." and shows Stop and Pause while active and
 its per-body results once completed. A continued predecessor shows "Continued by
 <UUID>" (a Slow-control link) and no Resume. Witnesses:
@@ -1721,6 +1788,16 @@ by the task manifest, shown as `definition.task.manifest` and any task binding;
 no control edits them). A card whose server inventory has a required unbound input
 gets `.has-required-unbound` and a small `.circuit-problem-badge` count; the soft red
 ring is on the unconnected socket itself.
+For a refused one-tuning-round review, `editorNodeParameters.reviewHint` appends
+the native `max_rounds` help description and names **Tuning rounds per iteration**
+in **Training settings**. It is a settings reminder, not a diagnosis or a browser
+admission rule: it applies only to explicit `max_rounds=1` with HTTP 422 request
+validation, or source diagnostics containing a `validation` code. Conflict,
+authentication and source syntax errors do not earn this reminder. Loop reviews
+retain their existing loop-specific guidance. Native error redaction is unchanged.
+`tests/browser/editor_max_rounds_help.mjs` exercises schema help/minimum projection,
+the refused one-round edit and successful correction to two with a preserved Trial
+override; neither review writes the source or launches training.
 `#editor-problems` (`editor-problems.js`, beside Review) lists "N problems" from
 server diagnostics only: draft `problems` (`DraftProblem`) and source diagnostics
 (`SourceDiagnostic`). It is hidden when empty. A located item selects its node and
