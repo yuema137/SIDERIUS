@@ -652,7 +652,9 @@ UTF-8 spans/import insertion with `source_edits` and literal rendering with
 matched by declaration identity where available, otherwise by position. Changed
 containers can change surrounding formatting, but retained values are recursive.
 `browser_numbers=True` preserves source numbers whose binary64 projections are
-equal, avoiding JSON float/int, signed-zero and large-integer losses. Exact source
+equal, avoiding JSON float/int, signed-zero and large-integer losses. Changed
+integer inputs preserve an existing float type (`2.0` to `3` saves `3.0`) via
+`_browser_scalar`, shared with pre-admission restoration. Exact source
 proposals are required for distinctions the browser cannot represent. Canonical
 rendering remains the owner for new documents and declaration identity.
 `restore_browser_values(source, value)` performs the same numeric comparison over
