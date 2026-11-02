@@ -22,7 +22,7 @@ for the supported scoring route and threshold rules.
 Use `--is_pseudo_llm --is_pseudo_training` to exercise the chain with canned
 LLM and execution results. Declare positive address-space limits for all three
 execution roles through `SIDERIUS_SUBPROCESS_RSS_GB` before launch. For example,
-`SIDERIUS_SUBPROCESS_RSS_GB=16 bash scripts/launch/run_chain.sh ...
+`SIDERIUS_SUBPROCESS_RSS_GB=16 bash scripts/launch/run_chain.sh --mode lilab ...
 --is_pseudo_llm --is_pseudo_training` declares 16 GiB for each role; replace
 `...` with your workspace, run name, task composition and data-directory flags.
 Choose the limits explicitly for your run; 16 GiB is an example, not a default.
