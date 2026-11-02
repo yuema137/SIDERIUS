@@ -8,7 +8,7 @@ and accepted task binding into the shape and renders canonical source; the
 editor then reviews that source through the ordinary ``source`` proposal path,
 and only an explicit Save publishes it.
 
-Shapes reuse the audited native profiles (``native-interpretation-candidate/v1``
+Shapes reuse the audited native profiles (``NATIVE_INTERPRETATION_PROFILE``
 and the plain candidate preview) exactly as the reusable examples under
 ``examples/workflow_declarations`` and the reusable browser fixtures use them.
 A Literature review node is not offered inside a loop: the catalog has no
@@ -40,6 +40,7 @@ from workflows.definition import (
     WorkflowDocument,
     render_workflow_source,
 )
+from workflows.definition.models import NATIVE_INTERPRETATION_PROFILE
 
 TemplateId = Literal["single-research-loop", "single-loop-with-advice", "single-step"]
 
@@ -247,7 +248,7 @@ def _research_loop(with_advice: bool) -> ReusableWorkflowDocument:
             ),
         ),
         positions=_positions("interpret", "propose", "implement", "validate", "train"),
-        execution_profile="native-interpretation-candidate/v1",
+        execution_profile=NATIVE_INTERPRETATION_PROFILE,
         # Native launch defaults apply until the author edits a training control; only the
         # launch policy pair is declared, because training admission has no default for it.
         training_settings={"launch": dict(DECLARED_LAUNCH_POLICY)},

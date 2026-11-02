@@ -123,6 +123,12 @@ requires separate integration and experiment-owned historical configuration.
 
 ## Authored loop
 
+`models.NativeInterpretationProfile` owns the native interpretation profile type;
+`models.NATIVE_INTERPRETATION_PROFILE` owns its runtime value. Python consumers
+reuse these names, including Literal unions; the transparent alias preserves
+existing JSON Schema enum ordering and serialized bytes. The console serves the
+same value through `/execution-profiles.js` before its browser consumers load.
+
 `WorkflowDefinition.loop` and `ReusableWorkflowDefinition.loop` optionally carry
 `AuthoredLoop(final_iteration, feedback, stop_conditions=())`. `final_iteration`
 is a positive body count; it is a ceiling, not a budget or a promise that every
