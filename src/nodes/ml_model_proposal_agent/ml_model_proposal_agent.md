@@ -301,7 +301,8 @@ The constructor accepts `bridge_factory` (test injection — defaults to `LLMBri
   `ProposalOutput._validate_supplied_training_config` validates every supplied
   `train_config` object through `TrainConfig`, including `batch_size`, `epochs`,
   `drop_last` and schedule cross-field constraints. The owner's coercion rules
-  apply; normalized supplied values replace raw values before advisory use.
+  include rejecting boolean integer counts (`epochs`, `batch_size`);
+  normalized supplied values replace raw values before advisory use.
   Omitted sections/fields remain omitted, extension keys remain intact, and
   explicit null/non-object training sections refuse. Unknown generated model
   architecture fields retain the implementation contract; no registered model
@@ -498,3 +499,15 @@ separator, colons and Unicode control characters are refused through the existin
 retry feedback. Names are never sanitized. The workflow independently repeats
 this check before name-derived attempt renaming and tuning directory creation,
 including operator-supplied fixed plans; archival decoding remains permissive.
+
+## Persisted proposal compatibility
+
+The supplied-training validator also runs when saved `ProposalOutput` records
+are reloaded. `run_one_iteration` fixed-candidate file loading,
+`model_exploration` fixed-plan construction, and candidate-worker
+`loop_evidence` / `graph_evidence` validation therefore refuse old records
+containing invalid training values. This is not an automatic
+migration or a live proposer repair: callers must regenerate/correct the invalid
+proposal, or replay with its recorded framework revision. Such invalid values
+would otherwise fail execution; boolean integer values are additionally refused
+instead of silently becoming 0/1. Valid typed records remain compatible.

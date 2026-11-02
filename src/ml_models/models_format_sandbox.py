@@ -913,6 +913,14 @@ class TrainConfig(BaseModel):
     drop_last: bool = True
     lr_schedule: LearningRateSchedule | None = Field(default=None, exclude_if=lambda v: v is None)
 
+    @field_validator("epochs", "batch_size", mode="before")
+    @classmethod
+    def reject_boolean_integers(cls, value: Any) -> Any:
+        """Keep numeric coercion, but never turn an LLM boolean into a count."""
+        if isinstance(value, bool):
+            raise ValueError("Training integer fields must not be booleans")
+        return value
+
     @model_validator(mode="after")
     def validate_learning_rate_schedule(self) -> TrainConfig:
         if (

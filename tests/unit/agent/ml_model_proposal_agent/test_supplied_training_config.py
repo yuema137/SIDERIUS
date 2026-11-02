@@ -26,6 +26,8 @@ _PREFLIGHT = "nodes.ml_model_proposal_agent.ml_model_proposal_agent._run_preflig
         ({"batch_size": 0}, "batch_size"),
         ({"batch_size": -1}, "batch_size"),
         ({"batch_size": []}, "batch_size"),
+        ({"batch_size": True}, "batch_size"),
+        ({"epochs": True}, "epochs"),
         ({"epochs": "invalid"}, "epochs"),
         ({"epochs": 0}, "epochs"),
         ({"epochs": None}, "epochs"),
@@ -70,7 +72,7 @@ def test_preflight_receives_normalized_supplied_values_without_filling_omissions
 ):
     """Catches validating then forwarding raw values, and injecting owner defaults."""
     raw = deepcopy(FAKE_GOOD_DRAFT)
-    supplied = {"batch_size": "8", "drop_last": "false", "extension": {"keep": 1}}
+    supplied = {"batch_size": "8", "epochs": 2.0, "drop_last": "false", "extension": {"keep": 1}}
     raw["baseline_config"]["train_config"] = supplied
     bridge = MagicMock()
     bridge.generate_text.return_value = "reasoning"
@@ -80,8 +82,9 @@ def test_preflight_receives_normalized_supplied_values_without_filling_omissions
     with patch(_PREFLIGHT, return_value=None) as preflight:
         output = _agent(bridge).run((_pipeline_input if pipeline else _legacy_input)(tmp_path))
     observed = preflight.call_args.args[1].baseline_config["train_config"]
-    assert observed == {"batch_size": 8, "drop_last": False, "extension": {"keep": 1}}
+    assert observed == {"batch_size": 8, "epochs": 2, "drop_last": False, "extension": {"keep": 1}}
     assert type(observed["batch_size"]) is int
+    assert type(observed["epochs"]) is int
     assert observed["drop_last"] is False
     assert output.baseline_config["train_config"] == observed
     assert supplied["batch_size"] == "8"  # No mutation of the LLM response.

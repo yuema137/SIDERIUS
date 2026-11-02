@@ -63,6 +63,12 @@ prompts.
 
 ## Owned semantics
 
+- `TrainConfig` rejects boolean `epochs` and `batch_size` before integer
+  coercion; numeric strings and integral floats retain the existing coercion
+  policy. The integer schedule fields (`horizon_epochs`, `step_size_epochs`)
+  already require strict integers. `drop_last` remains a boolean policy.
+  Proposal validation delegates to this owner before advisory estimation.
+
 - **The plugin file contract** — a plugin module must define:
 
   ```
