@@ -7,9 +7,10 @@ from unittest.mock import Mock
 import pytest
 
 from core import sandbox_executor as executor
+from core.stub_sandbox import StubSandbox
 
 
-@pytest.mark.parametrize("sandbox_type", [executor.TidmadSandbox, executor.StubSandbox])
+@pytest.mark.parametrize("sandbox_type", [executor.TidmadSandbox, StubSandbox])
 @pytest.mark.parametrize("run_name", ["../escape", "/absolute", r"C:\escape", "bad\nname"])
 def test_constructor_refuses_before_task_or_storage_resolution(
     sandbox_type, run_name, tmp_path, monkeypatch
@@ -27,7 +28,7 @@ def test_constructor_refuses_before_task_or_storage_resolution(
 
 
 @pytest.mark.usefixtures("synthetic_dataset_profile", "synthetic_physical_data_root")
-@pytest.mark.parametrize("sandbox_type", [executor.TidmadSandbox, executor.StubSandbox])
+@pytest.mark.parametrize("sandbox_type", [executor.TidmadSandbox, StubSandbox])
 @pytest.mark.parametrize("method", ["execute_training", "execute_inference", "execute_scoring"])
 @pytest.mark.parametrize("run_name", ["../escape", "/absolute", r"C:\escape", "bad\nname"])
 def test_method_name_is_checked_independently_before_effects(
@@ -46,7 +47,7 @@ def test_method_name_is_checked_independently_before_effects(
     monkeypatch.setattr(executor, "run_phase_subprocess", first_effect)
     monkeypatch.setattr(sandbox, "_write_dataset_profile_config", first_effect)
     state = None
-    if isinstance(sandbox, executor.StubSandbox):
+    if isinstance(sandbox, StubSandbox):
         state = (sandbox._rng.getstate(), deepcopy(sandbox._train_results_cache))
     kwargs = dict(exp_id="attempt", run_name=run_name, model_type="model", m_cfg={}, l_cfg={})
     if method != "execute_inference":
@@ -56,5 +57,5 @@ def test_method_name_is_checked_independently_before_effects(
     first_effect.assert_not_called()
     assert set(tmp_path.rglob("*")) == before
     assert not (records.parent / "escape").exists()
-    if isinstance(sandbox, executor.StubSandbox):
+    if isinstance(sandbox, StubSandbox):
         assert (sandbox._rng.getstate(), sandbox._train_results_cache) == state

@@ -16,7 +16,8 @@ from unittest.mock import patch
 
 import pytest
 
-from core.sandbox_executor import StubSandbox, TidmadSandbox
+from core.sandbox_executor import TidmadSandbox
+from core.stub_sandbox import StubSandbox
 from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
 REPO_ROOT = Path(__file__).resolve().parents[3]

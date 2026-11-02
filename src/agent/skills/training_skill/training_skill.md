@@ -103,7 +103,8 @@ call shape production would reject.
 
 ## Dependencies
 
-- `core/sandbox_executor.py` — `TidmadSandbox` / `StubSandbox`
+- `core/sandbox_executor.py` — `TidmadSandbox`
+- `core/stub_sandbox.py` — `StubSandbox` (pseudo mode)
 - `execute_tools/train_engine_sandbox.py` — the training subprocess
 - `skill_config.json` — the LLM-facing tool schema (legacy; the tuner
   calls `run_skill` directly rather than through tool-calling)

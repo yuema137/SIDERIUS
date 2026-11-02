@@ -465,7 +465,8 @@ def test_actual_tuner_factory_call_transports_validated_hardware_fact(
     from datetime import UTC, datetime
 
     from core.hardware_context import HardwareContext
-    from core.sandbox_executor import StubSandbox, TidmadSandbox, _admission_refusal
+    from core.sandbox_executor import TidmadSandbox, _admission_refusal
+    from core.stub_sandbox import StubSandbox
 
     monkeypatch.setenv(PROCESS_VISIBILITY_ENV, "namespace_limited")
     hardware = HardwareContext(

@@ -141,7 +141,7 @@ class TestApplicability:
 
     def test_pseudo_with_real_device_identity_is_not_measured(self, tmp_path, monkeypatch):
         """A GPU host must not turn the legacy fallback into a real pseudo probe."""
-        from core.sandbox_executor import StubSandbox
+        from core.stub_sandbox import StubSandbox
         from execute_tools.data_paths import bind_physical_data_root
 
         with bind_physical_data_root(str(tmp_path)):
