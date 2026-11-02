@@ -39,7 +39,6 @@ from pathlib import Path
 from typing import Any, ClassVar, cast
 
 from openai import APIError, OpenAI
-from openai.types.chat import ChatCompletionMessageFunctionToolCall
 from pydantic import ValidationError
 
 # Bound to the historical name: callers and tests patch ``llm_bridge.load_dotenv``.
@@ -66,6 +65,7 @@ from agent.llm_settings import (
 from agent.llm_transport.client import PydanticClient
 from agent.llm_transport.contracts import Completion, PydanticTransportConfig, validate_completion
 from agent.llm_transport.selection import optional_client, validate_output_limit
+from agent.llm_transport.tool_admission import admit_tool_response
 from agent.planner_strategy import resolve_planner_strategy
 from agent.prompt_templates.constraints import append_constraint_disclosure
 from agent.prompt_templates.tuner.rendering import (
@@ -2147,38 +2147,15 @@ class LLMBridge:
             ),
         )
 
-        message = response.choices[0].message
-
-        # Telemetry: record the row regardless of whether a tool_call came
-        # back. The API charged for the tokens either way; the response
-        # shape is the caller's contract concern.
-        tool_status = "ok" if message.tool_calls else "no_tool_call"
+        # Account even an empty or ambiguous envelope before admission rejects it.
+        has_calls = bool(response.choices and response.choices[0].message.tool_calls)
         record_usage(
             response=response,
-            extra={"attempt": 0, "status": tool_status},
+            extra={"attempt": 0, "status": "ok" if has_calls else "no_tool_call"},
         )
-
         validate_completion(response)
-        if not message.tool_calls:
-            raise ValueError(
-                f"[LLMBridge.tool_call] Model did not return a tool call. "
-                f"Response: {message.content!r}"
-            )
-
-        tc = message.tool_calls[0]
-        # SDK ``tool_calls`` is typed as a union of
-        # ``ChatCompletionMessageFunctionToolCall`` (has ``.function``) and
-        # ``ChatCompletionMessageCustomToolCall`` (has ``.custom`` instead).
-        # SIDERIUS never registers custom tools — every ``tools=`` payload
-        # built by ``SkillSpec.to_openai_tool()`` is function-typed, so the
-        # API always returns the function variant. Cast is a pure
-        # type-system shim — no runtime change.
-        tc_fn = cast(ChatCompletionMessageFunctionToolCall, tc)
-        return ToolCallResult(
-            name=tc_fn.function.name,
-            arguments=json.loads(tc_fn.function.arguments),
-            call_id=tc_fn.id,
-        )
+        name, arguments, call_id = admit_tool_response(response, tools)
+        return ToolCallResult(name=name, arguments=arguments, call_id=call_id)
 
 
 # ---------------------------------------------------------------------------
