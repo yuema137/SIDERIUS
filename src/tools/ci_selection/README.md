@@ -14,9 +14,9 @@ assets.
 
 Changes under `src/agent/prompt_templates/` also run the full unit suite. For
 example, the proposal loader computes a stage's filename at runtime, so import
-analysis cannot connect every template edit to its rendering tests. Running the
+analysis cannot link every template file to the tests that render it. Running the
 full suite costs more time but keeps those tests and the packaging checks covered.
 The manifest also declares the resource directories scanned by the packaging
-check, so edits to nested node Markdown and other packaged assets select it.
+check, so changes to nested node Markdown and other packaged assets select it.
 
 See [the parent guide](../README.md) for child ownership and the focused validation route.
