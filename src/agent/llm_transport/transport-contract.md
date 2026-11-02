@@ -24,6 +24,7 @@ for offline CI. Legacy routes do not import Pydantic AI at runtime.
 | `providers.py` | Construct supported SDK/provider/model objects with SDK retries disabled |
 | `runtime.py` | One Direct API request and exception translation |
 | `accounting.py` | Raw JSON/SSE accounting capture before SDK defaults |
+| `tool_admission.py` | Shared complete single-tool admission for legacy and Direct API routes |
 | `responses.py` | Admit complete representable results and normalize measured usage |
 | `LLMBridge` | Retry policies, remaining-deadline clipping, content repair, labels and usage persistence |
 
@@ -108,6 +109,17 @@ requested tool/output mode. Some models or thinking configurations can reject
 forced output-tool selection. There is no automatic fallback to prompt-only
 JSON, another model, or another protocol. Qualification must exercise JSON and
 tools separately for each intended model/configuration combination.
+
+### Legacy single-tool admission
+
+The default OpenAI-compatible `tool_call` route uses the same count, declared
+name, nonempty call ID and complete JSON-object argument checks as Direct API.
+It additionally requires exactly one response choice, a function call, no
+refusal, and a complete SDK `stop` or `tool_calls` finish reason. Invalid
+responses raise `ValueError` after billed usage is recorded, outside retries.
+A continuing deadline takes precedence over admission and records one late
+receipt. Valid requests and `ToolCallResult` payloads are unchanged. These
+checks do not add argument-schema validation or tool execution.
 
 ## Retry, lifecycle, and errors
 
