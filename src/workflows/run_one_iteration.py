@@ -1478,7 +1478,15 @@ def _run_bound_iteration(
 
         bridge_factory = StubLLMBridge
     if args.is_pseudo_training:
+        from core.execution_calibration import MalformedCeilingOverride
+        from core.pseudo_admission import resolve_pseudo_admission
         from core.sandbox_executor import StubSandbox
+
+        try:
+            resolve_pseudo_admission()
+        except MalformedCeilingOverride as exc:
+            print(f"[run_one_iteration] LAUNCH REFUSED: {exc}", file=sys.stderr)
+            sys.exit(2)
 
         sandbox_factory = StubSandbox
     if args.is_pseudo_llm or args.is_pseudo_training:
