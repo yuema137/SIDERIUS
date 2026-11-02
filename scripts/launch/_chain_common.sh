@@ -152,6 +152,7 @@ RUNTIME_FORMAL_SAFETY_FACTOR=""     # §3.2: empty == omit == Python None
 RUNTIME_WATCHDOG_SAFETY_FACTOR=""   # §3.2: empty == omit == Python None; V19 split — watchdog-only multiplier (5090 posture 3.5)
 RUNTIME_WATCHDOG_FLOOR_SECONDS=""   # arXiv #261: empty == omit == profile floor (legacy 60.0 when uncalibrated); explicit value overrides; V18 posture 120
 RUNTIME_VERIFICATION_MAX_WALL_SECONDS="" # empty == omit == adaptive verifier default; explicit value supports slow-step workloads
+RUNTIME_VERIFICATION_PATHOLOGICAL_MIN_UNIT_MS="" # empty == omit == Python None (100 ms floor); 0 disables the absolute floor
 EXPLORATION_MODE="auto"             # §3.2: matches Python default
 MINIMUM_BOLDNESS="0.05"             # §3.2: matches Python default
 # §3.2 — Adaptive-tuning brakes (default-synced to run_one_iteration.py)
@@ -271,6 +272,13 @@ ML_LIT_REVIEW_ENABLED=""
 # Explicit task-composed Data Analysis override. Empty preserves the task
 # composition; 1 and 0 forward the corresponding existing Python CLI flags.
 DATA_ANALYSIS_ENABLED=""
+# Tri-state BooleanOptionalAction pass-throughs, same contract as
+# ML_LIT_REVIEW_ENABLED: "" forwards nothing (the child's argparse default
+# applies), 1 forwards the positive flag, 0 forwards the negative flag.
+# --[no-]disclose_execution_constraints changes advisory agent context only;
+# --[no-]is_trial selects trial/formal versus legacy single-file mode.
+DISCLOSE_EXECUTION_CONSTRAINTS=""
+IS_TRIAL=""
 # Optional task-owned literature-review config. Empty preserves the child's
 # historical default; a supplied path is transported unchanged.
 ML_LIT_REVIEW_CONFIG=""
@@ -383,6 +391,7 @@ parse_chain_args() {
         --runtime_watchdog_safety_factor) RUNTIME_WATCHDOG_SAFETY_FACTOR="$2"; shift 2 ;;
         --runtime_watchdog_floor_seconds) RUNTIME_WATCHDOG_FLOOR_SECONDS="$2"; shift 2 ;;
         --runtime_verification_max_wall_seconds) RUNTIME_VERIFICATION_MAX_WALL_SECONDS="$2"; shift 2 ;;
+        --runtime_verification_pathological_min_unit_ms) RUNTIME_VERIFICATION_PATHOLOGICAL_MIN_UNIT_MS="$2"; shift 2 ;;
         --formal_eval_portion)       FORMAL_EVAL_PORTION="$2"; shift 2 ;;
         --gpu_admission_measurement_source) GPU_ADMISSION_MEASUREMENT_SOURCE="$2"; shift 2 ;;
         --gpu_execution_policy_json)
@@ -411,6 +420,10 @@ parse_chain_args() {
         --no-ml_lit_review_enabled)  ML_LIT_REVIEW_ENABLED=0; shift ;;
         --data_analysis_enabled)     DATA_ANALYSIS_ENABLED=1; shift ;;
         --no-data_analysis_enabled)  DATA_ANALYSIS_ENABLED=0; shift ;;
+        --disclose_execution_constraints)    DISCLOSE_EXECUTION_CONSTRAINTS=1; shift ;;
+        --no-disclose_execution_constraints) DISCLOSE_EXECUTION_CONSTRAINTS=0; shift ;;
+        --is_trial)                  IS_TRIAL=1; shift ;;
+        --no-is_trial)               IS_TRIAL=0; shift ;;
         --ml_lit_review_config)      ML_LIT_REVIEW_CONFIG="$2"; shift 2 ;;
         --scientific_evidence_order)
             case "${2:-}" in
@@ -712,6 +725,9 @@ build_app_args() {
     if [ -n "$RUNTIME_VERIFICATION_MAX_WALL_SECONDS" ]; then
         APP_ARGS+=(--runtime_verification_max_wall_seconds "$RUNTIME_VERIFICATION_MAX_WALL_SECONDS")
     fi
+    if [ -n "$RUNTIME_VERIFICATION_PATHOLOGICAL_MIN_UNIT_MS" ]; then
+        APP_ARGS+=(--runtime_verification_pathological_min_unit_ms "$RUNTIME_VERIFICATION_PATHOLOGICAL_MIN_UNIT_MS")
+    fi
     if [ "$ALLOW_EXTREME_STEPS" -eq 1 ]; then
         APP_ARGS+=(--allow_extreme_steps)
     fi
@@ -773,6 +789,16 @@ build_app_args() {
         APP_ARGS+=(--data_analysis_enabled)
     elif [ "$DATA_ANALYSIS_ENABLED" = "0" ]; then
         APP_ARGS+=(--no-data_analysis_enabled)
+    fi
+    if [ "$DISCLOSE_EXECUTION_CONSTRAINTS" = "1" ]; then
+        APP_ARGS+=(--disclose_execution_constraints)
+    elif [ "$DISCLOSE_EXECUTION_CONSTRAINTS" = "0" ]; then
+        APP_ARGS+=(--no-disclose_execution_constraints)
+    fi
+    if [ "$IS_TRIAL" = "1" ]; then
+        APP_ARGS+=(--is_trial)
+    elif [ "$IS_TRIAL" = "0" ]; then
+        APP_ARGS+=(--no-is_trial)
     fi
     if [ "$SCIENTIFIC_EVIDENCE_ORDER" != "analysis_then_literature" ]; then
         APP_ARGS+=(--scientific_evidence_order "$SCIENTIFIC_EVIDENCE_ORDER")

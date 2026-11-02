@@ -246,6 +246,24 @@ training-step counts, GPU VRAM ceilings, or Trial/Formal runtime budgets. See
 adaptive in-subprocess verifier. It is omitted by default, preserving the
 framework verifier default; slow-step workloads may set it explicitly without
 changing their Trial or Formal budgets.
+`--runtime_verification_pathological_min_unit_ms MS` is forwarded the same
+way: omitted by default (the runner keeps its 100 ms slowdown floor); `0`
+disables the absolute floor for historical reproduction.
+
+`--disclose_execution_constraints` / `--no-disclose_execution_constraints`
+and `--is_trial` / `--no-is_trial` are tri-state pass-throughs: neither
+spelling forwards nothing and the runner default applies (disclosure on,
+trial/formal mode on); either spelling reaches every iteration unchanged.
+Disclosure changes advisory agent context only, never enforcement.
+
+Every other `run_one_iteration.py` flag is accepted by `run_chain.sh`
+(deprecated no-ops and retired flags keep their documented handling), except
+those the chain owns or excludes (`--start_iteration` and its aliases, manifest
+replacement, `--print_resolved_launch_config`, the per-agent
+`--human_advice_*` strings and the unimplemented `--gpu_memory_limit_gb`).
+`tests/unit/sdsc_submission_scripts/test_launch_surface_parity.py` derives
+the runner flag set from its parser and fails when a new flag is neither
+accepted by `run_chain.sh` nor listed there with a reason.
 
 > The header comment inside `run_chain.sh` lists `--seed_paths` under "Required
 > flags". That comment is stale — `_chain_common.sh:403-406` documents the
