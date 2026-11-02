@@ -102,7 +102,14 @@ class ResolutionEvent(BaseModel):
         )
     )
     proposed: str = Field(description="The value as the planner AUTHORED it, rendered as text.")
-    executed: str = Field(description="The value the run ACTUALLY executed with, rendered as text.")
+    executed: str = Field(
+        description=(
+            "The resolved value supplied for execution, rendered as text, or "
+            "explanatory text when the key was omitted from the resolved "
+            "configuration. Omission text does not infer downstream defaults "
+            "or establish that execution occurred."
+        )
+    )
     authority: str = Field(
         description=(
             "Which resolution step overruled the authored value. One of "

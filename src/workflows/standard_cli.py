@@ -524,7 +524,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="JSON string of hard overrides for the LLM's ExperimentPlan. "
         'E.g. \'{"trial_portion": 0.2, "train_portion": 1.0}\'. '
-        "Keys must be valid ExperimentPlan fields.",
+        "Keys must be valid ExperimentPlan fields. Nested dictionaries such as "
+        "train_config, model_config and loss_config are replaced, not merged per key; "
+        "include every key you want to retain.",
     )
     parser.add_argument(
         "--disclose_execution_constraints",

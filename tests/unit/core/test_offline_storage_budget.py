@@ -1,25 +1,44 @@
-"""Deterministic slow-storage witness for the real-clock handshake fixture policy."""
+"""Preparation and consumption use distinct product windows even with slow I/O."""
 
-from types import SimpleNamespace
+from pathlib import Path
 
-from core.runtime_control.inference_startup import publish_message
-from tests.unit.core import test_native_gpu_execution as fixtures
-from tests.unit.core.test_checkpoint_inference_measurement import bound_spec
+import pytest
+
+from core.runtime_control.gpu_measurement_spec import GpuMeasurementSpec
+from core.runtime_control.inference_startup import (
+    InferenceStartupMessage,
+    publish_message,
+    read_message,
+)
+from tests.helpers.inference_startup import startup_fixture
+from tests.unit.core.test_checkpoint_inference_measurement import bound_spec as bound_spec
 from tests.unit.core.test_gpu_runtime_protection import Clock
 
 
-def test_handshake_accepts_slow_publication_and_consumption(tmp_path, bound_spec, monkeypatch):
-    """Old success-path deadlines reject these valid receipts before assertions run."""
+@pytest.mark.parametrize("consumed_at", [650.0, 690.0], ids=["within-ack-window", "ack-expired"])
+def test_consumption_window_starts_at_authorization_publication(
+    tmp_path: Path, bound_spec: GpuMeasurementSpec, consumed_at: float
+) -> None:
+    """Reject deadline reuse and timeout bypass without waiting for a real hang."""
     clock = Clock()
-    # Replace only the fixture's time namespace, not the runtime's clock module.
-    # Omitting clock= deliberately exercises its real-process budget selection.
-    monkeypatch.setattr(fixtures, "time", SimpleNamespace(monotonic=clock))
-    startup, message, publications = fixtures.startup_fixture(tmp_path, bound_spec)
+    startup, message, publications = startup_fixture(
+        tmp_path, bound_spec, clock=clock, preparation_seconds=600.0, ack_seconds=600.0
+    )
     publish_message(startup.path.parent / "loaded.json", message, 1024**2)
     clock.value = 90.0
     startup.check(message.child_pid)
+    assert (
+        read_message(startup.path.parent / "authorized.json", InferenceStartupMessage, 1024**2)
+        == message
+    )
     publish_message(startup.path.parent / "consumed.json", message, 1024**2)
-    clock.value = 180.0
-    startup.check(message.child_pid, terminal=True)
+    clock.value = consumed_at
+    if consumed_at == 690.0:
+        with pytest.raises(TimeoutError, match="consumption observation was late"):
+            startup.check(message.child_pid, terminal=True)
+        assert startup.receipt.consumed is None
+    else:
+        startup.check(message.child_pid, terminal=True)
+        assert startup.receipt.consumed == message
     assert publications == [90.0]
-    assert startup.receipt.loaded == startup.receipt.consumed == message
+    assert startup.receipt.loaded == message

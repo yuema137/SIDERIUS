@@ -61,7 +61,11 @@ def _operator_advice(value: str) -> str:
     if not 1 <= len(text) <= MAX_OPERATOR_ADVICE_CHARS:
         raise ValueError(f"operator advice must be 1 to {MAX_OPERATOR_ADVICE_CHARS} characters")
     # Cc covers C0, DEL and C1 (e.g. CSI \x9b); Cf covers bidi overrides and the BOM.
-    if any(unicodedata.category(char) in ("Cc", "Cf") and char not in "\n\t" for char in text):
+    # Joiners are meaningful in multilingual words and emoji; they do not reorder text.
+    if any(
+        unicodedata.category(char) in ("Cc", "Cf") and char not in "\n\t\u200c\u200d"
+        for char in text
+    ):
         raise ValueError("operator advice may not contain control or format characters")
     return text
 

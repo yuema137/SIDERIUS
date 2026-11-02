@@ -21,7 +21,10 @@
   // with one can never have started and is dropped, like a 422.
   const PRE_CLAIM = new Set(['stale_review', 'resources_required', 'run_resources_conflict', 'host_ledger_missing',
     'host_ledger_required', 'parallel_budget', 'parallel_budget_required', 'resource_refused',
-    'parallel_unit_exceeds_capacity', 'placement_unreachable']);
+    'parallel_unit_exceeds_capacity', 'placement_unreachable', 'credentials', 'loop_resume']);
+  // Project Python str.strip (loop_models._operator_advice), including its C0/C1
+  // whitespace and excluding BOM. The controller witness checks parity with Python.
+  const trimAdvice = text => text.replace(/^[\u0009-\u000d\u001c-\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+|[\u0009-\u000d\u001c-\u0020\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+$/g, '');
   const sameReservation = (kept, review) => JSON.stringify(kept.resources ?? null) === JSON.stringify(review.resources ?? null);
   const counted = (status, verb) => status.outcome?.completed_iterations == null
     ? `${verb}; the iteration count is unavailable.`
@@ -265,7 +268,8 @@
       }
       const box = $('loop-resume-advice');
       if (kept) {
-        box.value = kept.operator_advice || ''; resume.locked = true;
+        box.value = trimAdvice(kept.operator_advice || ''); resume.locked = true;
+        resume.error ||= 'An earlier Resume request is saved. Resume retries it with the advice shown.';
         if (kept.resources) { resume.resources = true; window.runScheduling.fillResources(RESOURCES, kept.resources); }
       } else if (!resume.locked) box.value = last.loop?.operator_advice || '';
       resume.review = kept ? {...review, resources: kept.resources, review_digest: kept.expected_review_digest} : review;
@@ -281,12 +285,18 @@
     const current = request, resume = current?.resume, review = resume?.review;
     if (!last || !review || resume.pending || current.stop.pending || stopRecorded(last) || !review.credential_readiness.ready || !session().connected) return;
     // The advice is fixed at the first attempt: a retry resends exactly the retained text.
-    const typed = $('loop-resume-advice').value.trim();
+    const typed = trimAdvice($('loop-resume-advice').value);
     resume.pending = true; resume.locked = true; resume.error = ''; render(last);
     const store = await storeId();
     try {
       const kept = retained(review, store, typed);
-      $('loop-resume-advice').value = kept.operator_advice || '';
+      $('loop-resume-advice').value = trimAdvice(kept.operator_advice || '');
+      if (trimAdvice(kept.operator_advice || '') !== typed) {
+        // Another tab or a legacy record may have bound different advice to this UUID.
+        // Show that binding before the operator chooses to replay it.
+        resume.error = 'An earlier Resume request has different advice. Its saved advice is shown above. Click Resume again to retry that request.';
+        return;
+      }
       const body = {request_id: kept.request_id, predecessor_operation_id: review.predecessor_operation_id, expected_receipt_digest: review.expected_receipt_digest};
       if (kept.operator_advice) body.operator_advice = kept.operator_advice;
       if (kept.resources) Object.assign(body, {resources: kept.resources, expected_review_digest: kept.expected_review_digest});

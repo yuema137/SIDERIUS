@@ -1,6 +1,6 @@
 # Browser witnesses
 
-These scripts exercise the console in a real browser using local Python fixtures.
+Most scripts exercise the console in a real browser using local Python fixtures.
 The fixtures supply temporary projects and offline responses; no real provider or
 GPU launch is needed.
 
@@ -20,3 +20,9 @@ reader waits for an explicitly marked record, so logs do not interrupt startup.
 When adding a fixture, use the producer and reader described in the
 [startup protocol](fixture-metadata-contract.md). The protocol regression witness
 is `fixture_metadata_test.mjs` and needs only Node and `EDITOR_PYTHON`.
+
+The advice retry witness needs only Node and this checkout’s `.venv/bin/python`:
+run `node --test tests/browser/loop_resume_advice.mjs` after syncing the environment.
+It executes the shipped controller against an in-memory page and API, and checks
+its whitespace handling against Python. A passing run reports 39 passed tests;
+it does not exercise browser rendering.
