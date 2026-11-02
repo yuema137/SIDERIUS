@@ -187,15 +187,30 @@ task's codec to write training/evaluation artifacts under the sandbox configs
 directory. Binding/codec errors propagate from these stub methods. The real
 scoring method retains its ordinary-error result envelope.
 
-Pseudo execution still launches no child, produces no scientific deliverable,
-and consumes the existing seeded synthetic result stream. Fixed inference
+Pseudo execution launches no child and consumes the existing seeded synthetic
+result stream. For an evaluation scope, `core.pseudo_deliverables` supplies
+CPU predictions through `run_generic_inference` and the task's ordinary
+`write_deliverable` codec. This reads task input data and writes synthetic
+artifacts for normal Health checks; it does not train a model or provide
+scientific measurements. Predictions use the declared output geometry and
+dtype, varying class indices across samples and non-class positions, or bounded
+continuous values. They do not inspect labels, task names or Health thresholds.
+Unresolvable geometry and non-floating continuous output dtypes raise
+`PseudoEvidenceUnsupported`; task codec and data errors propagate. Legacy calls without evaluation scopes remain artifact-free.
+
+The task codec owns scope ordering, source context and storage. Batch size one
+bounds framework tensor lifetime, not task dataset/writer memory. A
+`pseudo_inference_<exp_id>_<run_name>.json` sidecar records `_pseudo_origin`
+and inference sample/batch counts. The existing saved-record marker remains
+required: synthetic Health success is only wiring evidence. Fixed inference
 timings, absent runtime verification, training-cache merge order, legacy
 SampleSet scope checks and saved `_pseudo_origin` provenance remain in force.
 Caller regression: `tests/unit/core/test_stub_composed_scope.py`.
 
 Before scope artifact writes, pseudo execution requires `exp_id` to pass the
 existing `validate_generated_artifact_name` component rule. Calls with no
-training scope retain the legacy pseudo API without an `exp_id` path check.
+training or evaluation scope retain the legacy pseudo API without an `exp_id`
+path check.
 
 `verifier_provider.verifier_assembly_digest` includes the entire
 `sandbox_executor.py`; changes confined to its pseudo methods still change the
