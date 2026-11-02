@@ -15,7 +15,7 @@ import core.pseudo_deliverables as pseudo_deliverables
 from agent.skills.inference_skill.wrapper import run_skill as infer
 from core.pseudo_admission import PSEUDO_VALIDATION_MAX_SAMPLES
 from core.pseudo_deliverables import PseudoEvidenceUnsupported, write_pseudo_deliverable
-from core.sandbox_executor import StubSandbox
+from core.stub_sandbox import StubSandbox
 from execute_tools.task_data_path import ScopeBuildRequest
 from tests.helpers.step04a_fixtures import tidmad_model_io
 from workflows.standard_cli import build_parser, normalize_args

@@ -1,4 +1,4 @@
-"""T6 — schema + determinism tests for ``core.sandbox_executor.StubSandbox``.
+"""T6 — schema + determinism tests for ``core.stub_sandbox.StubSandbox``.
 
 StubSandbox is the 0-cost smoke-run replacement for ``TidmadSandbox``: it
 returns synthetic, pydantic-valid results without launching subprocesses,
@@ -29,7 +29,7 @@ from typing import Any
 import pytest
 
 from agent.schemas.hyperparam_tuning import ExperimentRecord
-from core.sandbox_executor import StubSandbox
+from core.stub_sandbox import StubSandbox
 
 pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile", "synthetic_physical_data_root")
 

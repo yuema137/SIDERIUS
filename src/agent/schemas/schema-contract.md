@@ -68,7 +68,11 @@ no hidden contracts, no silent defaults.
   `proposer_literature_evidence.py`. IDs remain unchanged in typed/serialized
   evidence; the [proposal renderer](../prompt_templates/proposal/README.md)
   owns single-line presentation of contribution IDs, contributor names and
-  citation source labels in singular and collection evidence. Multiline labels
+  citation source labels in singular and collection evidence, and through the
+  same `_single_line_label` owner the `AgentCard.agent_name` heading in
+  `render_agent_cards` and the `ExpertContextItem` `source` / `source_ref` (and
+  unlisted `kind`) labels in `render_expert_context` (#1465; empty labels keep
+  their bytes; deduplication keys on the raw `source_ref`). Multiline labels
   and labels beginning with a double quote use JSON string encoding so distinct
   raw labels remain distinguishable. Evidence prose remains multiline.
 - `ProposalOutput.baseline_config` validates supplied `train_config` through

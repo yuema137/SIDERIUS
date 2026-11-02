@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from core.sandbox_executor import StubSandbox
+from core.stub_sandbox import StubSandbox
 from execute_tools.evaluation_child import EvaluationNotScoreableError, validate_child_evaluation
 from tests.helpers.tuner_composed_fixture import _isolated_registrations
 from tests.unit.nodes.test_formula_selection_tuner_wiring import FORMULA, _masked_manifest

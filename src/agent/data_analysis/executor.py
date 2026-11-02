@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import signal
 import subprocess
 import sys
 import time
@@ -24,17 +23,13 @@ from agent.schemas.data_analysis.skills import (
 )
 from core.durable_io import publish_bytes_write_once
 from core.execution_deadline import remaining_seconds
-from core.runtime_control.process_group import (
-    process_group_alive,
-    signal_group,
-    terminate_observed_group,
-    tree_rss_bytes,
-)
+from core.runtime_control.process_group import process_group_alive, tree_rss_bytes
 from core.subprocess_env import subprocess_env
 
 from .discovery import DiscoveredSkill
 from .execution_origin import trusted_skill_execution_origin
 from .persistence import AnalysisPersistenceError, AnalysisRunStore
+from .process_termination import SUPERVISION_POLL_S, terminate_process_group
 from .worker_protocol import SkillWorkerRequest, SkillWorkerResponse, ValidatedParameters
 
 
@@ -110,28 +105,6 @@ def certify_analysis_coverage(
     )
 
 
-_POLL_S = 0.02
-_TERMINATION_GRACE_S = 1.0
-
-
-def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
-    # The shared owner reaps the leader while waiting. Without that, a leader
-    # that exited on SIGTERM stays a zombie, keeps its group observable and
-    # turns every termination into the full grace period (#1425).
-    terminate_observed_group(
-        process.pid,
-        grace_seconds=_TERMINATION_GRACE_S,
-        poll_seconds=_POLL_S,
-        child=process,
-        retain_unknown=False,
-    )
-    try:
-        process.wait(timeout=1.0)
-    except subprocess.TimeoutExpired:
-        signal_group(process.pid, signal.SIGKILL)
-        process.wait()
-
-
 def _worker_command(request_path: Path, response_path: Path) -> list[str]:
     """The skill-worker command line (also the test seam for a controlled child)."""
 
@@ -187,17 +160,17 @@ def _run_worker(
             peak_rss = max(peak_rss, tree_rss_bytes(process.pid))
             if memory_ceiling is not None and peak_rss > memory_ceiling:
                 disposition = "memory_limit_exceeded"
-                _terminate_process_group(process)
+                terminate_process_group(process)
                 break
             if time.monotonic() >= stop_at:
                 disposition = "timed_out"
-                _terminate_process_group(process)
+                terminate_process_group(process)
                 break
-            time.sleep(_POLL_S)
+            time.sleep(SUPERVISION_POLL_S)
         peak_rss = max(peak_rss, tree_rss_bytes(process.pid))
         orphaned_process_tree = False
         if process.poll() is None:
-            _terminate_process_group(process)
+            terminate_process_group(process)
         elif process_group_alive(process.pid):
             # Precedence (#1448): a disposition the supervisor already decided
             # (timed_out, memory_limit_exceeded) stands. After its termination
@@ -207,7 +180,7 @@ def _run_worker(
             orphaned_process_tree = True
             if disposition == "exited":
                 disposition = "orphaned_process_tree"
-            _terminate_process_group(process)
+            terminate_process_group(process)
         returncode = process.wait()
 
     response: SkillWorkerResponse | None = None

@@ -42,7 +42,7 @@ from agent.schemas.training_diagnosis import derive_training_diagnosis
 from agent.skills.evaluate_vram_skill.preflight_adapter import run_production_preflight
 from core.layout import checkout_root
 from core.record_role import AttemptRole, observed_attempt_role
-from core.sandbox_executor import StubSandbox
+from core.stub_sandbox import StubSandbox
 from execute_tools.dataset_config import (
     ScopeViolationError,
 )
@@ -1351,7 +1351,9 @@ def _run_local_evaluation_phase(
     try:
         if _scoring_route is ScoringRoute.ANCHOR_NORMALIZED:
             # Anchor-normalized scoring (both trial and formal modes).
-            # Trial: sparse SampleSet. Formal: full SampleSet (all 20 × 200).
+            # Scored on the round's evaluation SampleSet: the plan's
+            # eval_portion on Trial rounds, formal_eval_portion (default
+            # 1.0, snapshot strategy) on Formal rounds.
             # Step 06 — PRODUCTION SCORING through the
             # metric handle: scoreability first, then the
             # frozen TIDMAD arithmetic. A refused

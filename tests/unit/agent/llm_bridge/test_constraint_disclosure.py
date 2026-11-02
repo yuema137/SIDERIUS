@@ -112,6 +112,7 @@ def test_reflection_preserves_planning_inheritance_when_provenance_is_empty(tmp_
         hypothesis="Same values as winner",
         execution_provenance=ExecutionProvenance(),
         timing_context=timing,
+        trial_config=SimpleNamespace(mode="formal"),
     )
     bridge = BoundaryRecorderBridge()
     exp_id, _, results, reflection_context = reflect_fixture_args()

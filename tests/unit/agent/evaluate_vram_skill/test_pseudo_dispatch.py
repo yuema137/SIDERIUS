@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from core.sandbox_executor import StubSandbox
+from core.stub_sandbox import StubSandbox
 from execute_tools.data_paths import bind_physical_data_root
 
 execution = importlib.import_module("nodes.ml_hyperparameter_tune_agent.execution")
