@@ -24,12 +24,21 @@ from agent.schemas.data_analysis.resources import ResourceUsage
 from agent.schemas.data_analysis.skills import SkillPayload
 from core.campaign_identity import validate_path_component
 from core.durable_io import publish_bytes_write_once
-from core.runtime_control.process_group import process_group_alive
+from core.execution_deadline import ExecutionDeadlineExceeded, remaining_seconds
+from core.runtime_control.process_group import (
+    process_group_alive,
+    signal_group,
+    terminate_observed_group,
+)
 from core.training_seeds import NUMPY_SEED_MASK
 
 SANDBOX_PROTOCOL_ID = "siderius.generated-analysis-sandbox.v1"
 MAX_GENERATED_PAYLOAD_BYTES = 1024 * 1024
 GENERATED_PROCESS_HEADROOM = 64
+PROBE_TIMEOUT_S = 10.0
+_POLL_S = 0.02
+_TERMINATION_GRACE_S = 1.0
+_EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
 
 
 class AnalysisCodeSandboxUnavailable(RuntimeError):
@@ -99,23 +108,36 @@ def _current_uid_task_count() -> int:
 
 
 def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
+    # The shared owner reaps the leader while waiting. Without that, a leader
+    # that exited on SIGTERM stays a zombie, keeps its group observable and
+    # turns every termination into the full grace period (#1447, as #1425).
+    terminate_observed_group(
+        process.pid,
+        grace_seconds=_TERMINATION_GRACE_S,
+        poll_seconds=_POLL_S,
+        child=process,
+        retain_unknown=False,
+    )
     try:
-        os.killpg(process.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
-    deadline = time.monotonic() + 1.0
-    while process_group_alive(process.pid) and time.monotonic() < deadline:
-        time.sleep(0.02)
-    if not process_group_alive(process.pid):
-        if process.poll() is None:
-            process.wait(timeout=1.0)
-        return
+        process.wait(timeout=1.0)
+    except subprocess.TimeoutExpired:
+        signal_group(process.pid, signal.SIGKILL)
+        process.wait()
+
+
+def _allocation_expiry(boundary: str) -> float | None:
+    """Absolute monotonic expiry of the continuing allocation, if one is active.
+
+    An already exhausted allocation yields the current instant instead of
+    raising, so the caller reports ``timed_out`` exactly as a launch that
+    timed out immediately would have.
+    """
+
     try:
-        os.killpg(process.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        return
-    if process.poll() is None:
-        process.wait(timeout=2.0)
+        remaining = remaining_seconds(boundary)
+    except ExecutionDeadlineExceeded:
+        return time.monotonic()
+    return None if remaining is None else time.monotonic() + remaining
 
 
 def _process_tree_rss(process: psutil.Process) -> int:
@@ -195,6 +217,29 @@ def executed_program_seeds(program: GeneratedAnalysisProgram, program_seed: int)
     return program_seed, program_seed & NUMPY_SEED_MASK
 
 
+def _unlaunched_timeout(reason: str) -> SandboxExecutionReceipt:
+    """``timed_out`` without launching generated code (no worker, no output)."""
+
+    now = utc_now()
+    return SandboxExecutionReceipt(
+        status="timed_out",
+        resource_usage=ResourceUsage(
+            wall_time_s=0.0,
+            peak_rss_bytes=0,
+            device="cpu",
+            measurement_limitations=("No generated program was launched.",),
+        ),
+        payload=None,
+        failure_type="timed_out",
+        failure_message=f"generated program was not launched: {reason}",
+        worker_pid=os.getpid(),
+        started_at=now,
+        finished_at=now,
+        stdout_sha256=_EMPTY_SHA256,
+        stderr_sha256=_EMPTY_SHA256,
+    )
+
+
 class AnalysisCodeSandbox:
     """Execute one validated program with only explicit read/write mounts."""
 
@@ -272,7 +317,7 @@ class AnalysisCodeSandbox:
             command.extend(("--setenv", key, value))
         return command
 
-    def probe(self) -> SandboxCapabilityReceipt:
+    def probe(self, *, timeout_s: float = PROBE_TIMEOUT_S) -> SandboxCapabilityReceipt:
         if self._bubblewrap is None or self._unshare is None:
             missing = [
                 name
@@ -321,7 +366,7 @@ class AnalysisCodeSandbox:
                     command,
                     env=self._clean_environment(),
                     capture_output=True,
-                    timeout=10.0,
+                    timeout=max(0.0, timeout_s),
                     check=False,
                 )
                 if completed.returncode != 0 or not (output / "probe").is_file():
@@ -356,8 +401,23 @@ class AnalysisCodeSandbox:
         max_host_memory_gb: float,
         program_seed: int,
     ) -> SandboxExecutionReceipt:
-        capability = self.probe()
+        # Bind the continuing allocation's absolute expiry on entry, so the
+        # capability probe and the fsync'd request publication are charged to
+        # it rather than added after it (#1447, as #1425 for skill workers).
+        # ``timeout_s`` (the per-skill/program timeout) still starts at launch.
+        allocation_expires_at = _allocation_expiry("analysis.generated_program")
+        probe_timeout_s = PROBE_TIMEOUT_S
+        if allocation_expires_at is not None:
+            probe_timeout_s = min(probe_timeout_s, allocation_expires_at - time.monotonic())
+        if probe_timeout_s <= 0.0:
+            return _unlaunched_timeout("the continuing allocation expired before the probe")
+        capability = self.probe(timeout_s=probe_timeout_s)
         if not capability.available:
+            if allocation_expires_at is not None and time.monotonic() >= allocation_expires_at:
+                # The allocation cut the probe short: a timeout, not missing isolation.
+                return _unlaunched_timeout(
+                    "the continuing allocation expired during the capability probe"
+                )
             raise AnalysisCodeSandboxUnavailable(capability.reason or "sandbox unavailable")
         for path, label in (
             (source_path, "generated source"),
@@ -447,6 +507,9 @@ class AnalysisCodeSandbox:
         ]
         started_at = utc_now()
         started = time.monotonic()
+        stop_at = started + timeout_s
+        if allocation_expires_at is not None:
+            stop_at = min(stop_at, allocation_expires_at)
         uid_process_limit = _current_uid_task_count() + GENERATED_PROCESS_HEADROOM
         stdout_path = control_directory / "stdout.log"
         stderr_path = control_directory / "stderr.log"
@@ -478,7 +541,6 @@ class AnalysisCodeSandbox:
             )
             output_node_limit = max(16, program.resource_request.max_artifact_count * 4 + 8)
             while process.poll() is None:
-                elapsed = time.monotonic() - started
                 peak_rss = max(peak_rss, _process_tree_rss(ps_process))
                 if peak_rss > memory_limit:
                     disposition = "memory_limit_exceeded"
@@ -492,14 +554,15 @@ class AnalysisCodeSandbox:
                     disposition = "output_limit_exceeded"
                     _terminate_process_group(process)
                     break
-                if elapsed >= timeout_s:
+                if time.monotonic() >= stop_at:
                     disposition = "timed_out"
                     _terminate_process_group(process)
                     break
                 time.sleep(0.02)
             if process_group_alive(process.pid):
                 _terminate_process_group(process)
-            process.wait(timeout=2.0)
+            # Every path above has reaped the leader; this only reads its status.
+            process.wait()
         peak_rss = max(peak_rss, _process_tree_rss(ps_process))
         wall_time = max(0.0, time.monotonic() - started)
         if disposition not in {
