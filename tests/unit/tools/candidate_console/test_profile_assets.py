@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from tools.candidate_console.app import create_app
@@ -9,13 +10,21 @@ from tools.candidate_console.app import create_app
 SOURCE = Path(__file__).resolve().parents[4] / "src"
 
 
-def test_profile_literal_has_one_source_owner():
+@pytest.mark.parametrize(
+    "profile",
+    (
+        "native-interpretation-candidate/v1",
+        "native-literature-candidate/v1",
+        "native-proposal-families/v1",
+        "native-proposal-fanout/v1",
+    ),
+)
+def test_profile_literal_has_one_source_owner(profile):
     """Reverting any consumer to a literal defeats the shared owner."""
     owners = {
         path.relative_to(SOURCE).as_posix()
         for path in SOURCE.rglob("*")
-        if path.suffix in {".py", ".js"}
-        and "native-interpretation-candidate/v1" in path.read_text()
+        if path.suffix in {".py", ".js"} and profile in path.read_text()
     }
     assert owners == {"workflows/definition/models.py"}
 
@@ -28,7 +37,9 @@ def test_browser_profile_binding_precedes_consumers(console_config):
         assert response.headers["content-type"].startswith("text/javascript")
         assert response.text == (
             "window.executionProfiles = Object.freeze("
-            '{"nativeInterpretation": "native-interpretation-candidate/v1"});\n'
+            '{"nativeInterpretation": "native-interpretation-candidate/v1", '
+            '"nativeLiterature": "native-literature-candidate/v1", '
+            '"nativeProposalFamilies": "native-proposal-families/v1"});\n'
         )
         index = client.get("/").text
         for consumer in ("editor-loop-controls.js", "reusable-run.js"):
@@ -36,3 +47,6 @@ def test_browser_profile_binding_precedes_consumers(console_config):
             assert (
                 "window.executionProfiles.nativeInterpretation" in client.get("/" + consumer).text
             )
+        reusable_run = client.get("/reusable-run.js").text
+        for name in ("nativeLiterature", "nativeProposalFamilies"):
+            assert f"window.executionProfiles.{name}" in reusable_run
