@@ -19,6 +19,12 @@ the log shows `8 -> effective 4` and labels the proposal as superseded. The
 preceding inheritance line identifies the winning trial. These are prepared
 request values; training results are reported separately after execution.
 
+Operator `plan_overrides` replace complete plan fields. For example,
+`{"train_config": {"lr": 0.002}}` replaces the whole training dictionary;
+include `epochs` too if you want to retain an explicit epoch count. The
+provenance labels omitted keys as not supplied by the replacement. Later
+resolution and trainer defaults can still apply; omission does not mean zero.
+
 The next planner sees the same distinction in its experiment history. Each
 record whose proposal was changed keeps the planner's original hypothesis,
 plus a `resolution_events` list (for example `train_cfg.lr` proposed `0.0001`,
