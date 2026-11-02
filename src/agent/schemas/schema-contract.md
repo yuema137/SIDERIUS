@@ -214,3 +214,14 @@ not persisted. Like inactive-rule receipts it is transported through
 persisted `params` stay a pure configuration. Planner history retains it in
 recent and condensed records; see the
 [tuner contract](../../nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md#condensed-planner-history-resolution-receipts-issue-1322).
+
+## Trial schedule refusal identity
+
+`hyperparam_tuning.validate_trial_override_schedule` retains its existing admission
+predicate and remedy text, raising `PydanticCustomError` with type
+`trial_override_schedule` when Trial overrides would apply to zero tuning rounds.
+It remains a `ValueError` for direct callers; Pydantic preserves the type in native
+validation details. This lets declaration and HTTP projections identify the refusal
+without interpreting message text or repeating schedule rules. No valid launch,
+training defaults or emitted prompt text changes. The schema file participates in
+rendering and estimation assembly identities; its source change updates those hashes.
