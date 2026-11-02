@@ -63,11 +63,10 @@ def render_deterministic_selection(
     total = sum((Fraction(str(term.weight)) for term in terms), Fraction())
     denominator = str(total) if total.denominator == 1 else f"({total})"
     expression = " + ".join(f"{number(t.weight)}*u_{t.component}" for t in terms)
-    words = MetricOrder(MetricIdentityKey("weighted_sum", "higher")).direction_words
+    # Utility is maximized by the formula contract, independently of metric direction.
     lines = [
         "- kind: formula; family: weighted_sum",
-        f"- Utility: ({expression})/{denominator}; range [0, 1]; "
-        f"{words['verb']} ({words['comparative']} is better).",
+        f"- Utility: ({expression})/{denominator}; range [0, 1]; maximize (higher is better).",
     ]
     rates = inspection(context.spec, context.components)["marginal_rates"]
     for term, rate in zip(terms, rates, strict=True):
