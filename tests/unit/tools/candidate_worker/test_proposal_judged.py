@@ -243,6 +243,54 @@ def test_nonfinite_any_inputs_replay_under_their_recorded_encoding(
     verify_graph_trace(request, parent, receipt)
 
 
+def test_a_stripped_consumed_input_encoding_is_refused_by_the_record_anchor(
+    prepared, native_runner, monkeypatch
+):
+    """Threat model (#1326): ``consumed_input_encoding`` is dispatch, not authentication.
+
+    A forger downgrades a current judged record (``inf`` in an ``Any`` field) by
+    removing its encoding and rewriting the stamp to the legacy digest the
+    historical verifier would accept. The trace's unchanged ``record_sha256``
+    anchor refuses it before any recomputation."""
+    from core.canonical_json import canonical_sha256
+
+    _proposer_any_leaf(monkeypatch, float("inf"))
+    consumed: list[tuple] = []
+    stamp = phases.consumed_input_sha256
+
+    def recorded(seed, proposal, *, version):
+        consumed.append((seed, proposal))
+        return stamp(seed, proposal, version=version)
+
+    monkeypatch.setattr(phases, "consumed_input_sha256", recorded)
+    bridge = DebateBridge(order=["proposals:2", "proposals:0", "proposals:1"])
+    monkeypatch.setattr("agent.judge.call.bridge_for_route", lambda route: bridge)
+    monkeypatch.setattr(graph_evidence, "verify_graph_trace", lambda *args, **kwargs: None)
+    request = judged(prepared)
+    receipt, parent = run(request)
+    assert receipt.status == "accepted", receipt.error
+    monkeypatch.undo()
+    verify_graph_trace(request, parent, receipt)
+
+    node = next(item for item in receipt.graph_trace.nodes if item.capability == "implementation")
+    path = Path(node.record_path)
+    raw = json.loads(path.read_bytes())
+    seed, proposal = next(
+        (seed, proposal)
+        for seed, proposal in consumed
+        if stamp(seed, proposal, version="siderius.nonfinite/v1") == raw["consumed_input_sha256"]
+    )
+    legacy = canonical_sha256(
+        {"proposal": proposal.model_dump(mode="json"), "seed": seed.model_dump(mode="json")}
+    )
+    assert legacy != raw["consumed_input_sha256"]
+    del raw["consumed_input_encoding"]
+    raw["consumed_input_sha256"] = legacy
+    path.write_text(json.dumps(raw, indent=2))
+    with pytest.raises(ValueError, match="graph native record mismatch"):
+        verify_graph_trace(request, parent, receipt)
+
+
 def test_a_branch_run_on_a_nonfinite_variant_fails_verification(
     prepared, native_runner, monkeypatch
 ):

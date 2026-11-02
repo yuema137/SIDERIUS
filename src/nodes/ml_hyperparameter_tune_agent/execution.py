@@ -83,6 +83,7 @@ from nodes.ml_hyperparameter_tune_agent.policy import (
     _gate_results_to_score_meta,
     _merge_score_validity_failure,
     _should_bypass_formal_time_budget,
+    finite_score,
     resolve_measured_time_budget,
     resolve_scoring_route,
 )
@@ -1695,7 +1696,7 @@ def run_inference_scoring_health(
         if (
             reference_scores is not None
             and _sc_fv is not None
-            and _sc_scalar is not None
+            and finite_score(_sc_scalar)
             and not _is_degenerate_formal
         ):
             try:

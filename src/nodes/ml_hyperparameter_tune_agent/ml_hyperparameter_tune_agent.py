@@ -162,6 +162,7 @@ from nodes.ml_hyperparameter_tune_agent.policy import (
     _strategy_independent,
     _validate_data_config,
     _validate_penalty_for_direction,
+    finite_score,
 )
 from nodes.ml_hyperparameter_tune_agent.records import (
     _PHASE_FAILURE_TEXT,
@@ -1633,7 +1634,7 @@ class HyperparamTuningAgent:
                     # (for example, a Health-invalid collapsed candidate).
                     # Such an attempt has a failure record, not scored model
                     # evidence that requires keeping an uncertified original.
-                    scored = score_results.get("denoising_score") is not None
+                    scored = finite_score(score_results.get("denoising_score"))
                     score_table = executed.score_table
                     train_results = executed.train_results
 

@@ -312,11 +312,17 @@ A finite payload carries no metadata and keeps its historical bytes. A
 non-finite primary scalar, `file_vector` element, `metric_result.scalar` or
 secondary scalar now reaches the tuner as the float it was, instead of `null`;
 an actually missing element and the not-scoreable `denoising_score: null`
-remain `None`. Tuner policy already treats `None` and non-finite scores
-identically (`policy.py` `math.isfinite` checks), so classification, best
-selection and Health verdicts do not change; persisted records and
-reflector-visible results now carry the non-finite value on the task-owned
-subprocess route, as the in-process anchor route already did. The file is
+remain `None`. Live tuner decisions that previously tested `is not None`
+on the round score now test `policy.finite_score` (a real finite number):
+checkpoint retention (`scored`), the per-file score table, and the reflection
+context's rank / new-best / efficiency fields. A non-finite round is therefore
+decided exactly as the null round it used to be. Selections over persisted
+records were already finite-aware or status-gated: best tracks
+(`math.isfinite`), the validity merge (`_merge_score_validity_failure` makes a
+non-finite round `failed_mode_collapse`), candidate eligibility, and
+interpretation/reflection filters on `status == "success"`. Persisted records,
+planner history and reflector-visible results now carry the non-finite value
+on the task-owned subprocess route, as the in-process anchor route already did. The file is
 transient (removed after the read), so no archive of it exists.
 `scoring_utils.coerce_nonfinite_to_none` no longer runs on any new write; it
 remains for comparisons with legacy null-projected storage images.

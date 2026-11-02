@@ -443,6 +443,16 @@ def _fmt_reference(value: float | None) -> str:
     return "none" if value is None else f"{value:.4f}"
 
 
+def finite_score(value: object) -> bool:
+    """A usable golden-metric scalar: a real finite number.
+
+    ``None`` (missing, or a legacy null projection), NaN and ±inf are all
+    "no usable score". Live decisions test this rather than ``is not None``
+    because current scorer transport keeps non-finite floats (#1316).
+    """
+    return isinstance(value, int | float) and not isinstance(value, bool) and math.isfinite(value)
+
+
 def _identity(value: float) -> float:
     """Key function for ordering a list of bare scores."""
     return value
@@ -501,6 +511,10 @@ def _build_reflection_context(
     Returns:
         The reflector context dict — exactly the 23 keys WF-2 pins.
     """
+    # A non-finite current score has no rank, is never a new best and is never
+    # "more efficient": it is treated exactly as the null it used to arrive as.
+    if not finite_score(current_score):
+        current_score = None
     successful: list[dict] = [
         r
         for r in memory_history
