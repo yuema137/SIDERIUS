@@ -386,15 +386,21 @@ def _emit_outcome(args, outcome, *, secondaries: dict | None = None) -> None:
 
 
 def _merge_output_json_for(args, payload: dict) -> None:
-    """Merge ``payload`` into ``--output_json`` (only when the parent pre-created it)."""
-    from execute_tools.scoring_utils import coerce_nonfinite_to_none
+    """Merge ``payload`` into ``--output_json`` (only when the parent pre-created it).
+
+    Non-finite metric values are evidence, not missing values: they cross to the
+    parent in the versioned ``core.record_encoding`` form, which the parent's
+    ``evaluation_child.read_scoring_output`` decodes. A finite payload carries no
+    metadata and keeps its historical bytes.
+    """
+    from core.record_encoding import encoded_record
 
     if args.output_json and os.path.exists(args.output_json):
         with open(args.output_json) as f:
             data = json.load(f)
         data.update(payload)
         with open(args.output_json, "w") as f:
-            json.dump(coerce_nonfinite_to_none(data), f, indent=4)
+            json.dump(encoded_record(data, always=False), f, indent=4, allow_nan=False)
         print(f"Updated {args.output_json} with score.")
 
 

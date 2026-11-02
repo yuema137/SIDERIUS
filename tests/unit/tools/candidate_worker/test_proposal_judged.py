@@ -175,6 +175,106 @@ def test_a_branch_run_on_another_owners_seed_fails_verification(
         verify_graph_trace(request, parent, receipt)
 
 
+def _nonfinite_variant(real):
+    """Runtime fault: the branch implements its ranked proposal with an ``Any`` leaf
+    turned from ``None`` into ``inf`` (eager JSON-mode dumps null both)."""
+
+    def selected(shape, outcomes, node_id):
+        selected = real(shape, outcomes, node_id)
+        if selected is None:
+            return None
+        value, owner = selected
+        baseline = {**value.baseline_config, "fixture_limit": float("inf")}
+        return value.model_copy(update={"baseline_config": baseline}), owner
+
+    return selected
+
+
+def _proposer_any_leaf(monkeypatch, value):
+    """Every generated proposal carries ``value`` in an ``Any`` field (``baseline_config``)."""
+    from .test_native import Provider
+
+    proposer = Provider.generate
+
+    def generate(self, system, user, **kwargs):
+        output = proposer(self, system, user, **kwargs)
+        if "baseline_config" in output:
+            output["baseline_config"] = {**output["baseline_config"], "fixture_limit": value}
+        return output
+
+    monkeypatch.setattr(Provider, "generate", generate)
+
+
+@pytest.mark.parametrize("writer", ["current", "historical"])
+def test_nonfinite_any_inputs_replay_under_their_recorded_encoding(
+    prepared, native_runner, monkeypatch, writer
+):
+    """Defect (#1326): replay recomputes a stamp under an encoding other than the one
+    that wrote it. An honest branch whose proposal has ``inf`` in an ``Any`` field is
+    refused if the verifier ignores ``consumed_input_encoding`` (current writer) or
+    always applies the current encoding (an archive written before the field, whose
+    stamp is reproduced here with the pre-#1326 eager projection)."""
+    from core.canonical_json import canonical_sha256
+
+    _proposer_any_leaf(monkeypatch, float("inf"))
+    if writer == "historical":
+        monkeypatch.setattr(phases, "ENCODING_VERSION", None)
+        monkeypatch.setattr(
+            phases,
+            "consumed_input_sha256",
+            lambda seed, proposal, version: canonical_sha256(
+                {"proposal": proposal.model_dump(mode="json"), "seed": seed.model_dump(mode="json")}
+            ),
+        )
+    bridge = DebateBridge(order=["proposals:2", "proposals:0", "proposals:1"])
+    monkeypatch.setattr("agent.judge.call.bridge_for_route", lambda route: bridge)
+    monkeypatch.setattr(graph_evidence, "verify_graph_trace", lambda *args, **kwargs: None)
+    request = judged(prepared)
+    receipt, parent = run(request)
+    assert receipt.status == "accepted", receipt.error
+    monkeypatch.undo()
+    records = [
+        json.loads(Path(item.record_path).read_bytes())
+        for item in receipt.graph_trace.nodes
+        if item.capability == "implementation"
+    ]
+    assert len(records) == 2
+    assert all(("consumed_input_encoding" in item) == (writer == "current") for item in records)
+    verify_graph_trace(request, parent, receipt)
+
+
+def test_a_branch_run_on_a_nonfinite_variant_fails_verification(
+    prepared, native_runner, monkeypatch
+):
+    """Defect (#1326): the consumed-input digest projects ``Any`` fields through
+    ``model_dump(mode="json")``, so a branch that ran on ``inf`` where the ranked
+    proposal says ``None`` shares its identity and replay accepts it. With the eager
+    projection restored, ``verify_graph_trace`` passes and ``pytest.raises`` fails;
+    without the worker's version stamp the record replays as historical and passes."""
+    from agent.schemas.implementor import ImplementorOutput
+    from core.record_encoding import ENCODING_VERSION
+
+    _proposer_any_leaf(monkeypatch, None)
+    bridge = DebateBridge(order=["proposals:2", "proposals:0", "proposals:1"])
+    monkeypatch.setattr("agent.judge.call.bridge_for_route", lambda route: bridge)
+    variant = _nonfinite_variant(adaptor_phase.judged_proposal)
+    monkeypatch.setattr(unit_dispatch, "judged_proposal", variant)
+    monkeypatch.setattr(graph, "judged_proposal", variant)
+    monkeypatch.setattr(graph_evidence, "verify_graph_trace", lambda *args, **kwargs: None)
+    request = judged(prepared)
+    receipt, parent = run(request)
+    assert receipt.status == "accepted", receipt.error
+    monkeypatch.undo()
+    implemented = [
+        ImplementorOutput.model_validate_json(Path(item.record_path).read_bytes())
+        for item in receipt.graph_trace.nodes
+        if item.capability == "implementation"
+    ]
+    assert {item.consumed_input_encoding for item in implemented} == {ENCODING_VERSION}
+    with pytest.raises(ValueError, match="consumed a proposal or seed other than"):
+        verify_graph_trace(request, parent, receipt)
+
+
 class ProposalMergeBridge:
     """Merges by returning one proposal record a proposal node persisted, with every
     framework-owned field left unset (the author contract of ``proposal.output``)."""

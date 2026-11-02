@@ -273,9 +273,51 @@ their historical null. Typed interpreter/proposer/literature/implementor
 consumers receive decoded values before their existing projections and numeric
 formatters, never storage tags. No prompt template is changed.
 
-The encoding version is a dispatch label, not authentication. Replay still
-requires the recorded digest anchors and recomputed artifact bytes. Removing a
-version does not authorize arbitrary replacement values under an unchanged
-trusted digest; if both anchors and artifacts are attacker-controlled, this
-format alone supplies no authenticity. Additional consumed-input identity and
-downgrade/path-check hardening is tracked in #1326.
+### Version selection threat model (issue #1326)
+
+The encoding version is a dispatch label, not authentication. Replay selects the
+encoding a stored artifact records (`AdaptorRecord.encoding_version`,
+`ImplementorOutput.consumed_input_encoding`, the `$siderius_encoding` member) and
+then requires two independent facts: the stored bytes equal the trusted digest
+anchor (graph trace `record_sha256`, adaptor `outputs[].sha256`), and the value
+recomputed from upstream native records equals what the artifact claims.
+Changing or removing a version therefore changes the anchored bytes and is
+refused at the anchor (`graph adaptor record mismatch`, `graph native record
+mismatch`). A forger who rewrites a record and its outputs consistently in the
+legacy encoding still cannot change the numeric value: the outcome is
+recomputed, so only its spelling can differ, and that spelling differs from the
+anchor. Without a metadata path `decode_record` never turns a string into a
+float (a lax typed `float` field may still parse the spelling, yielding the same
+value it encoded, never another number). Duplicate metadata paths are refused by `decode_record`'s own path
+check (`duplicate non-finite float path`); overlapping paths fail dereferencing.
+
+Legacy null is irrecoverably ambiguous: an unversioned artifact whose writer
+null-projected a value cannot say whether it was `inf`, `-inf`, `NaN` or
+missing, and replay reproduces that historical identity rather than guessing.
+If an attacker controls both the artifacts and every trusted anchor, this format
+supplies no authenticity; anchors must come from a trusted receipt chain.
+
+Evidence: `tests/unit/core/test_record_encoding.py` (duplicate/overlapping paths) and
+`tests/unit/tools/candidate_worker/test_adaptor_encoding.py` (consistent legacy
+downgrade refused by the trusted anchor).
+
+### Scoring child output (issue #1316)
+
+The scoring child (`execute_tools/denoising_score_single.py::_merge_output_json_for`)
+writes its parent-created `--output_json` with `encoded_record(data, always=False)`
+and `allow_nan=False`; the parent reads it only through
+`execute_tools.evaluation_child.read_scoring_output`, which applies
+`decode_record` (`TidmadSandbox.execute_scoring` and `scoring_refusal_fields`).
+A finite payload carries no metadata and keeps its historical bytes. A
+non-finite primary scalar, `file_vector` element, `metric_result.scalar` or
+secondary scalar now reaches the tuner as the float it was, instead of `null`;
+an actually missing element and the not-scoreable `denoising_score: null`
+remain `None`. Tuner policy already treats `None` and non-finite scores
+identically (`policy.py` `math.isfinite` checks), so classification, best
+selection and Health verdicts do not change; persisted records and
+reflector-visible results now carry the non-finite value on the task-owned
+subprocess route, as the in-process anchor route already did. The file is
+transient (removed after the read), so no archive of it exists.
+`scoring_utils.coerce_nonfinite_to_none` no longer runs on any new write; it
+remains for comparisons with legacy null-projected storage images.
+Evidence: `tests/unit/execute_tools/test_scoring_output_nonfinite.py`.
