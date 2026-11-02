@@ -1,12 +1,22 @@
 # HyperparamTuningAgent
 
+
+## Structured evaluation prompt context
+
+Planner and reflector receive the shared block through their existing constraint append calls. deterministic_ranking is visible when declared; this renderer does not implement formula or rubric execution.
+
+The run-scoped composition supplies this context through the shared append path.
+Absence adds no bytes and never enters the new boundary under historical profiles.
+The [evaluation contract](../../execute_tools/evaluation-contract.md#evaluation-prompt-rendering)
+owns formatting, profile admission and runtime capability distinctions.
+
 ## Live output names
 
 After native input validation, `run()` checks `storage.local.run_name` whenever
 local storage exists, before watchdog/resource setup or sandbox work. Unsafe names raise `ValueError` through the shared filesystem-component rule;
 valid names are preserved unchanged. Archived schemas remain readable.
 
-> Optimizes hyperparameters for a given model architecture over N rounds. Each round runs **plan (LLM) → resource check → train → infer → score → reflect (LLM)** in a sandbox subprocess. Supports two modes (trial = sparse sampling for fast exploration, formal = full data for canonical scoring) and uses two LLM sub-calls per round — a planner (proposes hyperparameters) and a reflector (analyses results, drives the next plan). Returns the best run + a full audit trail of every successful, OOM-skipped, and gate-rejected attempt.
+> Optimizes hyperparameters for a given model architecture over N rounds. Each round runs **plan (LLM) → resource check → train → infer → score → reflect (LLM)** in a sandbox subprocess. Supports two modes (trial = sparse sampling for fast exploration, formal = configured training scope with a separate comparable evaluation scope) and uses two LLM sub-calls per round — a planner (proposes hyperparameters) and a reflector (analyses results, drives the next plan). Returns the best run + a full audit trail of every successful, OOM-skipped, and gate-rejected attempt.
 
 ## Position in the pipeline
 
@@ -76,13 +86,13 @@ them. Dataset row counts are separate from physical-segment counts.
 |---|---|---|---|---|
 | `max_rounds` | `int` | No | `50` | Maximum number of **completed** experiment rounds (OOM-skipped attempts do not count). |
 | `attempts_per_round` | `int` | No | `3` | Per-round attempt budget for trial rounds. Each round retries up to this many times after a gate-skip or error before the round is recorded as a failure. |
-| `attempts_per_formal_round` | `int` | No | `5` | Per-round attempt budget for the formal-promotion round. Higher than trial (5 vs 3) because the formal round runs on the full dataset and a single retry is much more expensive. |
+| `attempts_per_formal_round` | `int` | No | `5` | Per-round attempt budget for the formal-promotion round. Higher than trial (5 vs 3) because a Formal retry may use a larger configured workload. |
 | `max_fail_rounds` | `int` | No | `3` | Consecutive-failed-round abort trigger. When this many rounds in a row exhaust their attempt budget without a success, the tuner exits with `termination_reason="aborted_fail_rounds"`. |
 | `max_epochs` | `int \| None` | No | `None` | Hard cap on epochs per round. When set, the tuner clamps the LLM's planned epochs to `min(planned_epochs, max_epochs)`. Mode-agnostic fallback: `trial_max_epochs` / `formal_max_epochs` take precedence for their round role when provided (D-BUD-6). |
 | `trial_max_epochs` | `int \| None` | No | `None` | TRIAL-role epoch ceiling (campaign decision D-BUD-6; frozen campaign posture trial 2 / formal 1). Precedence for a trial round: this value → `max_epochs` → no clamp; formal rounds never read it. `ge=1` — zero/negative refuse at validation. Resolution happens only in `HyperparamTuningInput.resolve_epoch_cap(is_trial=...)`, keyed on `plan.is_trial` **after** the mode-override chain — the same authority that stamps `record.is_trial` (see "Candidate role identity"). |
 | `formal_max_epochs` | `int \| None` | No | `None` | FORMAL-role epoch ceiling (D-BUD-6). Precedence for a formal round: this value → `max_epochs` → no clamp; trial rounds never read it. `ge=1`. |
-| `force_formal_round` | `bool` | No | `True` | When `True` (default), the **last** round of every iteration forces `plan.is_trial = False` so it always runs in formal mode (full dataset) regardless of what the planner picked. |
-| `formal_round_strategy` | `Literal["full_clone", "hybrid_params", "independent", "inherit_best_train_plus_formal_eval"]` | No | `"full_clone"` | Orchestration policy for the forced formal round: `full_clone` re-runs the best trial verbatim on full data; `hybrid_params` carries trial-winner hyperparams + formal sampling; `independent` lets the planner propose a fresh formal config. |
+| `force_formal_round` | `bool` | No | `True` | When `True` (default), the **last** round of every iteration forces `plan.is_trial = False` so it always runs in Formal mode (configured Formal training and evaluation scopes) regardless of what the planner picked. |
+| `formal_round_strategy` | `Literal["full_clone", "hybrid_params", "independent", "inherit_best_trial", "llm_propose"]` | No | `"full_clone"` | Orchestration policy for the forced formal round: `full_clone` inherits the best trial configuration and uses the configured Formal scopes; `hybrid_params` carries trial-winner hyperparams + formal sampling; `independent` lets the planner propose a fresh formal config. |
 | `degenerate_penalty_score` | `float \| None` | No | `None` | Operator policy for the agent's reaction when scoring flags a degenerate output on a formal round (e.g. all-zeros prediction). When set (finite; inf/NaN are refused at launch, issue #1045), the degenerate run gets this penalty score and the tuner continues; when `None`, the run is recorded as-is. |
 
 ### Trial mode sampling
@@ -393,7 +403,7 @@ executes, without distorting what the planner is allowed to decide. See
 | `best_config` | `dict[str, Any] \| None` | `model_config` + `train_config` + `loss_config` that produced `best_denoising_score`. |
 | `best_file_vector` | `list[float \| None] \| None` | Length-20 score vector from the best experiment. `None` for files not included. |
 | `best_score_table` | `ScoreComparisonTable \| None` | Score comparison table from the best experiment. Enriches `best_file_vector` with raw_baseline + ground_truth columns. |
-| `formal_score_table` | `ScoreComparisonTable \| None` | Score comparison table from the most recent successful formal (full 20-file) round. Distinct from `best_score_table` because the best run might be a trial, not the formal canonical. |
+| `formal_score_table` | `ScoreComparisonTable \| None` | Score comparison table from the most recent successful Formal tuning round over the configured evaluation scope. Distinct from `best_score_table` because the best run might be a trial, not the formal canonical. |
 | `all_records` | `list[ExperimentRecord]` | Complete experiment history including successful, failed, OOM-skipped, and (V20 PR B) admission-refused rounds — the last are phases that never started, so they carry no score and are not candidate failures. Each record contains params, results, timing, and any error message. **The dominant payload by size.** |
 | `gate_exhaustion` | `GateExhaustionInfo \| None` | Populated when **either** trigger fires. **Trigger A**: no attempt reached `status == "success"` AND ≥1 attempt was rejected by the pre-flight resource gate. **Trigger B**: the outer loop aborted on the consecutive-failure brake after `completed_rounds > 0` — so under Trigger B earlier rounds **did** succeed. Used by the downstream proposer's `recent_gate_exhaustions` field to learn from prior tuner-side gate failures. C12-P: the rendered `summary_message` and log line now state how many attempts **reached training**, because Trigger A's predicate ("no *successful* outcome") was being rendered as "never trained" — false for an attempt that trained and then failed HealthGate, and false unconditionally under Trigger B. |
 | `trial_validity_feedback` | `TrialValidityFeedback \| None` | **V20 PR D (D-C6)** — populated only when the iteration ran trial rounds but produced NO HealthGate-valid winner. Reaches the next proposer via `ProposalInput.recent_trial_validity`. Deliberately SEPARATE from `gate_exhaustion`, which reports BUDGET exhaustion: these trials ran and succeeded and then failed their scientific gates, so `gate_exhaustion`'s triggers never fire for them, and the two call for opposite responses (propose lighter vs propose something that does not collapse). `None` whenever any trial is valid. |
@@ -1143,7 +1153,7 @@ for the full design rationale.
 - **Two LLM sub-calls per round** (planner + reflector). When `reflect_provider` / `reflect_model_id` are set, the two go through separate `LLMBridge` instances — enables splits like "cheap planner + smarter reflector" or "small planner + large reflector" without changing prompts.
 - **Attempt vs round distinction.** A *round* is a slot in the optimization history that produces a final record. An *attempt* is one LLM-plan + downstream-execution attempt. Each round can consume up to `attempts_per_round` (or `attempts_per_formal_round` for the forced-formal round) attempts before being marked failed. Attempts that fail at the pre-flight gate cost LLM tokens but no GPU time; attempts that reach training but fail (OOM, training error) cost both.
 - **`max_fail_rounds` termination trigger.** When this many *consecutive* rounds exhaust their attempt budget without producing a successful record, the tuner exits with `termination_reason="aborted_fail_rounds"`. The downstream interpreter reads `consecutive_fail_rounds_at_exit` to recognize this exit.
-- **Force-formal-round mechanic.** When `force_formal_round=True` (default), the **last** round in the loop has `plan.is_trial` forcibly set to `False` so it runs on the full dataset. The `formal_round_strategy` controls how that round's config is built: `full_clone` (re-run best trial verbatim), `hybrid_params` (best-trial hyperparams + formal sampling), `independent` (planner proposes fresh), or `inherit_best_train_plus_formal_eval` (best train + formal eval scope).
+- **Force-formal-round mechanic.** When `force_formal_round=True` (default), the **last tuning round of each iteration** has `plan.is_trial` forcibly set to `False` so it uses the configured Formal training and evaluation scopes. The `formal_round_strategy` controls how that round's config is built: `full_clone` (inherit selected model/loss/training fields from the best trial), `hybrid_params` (inherit loss and learning rate), or `independent` (planner proposes fresh). Legacy `inherit_best_trial` and `llm_propose` canonicalize to `full_clone` and `independent`; none of these strategies implies full-data training.
 - **Wall-time admission has one authority per role.** Trial and Formal independently select ``forecast`` or ``measured``. The default ``measured`` posture skips advance time admission and enforces the budget from executing-device verification. ``forecast`` invokes `evaluate_time_skill` and leaves in-process verification record-only. An unavailable selected authority refuses; the system never falls back to the other authority.
   - ``runtime_verification_max_wall_seconds`` optionally extends the adaptive verifier's observation window for workloads with slow individual optimizer steps. It does not change Trial or Formal budgets, and the observed verification steps are the first production training steps rather than a duplicate probe. Omit it to preserve the verifier's default window.
   - `runtime_verification_pathological_min_unit_ms` optionally sets the finite,
@@ -1817,6 +1827,30 @@ both probe routes' sampling against the request observed by the row-count owner.
 
 ## The reflector is told what RESOLVED, not what was proposed (Lane D / F15)
 
+### Console action boundary
+
+`plan_logging.py::render_effective_plan` owns the console presentation of the
+effective request and retained proposal. `planning.py::prepare_attempt` calls it
+after `ResolutionTracker.finish_with_model` projects the persisted `TrialConfig`.
+It consumes the same `execution_provenance` returned on `PreparedAttempt`, prints
+each final event's proposed/effective values and existing authority description,
+and labels hypothesis and reasoning as authored proposal text. With disagreements,
+that proposal is explicitly superseded; without disagreements, it remains a
+proposal rather than an observed result. The renderer neither mutates plans nor
+recomputes policy. The existing policy receipt supplies the selected inheritance
+strategy and named winning trial; the action block supplies final differences,
+including changes after inheritance. Both describe preparation, not completed
+training. Persisted hypothesis fields and reflector prompt bytes are unchanged.
+
+Regression coverage: `tests/unit/nodes/ml_hyperparameter_tune_agent/test_plan_logging.py`
+drives real preparation for `full_clone` and operator overrides, compares displayed
+values with the effective training request, and covers unchanged proposals.
+The rendering assembly identity changes when `planning.py` changes because it is
+part of that identity's source closure; this console change does not bypass that
+binding or rewrite archived evidence.
+
+### Reflection provenance
+
 `plan.hypothesis` is free prose the planner authors **before** the framework
 resolves the plan. Seven steps then overrule parts of it — operator
 `plan_overrides`, the mode-override chain, the task-declared objective,
@@ -2267,3 +2301,26 @@ Receipts are recomputed for each effective plan, so changing to an active loss
 re-enables enforcement. Tests: `test_inactive_loss_parameter_rules.py` and
 `test_inactive_rule_receipts.py` cover declaration, resolution, live tuner
 persistence and planner disclosure with stubbed execution.
+
+## Formal role and training population
+
+`is_trial=True` enables Trial selection, not a mandatory Trial schedule.
+With `force_formal_round=True`, the last tuning round of each iteration resolves
+to Formal. `max_rounds=1` therefore has no Trial opportunity, independently of
+outer `final_iteration`; `max_rounds>=2` allows earlier Trial choices. Explicit
+`force_formal_round=False` retains planner choice on the last tuning round.
+
+Formal training uses `formal_portion=0.1` and `formal_train_portion=1.0` by
+native default when `formal_training_scope_source="operator"`. These are
+training fractions, not mode labels or evaluation fractions. Evaluation uses
+`formal_eval_portion=1.0` by default. A CSV scope of 1,077 rows at portion .1
+has about 108 rows and 3 complete batches of size 32; retaining the partial
+batch adds a step. Actual step count also depends on per-epoch fraction,
+ceilings and batching policy. `formal_training_scope_source="agent"` instead
+uses validated planner training portions; evaluation remains operator-owned.
+
+Console templates and small executable examples explicitly choose
+`formal_portion=1.0`, `max_rounds=2`; native defaults and scientific campaign
+settings remain unchanged. `WorkflowLaunchConfig` owns editor help metadata,
+not a second execution policy. Changing the final iteration count or Trial
+budgets does not change the resolved Formal workload.

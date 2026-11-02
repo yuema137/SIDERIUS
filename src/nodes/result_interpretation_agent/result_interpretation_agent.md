@@ -1,5 +1,15 @@
 # ResultInterpretationAgent
 
+
+## Structured evaluation prompt context
+
+Per-model, synthesis, dedup and analysis-brief messages receive the shared block. The active-evaluation display noun is recorded score; serialized denoising_score fields and historical evidence remain unchanged.
+
+The run-scoped composition supplies this context through the shared append path.
+Absence adds no bytes and never enters the new boundary under historical profiles.
+The [evaluation contract](../../execute_tools/evaluation-contract.md#evaluation-prompt-rendering)
+owns formatting, profile admission and runtime capability distinctions.
+
 ## Live output names
 
 `run()` checks `storage.local.run_name` before cold-start or synthesis work

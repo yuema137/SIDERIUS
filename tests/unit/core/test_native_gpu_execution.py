@@ -8,6 +8,8 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -255,6 +257,9 @@ publish('loaded.json')
 while not (root / 'authorized.json').exists(): time.sleep(.005)
 if mode == 'no-ack': time.sleep(10)
 publish('consumed.json')
+if len(sys.argv) > 3:
+    with open(sys.argv[3], 'rb') as barrier:
+        assert barrier.read(1) == b'1'
 (root / 'forward-marker').write_text('authorized')
 print('child completed')
 """
@@ -442,6 +447,66 @@ def selected_state(spec, phase):
     return state
 
 
+@contextmanager
+def observed_child_barrier(gate: Path, observer, monkeypatch) -> Iterator[None]:
+    """Keep synthetic children alive until the observer commits a live sample."""
+    with gate.open("r+b", buffering=0) as barrier, monkeypatch.context() as patch:
+        released = False
+        expired = False
+        release_lock = threading.Lock()
+        actual_check = observer.check_control
+
+        def expire_barrier():
+            nonlocal released, expired
+            with release_lock:
+                if not released:
+                    expired = True
+                    barrier.write(b"1")
+                    released = True
+
+        # This bounds a broken test handshake; runtime policies stay unchanged.
+        timer = threading.Timer(60.0, expire_barrier)
+
+        def release_after_observation():
+            nonlocal released
+            decision = actual_check()
+            with release_lock:
+                if not released and observer.protection_receipt().valid_live_samples:
+                    barrier.write(b"1")
+                    released = True
+                    timer.cancel()
+            return decision
+
+        patch.setattr(observer, "check_control", release_after_observation)
+        timer.start()
+        try:
+            yield
+        finally:
+            timer.cancel()
+            timer.join()
+            if expired:
+                pytest.fail("GPU observation barrier was not released within 60 seconds")
+
+
+def inject_wiring_clocks(monkeypatch) -> None:
+    """Wiring witnesses use logical time; deadline refusal has separate witnesses."""
+    from core.runtime_control import native_gpu_execution as native
+
+    actual_observer = native.GpuPhaseObserver
+    actual_startup = native.InferenceStartup
+
+    def observer(*args, **kwargs):
+        anchor = kwargs["initial_observation"].query_completed_at
+        return actual_observer(*args, **kwargs, clock=lambda: anchor)
+
+    def startup(*args, **kwargs):
+        anchor = time.monotonic()
+        return actual_startup(*args, **kwargs, clock=lambda: anchor)
+
+    monkeypatch.setattr(native, "GpuPhaseObserver", observer)
+    monkeypatch.setattr(native, "InferenceStartup", startup)
+
+
 @pytest.mark.parametrize("phase", ["training", "inference"])
 @pytest.mark.parametrize("mode", ["trial", "formal"])
 @pytest.mark.parametrize("enforcement", ["observe_only", "enforce", "enforce_resource_limits"])
@@ -458,6 +523,7 @@ def test_actual_native_launch_and_terminal_receipt(
     from tests.unit.core.test_gpu_runtime_protection import DEVICE, snapshot
     from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
+    inject_wiring_clocks(monkeypatch)
     composition = compose_run_task_bindings("configs/task_composition/quickstart.yaml")
     with bind_run_task_composition(composition, physical_data_root=str(tmp_path)):
         sandbox = executor.TidmadSandbox(
@@ -497,52 +563,15 @@ def test_actual_native_launch_and_terminal_receipt(
                     str(sentinel),
                     str(gate),
                 ]
-                observer = state.current_observer
-                actual_check = observer.check_control
-                # A sampler return precedes the second liveness check. Release
-                # only after the real observer has committed a live sample.
-                with gate.open("r+b", buffering=0) as barrier, monkeypatch.context() as patch:
-                    released = False
-                    expired = False
-                    release_lock = threading.Lock()
-
-                    def expire_barrier():
-                        nonlocal released, expired
-                        with release_lock:
-                            if not released:
-                                expired = True
-                                barrier.write(b"1")
-                                released = True
-
-                    # Bound a broken observation handshake without sleep polling.
-                    timer = threading.Timer(60.0, expire_barrier)
-
-                    def release_after_observation():
-                        nonlocal released
-                        decision = actual_check()
-                        with release_lock:
-                            if not released and observer.protection_receipt().valid_live_samples:
-                                barrier.write(b"1")
-                                released = True
-                                timer.cancel()
-                        return decision
-
-                    patch.setattr(observer, "check_control", release_after_observation)
-                    timer.start()
-                    try:
-                        return actual_supervise(replacement, **kwargs)
-                    finally:
-                        timer.cancel()
-                        timer.join()
-                        if expired:
-                            pytest.fail(
-                                "GPU observation barrier was not released within 60 seconds"
-                            )
             else:
                 assert "--inference_startup_json" in cmd
                 path = Path(cmd[cmd.index("--inference_startup_json") + 1])
                 replacement = [sys.executable, "-c", _CHILD_HANDSHAKE, str(path.parent), "ok"]
-            return actual_supervise(replacement, **kwargs)
+                gate = tmp_path / "gpu-observed.fifo"
+                os.mkfifo(gate)
+                replacement.append(str(gate))
+            with observed_child_barrier(gate, state.current_observer, monkeypatch):
+                return actual_supervise(replacement, **kwargs)
 
         monkeypatch.setattr(native, "supervise_subprocess", scientific_child)
         scopes = SimpleNamespace(training=object(), evaluation=object())
@@ -584,6 +613,7 @@ def test_actual_native_launch_and_terminal_receipt(
         assert receipt.protection.binding.effective_ceiling_gib == 1.5
         assert receipt.lifecycle.group_cleanup.final.status == "absent"
         assert receipt.lifecycle.child_reaped
+        assert receipt.protection.valid_live_samples > 0
         assert receipt.measurement_segments[-1].outcome in {"training authorized", "authorized"}
         if phase == "inference":
             assert receipt.startup.loaded == receipt.startup.consumed
@@ -914,3 +944,56 @@ def test_authorization_refuses_changed_control_or_late_publication(
             startup.check(message.child_pid)
         assert startup.receipt.published_at == startup.request.deadline_at
     assert startup.receipt.error is not None
+
+
+@pytest.mark.parametrize("watchdog", [False, True])
+def test_native_inference_waits_for_observation_after_consumption(
+    tmp_path, bound_spec, monkeypatch, watchdog
+):
+    """The child must survive even when its ACK precedes the first GPU sample."""
+    from core.runtime_control.gpu_observer import GpuPhaseObserver
+
+    consumed = threading.Event()
+    actual_loop = GpuPhaseObserver._loop
+    actual_check = InferenceStartup.check
+
+    def delayed_loop(observer, child_pid):
+        if not consumed.wait(5.0):
+            observer.abort_control("test never observed inference consumption")
+            return
+        actual_loop(observer, child_pid)
+
+    def check(startup, child_pid, *, terminal=False):
+        actual_check(startup, child_pid, terminal=terminal)
+        if startup.receipt.consumed is not None:
+            consumed.set()
+
+    monkeypatch.setattr(GpuPhaseObserver, "_loop", delayed_loop)
+    monkeypatch.setattr(InferenceStartup, "check", check)
+    test_actual_native_launch_and_terminal_receipt(
+        tmp_path,
+        bound_spec,
+        monkeypatch,
+        "inference",
+        "formal",
+        "enforce_resource_limits",
+        watchdog,
+    )
+    assert consumed.is_set()
+
+
+def test_native_wiring_survives_scheduling_stall_before_launch(tmp_path, bound_spec, monkeypatch):
+    """Host scheduling must not age synthetic GPU facts in the wiring matrix."""
+    from core.runtime_control import native_gpu_execution as native
+
+    actual_supervise = native.supervise_subprocess
+
+    def delayed_launch(*args, **kwargs):
+        # Exceeds the fixture's one-second sample-age limit without changing it.
+        time.sleep(1.1)
+        return actual_supervise(*args, **kwargs)
+
+    monkeypatch.setattr(native, "supervise_subprocess", delayed_launch)
+    test_actual_native_launch_and_terminal_receipt(
+        tmp_path, bound_spec, monkeypatch, "inference", "formal", "enforce_resource_limits", False
+    )

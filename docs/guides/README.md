@@ -14,6 +14,7 @@ the declarations, source owners and validation needed for that operation.
 | --- | --- |
 | Build a task package | [Define a task](define-a-task.md) |
 | Add scientific evaluation | [Metric](bring-your-own-metric.md), [Health checks](bring-your-own-health-checks.md) |
+| Declare what scores mean and how candidates are compared (weighted combinations, balancing rules, requirements) | [Declare how your task judges candidates](evaluation/README.md) |
 | Change data membership | [Train/validation split](bring-your-own-split.md) |
 | Write, prepare and run a `workflow.py` (steps, advice, training budgets, research loop, literature review and LLM judges) | [Workflow declarations](workflow-declarations.md) |
 | Choose another research sequence | [Custom workflow](custom-workflow.md) |

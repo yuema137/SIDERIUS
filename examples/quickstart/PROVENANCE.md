@@ -126,9 +126,54 @@ stale:
 
   The §8 composition cell, by contrast, IS pure recomputation and has been
   re-derived from the committed pack (`60fde910197c…`, fingerprint
-  `1330d3991a98c48b…`). A reader comparing §8 against §10 will therefore
+  `b1c916f8fc5e53b3…`). A reader comparing §8 against §10 will therefore
   see them disagree; the disagreement is real, explained here, and the
   §8 values are the ones that describe the pack you have.
 
 `quickstart.html` is a generated static rendering of the same notebook,
 labelled as such, and section-heading-synced by test.
+
+## Sampling seed contract (#1169)
+
+The task plugin now refuses absent scope/epoch seeds when sampling, using
+`core.seeding.MissingRunSeed`. Explicitly seeded selections and generated
+shard bytes are unchanged. The plugin content hash and composition semantic
+fingerprint change; the pure §8 composition output is refreshed. Historical
+launch receipts in §10 and above remain evidence of their original revision.
+Resume with an old plugin identity fails closed; use a new workspace or the
+original source revision for those receipts. No new live witness is claimed.
+
+## Isolated composition-cell execution — 2026-11-02
+
+The §8 notebook cell `7cca5189` (zero-based index 15) is a **code** cell;
+its `outputs` field is recorded stdout, not narrative Markdown. Its exact
+source was executed at **2026-11-02T00:14:07+00:00** against source revision
+`c8beb30b3cb48051c152dfb1ed739d0d7c670ad8`, after this checkout's
+`uv sync --group dev --frozen` completed successfully. Execution used this
+checkout's `.venv/bin/python` and supplied only `REPO_ROOT` as prior cell state.
+The complete captured stdout, including import-time plugin-loader messages,
+replaces that cell's output; the HTML output block is escaped from the same
+capture. No output line was manually substituted in this execution record.
+
+This is one offline composition-cell execution, not a notebook-kernel session,
+full notebook rerun, training run, or API/GPU launch. The old kernel execution
+count is cleared to `null`. Cell metadata records the UTC timestamp, source
+revision, method, and SHA-256 hashes of the exact source and captured stdout.
+All other notebook cells, including the archived §9–§10 launch/recovery
+outputs, remain unchanged. This execution supersedes the earlier selective
+fingerprint/hash substitutions in §8; it does not revalidate archived runs.
+
+Reproduce the exact cell from the repository root:
+
+```bash
+.venv/bin/python - <<'PY'
+import json
+from pathlib import Path
+
+root = Path.cwd()
+path = root / "examples/quickstart/quickstart.ipynb"
+notebook = json.loads(path.read_text(encoding="utf-8"))
+cell = next(cell for cell in notebook["cells"] if cell.get("id") == "7cca5189")
+exec(compile("".join(cell["source"]), str(path) + "#7cca5189", "exec"), {"REPO_ROOT": root})
+PY
+```
