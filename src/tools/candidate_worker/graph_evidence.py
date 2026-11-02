@@ -750,7 +750,9 @@ def verify_judged_branches(
                 )
             )
         )
-        if implemented.consumed_input_sha256 != consumed_input_sha256(owner_seed, ranked):
+        if implemented.consumed_input_sha256 != consumed_input_sha256(
+            owner_seed, ranked, version=implemented.consumed_input_encoding
+        ):
             raise ValueError(
                 f"judged branch {implementation} consumed a proposal or seed other than "
                 f"adaptor {source.adaptor} output {source.index} of owner {owner}"

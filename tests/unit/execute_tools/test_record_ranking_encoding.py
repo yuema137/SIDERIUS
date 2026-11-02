@@ -21,7 +21,9 @@ def test_raw_record_ranking_decodes_values_and_does_not_leak_metadata(score):
     raw = [encoded_record(value) for value in values]
     best = best_by_declared_metric(raw, context="encoding regression")
     assert best is not None
-    assert best["denoising_score"] == (score if score == float("inf") else 0.5)
+    # A non-finite record is decoded evidence, never the best record (#1316):
+    # with ``is not None`` ranking, +inf wins here and the equality fails.
+    assert best["denoising_score"] == 0.5
     rankable, _ = partition_by_metric_identity(raw)
     assert all(METADATA not in row for row in rankable)
     value = rankable[1]["denoising_score"]

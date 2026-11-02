@@ -96,12 +96,13 @@ class WorkflowLaunchConfig:
     max_rounds: Annotated[
         int,
         Field(
+            ge=1,
             description=(
                 "Tuning rounds per iteration. With force_formal_round enabled (the default), "
                 "the last tuning round of each iteration is forced Formal: max_rounds=1 "
                 "never runs Trial. Use at least 2 to allow Trial before Formal; the planner "
                 "may still choose Formal earlier. Final iteration controls the outer loop."
-            )
+            ),
         ),
     ] = 10
     max_proposal_attempts: int = 3
