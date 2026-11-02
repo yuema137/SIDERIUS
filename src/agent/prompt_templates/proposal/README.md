@@ -22,3 +22,12 @@ and `b` appears as `"a\nb"`; an ID containing those literal quote and backslash
 characters appears as `"\"a\\nb\""`. The two reviews remain distinguishable.
 Other single-line labels keep their existing text. Stored labels and evidence
 prose, including multiline claims, stay unchanged.
+
+The same rule covers the older Contributors and Expert Context blocks. It
+applies to a contributor's name in its `### <name>` heading. It also applies to
+an expert-context item's `source`, its `source_ref`, and any `kind` outside the
+built-in groups, all shown in its `[KIND] (from ...)` line. For example, a
+contributor named `reviewer`, then a newline, then `### forged` appears as
+`### "reviewer\n### forged"` instead of opening a second heading. Card fields
+such as `coverage`, and item `content`, keep their text. Duplicate items are
+still matched on the stored `source_ref` before it is encoded for display.

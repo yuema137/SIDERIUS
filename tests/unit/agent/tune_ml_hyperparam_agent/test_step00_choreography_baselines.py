@@ -64,6 +64,15 @@ DECLARED GOLDEN DELTAS (never a re-baseline to make a test green)
   goldens pin the CALL SURFACE; that one pins what the LLM receives. Both
   had to be checked, and only the surface moved.
 
+* **#1472 reflector Data Volume Context (2026-11-02)** — two textual
+  insertions, nothing regenerated: ``wf2_reflect_call_surfaces.json``
+  ``additive_kwargs`` gained ``round_workload: RoleTimingContext`` on both
+  calls. It is the executed round's mode and workload sources, selected from
+  the retained ``prepared.timing_context``, so the reflector labels a Formal
+  round's ``formal_portion`` as the operator's knob rather than as the plan's
+  ``trial_portion``. Same ADDITIVE-kwarg shape as ``metric_spec``; the
+  ``reflection_context`` key list stays EXACTLY 23.
+
 * **D-BUD-6 mode-aware epoch caps (2026-08-26)** — two textual insertions
   per golden, nothing regenerated: ``wf1_plan_call_round1_surface.json``
   kwargs gained ``trial_max_epochs: null`` and ``formal_max_epochs: null``,

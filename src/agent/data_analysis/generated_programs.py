@@ -118,6 +118,7 @@ def runtime_environment_identity() -> str:
         module_root / "generated_program_executor.py",
         module_root / "executor.py",
         module_root / "persistence.py",
+        module_root / "process_termination.py",
         schema_root / "generated_program.py",
         schema_root / "view_formats.py",
         schema_root / "skills.py",

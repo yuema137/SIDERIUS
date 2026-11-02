@@ -25,6 +25,7 @@ from agent.schemas.health_feedback import (
 from agent.schemas.hyperparam_tuning import (
     GateExhaustionInfo,
 )
+from agent.schemas.planner_timing import RoleTimingContext
 from agent.skills.evaluate_vram_skill.evidence import preflight_memory_fields
 from agent.utils.architectural_pattern_tagger import (
     TIME_FACTOR_THRESHOLD,
@@ -746,6 +747,21 @@ def _render_gate_exhaustion_trigger_b_summary(
     return " ".join(parts)
 
 
+def executed_round_workload(prepared) -> RoleTimingContext | None:
+    """The retained timing role whose mode is the mode this attempt executed.
+
+    ``prepared.timing_context`` holds the role alternatives offered to the
+    planner, each with the workload sources ``_sample_set_sources`` selects for
+    execution. The executed role is the one matching ``trial_config.mode``;
+    ``None`` when no timing facts were retained or no role matches.
+    """
+    timing = prepared.timing_context
+    if timing is None:
+        return None
+    mode = prepared.trial_config.mode
+    return next((role for role in timing.roles if role.mode == mode), None)
+
+
 def invoke_reflection(
     brain,
     *,
@@ -797,4 +813,7 @@ def invoke_reflection(
         # the run that executed rather than the one that was proposed.
         execution_provenance=prepared.execution_provenance,
         constraint_context=constraint_context,
+        # Issue #1472 — the executed round's workload sources, so the Data
+        # Volume Context names the knob that set this round's portions.
+        round_workload=executed_round_workload(prepared),
     )

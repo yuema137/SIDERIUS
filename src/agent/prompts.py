@@ -23,11 +23,12 @@ from agent.prompt_templates.tuner.rendering import (
     render_execution_provenance_block,
     render_metric_identity_line,
     render_planner_dynamics_block,
+    render_reflector_data_volume_portions,
     render_reflector_dynamics_block,
 )
 from agent.prompt_templates.tuner.runtime_evidence import render_training_epoch_evidence
 from agent.prompt_templates.tuner.timing_context import render_timing_context
-from agent.schemas.planner_timing import PlannerTimingContext
+from agent.schemas.planner_timing import PlannerTimingContext, RoleTimingContext
 from core.record_encoding import decode_record
 
 # Step 07 PR 07b (P2) — collapse advice about a health check the run does not
@@ -1374,6 +1375,7 @@ def get_reflector_user_prompt(
     training_diagnosis=None,
     metric_spec=None,
     execution_provenance=None,
+    round_workload: RoleTimingContext | None = None,
 ):
     """
     Constructs the prompt for the Reflector to summarize findings into Memory.
@@ -1388,6 +1390,10 @@ def get_reflector_user_prompt(
         best_same_loss_final_loss - float or None: best (lowest) final_loss among experiments
                                    with the same loss_type as this one (None if first of its type)
         current_loss_type     - str: loss_type used in this experiment
+
+    round_workload (optional RoleTimingContext): the round's mode and workload
+    sources; labels the executed trial_portion / eval_portion in the Data Volume
+    Context with the knob that set them (issue #1472).
     """
     # Step 07 PR 07b (P3) — the CURRENT attempt's dynamics, rendered from the
     # TrainingDiagnosis 07a derived. The reflector receives the diagnosis and
@@ -1433,6 +1439,10 @@ def get_reflector_user_prompt(
             f"  is_more_efficient     : {c.get('is_more_efficient', 'N/A')}  "
             f"(True = score within {EFFICIENCY_BAND_PCT}% of best AND fewer params or epochs)"
         )
+        # Issue #1472 — the executed portions are labelled and advised by the
+        # round's workload sources, so a Formal round never reads its
+        # operator-set formal_portion as the planner's trial_portion.
+        data_volume_portions = render_reflector_data_volume_portions(c, round_workload)
         context_block = f"""
 ### Comparison Context (use this to judge the result):
   baseline_score        : {c.get("baseline_score", "N/A")}
@@ -1454,10 +1464,7 @@ def get_reflector_user_prompt(
   training_psd_segments : {c.get("training_psd_segments", "N/A")}  (PSD segments used for training)
   eval_psd_segments     : {c.get("eval_psd_segments", "N/A")}  (PSD segments used for scoring)
   baseline_psd_segments : {c.get("baseline_psd_segments", "N/A")}  (baseline trained on this many)
-  trial_portion         : {c.get("trial_portion", "N/A")}
-  eval_portion          : {c.get("eval_portion", "N/A")}
-  ⚠ If training_psd_segments << baseline_psd_segments, poor scores may be from
-     insufficient data, NOT bad hyperparameters. Recommend increasing trial_portion.
+{data_volume_portions}
 """
 
     actual_results = decode_record(actual_results)
