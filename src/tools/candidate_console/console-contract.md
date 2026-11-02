@@ -1901,7 +1901,14 @@ preparation. Type-compatible highlights do not claim runtime compatibility. Exis
 unrouteable/overlapping layouts retain every binding in the textual connection list.
 Stored positions remain exact. Nodes without one get a display-only fallback placed
 right of every stored card (card size is measured from the rendered cards), so a
-partial code-authored set never overlaps. A pointer drag and Alt + arrows call the
+partial code-authored set never overlaps. `placeCards` reuses `geometry.place` after
+card border-box size changes (including hidden-to-visible transitions, optional
+inputs and mapping expansion). Observers disconnect from replaced cards; pointer
+drags keep ownership of their live coordinates. The visible viewport remeasures
+before pending Fit chooses a scale. This updates fallback display coordinates and
+wire geometry only: stored positions, draft state and source bytes are unchanged.
+Advanced mapping details are present for every protocol-backed card; they do not
+indicate an incompatible advice connection. A pointer drag and Alt + arrows call the
 same move: it records every displayed position, the moved one updated, so the next
 open shows the same layout; a save without a move keeps positions unchanged.
 Keyboard buttons share pointer actions; Escape/right-click cancels a pending wire.

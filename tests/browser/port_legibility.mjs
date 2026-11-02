@@ -40,7 +40,14 @@ try {
   await waitUntil(async () => page.evaluate(() => document.querySelector('#editor-source').value.length > 0 && document.querySelector('#editor-task-choice').options.length === 3));
   // The Task version card lives on the Task tab; the canvas stays on the Workflow page.
   const tab = async view => { await page.evaluate(name => { location.hash = name; }, view); await page.locator('#view-' + view).waitFor(); };
-  await tab('task'); await page.locator('#editor-task-choice').selectOption('old'); await tab('workflow');
+  await tab('task'); await page.locator('#editor-task-choice').selectOption('old');
+  // Settings can re-render the canvas while its tab is hidden. Returning must
+  // measure the visible cards, not retain the zero-size fallback positions.
+  await page.locator('#settings-toggle').click();
+  await page.locator('[data-ui-setting="advanced"]').uncheck();
+  await page.locator('[data-ui-setting="advanced"]').check();
+  await page.locator('#settings-toggle').click();
+  await tab('workflow');
   assert.equal(await page.locator('.editor-node').count(), 8);
   const original = await readFile(metadata.source, 'utf8');
   const output = name => page.locator(`#circuit-output-${name}`);
@@ -49,6 +56,12 @@ try {
   const message = () => page.locator('.circuit-message').textContent();
   // Optional inputs are folded; expand every card so all socket kinds render.
   for (const summary of await page.locator('.circuit-optional > summary').all()) await summary.click();
+
+  for (const name of ['check_left', 'check_right']) {
+    const advice = input(name, 'human_advice');
+    assert.equal(await advice.locator('.circuit-port-contract').textContent(), 'Advice text');
+    assert.equal(await advice.getAttribute('data-contract'), 'optional.advice-text');
+  }
 
   // U4: one stable token per contract, distinct across contracts, rendered by CSS.
   const ports = await page.evaluate(() => [...document.querySelectorAll('.circuit-port[data-contract]')].map(port => {
@@ -89,11 +102,14 @@ try {
   const arrowFlow = await page.evaluate(() => [...document.querySelectorAll('.circuit-port > .circuit-port-direction')]
     .every(mark => getComputedStyle(mark).position === 'absolute'));
   assert.ok(arrowFlow, 'direction arrows take no layout space');
-  const cardRects = await page.evaluate(() => [...document.querySelectorAll('.circuit-card')].map(card => ({
-    node: card.dataset.node, left: card.offsetLeft, top: card.offsetTop, right: card.offsetLeft + card.offsetWidth, bottom: card.offsetTop + card.offsetHeight})));
-  for (const [i, a] of cardRects.entries()) for (const b of cardRects.slice(i + 1)) {
-    assert.ok(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top, `${a.node} and ${b.node} do not overlap`);
-  }
+  const assertCardsDisjoint = async () => {
+    const cardRects = await page.evaluate(() => [...document.querySelectorAll('.circuit-card')].map(card => ({
+      node: card.dataset.node, left: card.offsetLeft, top: card.offsetTop, right: card.offsetLeft + card.offsetWidth, bottom: card.offsetTop + card.offsetHeight})));
+    for (const [i, a] of cardRects.entries()) for (const b of cardRects.slice(i + 1)) {
+      assert.ok(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top, `${a.node} and ${b.node} do not overlap`);
+    }
+  };
+  await assertCardsDisjoint();
   // Required inputs/outputs are filled; optional inputs are hollow.
   for (const port of ports.filter(value => value.required !== undefined)) {
     assert.equal(port.fill, port.required === 'true' ? 'filled' : 'hollow', port.id);
@@ -151,6 +167,7 @@ try {
   assert.equal(await chip.getAttribute('aria-expanded'), 'false'); assert.ok(await fields.isHidden());
   await chip.click();
   assert.equal(await chip.getAttribute('aria-expanded'), 'true'); assert.ok(await fields.isVisible());
+  await assertCardsDisjoint();
   // Sockets exclude framework-supplied inputs (batch 2c: managed storage has no socket);
   // advanced Mapping details still list every protocol argument, storage included.
   const sockets = await page.locator('.circuit-card[data-node="build_left"] [data-input]').count();
