@@ -210,11 +210,14 @@ def test_conditional_provider_system_text_reaches_final_request(monkeypatch):
 # Deliberately moved by #1289: the planner's mode-choice step names the run's
 # configured Formal scopes instead of "a full formal evaluation" (previous
 # content ec2b0c06..., assembly 19e97084...).
+# Deliberately moved by #1403: StubLLMBridge derives pseudo proposal semantics
+# from the bound contract through agent.stub_model; planner content is
+# unchanged (previous assembly bb5eaf83...).
 NATIVE_PLANNER_IDENTITY_PIN = {
     "name": "native-timing-v1",
     "version": "1",
     "content_sha256": "8e373ea3ed2ebbcf7e8de9033a4206e375643eeecbb3f3fad403c383f58455e2",
-    "assembly_sha256": "bb5eaf83cb8390e8e59895a216247ff16f21d10164398140661127ecd61d9b2b",
+    "assembly_sha256": "3506931323ef7fa81c392ecb67280bc8e5fa3c6973376c9f0bd88e526aaf0f8c",
 }
 
 

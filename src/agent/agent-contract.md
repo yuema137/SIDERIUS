@@ -199,6 +199,19 @@ admissible dtype raises `UnsupportedStubShapeError` from `stub_model_code`,
 naming the declared dtypes, before candidate execution or the smoke/repair loop.
 The unbound legacy stub is unchanged.
 
+`stub_model.stub_proposal_semantics` derives the pseudo proposal from the same
+bound contract (`stub_model.bound_stub_contract`). `output_type` is the
+contract's `legacy_output_type`; the baseline and tuner-planner `loss_type` is
+`ce` for a categorical output and `smooth_l1` for a continuous one, so both pass
+`validate_semantic_loss_compatibility` and the candidate probe sees the declared
+geometry. The model description, mathematical definition, motivation, expert
+advice constraint, comparison/causal mechanism and proposer/implementor
+reasoning describe the emitted scalar projection, rendered input and declared
+output shape with the emitted dtype. No task name is consulted. An output with no
+floating admissible dtype raises `UnsupportedStubShapeError` already at proposal
+synthesis. Unbound fixtures keep the historical sequence narrative, `classifier`
+and `ce` unchanged.
+
 `stub_model.py` is outside the `rendering_assembly_digest` and planner strategy
 source closures: it produces pseudo plugin bytes, not prompts. Edits confined to
 it change explicit-contract pseudo plugin bytes and their downstream artifact
