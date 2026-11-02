@@ -577,7 +577,7 @@ class TestAdvisoryNoteBlock:
 
 
 class TestStructuralRetriesUnchanged:
-    @pytest.mark.parametrize("seg", [0, -1])
+    @pytest.mark.parametrize("seg", [0, -1, True, False])
     def test_invalid_temporal_size_is_repaired_before_advisory(self, tmp_path, seg):
         """Removing the schema gate leaks invalid sizes into the advisory instead of repair."""
         bridge = MagicMock()
@@ -602,7 +602,7 @@ class TestStructuralRetriesUnchanged:
         assert out.baseline_config["model_config"]["segmentation_size"] == 40_000
         assert out.preflight_estimated_minutes is not None
 
-    @pytest.mark.parametrize("seg", [0, -1])
+    @pytest.mark.parametrize("seg", [0, -1, True, False])
     def test_legacy_invalid_temporal_size_refuses_before_advisory(self, tmp_path, seg):
         """Legacy has no inner repair loop, but must refuse at the same schema boundary."""
         bridge = MagicMock()

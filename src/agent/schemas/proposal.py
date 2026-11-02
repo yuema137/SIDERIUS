@@ -1386,6 +1386,25 @@ class ProposalOutput(BaseModel):
             validate_implementation_baseline(self.baseline_config)
         return self
 
+    @field_validator("baseline_config")
+    @classmethod
+    def _validate_supplied_training_config(cls, baseline: dict[str, Any]) -> dict[str, Any]:
+        """Validate before structural retries end, retaining intentionally omitted keys."""
+        from ml_models.models_format_sandbox import TrainConfig
+
+        if "train_config" not in baseline:
+            return baseline
+        supplied = baseline["train_config"]
+        if not isinstance(supplied, dict):
+            raise ValueError("baseline_config.train_config must be an object")
+        validated = TrainConfig.model_validate(supplied)
+        # Downstream estimators must consume the owner's normalized values.
+        # Preserve extension keys and omissions instead of inserting defaults.
+        return {
+            **baseline,
+            "train_config": {**supplied, **validated.model_dump(exclude_unset=True)},
+        }
+
     @model_validator(mode="after")
     def _validate_baseline_segmentation_size(self):
         """Ensure ``baseline_config`` respects the dataset's ``segmentation_size`` rule.
@@ -1433,7 +1452,7 @@ class ProposalOutput(BaseModel):
         seg = model_cfg.get("segmentation_size")
         if seg is None:
             return self
-        if not isinstance(seg, int) or seg <= 0:
+        if isinstance(seg, bool) or not isinstance(seg, int) or seg <= 0:
             raise ValueError(
                 f"baseline_config['model_config']['segmentation_size'] must be a "
                 f"positive int, got {seg!r}."

@@ -295,15 +295,28 @@ The constructor accepts `bridge_factory` (test injection — defaults to `LLMBri
   through these consumers. Blocking runtime
   authority belongs to measured evidence via the shared policy (C4/C8);
   structural validation retries (`_MAX_PROPOSING_RETRIES=2`) are unchanged.
-  `ProposalOutput._validate_baseline_segmentation_size` rejects explicit zero
+  `ProposalOutput._validate_baseline_segmentation_size` rejects booleans, explicit zero
   and negative `baseline_config.model_config.segmentation_size` values before
   `_run_preflight_check` at both parse sites, after parameter-rule resolution.
+  `ProposalOutput._validate_supplied_training_config` validates every supplied
+  `train_config` object through `TrainConfig`, including `batch_size`, `epochs`,
+  `drop_last` and schedule cross-field constraints. The owner's coercion rules
+  apply; normalized supplied values replace raw values before advisory use.
+  Omitted sections/fields remain omitted, extension keys remain intact, and
+  explicit null/non-object training sections refuse. Unknown generated model
+  architecture fields retain the implementation contract; no registered model
+  constraints are invented for them.
   Pipeline validation failures enter `proposing_stage_errors` and retry only
   the proposing stage; legacy mode raises `ValidationError` without an inner
   repair loop. Missing segmentation remains permitted by the schema and takes
   the typed advisory skip above when no model default supplies it. Regression
   coverage in `test_preflight_advisory.py` checks repair-prompt delivery and
   that estimation sees only the corrected draft, not merely schema rejection.
+  `test_supplied_training_config.py` covers training repair, legacy refusal,
+  coercion transport and omission preservation. Valid normalized proposals keep
+  existing prompt bytes; newly refused drafts add the existing structural-error
+  feedback to retry prompts. The schema source change updates the rendering
+  assembly identity even without template changes.
 - **Causal-reasoning minimum-boldness retry** (`_MAX_REASONING_RETRIES=1`). In pipeline mode, the causal-reasoning stage emits a `FalsifiablePrediction` with a `boldness` score. If the score falls below the configured minimum, the stage retries ONCE with a "be bolder" nudge. This is independent of the pre-flight loop.
 - **Citation discipline** (`_check_citation_discipline`). The reasoning stage's output is checked for valid `source_ref` values: each ref must correspond to an entry in `expert_context` or `agent_cards`. Invalid refs (hallucinated citations) trigger an error message appended to the next attempt's prompt.
 - **Inherited-component source format**: causal and proposing prompts include examples of the existing `InheritedComponent` contract: bare model types for experiments, and supplied `prefix:identifier` references for external agents or humans. Examples are not permission to invent sources. The existing schema validation and causal-stage correction path remain authoritative.
