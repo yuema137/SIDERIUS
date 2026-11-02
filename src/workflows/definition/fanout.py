@@ -16,6 +16,7 @@ from .adaptor_validation import check_strategies, output_contract
 from .candidate import check_tuning_edge, refuse_declaration_only
 from .llm_strategies import LLM_STRATEGY_TYPES
 from .models import (
+    NATIVE_INTERPRETATION_PROFILE,
     AdaptorInstance,
     AdaptorSource,
     ExternalRequest,
@@ -229,7 +230,7 @@ def execution_families(
         return literature_split_candidate(definition)
     if profile == ROUTED_PROFILE:
         return routed_candidate(definition)
-    if profile == "native-interpretation-candidate/v1":
+    if profile == NATIVE_INTERPRETATION_PROFILE:
         return interpretation_candidate(definition)
     if profile == "native-literature-candidate/v1":
         return literature_candidate(definition)

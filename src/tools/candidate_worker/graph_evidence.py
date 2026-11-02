@@ -2,6 +2,7 @@
 
 import hashlib
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -130,13 +131,77 @@ _UNDISPATCHED_REASONS: dict[GraphState, frozenset[GraphReason]] = {
 }
 
 
+# Terminal states of a dispatched entry, and the closure the drain gives the rest.
+_DISPATCHED_STATES: frozenset[GraphState] = frozenset(("succeeded", "rejected", "failed"))
+_DRAIN_CLOSURE: tuple[GraphState, GraphReason] = ("blocked", "dependency_not_successful")
+
+
+@dataclass(frozen=True)
+class DrainWindow:
+    """Receipt timing a ``parallel-v1`` replay needs (``parallel_evidence.drained_entries``)."""
+
+    ended: Mapping[str, int]  # `ended_event` of every dispatched entry
+    failure_end: int | None  # `ended_event` of the first failed entry; None without one
+
+
+def _settled(node_id: str, recorded: Mapping[str, GraphNodeEvidence], window: DrainWindow) -> int:
+    """The last end event among ``node_id``'s sources, through sources closed without dispatch.
+
+    A closure is decided at the first readiness step after its sources ended, so
+    a node cannot have been closed before this event.
+    """
+    latest = 0
+    pending = list(recorded[node_id].predecessors)
+    seen: set[str] = set()
+    while pending:
+        source = pending.pop()
+        if source in seen:
+            continue
+        seen.add(source)
+        if source in window.ended:
+            latest = max(latest, window.ended[source])
+        else:
+            pending.extend(recorded[source].predecessors)
+    return latest
+
+
+def _replay_step(
+    step: readiness.ReadinessOutput,
+    recorded: Mapping[str, GraphNodeEvidence],
+    window: DrainWindow | None,
+) -> GraphNodeEvidence:
+    """The recorded entry readiness acts on; raise unless its record agrees.
+
+    A ``parallel-v1`` trace (``window``) is replayed without the failure stop: it
+    dispatches by completion, not declaration order. Once one of its entries
+    failed, any entry may instead carry the drain closure (decision B3-Q2: nothing
+    undispatched runs after the first failure ended), and a ``skipped`` closure
+    is accepted only if its sources had all ended before that failure did.
+    """
+    if step.next is not None:
+        item = recorded[step.next]
+        valid = item.state in _DISPATCHED_STATES
+    elif step.terminal:
+        node_id, state, reason = step.terminal[0]
+        item = recorded[node_id]
+        valid = (item.state, item.reason) == (state, reason)
+        if valid and state == "skipped" and window is not None and window.failure_end is not None:
+            valid = _settled(node_id, recorded, window) < window.failure_end
+    else:
+        raise ValueError("graph trace violates serial readiness or failure stop")
+    drained = window is not None and window.failure_end is not None
+    if not valid and not (drained and (item.state, item.reason) == _DRAIN_CLOSURE):
+        raise ValueError("graph trace violates serial readiness or failure stop")
+    return item
+
+
 def replay_readiness(
     nodes: tuple[GraphNodeEvidence, ...],
     *,
     decisions: tuple[RouteEvaluationOutput, ...] = (),
     routing: Mapping[str, readiness.NodeRouting] | None = None,
     skipped_inputs: Mapping[str, GraphReason] | None = None,
-    drained: frozenset[str] = frozenset(),
+    drained: DrainWindow | None = None,
 ) -> None:
     """Replay readiness only, never native execution, over recorded terminal states.
 
@@ -145,10 +210,10 @@ def replay_readiness(
     failed), so a node run inside a non-selected arm or a skip readiness would not
     produce is refused. Uncertainty (a failure) stops later effects.
 
-    ``drained`` (trace v2, ``parallel-v1``): nodes whose receipts prove they were
-    already running when the body's first failure ended. Such a node may carry
-    its real outcome where the serial replay closes it as blocked, but only when
-    its own sources permit it (no abort).
+    ``drained`` (trace v2, ``parallel-v1``): the receipt timing of the trace,
+    whose failure stop is the drain rather than declaration order (``_replay_step``).
+    Receipts already prove each dispatched entry started before the first
+    failure ended; the replay still proves its sources permitted it to run.
     """
     recorded = {item.node_id: item for item in nodes}
     complete: dict[str, GraphNodeEvidence] = {}
@@ -164,33 +229,8 @@ def replay_readiness(
                 skipped_inputs=skipped_inputs,
             )
         )
-        if step.next is not None:
-            item = recorded[step.next]
-            valid = item.state in ("succeeded", "rejected", "failed")
-        elif step.terminal:
-            node_id, state, reason = step.terminal[0]
-            item = recorded[node_id]
-            valid = (item.state, item.reason) == (state, reason) or (
-                aborted
-                and node_id in drained
-                and item.state in ("succeeded", "rejected", "failed")
-                and readiness.may_run(
-                    node_id,
-                    readiness.readiness_input(
-                        nodes,
-                        complete,
-                        aborted=False,
-                        decisions=decisions,
-                        routing=routing,
-                        skipped_inputs=skipped_inputs,
-                    ),
-                )
-            )
-        else:
-            raise ValueError("graph trace violates serial readiness or failure stop")
-        if not valid:
-            raise ValueError("graph trace violates serial readiness or failure stop")
-        aborted = aborted or item.state == "failed"
+        item = _replay_step(step, recorded, drained)
+        aborted = aborted or (drained is None and item.state == "failed")
         complete[item.node_id] = item
 
 
