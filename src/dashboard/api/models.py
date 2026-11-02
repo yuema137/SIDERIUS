@@ -208,6 +208,9 @@ class ModelOverview(BaseModel):
     total_experiments: int = 0
     status_counts: StatusCounts = Field(default_factory=StatusCounts)
     runs: list[str] = Field(default_factory=list)
+    # Preserve the data source's explanation when records cannot participate in ranking.
+    metric_identity_unavailable_rows: int = 0
+    metric_ranking_unavailable: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -216,7 +219,8 @@ class ModelOverview(BaseModel):
 
 
 class LeaderboardEntry(BaseModel):
-    rank: int
+    rank: int | None
+    metric_ranking: str | None = None
     exp_id: str
     run_name: str
     denoising_score: float | None = None
