@@ -177,14 +177,19 @@ def test_generated_interface_identity_survives_registry_and_discovery(tmp_path: 
 
 @pytest.mark.allow_real_subprocess
 def test_skill_worker_parameter_transport_and_digest_preserve_nonfinite(tmp_path: Path) -> None:
-    """A real child must return distinct parameter identities and retain their values."""
+    """A real child must return distinct parameter identities and retain their values.
+
+    The parameter is untyped because Pydantic's JSON-mode dump keeps non-finite
+    floats in typed float fields but projects them to null in ``Any`` fields;
+    only the untyped declaration discriminates the loader and worker encodings.
+    """
     from agent.data_analysis.discovery import DiscoveredSkill, discover_skills
     from agent.data_analysis.executor import resolve_skill_interface, validate_skill_parameters
     from tests.unit.agent.data_analysis.test_skill_substrate import _make_pack, _skill_source
 
     source = _skill_source().replace(
         "max_items: int = Field(default=5, ge=1, le=10)",
-        "max_items: float | None = 5.0",
+        "max_items: __import__('typing').Any = 5.0",
     )
     skill = discover_skills((_make_pack(tmp_path / "pack", source),)).skills[0]
     assert isinstance(skill, DiscoveredSkill)
