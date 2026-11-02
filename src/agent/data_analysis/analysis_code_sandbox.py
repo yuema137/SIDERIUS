@@ -6,7 +6,6 @@ import hashlib
 import os
 import resource
 import shutil
-import signal
 import site
 import subprocess
 import sys
@@ -25,19 +24,15 @@ from agent.schemas.data_analysis.skills import SkillPayload
 from core.campaign_identity import validate_path_component
 from core.durable_io import publish_bytes_write_once
 from core.execution_deadline import ExecutionDeadlineExceeded, remaining_seconds
-from core.runtime_control.process_group import (
-    process_group_alive,
-    signal_group,
-    terminate_observed_group,
-)
+from core.runtime_control.process_group import process_group_alive
 from core.training_seeds import NUMPY_SEED_MASK
+
+from .process_termination import SUPERVISION_POLL_S, terminate_process_group
 
 SANDBOX_PROTOCOL_ID = "siderius.generated-analysis-sandbox.v1"
 MAX_GENERATED_PAYLOAD_BYTES = 1024 * 1024
 GENERATED_PROCESS_HEADROOM = 64
 PROBE_TIMEOUT_S = 10.0
-_POLL_S = 0.02
-_TERMINATION_GRACE_S = 1.0
 _EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
 
 
@@ -106,24 +101,6 @@ def _current_uid_task_count() -> int:
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
     return count
-
-
-def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
-    # The shared owner reaps the leader while waiting. Without that, a leader
-    # that exited on SIGTERM stays a zombie, keeps its group observable and
-    # turns every termination into the full grace period (#1447, as #1425).
-    terminate_observed_group(
-        process.pid,
-        grace_seconds=_TERMINATION_GRACE_S,
-        poll_seconds=_POLL_S,
-        child=process,
-        retain_unknown=False,
-    )
-    try:
-        process.wait(timeout=1.0)
-    except subprocess.TimeoutExpired:
-        signal_group(process.pid, signal.SIGKILL)
-        process.wait()
 
 
 def _allocation_expiry(boundary: str) -> float | None:
@@ -558,7 +535,7 @@ class AnalysisCodeSandbox:
                 peak_rss = max(peak_rss, _process_tree_rss(ps_process))
                 if peak_rss > memory_limit:
                     disposition = "memory_limit_exceeded"
-                    _terminate_process_group(process)
+                    terminate_process_group(process)
                     break
                 if _output_tree_exceeds(
                     output_directory,
@@ -566,15 +543,15 @@ class AnalysisCodeSandbox:
                     max_bytes=output_byte_limit,
                 ):
                     disposition = "output_limit_exceeded"
-                    _terminate_process_group(process)
+                    terminate_process_group(process)
                     break
                 if time.monotonic() >= stop_at:
                     disposition = "timed_out"
-                    _terminate_process_group(process)
+                    terminate_process_group(process)
                     break
-                time.sleep(0.02)
+                time.sleep(SUPERVISION_POLL_S)
             if process_group_alive(process.pid):
-                _terminate_process_group(process)
+                terminate_process_group(process)
             # Every path above has reaped the leader; this only reads its status.
             process.wait()
         peak_rss = max(peak_rss, _process_tree_rss(ps_process))
