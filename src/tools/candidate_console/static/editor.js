@@ -713,7 +713,8 @@
       }
       $('pending').textContent = pendingText(); render();
       diagnostic(error.value?.diagnostics);
-      status(proposal.kind === 'loop' ? `Review refused the research loop: ${error.message}.${proposal.loop?.stop_conditions?.length && loopDeclarationRefusal(error) ? ' ' + window.editorLoopControls.refusalHint : ''}` : error.message);
+      const trainingHint = window.editorNodeParameters.reviewHint(training, graph?.training_settings?.launch, error);
+      status(proposal.kind === 'loop' ? `Review refused the research loop: ${error.message}.${proposal.loop?.stop_conditions?.length && loopDeclarationRefusal(error) ? ' ' + window.editorLoopControls.refusalHint : ''}` : `${error.message}${trainingHint ? '. ' + trainingHint : ''}`);
     }
   }
   $('review').addEventListener('click', () => { if (graph) void reviewProposal(sourceDirty ? {kind: 'source', source: $('source').value} : Draft.proposal(draftState())); });
