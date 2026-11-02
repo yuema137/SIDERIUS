@@ -1268,8 +1268,11 @@ Host resources for the resumed segment (#1385): the `#loop-resume-resources`
 fieldset (`loop-resume-resources-declare`, `-gpu`, `-vram`, `-memory`, `-cpus`,
 `-timed`, read and filled by `run-scheduling.js` `readResources(prefix)` /
 `fillResources(prefix, value)`, the same rules as the Run lane's panel) is hidden
-until a review or Resume is refused `resources_required` on a console with
-`host_ledger`, or a retained record carries `resources`. While shown, Review
+until a review or Resume is refused `resources_required` (only a console with
+`host_ledger` returns it), or a retained record carries `resources`. It is not
+gated on `ChoicesView.host_ledger`: a `#monitor/<UUID>` deep link connects through
+`GET /api/operations/<UUID>` and never reads `/api/choices`, so
+`consoleSession.hostLedger` stays `null` there. While shown, Review
 resume sends its declared values as `POST .../loop-resume-review {resources}`
 (`GET` otherwise); an invalid value is shown in `#loop-resume-status` and nothing
 is sent. The summary appends "Host resources: " and the `describe` sentence of the

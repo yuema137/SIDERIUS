@@ -466,12 +466,25 @@ browser console offers the same actions in Monitor.
    line breaks both work. If the advice is refused,
    nothing is saved and the command exits with status 2.
 
-   If you will submit with a [shared host ledger](#share-one-gpu-budget-across-operations)
-   and the loop's first run had no `resources`, also add
-   `--resources-file resources.json`: a file holding one `resources` object for the
-   resumed part, in the format of step 3 there. Each resume of such a loop needs its
-   own. If the first run declared `resources`, leave the flag out; the resume reuses
-   them, and a second declaration is refused with `run_resources_conflict`.
+   **Resuming under a shared host ledger.** If you will submit with
+   `--host-ledger` and `--host-budget` (a
+   [shared host ledger](#share-one-gpu-budget-across-operations), where each run
+   reserves part of the host budget before it starts), check whether the loop's
+   first run had a `resources` object:
+
+   - It had one: add nothing. The resume reserves the same `resources`.
+   - It had none: write the resumed part's needs to a file, for example
+     `resources.json` containing
+     `{"gpu_count": 0, "host_memory_gib": 8.0, "cpu_slots": 2, "time_budgeted": false}`
+     (the format of step 3 there), and add `--resources-file resources.json`.
+     Each resume of such a loop needs its own file.
+
+   An invalid file saves nothing and exits with status 2
+   (`invalid_input_or_record`). Whether the declaration fits is checked at
+   `submit`: a missing one is refused with `resources_required`, one beside the
+   first run's own `resources` with `run_resources_conflict`, and one submitted
+   without `--host-ledger` with `host_ledger_missing`. After such a refusal, write a
+   new request file with a new `--output` name; the saved file cannot be changed.
 
 3. Make the same provider API keys available in this shell as for the original
    launch, then submit:

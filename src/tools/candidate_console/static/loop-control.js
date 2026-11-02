@@ -198,7 +198,10 @@
     $('loop-resume').hidden = !resumable || !review;
     $('loop-resume-advice-group').hidden = !resumable || !review;
     $('loop-resume-advice').readOnly = !!resume.locked;
-    $(RESOURCES).hidden = !resumable || !resume.resources || session().hostLedger !== true;
+    // Shown only after the owner asked for it (a `resources_required` refusal, which only a
+    // console with a host ledger returns) or for a retained reserved request. Not gated on
+    // session().hostLedger: a Monitor deep link connects without reading /api/choices.
+    $(RESOURCES).hidden = !resumable || !resume.resources;
     $(RESOURCES).disabled = !!resume.locked || resume.pending;
     $('loop-resume').disabled = resume.pending || pending || !connected || !review?.credential_readiness.ready;
     $('loop-resume-summary').textContent = !review ? '' : `Resume continues with iteration ${review.completed_iterations + 1} of ${review.final_iteration} in a new segment of the same run. ` +
