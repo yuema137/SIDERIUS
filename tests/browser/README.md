@@ -8,12 +8,12 @@ Start from an installed development checkout (`uv sync --group dev --frozen`).
 Set `EDITOR_PYTHON` to that checkout's `.venv/bin/python`,
 `CONSOLE_PLAYWRIGHT_MODULE` to the installed Playwright module, and
 `CONSOLE_BROWSER_EXECUTABLE` to Chromium. Scripts that save screenshots also need
-`CONSOLE_EVIDENCE_DIR`, a fresh output directory. Each script's opening comment
-lists its prerequisites; some capture scripts require a clean committed checkout.
+`CONSOLE_EVIDENCE_DIR`, a fresh output directory. Check the selected script for
+additional prerequisites; some capture scripts require a clean committed checkout.
 
-Run a selected witness with `node tests/browser/<name>.mjs`. A successful witness
-prints `PASS` and exits with status zero. Screenshots are supporting evidence;
-assertions establish the result.
+Run a selected witness, for example `node tests/browser/circuit_ports.mjs`.
+Exit status zero means its assertions passed; many witnesses also print `PASS`.
+Screenshots are supporting evidence; assertions establish the result.
 
 Fixture startup logs may appear before the server address. The shared metadata
 reader waits for an explicitly marked record, so logs do not interrupt startup.

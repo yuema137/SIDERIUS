@@ -3,7 +3,7 @@ import {createInterface} from 'node:readline';
 
 const marker = 'SIDERIUS_BROWSER_METADATA ';
 
-/** @param {import('node:child_process').ChildProcessWithoutNullStreams} child
+/** @param {import('node:child_process').ChildProcess & {stdout: import('node:stream').Readable}} child
  * @param {{timeoutMs?: number}} options
  * @returns {Promise<Record<string, any>>}
  */
