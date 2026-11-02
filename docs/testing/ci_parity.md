@@ -630,6 +630,21 @@ Selection is conservative:
   readers, plus any test with a literal contract-file edge;
 - Python changes select direct tests, tests of explicit transitive callers,
   declared dynamic readers and the changed area's owning suite;
+- every path under `src/agent/prompt_templates/` triggers the full unit suite.
+  Proposal loaders compute stage and exploration-mode filenames, and other
+  template loaders read assets through filename arguments. Source edges model
+  Python imports, not these file reads; literal test references cannot prove all
+  rendering consumers. The tree-wide trigger includes future template families
+  and deliberately trades selection speed for complete rendering and packaging
+  coverage. It takes precedence over document and area ownership;
+- `DIRECTORY_SCANS` declares all resource families enumerated by
+  `tests/unit/packaging/test_package_resources.py::_required_assets`: vocabulary,
+  prompt templates, skill configs, analysis reference-pack manifests, model
+  descriptions, node Markdown, dashboard assets, CI weights, Health policy and
+  hook templates. Directory entries conservatively include all descendants,
+  including nested node Markdown. Packaging ownership is additive to existing
+  readers and area suites; these declarations remain explicit even where a
+  full-suite trigger currently covers the input;
 - every path under `examples/`, `configs/task_composition/`, or
   `tests/fixtures/step10_p1/` triggers the full
   unit suite, including Markdown, declared assets, nested task templates and
