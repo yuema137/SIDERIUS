@@ -343,8 +343,13 @@ identity is read from `/proc` while it is unreaped (its PID cannot be reused)
 and bound. A `Popen` `OSError` removes the reservation and publishes
 `spawn_failure.json` as before, so a failed operation directory may hold both
 `placement.json` and `spawn_failure.json`; the placement then names a
-reservation that no longer exists. Any other failure after the write keeps the
-reservation unbound.
+reservation that no longer exists. If publication of `host_reservation.json`,
+`placement.json`, `host_grant.json` or `queued.json` fails or is interrupted,
+`LedgerSlot.reserve` removes its own entry under the still-held admission lock
+and re-raises before spawn. The claim, any already-published files and the
+ordinal counter remain durable; no automatic retry occurs. Cleanup failure
+propagates and conservatively retains the entry. A failure while binding an
+already-spawned child retains the entry for the existing liveness machinery.
 
 Placed-child confirmation (#1108). The submitter holds the ledger lock from
 writing the entry until it has bound the child or removed the entry. A directly
@@ -352,10 +357,16 @@ placed operation child (it sees `placement.json` and no `queued.json`), right
 after publishing `process.json` and checking its runtime binding and before any
 reusable verification or native dispatch, calls `host_queue.confirm_reservation`:
 under the ledger lock it requires a reservation with its `operation_id`,
-`request_digest` and the published `placement`. Absent (or the ledger busy past
-`LEDGER_LOCK_WAIT_SECONDS`, or unreadable), the child publishes
+`request_digest` and the published `placement`. It and queued `_poll` share
+`_held_reservation` for reservation lookup; confirmation additionally checks the
+request digest and exact published placement. Absent or unreadable, the child publishes
 `Completion(outcome="pre_dispatch_failure", reason="host_reservation_unconfirmed")`
-and never runs. This closes two windows with one rule: a `KeyboardInterrupt`
+and never runs. A lock timeout (`OperationFailure.detail.code="ledger_busy"`)
+in this confirmation stage instead publishes `reason="host_reservation_busy"`,
+so operators can distinguish contention from an unconfirmed reservation. Both
+fail closed. The existing `LEDGER_LOCK_WAIT_SECONDS` (30 s) remains unchanged;
+there is no added retry or silent extension of runtime deadlines. This closes
+two windows with one rule: a `KeyboardInterrupt`
 inside `Popen` after the fork (the submitter removes the entry, but the child
 already exists in its own session), and a submitter killed after `Popen`
 returned but before the child published `process.json` (the sweep releases the
@@ -391,9 +402,10 @@ never sees the sandbox.
   `ProcessIdentity`, omitted on entries written before it existed). When no
   child identity exists at all (none bound, no `process.json`), the entry is
   released once that submitter has positively exited: it was killed between
-  writing the entry and spawning or binding a child, so no child exists for it
-  and the entry would otherwise hold capacity, or the head of the queue,
-  forever. An interrupted spawn that does not kill the submitter (any
+  writing the entry and spawning or binding a child. A child may already exist
+  without having published itself; after a sweep removes its entry, confirmation
+  prevents it from running. Otherwise the abandoned entry would hold capacity,
+  or the head of the queue, forever. An interrupted spawn that does not kill the submitter (any
   non-`OSError`, such as `KeyboardInterrupt`) removes the entry itself before
   re-raising; a child already forked then fails its confirmation (above) and
   never runs. With no identity and no recorded or exited submitter, a

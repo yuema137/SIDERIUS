@@ -22,6 +22,7 @@ from .models import (
     SEEDED_SUBMISSIONS,
     Completion,
     HostPlacementEvidence,
+    OperationFailure,
     OperationRecord,
 )
 from .native_chain import execute_native_chain
@@ -115,7 +116,13 @@ def execute(path: Path) -> int:
             receipt_digest=native[1],
             reason="native_terminal",
         )
-    except (Exception, KeyboardInterrupt):
+    except (Exception, KeyboardInterrupt) as error:
+        if (
+            pre_dispatch_reason == "host_reservation_unconfirmed"
+            and isinstance(error, OperationFailure)
+            and error.detail.code == "ledger_busy"
+        ):
+            pre_dispatch_reason = "host_reservation_busy"
         if record.submission.kind in {"prepare", "prepare_reusable"}:
             logging.getLogger(__name__).exception("Preparation operation failed")
         # Do not serialize exception messages: arbitrary plugins can include credentials.
