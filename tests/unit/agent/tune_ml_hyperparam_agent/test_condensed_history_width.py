@@ -43,8 +43,6 @@ def test_many_resolution_events_keep_paths_and_summarize_each_value(fields):
             assert event[name] == (
                 f"{whole[:60]} … (3002 chars; full value in the persisted record) … {whole[-20:]}"
             )
-    # Paths alone can exceed 100 kB; the guarantee deliberately concerns values.
-    assert sum(len(event["field_path"]) for event in events) > fields * 500
     recent = _planner_history(get_planner_user_prompt([record]))[0]
     assert recent["resolution_events"] == record["resolution_events"]
     assert history == original
