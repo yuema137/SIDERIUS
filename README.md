@@ -1,3 +1,21 @@
+<p align="center">
+  <a href="https://siderius.scitra.org">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="src/tools/candidate_console/static/siderius-logo-dark.svg">
+      <img alt="SIDERIUS" src="src/tools/candidate_console/static/siderius-logo-light.svg" width="420">
+    </picture>
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://siderius.scitra.org"><b>Website</b></a> ·
+  <a href="https://siderius.scitra.org/getting-started">Getting started</a> ·
+  <a href="https://siderius.scitra.org/tutorials">Tutorials</a> ·
+  <a href="https://siderius.scitra.org/docs">Documentation</a> ·
+  <a href="https://siderius.scitra.org/case-studies">Case studies</a> ·
+  <a href="https://arxiv.org/abs/2610.14024">Paper</a>
+</p>
+
 # SIDERIUS
 
 **S**cientific **I**nquiry, **D**esign, **E**xploration, and **R**easoning
@@ -22,6 +40,10 @@ Sources: [SIDERIUS paper (arXiv:2610.14024)](https://arxiv.org/abs/2610.14024) �
   your metric, with controlled data access and reproducible evaluation rules.
 - **Choose how to explore:** start with a lightweight fixed workflow or let an
   LLM orchestrator compose research steps. Select models independently by role.
+
+Step-by-step tutorials, guides and case studies are on the
+[SIDERIUS website](https://siderius.scitra.org). This README covers what
+SIDERIUS is, installation and how to start with your coding agent.
 
 See [supported providers and models](docs/reference/model-qualification.md) for
 required model capabilities and the configurations tested so far.
