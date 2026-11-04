@@ -158,7 +158,10 @@ stop criteria, a tuple of the discriminated `StopCondition` union (`kind` is the
 discriminator): two deterministic hard criteria and one LLM-judged criterion.
 Every condition also carries `on_met: Literal["stop", "request_input"] = "stop"`:
 `"stop"` completes the loop early; `"request_input"` ("Pause and ask me") pauses
-the loop and asks the operator, who continues it through the reviewed Resume.
+the loop and asks the operator, who either continues it through the reviewed Resume
+or ends it with Stop (End loop). The worker contract's
+[Condition input pause](../../tools/candidate_worker/candidate-worker-contract.md#condition-input-pause)
+owns both exits.
 
 | Constructor | Fields | Meaning |
 | --- | --- | --- |

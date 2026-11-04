@@ -255,7 +255,8 @@ Every condition has `on_met`:
   `best_valid_score`, `metric_id`, `direction`, `stop_reason`; omitted when
   empty). The worker contract's
   [Condition input pause](../../src/tools/candidate_worker/candidate-worker-contract.md#condition-input-pause)
-  owns how it is built. After a resume, a `request_input` condition counts
+  owns how it is built and its two exits: Resume (`write-loop-resume`) or
+  Stop, which ends the paused run (End loop). After a resume, a `request_input` condition counts
   from the iteration where it last asked, so it does not ask again at once.
 
 At one boundary, a met `stop` condition wins over a met `request_input`
@@ -272,7 +273,8 @@ Loop controls, all with `--store-config FILE --operation-id UUID`:
 .venv/bin/python -m tools.candidate_operations submit --store-config store.json --request loop-resume.json
 ```
 
-`stop-loop` ends the run after the current iteration (terminal). `pause-loop`
+`stop-loop` ends the run after the current iteration (terminal); on a paused
+segment it ends the run immediately (End loop). `pause-loop`
 ends the current segment after the current iteration. `write-loop-resume`
 reviews the paused segment and writes the resume request once (an existing
 output file is refused); `submit` launches it as a new operation with a new
