@@ -138,9 +138,10 @@ Weighted-sum formula aggregation (`selection: {kind: formula}`) launches on nati
 TASK_OWNED scoring-child execution and emits a new higher-is-better selection
 scalar; it never relabels the source metric. Health keeps original source metric
 values, never utility. Under formula selection, primary-unit thresholds refuse
-and must name the generated effective metric id. Feasibility constraints,
-measurements remain closed capability gates: a declaration that needs one
-composes but is refused at launch. Rubric components and `rubric_balance` launch
+and must name the generated effective metric id. Feasibility constraints and
+built-in measurements launch on the same native TASK_OWNED scoring route; see the
+evaluation contract's [Feasibility constraints](../../../src/execute_tools/evaluation-contract.md#feasibility-constraints)
+and [Candidate measurements](../../../src/execute_tools/evaluation-contract.md#candidate-measurements) sections. Rubric components and `rubric_balance` launch
 as rendered agent guidance only. Rubrics remain outside MetricOrder, and ranking
 uses the `deterministic_ranking` effective metric. The [evaluation contract](../../../src/execute_tools/evaluation-contract.md)
 owns the schema, capability table, launch admission, identity and downstream

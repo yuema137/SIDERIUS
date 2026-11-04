@@ -458,16 +458,10 @@ model plugins and can be ignored. It prints three things:
    `effective_metric_id` `evaluation.weighted_sum.v1.<identity>`, the
    `effective_units` `utility [0,1]` and the `marginal_rates` of step 3.
 
-   Rubric guidance (step 4) and constraints on metric components (step 5)
-   end the same way. Measurement components (step 5) end with exit status 1
-   and a message such as the following, naming `measurements`:
-
-   ```text
-   Launch check: Evaluation composition succeeded, but launch requires unimplemented capabilities: measurements. Their runtime owners must land before this task can run.
-   ```
-
-   A real run performs this check before it reads any data, and stops with the
-   same message.
+   Rubric guidance (step 4), constraints and measurement components
+   (step 5) end the same way, and the inspection lists the runtime parts they
+   need under `required_capabilities`. A real run performs the same check
+   before it reads any data.
 
 A mistake in the declaration stops the script at the composition call with
 `Composition refused: evaluation could not be composed:` followed by the
