@@ -35,7 +35,7 @@ IMPLEMENTED_CAPABILITIES: Mapping[str, bool] = MappingProxyType(
     {
         "evaluation rendering": True,
         "formula aggregation": True,
-        "feasibility constraints": False,
+        "feasibility constraints": True,
         "measurements": False,
         "rubric components": True,
         "rubric balancing": True,

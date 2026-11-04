@@ -7,9 +7,10 @@ and the declaration to verify transported evidence (``evaluation_child``).
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable
+import operator
+from collections.abc import Iterable, Mapping, Sequence
 from fractions import Fraction
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import JsonValue
 
@@ -20,9 +21,12 @@ from execute_tools.evaluation_metric import (
     MetricSpec,
     NotScoreableResult,
     ScoreabilityFailure,
+    ScoreabilityVerdict,
 )
 from execute_tools.evaluation_results import (
     ComponentEvaluation,
+    ConstraintEvaluation,
+    ConstraintTerm,
     EvaluationEvidence,
     EvaluationInputsScoreability,
     EvaluationTransportError,
@@ -30,7 +34,7 @@ from execute_tools.evaluation_results import (
 from execute_tools.evaluation_spec import MetricComponent, WeightedTerm
 from execute_tools.evaluation_validation import formula_terms
 from execute_tools.metric_order import MetricOrder
-from workflows.evaluation_selection import effective_metric_spec
+from workflows.evaluation_selection import constraint_terms, effective_metric_spec
 
 if TYPE_CHECKING:
     from workflows.evaluation_composition import ResolvedEvaluation
@@ -62,6 +66,108 @@ def _component_value(
     if result.scalar is None or not math.isfinite(result.scalar):
         raise ValueError("required source metric is null or nonfinite")
     return result.scalar
+
+
+#: Contract id of a refusal produced only by violated constraints under primary selection.
+CONSTRAINT_CONTRACT_ID = "evaluation_constraints/v1"
+
+_OPS = {">=": operator.ge, ">": operator.gt, "<=": operator.le, "<": operator.lt}
+
+
+def _constraint_value(
+    term: ConstraintTerm,
+    sources: Mapping[str, MetricResult],
+    measurements: Sequence[Mapping[str, Any]],
+) -> float | None:
+    """The raw value a constraint judges: a metric result, or a #1296 measurement."""
+    if term.source_metric_id is not None:
+        source = sources.get(term.source_metric_id)
+        return None if source is None else source.scalar
+    component = term.constraint.component
+    for item in measurements:
+        if item.get("component_id") == component:
+            value = item.get("value")
+            return value if isinstance(value, int | float) and not isinstance(value, bool) else None
+    return None
+
+
+def evaluate_constraint(term: ConstraintTerm, raw: float | None) -> ConstraintEvaluation:
+    """The single constraint arithmetic, shared by the child and the parent verifier.
+
+    Exact comparison of the decimal representations; a missing or nonfinite
+    value is never satisfied (fail closed), and there is no implicit tolerance.
+    """
+    constraint = term.constraint
+    label = f"constraint {constraint.component} {constraint.op} {constraint.threshold}"
+    if raw is None or not math.isfinite(raw):
+        satisfied, detail = False, f"{label} has no finite value: {raw}"
+    else:
+        value, threshold = Fraction(str(raw)), Fraction(str(constraint.threshold))
+        satisfied = bool(_OPS[constraint.op](value, threshold))
+        detail = f"{label} {'satisfied' if satisfied else 'violated'}: {raw}"
+    return ConstraintEvaluation(
+        component_id=constraint.component,
+        op=constraint.op,
+        threshold=constraint.threshold,
+        raw=raw if raw is not None and math.isfinite(raw) else None,
+        satisfied=satisfied,
+        detail=detail,
+    )
+
+
+def evaluate_constraints(
+    terms: Iterable[ConstraintTerm],
+    sources: Mapping[str, MetricResult],
+    measurements: Sequence[Mapping[str, Any]] = (),
+) -> tuple[tuple[ConstraintEvaluation, ...], list[ScoreabilityFailure]]:
+    """Every constraint is conjunctive; each violation is a named scoreability failure."""
+    verdicts = tuple(
+        evaluate_constraint(term, _constraint_value(term, sources, measurements)) for term in terms
+    )
+    failures = [
+        ScoreabilityFailure(requirement=f"constraint:{v.component_id}", detail=v.detail)
+        for v in verdicts
+        if not v.satisfied
+    ]
+    return verdicts, failures
+
+
+def constrain_primary(
+    evaluation: ResolvedEvaluation,
+    source_spec: MetricSpec,
+    primary: MetricResult | NotScoreableResult,
+    secondaries: list[MetricResult],
+    measurements: Sequence[Mapping[str, Any]] = (),
+) -> tuple[MetricResult | NotScoreableResult, EvaluationEvidence | None]:
+    """Primary selection with constraints: the source scalar ranks only if feasible.
+
+    A source refusal keeps its own contract verdict and carries no evidence.
+    """
+    if not isinstance(primary, MetricResult):
+        return primary, None
+    source, failures = _source_evidence(source_spec, primary)
+    if source is not None:
+        results = index_source_results([*secondaries, source])
+        verdicts, violated = evaluate_constraints(
+            constraint_terms(evaluation), results, measurements
+        )
+        failures.extend(violated)
+    else:
+        verdicts = ()
+    record = EvaluationEvidence(
+        evaluation_sha256=evaluation.sha256,
+        effective_metric_id=source_spec.id,
+        source_metric_result=source,
+        aggregate=None if failures else primary.scalar,
+        failures=tuple(failures),
+        constraints=verdicts,
+    )
+    if failures:
+        verdict = ScoreabilityVerdict(contract_id=CONSTRAINT_CONTRACT_ID, failures=tuple(failures))
+        return NotScoreableResult(
+            metric_id=source_spec.id, direction=source_spec.direction, verdict=verdict
+        ), record
+    return primary, record
 
 
 def weight_total(terms: Iterable[WeightedTerm]) -> Fraction:
@@ -126,8 +232,13 @@ def aggregate_evaluation(
     source_spec: MetricSpec,
     primary: MetricResult | NotScoreableResult,
     secondaries: list[MetricResult],
+    measurements: Sequence[Mapping[str, Any]] = (),
 ) -> tuple[MetricResult | NotScoreableResult, EvaluationEvidence]:
-    """Require all referenced evidence; never silently renormalize missing terms."""
+    """Require all referenced evidence; never silently renormalize missing terms.
+
+    Declared constraints are judged on raw values beside the terms; a violation
+    is a named failure, so an infeasible candidate is not scoreable (#1295).
+    """
     effective = effective_metric_spec(source_spec, evaluation)
     contract = effective.scoreability
     assert isinstance(contract, EvaluationInputsScoreability)
@@ -153,6 +264,10 @@ def aggregate_evaluation(
             contributions.append(contribution)
         except ValueError as error:
             failures.append(ScoreabilityFailure(requirement=term.component, detail=str(error)))
+    constraints, violated = evaluate_constraints(
+        constraint_terms(evaluation), results, measurements
+    )
+    failures.extend(violated)
     verdict = contract.evidence_verdict(tuple(failures))
     scalar = float(sum(contributions, Fraction())) if verdict.scoreable else None
     record = EvaluationEvidence(
@@ -162,6 +277,7 @@ def aggregate_evaluation(
         components=tuple(evidence),
         aggregate=scalar,
         failures=tuple(failures),
+        constraints=constraints,
     )
     if not verdict.scoreable:
         return NotScoreableResult(

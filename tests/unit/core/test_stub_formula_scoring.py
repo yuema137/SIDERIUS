@@ -80,3 +80,24 @@ def test_refused_formula_evidence_reaches_the_parent_as_a_typed_refusal(tmp_path
     assert outcome["results"]["denoising_score"] is None
     with pytest.raises(EvaluationNotScoreableError):
         validate_child_evaluation(outcome["results"], scored["composition"])
+
+
+def test_constraint_only_evaluation_passes_the_parent_check_and_keeps_source(tmp_path):
+    """#1295: a primary-selection task with constraints must transport constraint evidence.
+
+    Without it the parent, which binds a selection for constraints, rejects every
+    pseudo round as a transport error. ``masked_mae <= 0`` holds on the legacy band.
+    """
+    constrained = {
+        "components": FORMULA["components"],
+        "selection": {"kind": "primary"},
+        "constraints": [{"component": "mae", "op": "<=", "threshold": 0.0}],
+    }
+    scored = _score(tmp_path, constrained, "constrained")
+    outcome, composition = scored["outcome"], scored["composition"]
+    assert outcome["status"] == "success"
+    results = outcome["results"]
+    evidence = validate_child_evaluation(results, composition)
+    assert evidence is not None and evidence.aggregate == results["denoising_score"]
+    assert [c.satisfied for c in evidence.constraints] == [True]
+    assert results["metric_result"]["metric_id"] == "masked_mse"

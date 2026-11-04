@@ -132,8 +132,18 @@ def formula(evaluation):
     return evaluation
 
 
-def test_composes_but_launch_names_every_missing_capability(task, tmp_path):
+def close_capability(monkeypatch, name):
+    """The launch guard is generic; close one landed capability to exercise it."""
+    import workflows.evaluation_composition as owner
+
+    monkeypatch.setattr(
+        owner, "IMPLEMENTED_CAPABILITIES", {**owner.IMPLEMENTED_CAPABILITIES, name: False}
+    )
+
+
+def test_composes_but_launch_names_every_missing_capability(task, tmp_path, monkeypatch):
     """The real binding boundary must not silently execute a primary-only fallback."""
+    close_capability(monkeypatch, "feasibility constraints")
     plain = compose(task, None)
     with bind_run_task_composition(plain, physical_data_root=str(tmp_path)):
         pass
@@ -319,8 +329,9 @@ def test_defaulted_schema_extension_keeps_evaluation_identity():
     )
 
 
-def test_scoring_child_cannot_bypass_launch_capability_guard(task):
+def test_scoring_child_cannot_bypass_launch_capability_guard(task, monkeypatch):
     """Direct scoring entry must not ignore an evaluation declared by its manifest."""
+    close_capability(monkeypatch, "feasibility constraints")
     from workflows.task_composition import compose_metric_from_manifest
 
     compose(task, declaration(task))
