@@ -616,6 +616,31 @@ def test_worker_output_cannot_block_or_flood_the_parent(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match="exceeds"):
         candidate_measurement.read_measurement_results(str(big), declared)
 
+    def nested_worker(*args, **kwargs):
+        output = tmp_path / "nested" / "measurement_results.json"
+        output.write_text("[" * 100_000 + "]" * 100_000)
+        return SimpleNamespace(completed=SimpleNamespace(returncode=0, stderr=""))
+
+    monkeypatch.setattr(
+        "core.runtime_control.observed_subprocess.supervise_subprocess", nested_worker
+    )
+    nested = candidate_measurement.run_measurement_worker(
+        MeasurementRequest(
+            model_type="unused",
+            experiment_id="e",
+            model_configuration={},
+            loss_type="mse",
+            checkpoint_path=str(tmp_path / "missing.pth"),
+        ),
+        _count_components(),
+        directory=str(tmp_path / "nested"),
+        env={},
+        preexec_fn=None,
+        rss_limit_bytes=1 << 30,
+    )
+    assert nested and all("output invalid" in r.failure for r in nested)
+    monkeypatch.undo()
+
     # After redirection, candidate writes reach the log, never the parent's pipes.
     log = tmp_path / "measurement_worker.log"
     script = (

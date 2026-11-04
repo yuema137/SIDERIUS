@@ -398,5 +398,6 @@ def run_measurement_worker(
         return failed_results(components, f"measurement worker failed: {tail.strip()}")
     try:
         return read_measurement_results(output, declared)
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, RecursionError) as error:
+        # RecursionError: deeply nested JSON below the size cap.
         return failed_results(components, f"measurement worker output invalid: {error}")
