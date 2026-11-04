@@ -73,11 +73,19 @@ Do not apply the deliverable `_compute` calling convention to that adapter.
 
 ## Primary versus secondary
 
-Primary metric direction determines scientific ordering. Secondary metrics
-are observational and cannot replace the primary ranking scalar. They are
-evaluated only after primary scoring succeeds. A secondary refusal or ordinary
-computation failure is recorded as diagnostic unavailability; scope violations
-and task-code integrity failures retain their fatal behavior.
+Without formula selection, the primary metric's direction determines
+scientific ordering and secondary metrics are observational: they never replace
+the primary ranking scalar. Under `evaluation.selection: formula`, ranking uses
+the generated effective metric (`effective_metric_spec`, higher is better), and
+every secondary referenced by a formula term feeds that scalar; see
+[effective selection](#effective-selection-and-source-evidence).
+
+On the native TASK_OWNED scoring child, declared secondaries are evaluated
+beside the primary. When the primary refuses, the refusal payload omits them
+unless the task declares `evaluation`; formula refusals carry them to the
+parent. A secondary refusal or ordinary computation failure is recorded as
+diagnostic unavailability; scope violations and task-code integrity failures
+retain their fatal behavior.
 
 A task with no secondary declarations has no secondary evidence to project.
 No caller should infer a replacement primary from the order or availability of
@@ -122,16 +130,19 @@ The optional task `evaluation` spec can name primary/secondary metrics as compon
 with scientific meaning, units and descriptive ranges. References always use the
 post-transform `MetricResult.scalar` units. `evaluation.selection` is separate from
 the training loss in top-level `objective`. A secondary becomes required evidence
-only if a formula term or constraint references it; listing a component alone keeps
-it observational. Runtime promotion is deferred to #1294/#1295, currently protected
-by launch capability refusals.
+only if a formula term references it; listing a component alone keeps it
+observational.
 
-Weighted_sum will emit a new higher-is-better selection scalar, never relabel the
-source metric. Health keeps original source metric values, never utility. Existing
-primary-unit thresholds must be explicitly rebound or refused when formula selection
-lands. Rubrics remain outside MetricOrder. See the
-[evaluation contract](../../../src/execute_tools/evaluation-contract.md) for the
-schema, launch gates, identity and mandatory downstream binding rules.
+Weighted-sum formula aggregation (`selection: formula`) launches on native
+TASK_OWNED scoring-child execution and emits a new higher-is-better selection
+scalar; it never relabels the source metric. Health keeps original source metric
+values, never utility. Under formula selection, primary-unit thresholds refuse
+and must name the generated effective metric id. Feasibility constraints,
+measurements and rubric components remain closed capability gates: a declaration
+that needs one composes but is refused at launch. Rubrics remain outside
+MetricOrder. The [evaluation contract](../../../src/execute_tools/evaluation-contract.md)
+owns the schema, capability table, launch admission, identity and downstream
+binding rules.
 
 ## Effective selection and source evidence
 

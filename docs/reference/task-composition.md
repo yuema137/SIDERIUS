@@ -1040,9 +1040,13 @@ evaluation:
             lower: 0.0
             upper: 1.0
             out_of_range: refuse  # required; alternatively clip
-  constraints:
-    - {component: accuracy, op: '>=', threshold: 0.95}
 ```
+
+This example launches on the native task-owned scoring route. Adding a
+`constraints:` entry (for example
+`- {component: accuracy, op: '>=', threshold: 0.95}`) still composes and
+inspects, but requires the closed `feasibility constraints` capability, so the
+run is refused at launch.
 
 Metric references use post-transform scalar units and inherit direction from
 MetricSpec. Weighted_sum declares its normalization on each term and emits

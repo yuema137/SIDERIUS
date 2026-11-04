@@ -35,6 +35,14 @@ if it is absent. Local scoring-child entrypoints refuse this handle. Secondary
 metric declarations retain their local implementation contract; the complete
 evaluator must still account for every requested secondary metric.
 
+Formula selection (`evaluation.selection: formula`) is not supported on this
+route. `require_formula_route` runs at run-composition binding and in tuner
+planning before each attempt; whenever a candidate evaluator is bound it raises
+`ValueError` ("Formula aggregation does not support route
+CandidateEvaluationExecutor ..."). Use primary selection with a candidate evaluator; the
+[evaluation contract](../../src/execute_tools/evaluation-contract.md#admission-and-threshold-units)
+owns formula admission.
+
 This differs from [per-epoch validation](private-validation-execution.md):
 validation returns training-objective observations; complete candidate evaluation
 returns the declared scientific metric and Health evidence. Both bindings can be

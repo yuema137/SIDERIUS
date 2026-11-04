@@ -183,7 +183,7 @@ adaptor restrictions remain until deliberately amended by their owner.
 
 Composition scales with declaration/plugin bytes, not dataset size; it loads no
 scientific data, tensors or GPU work. Bounds are authored values, never caps on
-TIDMAD or other task dataset lengths. Deferred compatible extensions: #1307, #1308.
+TIDMAD or other task dataset lengths.
 
 ## Validation
 
