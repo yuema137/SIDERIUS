@@ -26,12 +26,12 @@ available, so nothing is silently ignored.
 | --- | --- | --- |
 | Meanings, units and ranges, with `selection: {kind: primary}` (step 2) | yes | yes |
 | A weighted combination, `selection: {kind: formula}` (step 3) | yes | yes |
-| A natural-language balancing rule, `selection: {kind: rubric_balance}` (step 4) | yes | not yet: issue #1297 |
-| Rubric components, `kind: rubric` (step 4) | yes | not yet: issue #1297 |
+| A natural-language balancing rule, `selection: {kind: rubric_balance}` (step 4) | yes | yes, as guidance for the agents |
+| Rubric components, `kind: rubric` (step 4) | yes | yes, as guidance for the agents |
 | Requirements, `constraints:` (step 5) | yes | not yet: issue #1295 |
 | Model measurements such as latency or parameter count (step 5) | no | not yet: issue #1296 |
 
-Issues #1295, #1296 and #1297 are planned to land before Hackathon Track 2
+Issues #1295 and #1296 are planned to land before Hackathon Track 2
 (21 November 2026). Until then you can still write and check those
 declarations (except measurements), and the agents see them in their prompts.
 
@@ -323,9 +323,11 @@ evaluation:
 
 What the rule decides, and what it does not:
 
-- `guidance` and the rubric are shown to every agent, and, once issue #1297
-  lands, they are used by the [judged steps of a workflow](../workflow-declarations.md#7-literature-reviews-and-llm-aggregation), where an LLM judge
-  already chooses between candidates.
+- `guidance` and the rubric are shown to every agent (proposer, interpreter,
+  tuner planner and reflector, implementor, validator, literature review and
+  data analysis), which then aim for it when they propose and refine models.
+  No LLM judge scores your trained models against it yet, and the rubric adds
+  no LLM calls or cost.
 - The rule never produces a number. It cannot be a formula term or a
   constraint, and it is never compared like a metric.
 - `deterministic_ranking` is required. It is either `{kind: primary}` or a
@@ -344,7 +346,9 @@ evidence. It has no units, range or direction:
       rubric: {id: deployability, version: "1"}
 ```
 
-Both forms are refused at launch until issue #1297 lands.
+Both forms launch. The run still ranks models only by
+`deterministic_ranking`. For a formula, the inspection's
+`required_capabilities` therefore also lists `formula aggregation`.
 
 ## Step 5: hard requirements (constraints)
 
@@ -377,7 +381,7 @@ What works now, and what comes later:
   them yet. `kind: measurement` is refused today. A task such as "keep
   balanced accuracy at least 0.9 and minimize latency" becomes possible once
   both #1295 and #1296 land.
-- **Rubric components (issue #1297):** see step 4.
+- **Rubric components:** they launch as guidance for the agents; see step 4.
 
 ## Step 6: check your declaration
 
@@ -434,8 +438,7 @@ model plugins and can be ignored. It prints three things:
    `effective_units` `utility [0,1]` and the `marginal_rates` of step 3.
 
    For the parts of steps 4 and 5 it ends with exit status 1 and a message
-   such as the following, naming `feasibility constraints`, `rubric balancing`
-   or `rubric components`:
+   such as the following, naming `feasibility constraints`:
 
    ```text
    Launch check: Evaluation composition succeeded, but launch requires unimplemented capabilities: feasibility constraints. Their runtime owners must land before this task can run.

@@ -12,8 +12,9 @@ source metric behavior and prompt bytes. Presence permits composition and inspec
 and primary-only metric declarations can launch with evaluation rendering.
 Weighted-sum formula aggregation (#1294) launches on the supported native route
 described in [Deterministic selection runtime](#deterministic-selection-runtime).
-Feasibility (#1295), measurements (#1296) and rubric execution (#1297) still have
-independent, currently closed capability gates. Composition never
+Rubric components and rubric balancing (#1297) launch as declared agent
+guidance only; see [Rubric guidance](#rubric-guidance). Feasibility (#1295) and
+measurements (#1296) still have independent, currently closed capability gates. Composition never
 executes arithmetic, measurements or an LLM. A declaration is not runtime support.
 
 `RunTaskComposition.evaluation` is `ResolvedEvaluation | None`. Its `spec` is the
@@ -80,8 +81,9 @@ Selection variants:
   expression language or lexicographic family in v1.
 - `{kind: rubric_balance, rubric: {id, version, sha256?}, guidance: <text>,
   deterministic_ranking: <primary or formula>}`. The deterministic ranking is
-  mandatory and cannot recursively be rubric_balance. Rubric selection is only
-  used by admitted judged paths once #1297 lands, not by every selection site.
+  mandatory and cannot recursively be rubric_balance. The rubric and guidance
+  are rendered agent guidance only; every deterministic ranking uses
+  `deterministic_ranking` (see [Rubric guidance](#rubric-guidance)).
 
 Weighted-sum arithmetic contract: normalize each term to
 `q=(value-lower)/(upper-lower)` using its explicit range policy. Convert q to
@@ -177,8 +179,9 @@ absence: historical profiles on absent-evaluation tasks never meet the new
 boundary and need no override. Present evaluation requires an explicit override
 or native declaration in an active profile. Changed assembly hashes still require
 normal offline qualification. #1295 owns feasibility at all
-selection sites; #1296 supplies measurement schema/execution; #1297 owns candidate
-result projection and versioned replayable judge calls. Existing metric-scored
+selection sites; #1296 supplies measurement schema/execution; #1297 ships rubric guidance
+only; candidate-result projection and versioned replayable rubric judge calls are
+a separate follow-up. Existing metric-scored
 adaptor restrictions remain until deliberately amended by their owner.
 
 Composition scales with declaration/plugin bytes, not dataset size; it loads no
@@ -243,7 +246,7 @@ prediction direction rules to the named prediction metric. Under active evaluati
 the interpreter labels its legacy score field as a recorded score; serialized keys
 remain unchanged. Literature extraction preserves published source facts and
 receives no task-evaluation block. Existing judge versions remain unchanged;
-#1297 must explicitly use this renderer in new versions.
+a future rubric judge version must explicitly use this renderer.
 
 A historical profile selected for an evaluation-bearing task must declare this
 boundary native or provide a renderer accepting `context`. An empty override
@@ -347,8 +350,8 @@ metric-rank adaptor). Source per-file values must not be labelled as utility evi
 scoring-child execution is supported. ANCHOR_NORMALIZED and
 CandidateEvaluationExecutor combinations refuse; their child handoffs are #1336.
 Referenced custom quantitative kinds without runtime values refuse by component
-name and kind (#1338). Constraints and rubric capabilities remain independently
-gated; enabling formula aggregation does not enable them.
+name and kind (#1338). Constraints remain independently gated; enabling formula
+aggregation does not enable them. Rubric capabilities add no runtime value.
 
 Under formula selection, existing primary-unit thresholds refuse. Use the generated
 effective metric id for loop `metric_threshold`, route `MetricAtLeast`, and
@@ -368,3 +371,62 @@ Validation owners: `tests/unit/execute_tools/test_evaluation_aggregation.py`,
 structural guards and the complete affected package suites. Paper qualification
 must report semantic-payload parity separately from release-wide assembly identity
 changes; schema/source edits can move identities even with identical prompt bytes.
+
+## Rubric guidance
+
+`IMPLEMENTED_CAPABILITIES` sets `rubric components` and `rubric balancing` to
+True. The capabilities have exactly one runtime consumer: the
+`evaluation.spec` renderer. Launch admits a `kind: rubric` component and
+`selection: {kind: rubric_balance}` on every route that admits the rest of the
+evaluation. Their deterministic parts keep their own gates: a formula under
+`deterministic_ranking` needs `formula aggregation`; constraints need
+`feasibility constraints`.
+
+**A rubric is not a metric.** A rubric referenced by an evaluation `rubric`
+component or by `selection.kind: rubric_balance` is task-declared
+natural-language guidance. Its criteria, weights and integer scale, and the
+balance `guidance`, are rendered to agents through `evaluation.spec`. The
+rubric enters evaluation identity by resolved content hash. It has no
+direction, units or total. It is never:
+
+- a formula term or a constraint;
+- an input to MetricOrder;
+- a record score field;
+- a Health input;
+- a stop-condition value.
+
+Every deterministic ranking uses the effective metric of
+`deterministic_ranking` (`formula_terms` unwraps it; `selection_metric_spec`
+exposes it): tuner trials and planner requests, incumbent, resume folds,
+`--target_score`, metric stop conditions and metric adaptors. That effective
+metric is the source primary for `{kind: primary}`, or
+`evaluation.weighted_sum.v1.<evaluation SHA>` for a formula.
+
+No framework step judges a trained candidate against an evaluation rubric. No
+judge call, judge evidence or LLM cost is added. The existing judge strategies
+use only the rubric named in their own declaration (`rubric-rank/v1`), and
+their templates are unchanged.
+
+Rendered semantics:
+
+- A rubric component ends with `Role: qualitative guidance for agents; no
+  framework step scores it; never a deterministic scalar or ranking input.`
+- Rubric balancing states `Rubric balancing is guidance for agents; no
+  framework step judges candidates against it.`, followed by the rendered
+  `deterministic_ranking`.
+
+Evaluations without rubrics, and absent `evaluation:` sections, keep their
+prompt bytes. No new prompt boundary is added.
+
+Deferred follow-up: rubric-driven judged selection is a separate change. It
+covers a `candidate.result` projector, a `judge.rubric/v2` template rendering
+`evaluation.spec`, a dedicated judge route and budget, and rubric facts for
+adaptors over `tuning.output` and JudgeStop. Today `ITEM_PROJECTORS` holds only
+`proposal.output` and `literature.output`. No shipped profile admits an adaptor
+over `tuning.output`. Q-B2-2 forbids an LLM from reordering metric-scored
+items.
+
+Validation: `test_rubric_guidance_launches_without_entering_metric_order` (binding
+admits a rubric component with `rubric_balance` over a formula; the effective
+metric is the weighted-sum id) and the rubric wording assertions in
+`test_rubric_balance_discloses_criteria_and_deterministic_formula`.
