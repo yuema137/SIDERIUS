@@ -16,6 +16,10 @@ final-witness arm + one sanctioned corrective relaunch on the integrated
 candidate): what was witnessed and what was not are stated per-seam below
 and shown with real outputs in notebook §9/§10/§12.
 
+Every "notebook §N" reference in this file is to the notebook before its
+v1.1.0 rewrite (`git show 4fc0aefce:examples/quickstart/quickstart.ipynb`); see
+`PROVENANCE.md`, "Tutorial outputs". The rewritten notebook records no outputs.
+
 | seam | status on the landed source | evidence |
 |---|---|---|
 | dataset identity (seeded generator + pins) | **EXECUTABLE** — regenerated bit-identically, sha-pinned, materializer refuses drift | `test_quickstart_pack.py` (determinism + drift-refusal plant) |

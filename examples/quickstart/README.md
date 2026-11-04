@@ -11,9 +11,11 @@ To run this task from the browser console instead, use the
 [example bundle](../console_bundle/README.md): it packages this task with a
 ready experiment setup.
 
-Browse [quickstart.ipynb](quickstart.ipynb) or its [HTML rendering](quickstart.html)
-for the worked example. Saved live-run excerpts are dated historical evidence;
-your current checkout and a new run can produce different results.
+The tutorial notebook [quickstart.ipynb](quickstart.ipynb) (or its read-only
+[HTML rendering](quickstart.html)) walks through this task step by step: the
+task package, how SIDERIUS reads it, a `workflow.py`, an LLM profile and an
+offline check of a preparation request. Those steps run on CPU without API keys;
+it then shows the commands that prepare, launch and read a real run.
 
 ## Prepare the synthetic data
 
@@ -43,12 +45,13 @@ Return to the repository root before the next command:
 cd ../..
 ```
 
-## Preview a research run
+## Preview a research run with the older chain launcher
 
 SIDERIUS 1.1's main route is a `workflow.py` prepared with
-`tools.candidate_prepare`; see
-[Write and run a workflow declaration](../../docs/getting-started/README.md#write-and-run-a-workflow-declaration).
-The preview below uses the older chain launcher.
+`tools.candidate_prepare`; the notebook follows it, and
+[Write and run a workflow declaration](../../docs/getting-started/README.md#write-and-run-a-workflow-declaration)
+gives every command. The preview below uses the older chain launcher,
+`scripts/launch/run_chain.sh`, which the paper tasks use.
 
 ```bash
 WS="${SIDERIUS_QUICKSTART_WORKSPACE:-$HOME/siderius_quickstart_workspace}"
@@ -64,14 +67,14 @@ bash scripts/launch/run_chain.sh \
     --data_dir "$WS/data" \
     --healthgate_mode blocking \
     --result_authority diagnostic \
-    --llm_config configs/llm/openai_tiered_pro.json \
+    --llm_config configs/llm/default.json \
     --dry-run
 ```
 
-`--mode lilab` runs the chain as a foreground process on this machine (the
-other value, `sdsc`, submits Slurm jobs). The command matches the notebook's
-launch cell, which uses the `openai_tiered_pro.json` LLM profile; for your own
-research runs the [root README](../../README.md#choose-models-by-role)
+`--mode lilab` is the name of the local mode: it runs the chain as a
+foreground process on this machine (the other value, `sdsc`, submits Slurm
+jobs). `default.json` uses GPT-5.6 Luna for every role, which suits a flow
+check; for your own research runs the [root README](../../README.md#choose-models-by-role)
 recommends `openai-moderate-v1.json`.
 
 These small-task settings use `formal_portion=1.0` and `max_rounds=2`; see [Trial and Formal training](../../src/tools/candidate_console/README.md#trial-and-formal-training) for scope, round limits and framework defaults.
@@ -79,8 +82,10 @@ These small-task settings use `formal_portion=1.0` and `max_rounds=2`; see [Tria
 The preview prints child commands. It does not execute or qualify training.
 Before removing `--dry-run`, follow the
 [credential and launch procedure](../../docs/getting-started/first-run.md).
-The example declares no Health family, so it demonstrates workflow mechanics
-without claiming scientific validity or useful model quality.
+The example declares no Health checks (`task_health: none: true` in its
+manifest), and the command above declares `--result_authority diagnostic`, so
+it demonstrates workflow mechanics without claiming scientific validity or
+useful model quality.
 
 ## What to inspect
 

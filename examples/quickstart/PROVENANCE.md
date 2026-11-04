@@ -59,6 +59,14 @@ and the composed metric together and pins its external score to `37/64 =
 
 ## Tutorial outputs
 
+**Superseded notebook (v1.1.0 rewrite).** `quickstart.ipynb` and
+`quickstart.html` were rewritten for v1.1.0 as an offline tutorial of the
+`workflow.py` route, with all code-cell outputs cleared. The cells, section
+numbers and recorded outputs described in this section and in
+"Isolated composition-cell execution" below belong to the earlier notebook,
+retrievable with `git show 4fc0aefce:examples/quickstart/quickstart.ipynb`.
+That record is unchanged; the rewritten notebook carries no live-run evidence.
+
 Every executed cell output in `quickstart.ipynb` was produced by running the
 cell's own source on the landed post-PR-12d integration source (CPU only, no
 LLM calls, no chain launch) — with four exceptions, three whose outputs come

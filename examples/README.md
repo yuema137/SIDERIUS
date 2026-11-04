@@ -1,26 +1,22 @@
 # Framework examples
 
-[`workflow_declarations/`](workflow_declarations/README.md) holds ready-made `workflow.py`
-starting points for the
-[workflow route](../docs/getting-started/README.md#write-and-run-a-workflow-declaration).
+These examples show SIDERIUS on small synthetic data. They check that your
+installation works and give you files to copy; none of them is a scientific
+result.
+
+[`workflow_declarations/`](workflow_declarations/README.md) holds ready-made
+`workflow.py` starting points for the
+[workflow route](../docs/getting-started/README.md#write-and-run-a-workflow-declaration),
+and explains [how a workflow.py is built](workflow_declarations/README.md#how-a-workflowpy-is-built).
 Copy one into your project as `workflow.py`:
 
 - `reusable_training.py` runs Propose → Implement → Validate → Train & tune once.
+- `research_loop_request_input.py` repeats Interpret → Propose → Implement →
+  Validate → Train & tune as a research loop of up to three iterations.
 - `managed_reusable_candidate.py` stops after validation.
 
-For the two-step Quickstart scenario, follow the
-[workflow examples README](workflow_declarations/README.md):
-`literature_debate_judged.py` writes run A's concrete judged-literature request,
-and `research_loop_request_input.py` supplies run B's reusable loop, with the
-reviewed findings carried in `proposal_advice`.
-
-Two smaller examples serve different purposes:
-`reusable_candidate.py` (which also reads a literal `context.json` input) is
-for authoring and resolution only, not for preparation, and
-`native_training.py` is a script that writes an older concrete four-stage
-document and its JSON inputs for the Quickstart data without launching a run.
-The [workflow declarations guide](../docs/guides/workflow-declarations.md)
-describes each file.
+The same README lists the other files there, including an advanced two-run
+scenario where a literature review feeds a research loop.
 
 SIDERIUS also ships two lightweight synthetic task examples:
 
