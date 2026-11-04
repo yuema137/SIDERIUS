@@ -1046,7 +1046,9 @@ evaluation:
 
 Metric references use post-transform scalar units and inherit direction from
 MetricSpec. Weighted_sum declares its normalization on each term and emits
-higher-is-better utility. Constraints use raw component values. Rubric components
+higher-is-better utility. Constraints use raw component values; a Trial or Formal
+candidate that violates one, or lacks a finite value for one, is not scoreable
+(`requirement: constraint:<component>`) and is therefore never selected. Rubric components
 and `selection: {kind: rubric_balance, rubric: {id, version}, guidance: ...,
 deterministic_ranking: {kind: primary}}` resolve task-declared rubrics; their actual
 SHA is pinned even when the authored reference omits it. No rubric enters arithmetic.

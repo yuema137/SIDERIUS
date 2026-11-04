@@ -12,8 +12,9 @@ source metric behavior and prompt bytes. Presence permits composition and inspec
 and primary-only metric declarations can launch with evaluation rendering.
 Weighted-sum formula aggregation (#1294) launches on the supported native route
 described in [Deterministic selection runtime](#deterministic-selection-runtime).
-Feasibility (#1295), measurements (#1296) and rubric execution (#1297) still have
-independent, currently closed capability gates. Composition never
+Feasibility constraints on metric components (#1295) launch on the same route; see
+[Feasibility constraints](#feasibility-constraints). Measurements (#1296) and rubric
+execution (#1297) still have independent, currently closed capability gates. Composition never
 executes arithmetic, measurements or an LLM. A declaration is not runtime support.
 
 `RunTaskComposition.evaluation` is `ResolvedEvaluation | None`. Its `spec` is the
@@ -102,7 +103,7 @@ produce inspection warnings. Descriptive component ranges do not impose feasibil
 No equality, implicit tolerance or inferred scientific threshold is supported.
 
 Only a secondary referenced by a formula term or constraint becomes REQUIRED
-quantitative evidence for formula execution (constraint execution remains #1295). Merely listing it as a component leaves it
+quantitative evidence for formula and constraint execution. Merely listing it as a component leaves it
 observational. Missing or nonfinite required evidence must fail closed; unrelated
 secondary errors retain their observational behavior. Health, feasibility and
 preference remain separate authorities; Trial Health exemptions do not grant
@@ -176,8 +177,8 @@ The `evaluation.spec` renderer is gated outside its decorated boundary on
 absence: historical profiles on absent-evaluation tasks never meet the new
 boundary and need no override. Present evaluation requires an explicit override
 or native declaration in an active profile. Changed assembly hashes still require
-normal offline qualification. #1295 owns feasibility at all
-selection sites; #1296 supplies measurement schema/execution; #1297 owns candidate
+normal offline qualification. #1295 enforces feasibility through scoreability
+(below), so every selection site inherits it; #1296 supplies measurement schema/execution; #1297 owns candidate
 result projection and versioned replayable judge calls. Existing metric-scored
 adaptor restrictions remain until deliberately amended by their owner.
 
@@ -368,3 +369,68 @@ Validation owners: `tests/unit/execute_tools/test_evaluation_aggregation.py`,
 structural guards and the complete affected package suites. Paper qualification
 must report semantic-payload parity separately from release-wide assembly identity
 changes; schema/source edits can move identities even with identical prompt bytes.
+
+## Feasibility constraints
+
+Owner: `evaluation_aggregation.evaluate_constraints` / `evaluate_constraint` (the
+single comparison arithmetic, shared by the scoring child and the parent verifier)
+and `constrain_primary` (primary selection). Constraints are enforced as declared
+scoreability; no selection site carries a separate feasibility filter.
+
+- `SelectionBinding` is bound when the spec declares formula terms OR constraints.
+  `constraints: tuple[ConstraintTerm, ...]` (omitted when empty) carries each
+  declared constraint and the source metric id of its component (`None` for a
+  non-metric quantitative component). `is_formula` is true only when the effective
+  metric id differs from the source id; constraint-only bindings keep the source
+  `MetricSpec` as the effective spec, its units and its per-sample evidence.
+- The scoring child judges every constraint on the raw post-transform value: the
+  source primary or a declared secondary by metric id, or, for a non-metric
+  component, the `measurement_results` entry whose `component_id` matches (#1296
+  transport, read as `{component_id, value, unit}`). Comparison is exact on the
+  decimal representations; `>=`/`<=` are inclusive and `>`/`<` exclusive; no
+  tolerance. A missing, null or nonfinite value is never satisfied.
+- Each unsatisfied constraint is a `ScoreabilityFailure`
+  `requirement="constraint:<component>"`, detail
+  `constraint <component> <op> <threshold> violated: <raw>` (or `has no finite
+  value`). Under formula selection these join the term failures under
+  `evaluation_inputs/v1`. Under primary selection the refusal is a
+  `NotScoreableResult` for the source metric id with contract
+  `evaluation_constraints/v1`; a source-primary refusal is returned unchanged
+  without evaluation evidence.
+- `EvaluationEvidence.constraints: tuple[ConstraintEvaluation, ...]` (omitted when
+  empty) records `{component_id, op, threshold, raw, satisfied, detail}` in
+  declaration order on success and refusal. Under primary selection a successful
+  `aggregate` equals the source scalar and `components` is empty.
+- The parent re-derives every constraint verdict from transported raw values and
+  refuses disagreement or a success that contains a violated constraint
+  (`EvaluationTransportError`). It also requires the constrained primary scalar to
+  equal the source scalar.
+- A refusal becomes the existing `error_scoring` / `failure_type=not_scoreable`
+  record with `metric_refusal` and `evaluation_result`; `memory.conclusion` names
+  every violated constraint and `memory_update` names infeasibility. Every
+  selection site already requires `status == "success"` or a finite
+  `denoising_score` (tuner best tracks and Trial winner, skip/bypass gates, chain
+  incumbent and `--target_score`, resume folds, loop stops, `MetricAtLeast`,
+  adaptors, interpretation, reports), so an infeasible candidate is never selected,
+  ranked or used as an incumbent. Health is not evaluated for a refused round, and
+  feasibility never changes Health validity or a scored record's score.
+- Trial and Formal rounds follow the same rule; there is no Trial exemption.
+- Constraint-only bindings do not change threshold units: `--target_score`, loop
+  `metric_threshold`, `MetricAtLeast` and `threshold/v1` keep the source metric.
+  Only the native TASK_OWNED scoring child produces the evidence; other routes and
+  `CandidateEvaluationExecutor` refuse at launch, as for formulas.
+- Pseudo scoring (`core.pseudo_scoring`) passes synthetic values through the same
+  child owner when constraints are declared.
+- The shared `evaluation.spec` renderer states that a Trial or Formal candidate
+  violating a constraint, or lacking a finite value for one, is not scoreable and
+  never selected.
+
+Not covered: noise-aware constraints and a feasibility-specific planner feedback
+carrier. Measurement components remain refused by `require_component_runtime`
+until #1296 registers their runtime values.
+
+Validation: `tests/unit/execute_tools/test_evaluation_constraints.py` (refusal and
+reason, exact inclusivity, fail-closed missing values, formula constraints, parent
+re-derivation, tuner best/Trial-winner exclusion through the real record builder,
+per-sample record readback) and
+`tests/unit/core/test_stub_formula_scoring.py` (pseudo transport).

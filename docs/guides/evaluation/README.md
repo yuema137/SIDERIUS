@@ -28,10 +28,10 @@ available, so nothing is silently ignored.
 | A weighted combination, `selection: {kind: formula}` (step 3) | yes | yes |
 | A natural-language balancing rule, `selection: {kind: rubric_balance}` (step 4) | yes | not yet: issue #1297 |
 | Rubric components, `kind: rubric` (step 4) | yes | not yet: issue #1297 |
-| Requirements, `constraints:` (step 5) | yes | not yet: issue #1295 |
+| Requirements, `constraints:` (step 5) | yes | yes, on metric components |
 | Model measurements such as latency or parameter count (step 5) | no | not yet: issue #1296 |
 
-Issues #1295, #1296 and #1297 are planned to land before Hackathon Track 2
+Issues #1296 and #1297 are planned to land before Hackathon Track 2
 (21 November 2026). Until then you can still write and check those
 declarations (except measurements), and the agents see them in their prompts.
 
@@ -367,16 +367,23 @@ A constraint says what a candidate must achieve to count at all:
 
 What works now, and what comes later:
 
-- **Today:** constraints are checked and shown to every agent, and the check
-  in step 6 warns about one that works against the metric's own direction
-  (for example `balanced_accuracy <= 0.99`). A run refuses to launch with
-  any constraint, because filtering candidates by feasibility is not yet
-  implemented (issue #1295).
+- **What happens in a run:** after each round is scored, the framework
+  compares the round's raw values with every constraint. A round that breaks
+  one, or has no finite value for one, is recorded as not scoreable, with the
+  reason in its record, for example
+  `constraint balanced_accuracy >= 0.9 violated: 0.85`. Such a round is never
+  chosen as the best result, the Trial winner or the incumbent, and the
+  planner and interpreter see the reason. Trial and Formal rounds follow the
+  same rule. The check in step 6 still warns about a constraint that works
+  against the metric's own direction (for example
+  `balanced_accuracy <= 0.99`).
+- **Scoring route:** constraints need the native task-owned scoring step,
+  the same one formula selection uses; other scoring routes refuse at launch.
 - **Measurements (issue #1296):** latency, parameter count and other
   properties of the trained model are not metrics, so no component can name
   them yet. `kind: measurement` is refused today. A task such as "keep
   balanced accuracy at least 0.9 and minimize latency" becomes possible once
-  both #1295 and #1296 land.
+  #1296 lands.
 - **Rubric components (issue #1297):** see step 4.
 
 ## Step 6: check your declaration
@@ -433,12 +440,12 @@ model plugins and can be ignored. It prints three things:
    `effective_metric_id` `evaluation.weighted_sum.v1.<identity>`, the
    `effective_units` `utility [0,1]` and the `marginal_rates` of step 3.
 
-   For the parts of steps 4 and 5 it ends with exit status 1 and a message
-   such as the following, naming `feasibility constraints`, `rubric balancing`
-   or `rubric components`:
+   Constraints on metric components (step 5) end the same way. For the
+   parts of step 4 it ends with exit status 1 and a message such as the
+   following, naming `rubric balancing` or `rubric components`:
 
    ```text
-   Launch check: Evaluation composition succeeded, but launch requires unimplemented capabilities: feasibility constraints. Their runtime owners must land before this task can run.
+   Launch check: Evaluation composition succeeded, but launch requires unimplemented capabilities: rubric balancing. Their runtime owners must land before this task can run.
    ```
 
    A real run performs this check before it reads any data, and stops with the
