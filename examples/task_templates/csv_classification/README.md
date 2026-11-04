@@ -107,10 +107,11 @@ SIDERIUS checkout's root folder.
 
    You do not need `--device`. `add-task` finds this machine's NVIDIA GPUs
    (`/dev/nvidia<N>`), passes them to runs and prints them as
-   `candidate_devices: ...`. Add `--device PATH [PATH ...]` to pass exactly the
-   device paths you name. `--no-gpu` passes none: you can then register, prepare
-   and check the task on a machine without a GPU, but a run that trains is
-   refused (SIDERIUS 1.1 has no CPU mode). To change
+   `candidate_devices: ...`. On a machine without one it passes none: you can
+   still register, prepare and check the task, but a run that trains is refused
+   (SIDERIUS 1.1 has no CPU mode). Add `--device PATH [PATH ...]` to pass
+   exactly the device paths you name, or `--no-gpu` to withhold the GPU even
+   when one exists, for a workflow that stops before training. To change
    the devices later, edit the `candidate_devices` list in this task's entry in
    `siderius_workspace/settings/console.json`, then restart the console.
    Success: it prints the entry it added and ends with

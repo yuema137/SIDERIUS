@@ -22,7 +22,8 @@ To prepare and run a copied file, follow
 
 The first four are **reusable** declarations, the recommended format:
 preparation generates their inputs from your task package and LLM profile, so
-one file serves many runs. The older **concrete** format names every input file
+one file serves many runs. The first three are ready to prepare;
+`reusable_candidate.py` shows the same format with one file-backed input. The older **concrete** format names every input file
 itself and is only needed for the literature-debate step below.
 
 ## How a workflow.py is built

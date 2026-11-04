@@ -304,7 +304,7 @@ print(&quot;written so far:&quot;, sorted(p.name for p in RUNS.iterdir()) or &qu
 }</code></pre>
 <p>Success is exit status 0 with <code>&quot;status&quot;: &quot;prepared&quot;</code>. The <code>envelope</code> is the run folder; <code>workflow.py.snapshot</code> there is the exact workflow that will run. A request can be prepared once: to prepare again, rerun section 12 for a fresh <code>run_id</code>.</p>
 <h2>14. Launch and follow the run</h2>
-<p>Launching calls paid APIs and trains on the GPU. Save <code>store.json</code> in your project, telling the operations tool where prepared runs live and where to keep its own records (a folder that does not exist yet):</p>
+<p>Launching calls paid APIs and trains on the GPU. Save <code>store.json</code> in your project, telling the operations tool where prepared runs live and where to keep its own records. For <code>state_root</code>, name a separate folder that does not exist yet (its parent must). The first submit creates it with private permissions, and later submits reuse it. Do not create it yourself.</p>
 <pre class="md"><code>{
   &quot;state_root&quot;: &quot;/home/you/siderius_quickstart_workspace/operations&quot;,
   &quot;preparation_roots&quot;: [&quot;/home/you/siderius_quickstart_workspace/runs&quot;],

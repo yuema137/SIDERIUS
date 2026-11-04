@@ -39,7 +39,7 @@ Sources: [SIDERIUS paper (arXiv:2610.14024)](https://arxiv.org/abs/2610.14024) Â
 - **Evaluate more than a score:** declare task-specific validity checks alongside
   your metric, with controlled data access and reproducible evaluation rules.
 - **Choose how to explore:** start with a lightweight fixed workflow or let an
-  LLM orchestrator compose research steps. Select models independently by role.
+  LLM orchestrator (your coding agent) compose research steps. Select models independently by role.
 
 Step-by-step tutorials, guides and case studies are on the
 [SIDERIUS website](https://siderius.scitra.org). This README covers what
@@ -119,7 +119,7 @@ next research step**:
 
 In both, the deterministic core still owns data access, training, scoring and
 Health. `llm.json` selects the models *inside* each capability; the
-orchestrator's own model is whatever your coding agent uses. To set up
+orchestrator (your coding agent) uses its own model. To set up
 orchestration, follow the [orchestration setup guide](src/tools/orchestration_setup/README.md).
 
 **Workflow keeps coordination lightweight; orchestration offers more room to
@@ -227,19 +227,12 @@ spending limit or guarantee better scores; paper replay keeps its
 
 ### How to tell a run worked
 
-A run that finishes has not necessarily produced a valid model. A model
-**counts** only when all three hold:
-
-- its main score could be computed (it is *scoreable*);
-- it passed every **Blocking** Health check the task declares (a failing
-  **Recording** check is only stored);
-- the run declared **Scientific** result standing with Blocking Health. A run
-  declared *Diagnostic* reports scores for exploration only; none of them count.
-
-Compare runs on the best valid Formal score, not on trial scores or unfiltered
-"best" lines. [Read the result](docs/getting-started/README.md#6-read-the-result)
-shows where the score and Health verdict appear, on the command line and in the
-browser console.
+A run that finishes has not necessarily produced a valid model: compare runs
+on the best valid Formal score, and only a scoreable model that passed every
+Blocking Health check in a run declared Scientific counts.
+[Read the result](docs/getting-started/README.md#6-read-the-result) gives the
+full rule and shows where the score and Health verdict appear, on the command
+line and in the browser console.
 
 ## Try the browser console (experimental)
 

@@ -116,9 +116,10 @@ version in the zip's name. That number is the package version from
 
 4. Import the task and its experiment setup.
    `add-task` finds this machine's NVIDIA GPUs (`/dev/nvidia<N>`) and passes
-   them to runs. On a machine without a GPU, `--no-gpu` still lets you import
-   the task, prepare and check it, but a run that trains is refused there
-   (SIDERIUS 1.1 has no CPU mode):
+   them to runs. On a machine without one it passes none: you can still
+   import, prepare and check the task, but a run that trains is refused
+   (SIDERIUS 1.1 has no CPU mode). `--no-gpu` withholds the GPU even when one
+   exists, for a workflow that stops before training:
 
    ```bash
    .venv/bin/python -m tools.candidate_console add-task \

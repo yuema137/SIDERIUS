@@ -39,7 +39,7 @@ see [Try the browser console (experimental)](#try-the-browser-console-experiment
 2. Open the checkout in your coding agent. Describe your research question,
    dataset location and an external project directory. You do not need a
    prepared manifest. Agree on the prediction target, splits, score and budgets;
-   the agent creates your [task package](../reference/task-composition.md) and
+   the agent creates your [task package](../concepts/task-package.md) and
    experiment files there. For an existing scientific task, start from a
    [companion tutorial](https://github.com/yuema137/siderius-exp/blob/main/tutorials/README.md).
 3. Save a reviewed [LLM profile](../../configs/llm/README.md) in your project as
@@ -159,8 +159,8 @@ This step is offline: no model is called and nothing is trained.
 
 Success: exit status 0, and the printed JSON receipt includes
 `"status": "prepared"` and `"envelope": "/absolute/runs/<run_id>"`. That
-envelope is the new run folder. The same receipt is saved there as
-`receipt.json`, and `workflow.py.snapshot` beside it is the exact workflow that
+envelope is the new run folder. This **preparation receipt** is saved as
+`/absolute/runs/<run_id>/receipt.json`, and `workflow.py.snapshot` beside it is the exact workflow that
 will run; later edits to `workflow.py` only affect future runs. A request that
 cannot be prepared exits non-zero, and the error (or the receipt's `error`
 field) names the problem.
@@ -178,7 +178,9 @@ live and where to keep its own records:
 }
 ```
 
-`state_root` must be a separate folder that does not exist yet; its parent must.
+For `state_root`, name a separate folder that does not exist yet (its parent
+must). The first submit creates it with private permissions, and later submits
+reuse it. Do not create it yourself.
 Then your agent turns the prepared run folder into a launch request,
 `reusable-submission.json`, with the short Python
 [operation recipe](../../src/tools/candidate_operations/candidate-operations-contract.md#shared-python-and-cli-recipe):
@@ -224,7 +226,8 @@ Read the state and the log with the operation ID:
 ```
 
 `status` prints JSON whose `state` moves from `active` to `completed` (or
-`operation_failed`). [Read status and logs](../../src/tools/candidate_operations/README.md#read-status-and-logs)
+`operation_failed`); `queued` means it is waiting for room in a shared GPU
+budget. [Read status and logs](../../src/tools/candidate_operations/README.md#read-status-and-logs)
 explains each value.
 
 For a research loop, `stop-loop` and `pause-loop` act at the next iteration
@@ -238,13 +241,14 @@ boundary. To resume a paused loop, `write-loop-resume --output resume.json`
 A finished run is a record, not a verdict. Read it in three layers:
 
 1. **Did the run finish?** In the `status` output, `state` is `completed` and
-   `receipt.status` says what the run reported: `completed` (training
+   the **run receipt** (the `receipt` in the `status` output, saved as
+   `/absolute/runs/<run_id>/workspace/candidate_run/receipt.json`) has a
+   `status` that says what the run reported: `completed` (training
    returned), `stopped` or `paused` (a research loop), `accepted` or
-   `rejected` (a workflow without training), or `failed` / `timed_out` /
-   `interrupted` (read the native log). The receipt is also saved as
-   `/absolute/runs/<run_id>/workspace/candidate_run/receipt.json`. For a
-   research loop, its `loop_trace` lists each iteration and why the loop
-   stopped or paused.
+   `rejected` (a workflow without training), `cancelled` (stopped at once
+   with `cancel`), or `failed` / `timed_out` / `interrupted` (read the native
+   log). For a research loop, its `loop_trace` lists each iteration and why
+   the loop stopped or paused.
 2. **What score did training reach, and did Health pass?** Each training step
    saves its report as a file named `run_output_<run_name>.json` inside the run
    folder: one per iteration for a research loop. List them with
@@ -253,12 +257,11 @@ A finished run is a record, not a verdict. Read it in three layers:
    find /absolute/runs/<run_id>/workspace -name 'run_output_*.json'
    ```
 
-   (For a single pass, the receipt's `native_output_paths` also lists every
-   step's record.) In each report:
-   - `best_valid_formal_denoising_score` is the best main-score value among
-     Formal results that passed Health. It is the number to compare. (The field
-     name is historical: it holds your task's main score, whatever the metric.)
-     `null` means no Formal result passed Health, or none ran;
+   (For a single pass, the run receipt's `native_output_paths` also lists
+   every step's record.) The number to compare is
+   `best_valid_formal_denoising_score`: the best main-score value among Formal
+   results that passed Health (`null` means no Formal result passed Health, or
+   none ran). The supporting fields are:
    - `all_records` lists every training attempt with its `status`, score,
      `health_gate_results` (each Health check's outcome) and, on Formal
      records, `scientific_authority` (whether that result may count, and if
@@ -266,13 +269,18 @@ A finished run is a record, not a verdict. Read it in three layers:
    - `termination_reason` says why training stopped.
 
    Fields such as `best_denoising_score` and `best_formal_denoising_score`
-   include results that failed Health; treat them as progress reports.
-3. **Does the result count scientifically?** Only when the workflow declared
-   Health enforcement `blocking` and result standing `scientific` (in
-   `workflow.py`, under `training_settings`), the score could be computed, and
-   every **Blocking** Health check passed. A run declared `diagnostic` (as the
-   files in `examples/workflow_declarations/` are) reports scores for exploration only. A failing
-   **Recording** check is stored but does not invalidate the model.
+   include results that failed Health; treat them as progress reports. (The
+   `denoising_score` field names are historical: they hold your task's main
+   score, whatever the metric.)
+3. **Does the result count scientifically?** Only when `workflow.py` declares
+   `training_settings["launch"]["healthgate_mode"] = "blocking"` and
+   `"result_authority": "scientific"`, the score could be computed, and every
+   **Blocking** Health check passed. On a Formal record,
+   `scientific_authority.authoritative` is `true` only when all of this holds;
+   otherwise `blocking_reasons` says why (`declared_diagnostic`,
+   `non_blocking_mode`, `gate_invalidated`, ...). A run declared `diagnostic`
+   (as the training examples are) reports scores for exploration only. A
+   failing **Recording** check is stored but does not invalidate the model.
 
 In the browser console, open the run on **Monitor**. When a workflow run has
 finished, **Workflow training results** shows each iteration's training report
@@ -427,9 +435,10 @@ you own; the console workspace is created inside it) and
 
 5. **Register the task and its experiment setup.**
    `add-task` finds this machine's NVIDIA GPUs (`/dev/nvidia<N>`) and passes
-   them to runs. On a machine without a GPU, `--no-gpu` still lets you register
-   the task, prepare and check it offline, but a run that trains is refused
-   there (SIDERIUS 1.1 has no CPU mode):
+   them to runs. On a machine without one it passes none: you can still
+   register, prepare and check the task, but a run that trains is refused
+   (SIDERIUS 1.1 has no CPU mode). `--no-gpu` withholds the GPU even when one
+   exists, for a workflow that stops before training:
 
    ```bash
    .venv/bin/python -m tools.candidate_console add-task \

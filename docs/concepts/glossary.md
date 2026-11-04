@@ -121,4 +121,5 @@ formal-budget compute.
 
 **Workflow** — a fixed path through the node graph, declared in advance (for
 example in a `workflow.py` declaration) and executed by SIDERIUS without an LLM
-choosing the next step. Contrast *orchestration*.
+choosing the next step (an optional LLM judge may only end a loop early).
+Contrast *orchestration*.
