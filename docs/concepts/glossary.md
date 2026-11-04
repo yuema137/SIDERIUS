@@ -58,6 +58,11 @@ The current node map includes seven research capabilities; see the
 **Objective** — what training minimises. Distinct from the evaluation metric by
 *role*, even when the mathematics is the same.
 
+**Orchestration** — the alternative execution approach: a caller (a coding agent,
+or a caller script it writes) chooses at run time which SIDERIUS capabilities to
+invoke and in what order, using the same typed capability contracts. See the
+[orchestration setup guide](../../src/tools/orchestration_setup/README.md).
+
 **Plugin** — task-owned code loaded at run scope: a model, a loss, a data path, a
 metric, a health check or a view provider. May be declared by importable module or
 by file path; a file-declared plugin's content hash joins the run fingerprint.
@@ -114,6 +119,6 @@ ability to build and serialise a task's own training and evaluation scopes.
 **Trial round** — a cheap, reduced-budget round used to explore before committing
 formal-budget compute.
 
-**Workflow** — a deterministic, hardcoded path through the node graph. Distinct
-from an *orchestrator*, which would choose its own path. SIDERIUS currently runs
-workflows.
+**Workflow** — a fixed path through the node graph, declared in advance (for
+example in a `workflow.py` declaration) and executed by SIDERIUS without an LLM
+choosing the next step. Contrast *orchestration*.
