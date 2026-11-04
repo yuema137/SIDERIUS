@@ -17,6 +17,7 @@ from pydantic import (
 )
 
 from agent.schemas.judge_refs import Digest, Identifier, Version
+from execute_tools.evaluation_metric import MetricDirection
 
 Text = Annotated[str, StringConstraints(pattern=r"\S")]
 Number = Annotated[float, Field(strict=True, allow_inf_nan=False)]
@@ -72,6 +73,38 @@ class MetricComponent(ComponentSpec):
     metric: Text
     units: Text | None = Field(default=None, max_length=128)
     range: ValueRange | None = None
+
+
+class LatencyProtocol(EvaluationModel):
+    """One synthetic input, untimed warm-up forwards, then timed repeats (median)."""
+
+    input_shape: tuple[Annotated[int, Field(strict=True, ge=1)], ...] = Field(
+        min_length=1, max_length=8, strict=False
+    )
+    warmup: Annotated[int, Field(strict=True, ge=0, le=1000)] = 10
+    repeats: Annotated[int, Field(strict=True, ge=1, le=10000)] = 50
+    timeout_seconds: Annotated[Positive, Field(le=3600)] = 300.0
+
+
+class MeasurementComponent(ComponentSpec):
+    """A builtin model-level measurement of the serialized trained checkpoint (#1296)."""
+
+    kind: Literal["measurement"]
+    measurement: Literal[
+        "trainable_parameter_count", "total_parameter_count", "model_bytes", "inference_latency_ms"
+    ]
+    direction: MetricDirection
+    range: ValueRange | None = None
+    protocol: LatencyProtocol | None = None
+
+    @model_validator(mode="after")
+    def protocol_applies(self) -> Self:
+        timed = self.measurement == "inference_latency_ms"
+        if timed and self.protocol is None:
+            raise ValueError("inference_latency_ms requires a protocol with input_shape")
+        if not timed and self.protocol is not None:
+            raise ValueError(f"measurement {self.measurement!r} takes no protocol")
+        return self
 
 
 class RubricComponent(ComponentSpec):

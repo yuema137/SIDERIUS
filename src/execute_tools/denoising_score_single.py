@@ -134,6 +134,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Step 12 / PR-12bc C2: the PARENT-PINNED IDENTITY of the implementation named by --task_data_path_id. The id says WHICH implementation; this says WHICH CODE. Verified BEFORE the implementation is consumed, because a registry hit is never proof of identity — a stale registration answers to the right name while running different bytes. ABSENT -> a parent that predates this transport made no claim, and a child must not invent one.",
     )
+    parser.add_argument(
+        "--measurement_request_json",
+        type=str,
+        default=None,
+        help="Parent-written checkpoint reconstruction request for evaluation measurements.",
+    )
     return parser
 
 
@@ -263,10 +269,35 @@ def _emit_task_owned_score(
     with bind_task_data_path(data_path):
         outcome = metric.evaluate(scoreable_deliverables, **compute_kwargs)
         secondaries = _evaluate_task_owned_secondaries(args, deliverable, compute_kwargs)
+    secondaries = {**secondaries, **_measure_declared_components(args, composition)}
     from execute_tools.evaluation_child import aggregate_child_outcome
 
     outcome, secondaries = aggregate_child_outcome(composition, outcome, secondaries)
     _emit_outcome(args, outcome, secondaries=secondaries)
+
+
+def _measure_declared_components(args, composition) -> dict:
+    """#1296 measurement results for declared ``measurement`` components, or ``{}``.
+
+    Runs after source metrics and before aggregation. A run declaring no
+    measurement component writes no key, so its payload is byte-unchanged.
+    """
+    evaluation = getattr(composition, "evaluation", None)
+    if evaluation is None:
+        return {}
+    from execute_tools.candidate_measurement import measure_components, read_measurement_request
+    from execute_tools.evaluation_spec import MeasurementComponent
+
+    components = [c for c in evaluation.spec.components if isinstance(c, MeasurementComponent)]
+    if not components:
+        return {}
+    if args.measurement_request_json is None:
+        raise ValueError("measurement components require --measurement_request_json")
+    request = read_measurement_request(args.measurement_request_json)
+    if request.model_type != args.denoising_model or request.experiment_id != args.exp_id:
+        raise ValueError("measurement request belongs to another attempt")
+    results = measure_components(components, request)
+    return {"measurement_results": [r.model_dump(mode="json") for r in results]}
 
 
 def _evaluate_task_owned_secondaries(args, deliverable: str, compute_kwargs: dict) -> dict:

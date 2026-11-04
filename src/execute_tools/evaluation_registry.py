@@ -25,6 +25,7 @@ from execute_tools.evaluation_metric import MetricDirection, MetricSpec
 from execute_tools.evaluation_spec import (
     ComponentSpec,
     EvaluationRubricRef,
+    MeasurementComponent,
     MetricComponent,
     RubricComponent,
     SymbolRef,
@@ -36,7 +37,7 @@ IMPLEMENTED_CAPABILITIES: Mapping[str, bool] = MappingProxyType(
         "evaluation rendering": True,
         "formula aggregation": True,
         "feasibility constraints": True,
-        "measurements": False,
+        "measurements": True,
         "rubric components": True,
         "rubric balancing": True,
     }
@@ -163,12 +164,21 @@ def _rubric(component: RubricComponent, ctx: EvaluationLoadContext) -> ResolvedC
     return ResolvedComponent(identity={"rubric": ref.model_dump(mode="json")})
 
 
+def _measurement(component: MeasurementComponent, ctx: EvaluationLoadContext) -> ResolvedComponent:
+    """Direction is authored; the declaration itself is the identity (no external code)."""
+    return ResolvedComponent(
+        direction=component.direction,
+        identity={"measurement": component.measurement, "version": "1"},
+    )
+
+
 def _identity(component: ComponentSpec, resolved: ResolvedComponent) -> Mapping[str, JsonValue]:
     return resolved.identity
 
 
 def builtin_registry() -> dict[str, ComponentKindRegistration]:
     from execute_tools.evaluation_component_rendering import (
+        render_measurement_component,
         render_metric_component,
         render_rubric_component,
     )
@@ -192,5 +202,15 @@ def builtin_registry() -> dict[str, ComponentKindRegistration]:
             render_rubric_component,
             "rubric",
             frozenset({"rubric components"}),
+        ),
+        "measurement": ComponentKindRegistration(
+            "measurement",
+            "1",
+            MeasurementComponent,
+            _measurement,
+            _identity,
+            render_measurement_component,
+            "quantitative",
+            frozenset({"measurements"}),
         ),
     }

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from execute_tools.evaluation_spec import MetricComponent
+from execute_tools.evaluation_spec import MeasurementComponent, MetricComponent
 from execute_tools.evaluation_validation import formula_terms
 from workflows.evaluation_selection import SelectionCarrier, bound_selection
 
@@ -17,12 +17,29 @@ def require_component_runtime(evaluation: ResolvedEvaluation | None) -> None:
         return
     referenced = {t.component for t in formula_terms(evaluation.spec)}
     referenced.update(c.component for c in evaluation.spec.constraints)
+    runtime_kinds = (MetricComponent, MeasurementComponent)
     for component in evaluation.spec.components:
-        if component.id in referenced and type(component) is not MetricComponent:
+        if component.id in referenced and type(component) not in runtime_kinds:
             raise ValueError(
                 f"Evaluation composition succeeded, but component {component.id!r} "
                 f"of kind {component.kind!r} has no runtime value support."
             )
+    require_measurement_route(evaluation)
+
+
+def require_measurement_route(evaluation: ResolvedEvaluation | None) -> None:
+    """Measurements run only in the native task-owned scoring child (#1296)."""
+    if evaluation is None or not any(
+        isinstance(c, MeasurementComponent) for c in evaluation.spec.components
+    ):
+        return
+    from execute_tools.evaluation_execution import candidate_evaluation_executor
+
+    if candidate_evaluation_executor() is not None:
+        raise ValueError(
+            "Measurement components do not support route CandidateEvaluationExecutor; "
+            "use native TASK_OWNED scoring-child execution."
+        )
 
 
 def require_formula_route(composition: SelectionCarrier | None, route: str = "TASK_OWNED") -> None:

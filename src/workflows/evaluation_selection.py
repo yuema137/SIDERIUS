@@ -11,7 +11,12 @@ from execute_tools.evaluation_results import (
     SelectionBinding,
     SelectionTerm,
 )
-from execute_tools.evaluation_spec import EvaluationConstraint, MetricComponent, WeightedTerm
+from execute_tools.evaluation_spec import (
+    EvaluationConstraint,
+    MeasurementComponent,
+    MetricComponent,
+    WeightedTerm,
+)
 from execute_tools.evaluation_validation import formula_terms
 from execute_tools.metric_order import MetricOrder
 
@@ -77,6 +82,7 @@ def _selection_term(evaluation: ResolvedEvaluation, term: WeightedTerm) -> Selec
         term=term,
         source_metric_id=component.metric if isinstance(component, MetricComponent) else None,
         direction=evaluation.components[term.component].direction,
+        source_measurement=component.id if isinstance(component, MeasurementComponent) else None,
     )
 
 

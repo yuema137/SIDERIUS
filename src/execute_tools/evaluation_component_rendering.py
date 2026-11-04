@@ -6,7 +6,7 @@ import re
 from typing import TYPE_CHECKING
 
 from agent.schemas.judge_task import RubricSpec, rubric_sha256
-from execute_tools.evaluation_spec import MetricComponent, RubricComponent
+from execute_tools.evaluation_spec import MeasurementComponent, MetricComponent, RubricComponent
 
 if TYPE_CHECKING:
     from execute_tools.evaluation_registry import ComponentRenderContext
@@ -66,3 +66,34 @@ def render_rubric_component(component: RubricComponent, context: ComponentRender
             "never a deterministic scalar or ranking input."
         ]
     )
+
+
+def render_measurement_component(
+    component: MeasurementComponent, context: ComponentRenderContext
+) -> str:
+    from execute_tools.measurement_results import MEASUREMENT_UNITS
+
+    words = context.direction_words
+    bounds = component.range
+    descriptive = (
+        f"[{number(bounds.lower)}, {number(bounds.upper)}] (descriptive only)"
+        if bounds is not None
+        else "not declared"
+    )
+    lines = [
+        f"- {component.id} (measurement: {component.measurement})",
+        f"  Meaning: {indent_text(component.meaning)}",
+        f"  Units: {MEASUREMENT_UNITS[component.measurement]}",
+        f"  Preference: {words['verb']} ({words['comparative']} is better)",
+        f"  Descriptive range: {descriptive}",
+        "  Source: the serialized trained checkpoint, measured once per candidate.",
+    ]
+    protocol = component.protocol
+    if protocol is not None:
+        shape = "x".join(str(dim) for dim in protocol.input_shape)
+        lines.append(
+            f"  Protocol: one synthetic input of shape {shape}; {protocol.warmup} untimed "
+            f"warm-up forwards, then the median of {protocol.repeats} timed forwards on the "
+            "training device (not data loading or I/O time)."
+        )
+    return "\n".join(lines)

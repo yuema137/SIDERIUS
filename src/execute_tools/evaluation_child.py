@@ -20,6 +20,7 @@ from execute_tools.evaluation_results import (
     SelectionBinding,
 )
 from execute_tools.evaluation_validation import formula_terms
+from execute_tools.measurement_results import MeasurementResult, record_measurements
 from workflows.evaluation_selection import SelectionCarrier, bound_selection
 
 if TYPE_CHECKING:
@@ -27,9 +28,15 @@ if TYPE_CHECKING:
 
 
 class EvaluationNotScoreableError(NotScoreableError):
-    def __init__(self, refusal: NotScoreableResult, evidence: EvaluationEvidence):
+    def __init__(
+        self,
+        refusal: NotScoreableResult,
+        evidence: EvaluationEvidence,
+        measurement_results: tuple[MeasurementResult, ...] = (),
+    ):
         super().__init__(refusal)
         self.evaluation_result = evidence
+        self.measurement_results = measurement_results
 
 
 def aggregate_child_outcome(
@@ -45,7 +52,7 @@ def aggregate_child_outcome(
     results = [
         MetricResult.model_validate(r) for r in secondaries.get("secondary_metric_results", ())
     ]
-    measurements = secondaries.get("measurement_results", ())
+    measurements = record_measurements(secondaries)
     if formula_terms(evaluation.spec):
         result, evidence = aggregate_evaluation(
             evaluation, composition.metric.spec, outcome, results, measurements
@@ -80,7 +87,9 @@ def validate_child_evaluation(
         )
     if evidence.failures:
         refusal = NotScoreableResult.model_validate(results.get("not_scoreable"))
-        raise EvaluationNotScoreableError(refusal, evidence)
+        raise EvaluationNotScoreableError(
+            refusal, evidence, tuple(record_measurements(results).values())
+        )
     if evidence.aggregate is None:
         raise EvaluationTransportError("Scoring child omitted the effective scalar")
     metric = MetricResult.model_validate(results.get("metric_result"))
@@ -135,11 +144,17 @@ def _validate_component_arithmetic(
             *(MetricResult.model_validate(r) for r in results.get("secondary_metric_results", ())),
         ]
     )
+    measurements = record_measurements(results)
     total = weight_total(t.term for t in binding.terms)
     aggregate = Fraction()
     for item, selection in zip(evidence.components, binding.terms, strict=True):
-        source = sources.get(selection.source_metric_id or "")
-        if source is None or selection.direction is None or source.scalar != item.raw:
+        if selection.source_measurement is not None:
+            measured = measurements.get(selection.source_measurement)
+            raw = None if measured is None else measured.value
+        else:
+            source = sources.get(selection.source_metric_id or "")
+            raw = None if source is None else source.scalar
+        if raw is None or selection.direction is None or raw != item.raw:
             raise EvaluationTransportError(
                 f"Component {item.component_id!r} raw value disagrees with its source result"
             )
@@ -159,7 +174,7 @@ def _validate_component_arithmetic(
     if binding.is_formula and float(aggregate) != evidence.aggregate:
         raise EvaluationTransportError("Scoring child aggregate disagrees with its components")
     expected_constraints, violated = evaluate_constraints(
-        binding.constraints, sources, results.get("measurement_results", ())
+        binding.constraints, sources, measurements
     )
     if expected_constraints != evidence.constraints or violated:
         raise EvaluationTransportError(
@@ -168,10 +183,14 @@ def _validate_component_arithmetic(
 
 
 def evaluation_record_fields(results: dict[str, Any]) -> dict[str, Any]:
-    if "evaluation_result" not in results:
-        return {}
-    evidence = EvaluationEvidence.model_validate(results["evaluation_result"])
-    return {"evaluation_result": evidence.model_dump(mode="json")}
+    fields: dict[str, Any] = {}
+    if "evaluation_result" in results:
+        evidence = EvaluationEvidence.model_validate(results["evaluation_result"])
+        fields["evaluation_result"] = evidence.model_dump(mode="json")
+    measurements = record_measurements(results)
+    if measurements:
+        fields["measurement_results"] = [m.model_dump(mode="json") for m in measurements.values()]
+    return fields
 
 
 def read_scoring_output(path: str) -> dict[str, Any]:
@@ -207,6 +226,7 @@ def scoring_refusal_fields(path: str) -> dict[str, Any]:
             "not_scoreable": refusal.model_dump(mode="json"),
             "evaluation_result": evidence.model_dump(mode="json"),
             "denoising_score": None,
+            **evaluation_record_fields({"measurement_results": payload.get("measurement_results")}),
         }
     }
 

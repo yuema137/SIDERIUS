@@ -103,6 +103,8 @@ class SelectionTerm(BaseModel):
     term: WeightedTerm
     source_metric_id: str | None
     direction: MetricDirection | None
+    # #1296: the measurement component whose recorded raw value feeds this term.
+    source_measurement: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class SelectionBinding(BaseModel):

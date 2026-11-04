@@ -28,12 +28,8 @@ available, so nothing is silently ignored.
 | A weighted combination, `selection: {kind: formula}` (step 3) | yes | yes |
 | A natural-language balancing rule, `selection: {kind: rubric_balance}` (step 4) | yes | yes, as guidance for the agents |
 | Rubric components, `kind: rubric` (step 4) | yes | yes, as guidance for the agents |
-| Requirements, `constraints:` (step 5) | yes | yes, on metric components |
-| Model measurements such as latency or parameter count (step 5) | no | not yet: issue #1296 |
-
-Issue #1296 is planned to land before Hackathon Track 2
-(21 November 2026). Until then you can still write and check those
-declarations (except measurements), and the agents see them in their prompts.
+| Requirements, `constraints:` (step 5) | yes | yes, on metric and measurement components |
+| Model measurements such as latency or parameter count, `kind: measurement` (step 5) | yes | yes |
 
 ## Before you start
 
@@ -383,11 +379,29 @@ What works now, and what comes later:
   `balanced_accuracy <= 0.99`).
 - **Scoring route:** constraints need the native task-owned scoring step,
   the same one formula selection uses; other scoring routes refuse at launch.
-- **Measurements (issue #1296):** latency, parameter count and other
-  properties of the trained model are not metrics, so no component can name
-  them yet. `kind: measurement` is refused today. A task such as "keep
-  balanced accuracy at least 0.9 and minimize latency" becomes possible once
-  #1296 lands.
+- **Measurements:** a `kind: measurement` component measures the trained
+  checkpoint once per candidate, after scoring the deliverable. Choose
+  `measurement: trainable_parameter_count`, `total_parameter_count`,
+  `model_bytes` or `inference_latency_ms`, and say which way is better with
+  `direction: lower` or `higher`. Latency also needs a `protocol`: the input
+  shape including batch, warm-up and repeat counts. The value is the median
+  of the timed forward passes on the training device, in milliseconds; data
+  loading is not included. For example:
+
+  ```yaml
+  - kind: measurement
+    id: latency
+    measurement: inference_latency_ms
+    direction: lower
+    meaning: Median forward latency of one input batch.
+    protocol: {input_shape: [1, 1, 4096], warmup: 10, repeats: 50}
+  ```
+
+  Use the component in a formula term or a constraint like a metric. If the measurement
+  fails, the record shows `measurement_results` with the reason and the
+  candidate is not scoreable. A task such as "keep balanced accuracy at
+  least 0.9 and minimize latency" combines a constraint on the metric with a
+  formula term on the latency measurement.
 - **Rubric components:** they launch as guidance for the agents; see step 4.
 
 ## Step 6: check your declaration

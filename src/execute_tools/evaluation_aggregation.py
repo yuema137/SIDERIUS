@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import math
 import operator
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping
 from fractions import Fraction
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from pydantic import JsonValue
 
@@ -31,8 +31,9 @@ from execute_tools.evaluation_results import (
     EvaluationInputsScoreability,
     EvaluationTransportError,
 )
-from execute_tools.evaluation_spec import MetricComponent, WeightedTerm
+from execute_tools.evaluation_spec import MeasurementComponent, MetricComponent, WeightedTerm
 from execute_tools.evaluation_validation import formula_terms
+from execute_tools.measurement_results import MeasurementResult
 from execute_tools.metric_order import MetricOrder
 from workflows.evaluation_selection import constraint_terms, effective_metric_spec
 
@@ -77,18 +78,17 @@ _OPS = {">=": operator.ge, ">": operator.gt, "<=": operator.le, "<": operator.lt
 def _constraint_value(
     term: ConstraintTerm,
     sources: Mapping[str, MetricResult],
-    measurements: Sequence[Mapping[str, Any]],
+    measurements: Mapping[str, MeasurementResult],
 ) -> float | None:
-    """The raw value a constraint judges: a metric result, or a #1296 measurement."""
+    """The raw value a constraint judges: a metric result, or a #1296 measurement.
+
+    A missing or failed measurement yields ``None``, which is never satisfied.
+    """
     if term.source_metric_id is not None:
         source = sources.get(term.source_metric_id)
         return None if source is None else source.scalar
-    component = term.constraint.component
-    for item in measurements:
-        if item.get("component_id") == component:
-            value = item.get("value")
-            return value if isinstance(value, int | float) and not isinstance(value, bool) else None
-    return None
+    measured = measurements.get(term.constraint.component)
+    return None if measured is None or measured.failure is not None else measured.value
 
 
 def evaluate_constraint(term: ConstraintTerm, raw: float | None) -> ConstraintEvaluation:
@@ -118,11 +118,12 @@ def evaluate_constraint(term: ConstraintTerm, raw: float | None) -> ConstraintEv
 def evaluate_constraints(
     terms: Iterable[ConstraintTerm],
     sources: Mapping[str, MetricResult],
-    measurements: Sequence[Mapping[str, Any]] = (),
+    measurements: Mapping[str, MeasurementResult] | None = None,
 ) -> tuple[tuple[ConstraintEvaluation, ...], list[ScoreabilityFailure]]:
     """Every constraint is conjunctive; each violation is a named scoreability failure."""
     verdicts = tuple(
-        evaluate_constraint(term, _constraint_value(term, sources, measurements)) for term in terms
+        evaluate_constraint(term, _constraint_value(term, sources, measurements or {}))
+        for term in terms
     )
     failures = [
         ScoreabilityFailure(requirement=f"constraint:{v.component_id}", detail=v.detail)
@@ -137,7 +138,7 @@ def constrain_primary(
     source_spec: MetricSpec,
     primary: MetricResult | NotScoreableResult,
     secondaries: list[MetricResult],
-    measurements: Sequence[Mapping[str, Any]] = (),
+    measurements: Mapping[str, MeasurementResult] | None = None,
 ) -> tuple[MetricResult | NotScoreableResult, EvaluationEvidence | None]:
     """Primary selection with constraints: the source scalar ranks only if feasible.
 
@@ -168,6 +169,18 @@ def constrain_primary(
             metric_id=source_spec.id, direction=source_spec.direction, verdict=verdict
         ), record
     return primary, record
+
+
+def measurement_raw(component_id: str, measurements: Mapping[str, MeasurementResult]) -> float:
+    """The finite raw measurement value a term needs; failures refuse with their reason."""
+    result = measurements.get(component_id)
+    if result is None:
+        raise ValueError("required measurement is missing")
+    if result.failure is not None:
+        raise ValueError(f"required measurement failed: {result.failure}")
+    if result.value is None or not math.isfinite(result.value):
+        raise ValueError("required measurement is null or nonfinite")
+    return result.value
 
 
 def weight_total(terms: Iterable[WeightedTerm]) -> Fraction:
@@ -232,7 +245,7 @@ def aggregate_evaluation(
     source_spec: MetricSpec,
     primary: MetricResult | NotScoreableResult,
     secondaries: list[MetricResult],
-    measurements: Sequence[Mapping[str, Any]] = (),
+    measurements: Mapping[str, MeasurementResult] | None = None,
 ) -> tuple[MetricResult | NotScoreableResult, EvaluationEvidence]:
     """Require all referenced evidence; never silently renormalize missing terms.
 
@@ -252,9 +265,12 @@ def aggregate_evaluation(
     for term in terms:
         component = components[term.component]
         try:
-            if type(component) is not MetricComponent:
+            if type(component) is MeasurementComponent:
+                raw = measurement_raw(component.id, measurements or {})
+            elif type(component) is MetricComponent:
+                raw = _component_value(component, results, evaluation)
+            else:
                 raise ValueError("component kind has no runtime value support")
-            raw = _component_value(component, results, evaluation)
             resolved = evaluation.components[term.component]
             assert resolved.direction is not None
             item, contribution = term_evaluation(
