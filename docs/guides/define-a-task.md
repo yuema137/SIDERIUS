@@ -406,7 +406,8 @@ Decide three things, then write them in the manifest:
 
 The [composition reference](../reference/task-composition.md#section-shapes)
 owns the exact shapes, the `require:` refusal, the `none: true` forms, objective
-validation and how declared roots reach child processes. Custom-loss
+validation and
+[how declared roots reach child processes](../reference/task-composition.md#things-the-manifest-does-not-declare). Custom-loss
 applicability and the optional `custom_loss_validation_pair()` are owned by
 [custom-loss applicability and validation](../reference/task-composition.md#custom-loss-applicability-and-validation).
 See the shipped `synthetic_masked_regression` example for a complete

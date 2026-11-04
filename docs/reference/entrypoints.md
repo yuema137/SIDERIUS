@@ -267,8 +267,10 @@ accepted by `run_chain.sh` nor listed there with a reason.
 
 Any flag `run_chain.sh` does not accept stops the launcher during argument
 parsing, before any Python or Slurm step: it prints `Unknown arg: <flag>` to
-stderr and exits 1. Missing `--workspace` or `--run_name` likewise exits 1
-(`Required: --workspace, --run_name`).
+stderr and exits 1. Missing required flags (`--workspace`, `--run_name`,
+`--task_composition`, `--data_dir`, `--mode`) or an invalid `--mode` (anything
+other than `lilab` or `sdsc`) also print a `Required: ...` or `Invalid --mode`
+message and exit 1.
 
 ## `run_one_iteration.py` — one iteration
 

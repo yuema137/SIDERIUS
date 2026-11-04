@@ -35,7 +35,7 @@ if it is absent. Local scoring-child entrypoints refuse this handle. Secondary
 metric declarations retain their local implementation contract; the complete
 evaluator must still account for every requested secondary metric.
 
-Formula selection (`evaluation.selection: formula`) is not supported on this
+Formula selection (`evaluation.selection: {kind: formula}`) is not supported on this
 route. `require_formula_route` runs at run-composition binding and in tuner
 planning before each attempt; whenever a candidate evaluator is bound it raises
 `ValueError` ("Formula aggregation does not support route

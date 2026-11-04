@@ -75,15 +75,16 @@ Do not apply the deliverable `_compute` calling convention to that adapter.
 
 Without formula selection, the primary metric's direction determines
 scientific ordering and secondary metrics are observational: they never replace
-the primary ranking scalar. Under `evaluation.selection: formula`, ranking uses
+the primary ranking scalar. Under `evaluation.selection: {kind: formula}`, ranking uses
 the generated effective metric (`effective_metric_spec`, higher is better), and
 every secondary referenced by a formula term feeds that scalar; see
 [effective selection](#effective-selection-and-source-evidence).
 
 On the native TASK_OWNED scoring child, declared secondaries are evaluated
 beside the primary. When the primary refuses, the refusal payload omits them
-unless the task declares `evaluation`; formula refusals carry them to the
-parent. A secondary refusal or ordinary computation failure is recorded as
+unless formula selection is active (an `evaluation_result` exists only when the
+declaration has formula terms); formula refusals carry them to the parent.
+Declaring `evaluation` without formula selection keeps the omission. A secondary refusal or ordinary computation failure is recorded as
 diagnostic unavailability; scope violations and task-code integrity failures
 retain their fatal behavior.
 
@@ -133,7 +134,7 @@ the training loss in top-level `objective`. A secondary becomes required evidenc
 only if a formula term references it; listing a component alone keeps it
 observational.
 
-Weighted-sum formula aggregation (`selection: formula`) launches on native
+Weighted-sum formula aggregation (`selection: {kind: formula}`) launches on native
 TASK_OWNED scoring-child execution and emits a new higher-is-better selection
 scalar; it never relabels the source metric. Health keeps original source metric
 values, never utility. Under formula selection, primary-unit thresholds refuse

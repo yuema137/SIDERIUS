@@ -31,7 +31,7 @@ Secondary metrics use the *same* `{declaration, implementation}` shape under
 `secondary_metrics:` (a list — **order is semantic**, it joins the
 composition fingerprint), are resolved by the same authority, and are
 observational (recorded and shown to the agents) unless a term of an
-`evaluation` `selection: formula` references them; see the
+`evaluation` `selection: {kind: formula}` references them; see the
 [structured evaluation declaration](../agent-reference/mechanisms/metrics.md#opt-in-structured-evaluation-declaration).
 
 The declaration JSON is a `MetricSpec`:

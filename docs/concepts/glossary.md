@@ -92,7 +92,9 @@ arithmetic and decides whether the deliverable can be scored at all. A refusal i
 a structured, recorded outcome.
 
 **Secondary metric** — additional observational evidence. Recorded and shown to
-the agents; never an operand of any ordering expression.
+the agents; never an operand of any ordering expression unless a
+`selection: {kind: formula}` term references it
+([structured evaluation](../agent-reference/mechanisms/metrics.md#opt-in-structured-evaluation-declaration)).
 
 **Semantic fingerprint** — a hash over a composition's declared content, including
 file-declared plugin contents but never absolute paths, so the same package at two

@@ -521,13 +521,21 @@ Notes:
       batch_hint: 32                                     # passed verbatim
   ```
 
-  `TaskCompositionError` refuses: a `config` that is not a mapping; an empty,
-  whitespace-only or non-string key; a `ref` envelope with any sibling key; and
-  a `ref` that is not a non-empty string. The authored `config` mapping (with
+  `TaskCompositionError` refusals include: a `config` that is not a mapping; an
+  empty, whitespace-only or non-string key; a `ref` envelope with any sibling
+  key; a `ref` that is not a non-empty string; a `config` declared against a
+  `symbol` that resolves to an already-constructed instance; a key the
+  implementation's constructor does not accept; and a constructor that raises. The authored `config` mapping (with
   unresolved `ref` strings, never absolute paths) enters the semantic
   fingerprint as `task_data_path_config` when non-empty, so changing it is a
   semantic change while relocating the package is not. An absent or empty
   `config` adds no fingerprint key.
+- `objective` takes exactly one of `config` or `implementation`.
+  `objective.config` is validated as a `LossConfig` (unknown keys refused) and
+  cannot select `loss_type: custom`. A custom objective uses `implementation`
+  with a `file:` ref, not `module:`, so its contract is validated before import
+  and its bytes are pinned; it also requires `supervision_target` and
+  `custom_loss_applicability` in the task's `forward_contract`.
 - `model_plugins` (without `none: true`) requires `dir` and a non-empty
   `require` list of non-empty strings; a missing or empty `require` is refused,
   because an unresolvable plugin would otherwise be indistinguishable from an
@@ -797,7 +805,7 @@ Identity and refusal rules:
 A composed run **requires** `--data_dir`. Without it,
 `bind_run_task_composition` fails closed with `CompositionDataRootMissing`
 before any LLM call or GPU work. The root is validated through
-`bind_physical_data_root`; a missing, placeholder or non-directory root is
+`bind_physical_data_root`; a missing, empty or non-directory root is
 refused before any child subprocess is spawned. There is no import-time data
 directory fallback.
 

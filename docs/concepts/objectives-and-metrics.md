@@ -61,7 +61,7 @@ wherever the primary is evaluated, recorded, and shown to the agents. Ranking,
 incumbent selection and per-partition best-of ignore them.
 
 The one exception is an explicit, declared trade-off: when the task's optional
-`evaluation` section uses `selection: formula`, ranking uses a generated
+`evaluation` section uses `selection: {kind: formula}`, ranking uses a generated
 weighted-sum utility, and every secondary that a formula term references feeds
 that utility. Listing a secondary as a component without a term keeps it
 observational. See the
