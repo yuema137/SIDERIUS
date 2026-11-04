@@ -3,8 +3,8 @@
 SIDERIUS is in closed beta: the repository is shared by explicit invitation
 and there is no public license yet (see the README's License section).
 Contributions follow the ordinary flow — branch, commit, open a PR against
-`master` — with one hard expectation: run the contributor gate before you
-open the PR.
+`master`. Validate your change as [CLAUDE.md](CLAUDE.md#validation-and-independent-review)
+requires; CI runs the contributor gate on your PR.
 
 ## The contributor gate: `make check`
 
@@ -76,7 +76,7 @@ host has a modern Node.js, the stage runs in full locally.
 
 ### What the gate does NOT cover
 
-`make check` is necessary, never sufficient. It does not run:
+A green gate (CI or `make check`) is necessary, never sufficient. It does not run:
 
 - **Real-training / GPU / real-LLM Gates** — the evidence system for changes
   touching training, inference, scoring or prompt surfaces lives in
@@ -90,11 +90,10 @@ host has a modern Node.js, the stage runs in full locally.
 
 ### Git worktrees
 
-Linked worktrees (`git worktree add …`) have no `.venv` of their own. Point
-commands at the project's established virtual environment explicitly, or set
-`UV_PROJECT_ENVIRONMENT` to that environment. Tests and entrypoint dry-runs
-must still resolve source from the worktree under test; sharing an interpreter
-must not silently import a different checkout.
+Linked worktrees (`git worktree add …`) have no `.venv` of their own. Run
+`uv sync --group dev --frozen` in the worktree and use its own
+`.venv/bin/python`; never borrow another checkout's environment (see
+[CLAUDE.md](CLAUDE.md#environment-and-launch-credentials)).
 
 ### Before you open a PR
 
