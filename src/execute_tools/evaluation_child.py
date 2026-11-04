@@ -24,7 +24,7 @@ from execute_tools.measurement_results import MeasurementResult, record_measurem
 from workflows.evaluation_selection import SelectionCarrier, bound_selection
 
 if TYPE_CHECKING:
-    from workflows.task_composition import RunTaskComposition
+    from workflows.task_composition import RunTaskComposition, ScoringChildComposition
 
 
 class EvaluationNotScoreableError(NotScoreableError):
@@ -40,7 +40,7 @@ class EvaluationNotScoreableError(NotScoreableError):
 
 
 def aggregate_child_outcome(
-    composition: RunTaskComposition | None,
+    composition: RunTaskComposition | ScoringChildComposition | None,
     outcome: MetricResult | NotScoreableResult,
     secondaries: dict[str, Any],
 ) -> tuple[MetricResult | NotScoreableResult, dict[str, Any]]:

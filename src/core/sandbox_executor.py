@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from core.runtime_control.gpu_execution_evidence import AttemptGpuExecution
     from core.runtime_control.gpu_requirement_evidence import AdmissionRequirementEvidence
+    from execute_tools.measurement_results import MeasurementResult
 
 from pydantic import StrictBool
 
@@ -976,15 +977,14 @@ class TidmadSandbox:
 
     def _run_candidate_measurements(
         self, exp_id: str, model_type: str, m_cfg: dict, l_cfg: dict
-    ) -> list | None:
+    ) -> list["MeasurementResult"] | None:
         """#1296: measure the checkpoint in an isolated supervised worker, or ``None``.
 
         Only a composed run whose bound evaluation declares ``measurement``
-        components measures. Candidate model code runs only in that worker:
-        never in this process and never in the scoring child, which receives
-        the validated results file. The worker gets the inference child's
-        environment (``CUDA_VISIBLE_DEVICES``, plugin roots), its address-space
-        cap, an RSS limit and a hard deadline (killed on expiry).
+        components measures. Measurement construction and forward run in that
+        worker; the scoring child receives only validated results. The worker
+        gets the inference environment (``CUDA_VISIBLE_DEVICES``, plugin roots),
+        the scoring address-space cap, an RSS limit and a hard deadline.
         """
         from execute_tools.candidate_measurement import (
             MeasurementRequest,
@@ -1007,7 +1007,7 @@ class TidmadSandbox:
             ),
             model_io_json=self._write_model_io_config(exp_id),
         )
-        ceiling_gb = _subprocess_rss_gb("inference")
+        ceiling_gb = _subprocess_rss_gb("scoring")
         rss_limit = (
             ceiling_gb * 1024**3
             if ceiling_gb is not None and ceiling_gb > 0
@@ -1023,10 +1023,17 @@ class TidmadSandbox:
         )
 
     @staticmethod
-    def _measurement_results_argv(measured: list | None, directory: str) -> list[str]:
+    def _measurement_results_argv(
+        measured: list["MeasurementResult"] | None, directory: str
+    ) -> list[str]:
         if measured is None:
             return []
-        return ["--measurement_results_json", os.path.join(directory, "measurement_results.json")]
+        # Publish parent-validated evidence, including synthesized timeout/crash
+        # failures. Never hand scoring a missing or malformed worker output.
+        path = os.path.join(directory, "scoring_measurement_results.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump([result.model_dump(mode="json") for result in measured], handle)
+        return ["--measurement_results_json", path]
 
     def _write_dataset_profile_config(self, exp_id: str) -> str:
         """Materialize the resolved Dataset Profile for a subprocess.

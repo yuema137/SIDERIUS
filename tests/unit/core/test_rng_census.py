@@ -142,6 +142,7 @@ ENTRY_ALLOWLIST: dict[str, str] = {
     "core/runtime_control/gpu_measurement_worker_main.py": _MEASUREMENT,
     "core/runtime_control/probe_worker_main.py": _MEASUREMENT + " (bounded runtime probe)",
     "dashboard/main.py": "read-only dashboard server; builds no model",
+    "execute_tools/candidate_measurement_worker.py": "exempt: loads checkpoint in eval mode; initialization overwritten, synthetic input uses a local seed-0 generator",
     "execute_tools/denoising_score_single.py": "scores a fixed deliverable; builds or trains no model",
     "execute_tools/inference_single.py": "exempt: loads a checkpoint and runs in eval(); initialization is overwritten",
     "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py": "tuner CLI entry boundary (S3b): trainers are seeded children",

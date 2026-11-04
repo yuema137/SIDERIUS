@@ -332,13 +332,13 @@ def test_persisted_effective_spec_round_trips_to_an_equal_spec():
 
 
 @pytest.mark.parametrize("declares_evaluation", [False, True])
-def test_scoring_child_composes_full_bindings_only_for_declared_evaluation(
+def test_scoring_child_never_composes_candidate_bindings(
     monkeypatch, tmp_path, declares_evaluation
 ):
     """Review B3: every absent-evaluation scoring child paid a full plugin/code load.
 
-    Drives the production child entry `main`; the full composer must not run
-    without an `evaluation` section and must run exactly once with one.
+    Drives production `main`: neither route may resolve candidate plugins.
+    Scoring-only composition must retain the parent's evaluation identity.
     """
     from execute_tools import denoising_score_single as scoring
     from execute_tools.task_registration_scope import run_registration_scope
@@ -372,6 +372,8 @@ def test_scoring_child_composes_full_bindings_only_for_declared_evaluation(
     )
     composed_calls = []
     real_compose = task_composition.compose_run_task_bindings
+    with run_registration_scope():
+        expected = real_compose(str(manifest)).evaluation
 
     def spy(path):
         composed_calls.append(path)
@@ -394,9 +396,8 @@ def test_scoring_child_composes_full_bindings_only_for_declared_evaluation(
     with run_registration_scope():
         scoring.main(argv)
     assert emitted["metric"].spec.id == "accuracy"
+    assert composed_calls == []
     if declares_evaluation:
-        assert composed_calls == [str(manifest)]
-        assert emitted["composition"].selection_binding is not None
+        assert emitted["composition"].evaluation.sha256 == expected.sha256
     else:
-        assert composed_calls == []
         assert emitted["composition"] is None

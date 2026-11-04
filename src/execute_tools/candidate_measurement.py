@@ -1,11 +1,8 @@
-"""Builtin measurements of the serialized trained checkpoint, run in the scoring child.
+"""Builtin checkpoint measurements in a separate supervised worker.
 
-#1296. The parent writes a validated :class:`MeasurementRequest`; the native
-task-owned scoring child calls :func:`measure_components` after source metrics
-and before formula aggregation. Every failure becomes a typed failure result:
-a measurement never raises out of the child, and a failed measurement that a
-formula term needs makes the candidate not scoreable through aggregation.
-Latency is a dedicated timed-forward protocol, never inference-phase wall time.
+The scoring interpreter reads only typed results; candidate construction and
+forward execution cannot patch its aggregation or emission. Latency follows a
+dedicated timed-forward protocol, never inference-phase wall time.
 """
 
 from __future__ import annotations
@@ -13,6 +10,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import subprocess
 import time
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
@@ -223,7 +221,7 @@ def measure_components(
 
 # ---------------------------------------------------------------------------
 # Isolated worker (#1296 F3): candidate model code never runs in the scoring
-# child or the parent. The parent launches this worker under explicit process
+# child. The parent launches this worker under explicit process
 # limits before scoring and transports only validated MeasurementResult JSON.
 # ---------------------------------------------------------------------------
 
@@ -310,6 +308,8 @@ def run_measurement_worker(
         supervise_subprocess,
     )
 
+    if not components:
+        return []
     declared = {c.id: c.measurement for c in components}
     os.makedirs(directory, exist_ok=True)
     output = os.path.join(directory, "measurement_results.json")
@@ -342,6 +342,8 @@ def run_measurement_worker(
         if reason == "work_deadline_exceeded":
             reason = f"measurement worker exceeded its {deadline:g} s deadline and was killed"
         return failed_results(components, f"measurement worker stopped: {reason}")
+    except (subprocess.CalledProcessError, OSError) as error:
+        return failed_results(components, f"measurement worker failed: {error}")
     completed = observed.completed
     if completed is None or completed.returncode != 0:
         tail = "" if completed is None else (completed.stderr or "")[-500:]

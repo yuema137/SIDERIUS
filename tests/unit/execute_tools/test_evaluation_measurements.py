@@ -15,6 +15,7 @@ from execute_tools.evaluation_metric import (
     NotScoreableResult,
     PresenceScoreabilityContract,
 )
+from execute_tools.evaluation_results import EvaluationTransportError
 from execute_tools.evaluation_spec import LatencyProtocol, MeasurementComponent
 from execute_tools.measurement_results import (
     MeasurementNoise,
@@ -350,12 +351,238 @@ def test_parent_rejects_a_measurement_roster_or_kind_mismatch():
     wrong_kind = measured(value=5.0).model_copy(
         update={"measurement": "model_bytes", "unit": "bytes"}
     )
-    for roster in ([], [wrong_kind], [measured(value=5.0), measured(value=5.0)]):
+    extra = measured(value=5.0).model_copy(update={"component_id": "undeclared"})
+    for roster in (
+        [],
+        [wrong_kind],
+        [measured(value=5.0), measured(value=5.0)],
+        [measured(value=5.0), extra],
+    ):
         payload = {
             "evaluation_result": evidence.model_dump(mode="json"),
             "denoising_score": outcome.scalar,
             "metric_result": outcome.model_dump(mode="json"),
             "measurement_results": [m.model_dump(mode="json") for m in roster],
         }
-        with pytest.raises(ValueError, match="measurement"):
+        with pytest.raises(EvaluationTransportError, match="measurement"):
             validate_child_evaluation(payload, carrier)
+
+
+def test_hostile_plugin_isolated_from_scoring_and_hung_forward_is_killed(monkeypatch, tmp_path):
+    """Real plugin import/forward patches cannot cross the measurement process boundary."""
+    import json
+    import os
+    import subprocess
+    import sys
+    import time
+
+    from core.runtime_control.observed_subprocess import observe_process_lifecycle
+    from core.sandbox_executor import TidmadSandbox
+    from core.subprocess_env import subprocess_env
+
+    plugin_dir = tmp_path / "plugins"
+    plugin_dir.mkdir()
+    marker = tmp_path / "forward_pid"
+    (plugin_dir / "hostile.py").write_text("""
+import os
+import time
+from pathlib import Path
+from pydantic import BaseModel
+from torch import nn
+from execute_tools import evaluation_aggregation, denoising_score_single
+
+def poison(*args, **kwargs):
+    raise AssertionError("candidate patched scoring")
+
+evaluation_aggregation.term_evaluation = poison
+class Config(BaseModel):
+    hang: bool = False
+class Model(nn.Linear):
+    def __init__(self, config):
+        super().__init__(4, 2)
+        self.hang = config.hang
+    def forward(self, value):
+        denoising_score_single._emit_outcome = poison
+        Path(os.environ["FORWARD_MARKER"]).write_text(str(os.getpid()))
+        if self.hang:
+            time.sleep(60)
+        return super().forward(value)
+PLUGIN_MODEL_TYPE = "hostile"
+PLUGIN_CONFIG_CLASS = Config
+PLUGIN_MODEL_CLASS = Model
+PLUGIN_OUTPUT_TYPE = "regressor"
+""")
+    checkpoint = tmp_path / "model_hostile_e_agent.pth"
+    torch.save(torch.nn.Linear(4, 2).state_dict(), checkpoint)
+    (tmp_path / "_OK_e").write_text("")
+    request = MeasurementRequest(
+        model_type="hostile",
+        experiment_id="e",
+        model_configuration={},
+        loss_type="mse",
+        checkpoint_path=str(checkpoint),
+    )
+    components = [MeasurementComponent.model_validate(latency_component(warmup=1, repeats=3))]
+    env = subprocess_env(plugin_dir=str(plugin_dir), cuda_visible_devices="")
+    env["FORWARD_MARKER"] = str(marker)
+    kwargs = {"env": env, "preexec_fn": None, "rss_limit_bytes": 8 * 1024**3}
+    results = candidate_measurement.run_measurement_worker(
+        request, components, directory=str(tmp_path), **kwargs
+    )
+    assert results[0].failure is None
+    assert int(marker.read_text()) != os.getpid()
+    argv = TidmadSandbox._measurement_results_argv(results, str(tmp_path))
+    evaluation = composed()
+    import shutil
+    from pathlib import Path
+
+    import yaml
+
+    task = tmp_path / "task"
+    fixture = Path(__file__).resolve().parents[2] / "fixtures/step10_p1/fourth_task"
+    shutil.copytree(fixture, task)
+    spec_path = task / "composition.yaml"
+    manifest = yaml.safe_load(spec_path.read_text())
+    (task / "primary.json").write_text(PRIMARY.model_dump_json())
+    manifest["metric"] = {
+        "declaration": "primary.json",
+        "implementation": {"module": "execute_tools.evaluation_metric", "symbol": "AccuracyMetric"},
+    }
+    manifest["evaluation"] = evaluation.spec.model_dump(mode="json")
+    manifest["model_plugins"] = {"dir": "../plugins", "require": ["hostile"]}
+    spec_path.write_text(yaml.safe_dump(manifest))
+    output = tmp_path / "score.json"
+    output.write_text("{}")
+    script = """
+import json, sys
+from types import SimpleNamespace
+from execute_tools.denoising_score_single import _measure_declared_components, _emit_outcome
+from execute_tools.evaluation_child import aggregate_child_outcome
+from execute_tools.evaluation_metric import MetricResult, MetricSpec, PresenceScoreabilityContract
+from workflows.task_composition import compose_scoring_child_bindings
+from execute_tools.denoising_score_single import _compose_child_secondary_metrics
+metric, composition = compose_scoring_child_bindings(sys.argv[1])
+assert _compose_child_secondary_metrics(SimpleNamespace(task_manifest=sys.argv[1])) == ()
+args = SimpleNamespace(measurement_results_json=sys.argv[2], output_json=sys.argv[3])
+secondaries = _measure_declared_components(args, composition)
+outcome, secondaries = aggregate_child_outcome(composition,
+    MetricResult(metric_id="accuracy", direction="higher", scalar=1.0), secondaries)
+_emit_outcome(args, outcome, secondaries=secondaries)
+assert "ml_models.models_sandbox" not in sys.modules
+assert not any(name.startswith("siderius_plugin_") for name in sys.modules)
+"""
+    subprocess.run(
+        [sys.executable, "-c", script, str(spec_path), argv[1], str(output)],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    payload = json.loads(output.read_text())
+    expected = (1.0 + max(0.0, 1.0 - results[0].value / 10.0)) / 2
+    assert payload["denoising_score"] == pytest.approx(expected)
+
+    # Reach an actual blocked forward, rather than timing out interpreter startup.
+    marker.unlink()
+    monkeypatch.setattr(candidate_measurement, "MEASUREMENT_LOAD_ALLOWANCE_SECONDS", 5.0)
+    components = [
+        MeasurementComponent.model_validate(
+            latency_component(warmup=1, repeats=1, timeout_seconds=0.1)
+        )
+    ]
+    lifecycles = []
+    started = time.monotonic()
+    with observe_process_lifecycle(lifecycles.append):
+        failures = candidate_measurement.run_measurement_worker(
+            request.model_copy(update={"model_configuration": {"hang": True}}),
+            components,
+            directory=str(tmp_path),
+            **kwargs,
+        )
+    assert marker.exists(), "deadline must interrupt model forward, not startup"
+    assert time.monotonic() - started < 20
+    assert lifecycles[-1].child_reaped
+    assert lifecycles[-1].group_cleanup.final.status == "absent"
+    assert "deadline" in failures[0].failure
+    # Failure evidence must be readable by scoring even when the worker wrote nothing.
+    failed_argv = TidmadSandbox._measurement_results_argv(failures, str(tmp_path))
+    assert (
+        candidate_measurement.read_measurement_results(
+            failed_argv[1], {"latency": "inference_latency_ms"}
+        )
+        == failures
+    )
+
+
+def test_worker_crash_and_rss_failure_become_typed_results(tmp_path):
+    from core.subprocess_env import subprocess_env
+
+    request = MeasurementRequest(
+        model_type="unused",
+        experiment_id="e",
+        model_configuration={},
+        loss_type="mse",
+        checkpoint_path=str(tmp_path / "missing.pth"),
+    )
+    env = subprocess_env()
+    # Failure before worker entry (invalid interpreter option) must also be typed.
+    env["PYTHONHASHSEED"] = "invalid"
+    results = candidate_measurement.run_measurement_worker(
+        request,
+        _count_components(),
+        directory=str(tmp_path),
+        env=env,
+        preexec_fn=None,
+        rss_limit_bytes=8 * 1024**3,
+    )
+    assert all("worker failed" in result.failure for result in results)
+    results = candidate_measurement.run_measurement_worker(
+        request,
+        _count_components(),
+        directory=str(tmp_path),
+        env=subprocess_env(),
+        preexec_fn=None,
+        rss_limit_bytes=1,
+    )
+    assert all("host_rss_exceeded" in result.failure for result in results)
+
+
+def test_no_measurements_skip_worker_and_keep_transport_empty(monkeypatch):
+    from core.sandbox_executor import TidmadSandbox
+
+    monkeypatch.setattr(candidate_measurement, "active_measurement_components", lambda: ())
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("non-declaring task started a measurement worker")
+
+    monkeypatch.setattr(candidate_measurement, "run_measurement_worker", forbidden)
+    sandbox = object.__new__(TidmadSandbox)
+    assert sandbox._run_candidate_measurements("e", "unused", {}, {}) is None
+    assert sandbox._measurement_results_argv(None, "unused") == []
+
+
+def test_executor_measurements_use_scoring_ceiling_and_attempt_device(monkeypatch, tmp_path):
+    """Per-role mappings must not silently give measurement the inference cap."""
+    from core.sandbox_executor import TidmadSandbox
+
+    monkeypatch.setenv("SIDERIUS_SUBPROCESS_RSS_GB", "training=8,inference=6,scoring=4")
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "GPU-attempt-binding")
+    monkeypatch.setattr(candidate_measurement, "active_measurement_components", _count_components)
+    captured = {}
+
+    def worker(request, components, **kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(candidate_measurement, "run_measurement_worker", worker)
+    monkeypatch.setattr(TidmadSandbox, "_write_model_io_config", lambda *args: None)
+    sandbox = object.__new__(TidmadSandbox)
+    sandbox.dirs = {"models": str(tmp_path), "configs": str(tmp_path)}
+    sandbox.plugin_dir = str(tmp_path / "plugins")
+    sandbox.loss_dir = str(tmp_path / "losses")
+    sandbox._run_candidate_measurements("e", "tiny", {}, {"loss_type": "smooth_l1"})
+    assert captured["rss_limit_bytes"] == 4 * 1024**3
+    assert captured["preexec_fn"] is not None
+    assert captured["env"]["CUDA_VISIBLE_DEVICES"] == "GPU-attempt-binding"
+    assert captured["env"]["SIDERIUS_PLUGIN_DIRS"].split(":")[0] == sandbox.plugin_dir

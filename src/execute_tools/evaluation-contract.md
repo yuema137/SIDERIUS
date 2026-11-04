@@ -509,21 +509,39 @@ per-sample record readback) and
 
 ## Candidate measurements
 
-Owners: `execute_tools/candidate_measurement.py` (request schema and execution),
-`execute_tools/measurement_results.py` (typed results and record accessor),
-`candidate_measurement.active_run_declares_measurements` (whether the bound run declares any).
+Owners: `execute_tools/candidate_measurement.py` (request, measurement and supervision),
+`candidate_measurement_worker.py` (worker entry), `measurement_results.py` (typed
+results/accessor), `candidate_measurement.active_measurement_components` (bound roster).
 
-Execution happens only in the native TASK_OWNED scoring child, after source primary
-and secondary metrics and before aggregation. `TidmadSandbox.execute_scoring` writes a
-validated `MeasurementRequest` (model type/config, `LossConfig` loss type, model-I/O
-path, absolute checkpoint path from `training_checkpoint_path`) to
-`configs/measurement_request_<exp_id>.json` and passes `--measurement_request_json`
-only when the bound evaluation snapshot declares a measurement component; every other
-scoring argv is unchanged. The child refuses a measurement-declaring composition
-without the flag and a request for another model type or experiment. The model is
-built with `construct_inference_model` and loaded by `load_inference_checkpoint`
-(trainer sentinel enforced) on `cuda` when the child sees one (it inherits the
-attempt's `CUDA_VISIBLE_DEVICES`, the training device), otherwise `cpu`.
+`TidmadSandbox.execute_scoring` runs declared measurements in a separate supervised
+child **before launching the scoring child**. It transports a validated
+`MeasurementWorkerRequest` containing checkpoint reconstruction inputs and the exact
+component declarations. Only the measurement worker constructs the candidate with
+`construct_inference_model`, loads it with `load_inference_checkpoint` (trainer
+sentinel enforced), and runs its forward. The scoring interpreter reads typed JSON
+and does not import candidate model/plugin modules for measurement; candidate
+monkeypatches cannot reach its aggregation or emission. This is interpreter/process
+isolation, not an OS security sandbox against filesystem writes by same-user code.
+`compose_scoring_child_bindings` and `compose_scoring_secondary_metrics` resolve
+only metric/evaluation/judge declarations through the existing owners, never the
+full task composition that would import declared model or loss plugins. Task-owned
+metric and data-path implementations still execute as the trusted scoring authority.
+
+The worker inherits the attempt's environment, plugin roots and
+`CUDA_VISIBLE_DEVICES`, selecting CUDA when visible and CPU otherwise. It uses the
+scoring role's address-space cap from `core.execution_calibration`; its supervised
+RSS ceiling is that positive cap in bytes, or physical host RAM when no extra cap
+is declared. The parent supervises the owned process group with a hard deadline of
+300 seconds for startup/checkpoint loading plus the sum of declared latency
+`timeout_seconds`. Deadline/RSS excess terminates the group (5-second TERM grace,
+then KILL and a 5-second reap bound; RSS/deadline polling is 0.2 seconds). A blocked
+model import, constructor or forward cannot evade this parent-owned deadline.
+
+The parent validates worker JSON and writes `scoring_measurement_results.json`,
+including synthesized typed failure results after timeout, RSS excess, crash or
+invalid output. Only declaring runs receive `--measurement_results_json`; the
+scoring child refuses an absent flag or a mismatched component roster/kind. Runs
+without measurements start no worker and retain their existing scoring argv.
 
 - Parameter counts are summed over the loaded model's parameters (trainable: those
   with `requires_grad`). `model_bytes` is the checkpoint file size.
@@ -532,8 +550,8 @@ attempt's `CUDA_VISIBLE_DEVICES`, the training device), otherwise `cpu`.
   `warmup` untimed forwards, then `repeats` `perf_counter` timed forwards with CUDA
   synchronization. Value is the median in ms; noise is `{repeats, iqr}`. It never
   reuses inference-phase per-file or per-batch wall times, which include I/O and
-  contention. `timeout_seconds` is a cooperative bound checked after each forward;
-  the scoring child has no hard wall-clock kill (existing behaviour, follow-up).
+  contention. Per-protocol checks after each forward can return an early failure;
+  the independent parent-owned worker deadline also kills blocked forwards.
 - Each failure (exception, timeout, nonfinite value) becomes a `MeasurementResult`
   with `failure` set; measurement code never raises out of the child. Code-package
   integrity failures still propagate.
@@ -542,8 +560,12 @@ The child emits `measurement_results` (one per component, declaration order) bes
 `evaluation_result`. `aggregate_evaluation` reads measurement terms from them: a
 missing, failed or nonfinite required measurement becomes a `ScoreabilityFailure`
 naming the component and the reason, so the candidate is not scoreable. The parent
-re-derives each measurement term against the transported `measurement_results`
-(`SelectionTerm.source_measurement`); disagreement raises `EvaluationTransportError`.
+requires exactly the declared measurement ids and kinds (no missing, extra or
+duplicate results), then re-derives each measurement term against the transported
+`measurement_results` (`SelectionTerm.source_measurement`); disagreement raises
+`EvaluationTransportError`. Constraint-only failures also include the measurement's
+failure reason. Successful scoring transport must equal the parent's validated
+worker results.
 Records carry `measurement_results` on success and on structured formula refusals;
 the field is omitted when empty, so non-declaring runs keep record and planner prompt
 bytes. `measurement_results.measurement_value(record, component_id)` is the accessor

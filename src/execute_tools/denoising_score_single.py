@@ -357,9 +357,9 @@ def _compose_child_secondary_metrics(args) -> tuple:
     """
     if args.task_manifest is None:
         return ()
-    from workflows.task_composition import compose_run_task_bindings
+    from workflows.task_composition import compose_scoring_secondary_metrics
 
-    return tuple(compose_run_task_bindings(args.task_manifest).secondary_metrics or ())
+    return compose_scoring_secondary_metrics(args.task_manifest)
 
 
 def _emit_outcome(args, outcome, *, secondaries: dict | None = None) -> None:
