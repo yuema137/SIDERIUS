@@ -1492,8 +1492,9 @@ bounded per-iteration projection and legacy omission behavior are defined in the
 worker contract's "Condition input pause" section; the CLI prints it unchanged.
 
 `--advice-file` reads UTF-8 operator advice into `operator_advice`. Invalid advice
-(non-UTF-8, empty after trimming, over 4000 characters, control or format
-characters; CRLF line breaks are first normalized to LF, a lone CR is refused) exits 2
+(non-UTF-8, empty after trimming, over 4000 characters, characters `OperatorAdvice`
+refuses (see the worker contract's
+[Resume advice](../candidate_worker/candidate-worker-contract.md#resume-advice)); CRLF line breaks are first normalized to LF, a lone CR is refused) exits 2
 with `invalid_input_or_record`. It never echoes the text, and nothing is reviewed or
 written. `--resources-file` reads one `OperationResources` JSON object into
 `resources` (for a loop whose root declared none, submitted with `--host-ledger`);

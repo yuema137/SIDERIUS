@@ -857,7 +857,7 @@ those of `native-proposal-fanout/v1`; training admission and the native tuner pa
 are those of the interpretation profile's training ("Native training after
 interpretation"), so the seed must leave training-owned fields unset or equal.
 
-**Readiness.** `NodeReadiness.kind` is `"capability"` (default) or `"adaptor"`
+**Readiness.** `NodeReadiness.kind` is `"capability"` (default) or `"adaptor"`.
 An adaptor is ready once every bound source is terminal; `_close_reason`
 closes it `blocked/dependency_not_successful` only after an abort or when a source
 is `failed` or `blocked`. A `rejected` or `skipped` source does not close it; the
@@ -1683,7 +1683,10 @@ judge call bound `judge_call_bound(loop) = final_iteration - min_completed_bodie
 COMBINE adaptors, `adaptor_llm.admit_llm_adaptors` separately refuses unless
 `Σ(adaptor static_call_bound) × final_iteration + judge_call_bound(loop)` fits the
 same cap (the sum is documented in
-[Workflow declarations, LLM configuration](../../../docs/guides/workflow-declarations.md#3-llm-configuration)). The route and the cap are resolved from the workspace run lock
+[Workflow declarations, LLM configuration](../../../docs/guides/workflow-declarations.md#3-llm-configuration)). This combined
+check is not reachable while loops are admitted only for the interpretation profile
+(`loop_models.admit_loop`), because LLM COMBINE kinds execute only under the
+judged profiles (`fanout.LLM_COMBINE_NOT_ADMITTED`). The route and the cap are resolved from the workspace run lock
 (`RunInvariants.judge_routes`, canonical) at call and readback time. Before each
 call, `call_stop_judge` re-checks the run's calls so far plus one against the locked
 cap and raises `StopConditionError` before any provider contact if it would be
@@ -1925,8 +1928,6 @@ publishes it write-once as `candidate_run/host_grant.json`;
 `launch_continuation` publishes it in the segment's control directory.
 
 Tests: `tests/unit/tools/candidate_operations/test_parallel_envelope.py`.
-
-<a id="concurrent-dispatch-b3-4b"></a>
 
 ### Concurrent dispatch
 

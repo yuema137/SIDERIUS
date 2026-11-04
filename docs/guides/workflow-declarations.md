@@ -255,8 +255,11 @@ Every condition has `on_met`:
   `best_valid_score`, `metric_id`, `direction`, `stop_reason`; omitted when
   empty). The worker contract's
   [Condition input pause](../../src/tools/candidate_worker/candidate-worker-contract.md#condition-input-pause)
-  owns how it is built and its two exits: Resume (`write-loop-resume`) or
-  Stop, which ends the paused run (End loop). After a resume, a `request_input` condition counts
+  owns how it is built and describes its two exits: Resume (`write-loop-resume`)
+  or Stop, which ends the paused run (End loop). End eligibility and its
+  `loop_end` refusals are owned by the operations contract's
+  [Authored finite-loop Stop](../../src/tools/candidate_operations/candidate-operations-contract.md#authored-finite-loop-stop).
+  After a resume, a `request_input` condition counts
   from the iteration where it last asked, so it does not ask again at once.
 
 At one boundary, a met `stop` condition wins over a met `request_input`

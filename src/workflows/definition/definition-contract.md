@@ -161,7 +161,9 @@ Every condition also carries `on_met: Literal["stop", "request_input"] = "stop"`
 the loop and asks the operator, who either continues it through the reviewed Resume
 or ends it with Stop (End loop). The worker contract's
 [Condition input pause](../../tools/candidate_worker/candidate-worker-contract.md#condition-input-pause)
-owns both exits.
+describes both exits; End eligibility and its `loop_end` refusals are owned by the
+operations contract's
+[Authored finite-loop Stop](../../tools/candidate_operations/candidate-operations-contract.md#authored-finite-loop-stop).
 
 | Constructor | Fields | Meaning |
 | --- | --- | --- |
@@ -364,7 +366,7 @@ in `llm_strategies.py` (`LLMStrategy`, B2-6,
 them to `AdaptorInstance.combine` and the catalogue.
 
 A port source may be `ExternalSource`, `ResultSource`, `AdaptorSource` or a route
-merge `SelectedSource` (decision 2026-10-28): the merge resolves at run time to the one
+merge `SelectedSource`: the merge resolves at run time to the one
 selected candidate's result, which is what record provenance (`AdaptorInputRef.source`,
 a concrete origin) names.
 

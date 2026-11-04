@@ -2719,7 +2719,10 @@ the spec conformance pass to gate with the same attribute or `uiSettings.isEnabl
 | Monitor | Native chain observation details | Advanced | hook (native-chain-monitor.js) | Native recipe internals |
 | Monitor | Recorded example | Advanced | gated | Read-only validation evidence |
 
-Open editor follow-ups are tracked as issues (overview/minimap: #1351).
+The editor does not implement these spec items: Help menu (§7.4 shows only the tour),
+Lucide header/step icons, inspector Workflow tab, tour backdrop, canvas internals below
+12 px, connection snap radius, palette click-to-add auto-wiring, Connection view;
+minimap is tracked in #1351.
 
 Navigation qualification: `tests/browser/console_navigation.mjs` uses the same
 explicit environment as the editor gate. Its temporary synthetic observations
