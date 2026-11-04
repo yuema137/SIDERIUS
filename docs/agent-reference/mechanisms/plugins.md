@@ -288,6 +288,6 @@ fresh registry and validates schema variant, loader, fingerprint contributor, re
 hook and runtime capability requirements. Plugin schemas cannot exclude fields or
 use custom serializers, including nested types, because every validated field must
 remain visible to the resume identity. Contributor output cannot contain absolute
-host paths. Builtins currently comprise metric and rubric; measurements land through
-this extension in #1296. No global registry or runtime execution is introduced.
+host paths. Builtins comprise metric, rubric and measurement (#1296); the measurement
+plugin family is a closed follow-up. No global registry or runtime execution is introduced.
 See the [evaluation contract](../../../src/execute_tools/evaluation-contract.md).
