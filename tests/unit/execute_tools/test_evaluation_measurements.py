@@ -1,5 +1,8 @@
 """#1296 builtin measurements: protocol, child execution, aggregation and transport."""
 
+import os
+import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -586,3 +589,74 @@ def test_executor_measurements_use_scoring_ceiling_and_attempt_device(monkeypatc
     assert captured["preexec_fn"] is not None
     assert captured["env"]["CUDA_VISIBLE_DEVICES"] == "GPU-attempt-binding"
     assert captured["env"]["SIDERIUS_PLUGIN_DIRS"].split(":")[0] == sandbox.plugin_dir
+
+
+def test_worker_output_cannot_block_or_flood_the_parent(monkeypatch, tmp_path):
+    """Hostile worker output: FIFO/oversized results, log floods and undecodable bytes.
+
+    Before the fix the parent blocked forever opening a FIFO results file,
+    loaded any size into memory, captured candidate stdout/stderr unbounded in
+    pipes, and let a UnicodeDecodeError escape instead of typed failures.
+    """
+    import signal
+
+    declared = {c.id: c.measurement for c in _count_components()}
+    fifo = tmp_path / "fifo.json"
+    os.mkfifo(fifo)
+    previous = signal.signal(signal.SIGALRM, lambda *_: pytest.fail("parent blocked on FIFO"))
+    signal.alarm(5)
+    try:
+        with pytest.raises(ValueError, match="not a regular file"):
+            candidate_measurement.read_measurement_results(str(fifo), declared)
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+    big = tmp_path / "big.json"
+    big.write_bytes(b" " * (candidate_measurement.MAX_RESULTS_BYTES + 1))
+    with pytest.raises(ValueError, match="exceeds"):
+        candidate_measurement.read_measurement_results(str(big), declared)
+
+    # After redirection, candidate writes reach the log, never the parent's pipes.
+    log = tmp_path / "measurement_worker.log"
+    script = (
+        "import os, sys\n"
+        "from execute_tools.candidate_measurement_worker import redirect_output_to_log\n"
+        "redirect_output_to_log(sys.argv[1])\n"
+        "os.write(1, b'\\xff' * 4096)\n"
+        "os.write(2, b'x' * (2 << 20))\n"
+    )
+    from core.subprocess_env import subprocess_env
+
+    completed = subprocess.run(
+        [sys.executable, "-c", script, str(log)],
+        env=subprocess_env(),
+        capture_output=True,
+        timeout=30,
+        check=True,
+    )
+    assert completed.stdout == b"" and completed.stderr == b""
+    assert log.stat().st_size == 4096 + (2 << 20)
+    assert len(candidate_measurement._log_tail(str(tmp_path / "out.json"))) <= 500
+
+    def undecodable(*args, **kwargs):
+        raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+    monkeypatch.setattr(
+        "core.runtime_control.observed_subprocess.supervise_subprocess", undecodable
+    )
+    request = MeasurementRequest(
+        model_type="unused",
+        experiment_id="e",
+        model_configuration={},
+        loss_type="mse",
+        checkpoint_path=str(tmp_path / "missing.pth"),
+    )
+    results = candidate_measurement.run_measurement_worker(
+        request,
+        _count_components(),
+        directory=str(tmp_path / "w"),
+        env={},
+        preexec_fn=None,
+        rss_limit_bytes=1 << 30,
+    )
+    assert results and all("worker failed" in r.failure for r in results)

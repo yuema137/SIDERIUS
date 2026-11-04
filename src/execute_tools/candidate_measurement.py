@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import stat
 import subprocess
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -274,9 +275,51 @@ def validate_measurement_roster(
             )
 
 
+MAX_RESULTS_BYTES = 1 << 20
+MAX_LOG_TAIL_BYTES = 500
+
+
+def worker_log_path(output_path: str) -> str:
+    return os.path.join(os.path.dirname(output_path), "measurement_worker.log")
+
+
+def _read_regular_file(path: str, limit: int, *, tail: bool = False) -> bytes:
+    """Read at most ``limit`` bytes from a worker-written regular file.
+
+    The worker controls the path, so never follow a symlink, never block on a
+    FIFO or device, and never load an unbounded payload into the parent.
+    """
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError(f"{os.path.basename(path)} is not a regular file")
+        if tail:
+            os.lseek(fd, max(0, info.st_size - limit), os.SEEK_SET)
+        elif info.st_size > limit:
+            raise ValueError(f"{os.path.basename(path)} exceeds {limit} bytes")
+        chunks, remaining = [], limit
+        while remaining > 0:
+            chunk = os.read(fd, remaining)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
+def _log_tail(output_path: str) -> str:
+    try:
+        data = _read_regular_file(worker_log_path(output_path), MAX_LOG_TAIL_BYTES, tail=True)
+    except (OSError, ValueError):
+        return ""
+    return data.decode("utf-8", errors="replace").strip()
+
+
 def read_measurement_results(path: str, declared: Mapping[str, str]) -> list[MeasurementResult]:
-    with open(path, encoding="utf-8") as handle:
-        raw = json.load(handle)
+    raw = json.loads(_read_regular_file(path, MAX_RESULTS_BYTES).decode("utf-8"))
     if not isinstance(raw, list):
         raise ValueError("measurement results must be a JSON list")
     results = [MeasurementResult.model_validate(item) for item in raw]
@@ -319,8 +362,9 @@ def run_measurement_worker(
     )
     with open(request_path, "w", encoding="utf-8") as handle:
         json.dump(worker.model_dump(mode="json"), handle)
-    if os.path.exists(output):
-        os.remove(output)
+    for stale in (output, worker_log_path(output)):
+        if os.path.lexists(stale):
+            os.remove(stale)
     deadline = worker_deadline_seconds(components)
     limits = ProcessLimits(
         deadline_seconds=deadline,
@@ -342,11 +386,15 @@ def run_measurement_worker(
         if reason == "work_deadline_exceeded":
             reason = f"measurement worker exceeded its {deadline:g} s deadline and was killed"
         return failed_results(components, f"measurement worker stopped: {reason}")
-    except (subprocess.CalledProcessError, OSError) as error:
-        return failed_results(components, f"measurement worker failed: {error}")
+    except (subprocess.CalledProcessError, OSError, ValueError) as error:
+        # ValueError covers undecodable bytes the worker wrote before redirecting its output.
+        detail = _log_tail(output) or str(error)
+        return failed_results(components, f"measurement worker failed: {detail}")
     completed = observed.completed
     if completed is None or completed.returncode != 0:
-        tail = "" if completed is None else (completed.stderr or "")[-500:]
+        tail = _log_tail(output) or (
+            "" if completed is None else (completed.stderr or "")[-MAX_LOG_TAIL_BYTES:]
+        )
         return failed_results(components, f"measurement worker failed: {tail.strip()}")
     try:
         return read_measurement_results(output, declared)

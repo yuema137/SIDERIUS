@@ -544,6 +544,13 @@ is declared. The parent supervises the owned process group with a hard deadline 
 then KILL and a 5-second reap bound; RSS/deadline polling is 0.2 seconds). A blocked
 model import, constructor or forward cannot evade this parent-owned deadline.
 
+Before loading the candidate, the worker redirects its stdout and stderr to
+`measurement_worker.log` in the measurement directory, so candidate output never
+reaches the parent's capture pipes; failure details quote at most the last 500 bytes
+of that log, decoded with replacement. The parent reads `measurement_results.json`
+without following symlinks or blocking, requires a regular file of at most 1 MiB,
+and treats any other file, oversized payload or undecodable bytes as invalid output.
+
 The parent validates worker JSON and writes `scoring_measurement_results.json`,
 including synthesized typed failure results after timeout, RSS excess, crash or
 invalid output. Only declaring runs receive `--measurement_results_json`; the
