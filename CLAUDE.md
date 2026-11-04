@@ -210,6 +210,9 @@ in a workflow, adapter, prompt, launcher or consumer:
 | Health policy, task checks and validity | [Health contract](src/execute_tools/health_checks/health-contract.md), [composition and verdicts](docs/agent-reference/mechanisms/health-gates.md) |
 | Plugin registration, identity and subprocess propagation | [plugin contract](docs/agent-reference/mechanisms/plugins.md) |
 | Run invariants, resume and findings union | [persistence contract](docs/agent-reference/mechanisms/persistence-and-resume.md), [run lock](src/core/run_invariants.py), [resume owner](src/core/resume.py) |
+| Formula evaluation (weighted sum), effective metric id and `evaluation_result` | [evaluation contract](src/execute_tools/evaluation-contract.md) |
+| Authored research loops, stop conditions and loop control (pause, resume, stop) | [workflow declarations](docs/guides/workflow-declarations.md), [worker contract](src/tools/candidate_worker/candidate-worker-contract.md), [operations contract](src/tools/candidate_operations/candidate-operations-contract.md) |
+| Browser console behaviour | [console contract](src/tools/candidate_console/console-contract.md) |
 
 Metric arithmetic and Health validity are distinct; do not bypass declared
 scoreability or reinterpret direction from a metric name. Keep framework Health

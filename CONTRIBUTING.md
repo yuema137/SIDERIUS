@@ -98,7 +98,11 @@ must not silently import a different checkout.
 
 ### Before you open a PR
 
-1. `make check` at your final head, from a clean tree.
+1. Run the targeted tests and static checks for your change while you work;
+   the PR's CI runs the gate on your final head. Run `make check` locally only
+   when you need the full tier (for example when CI is unavailable), from a
+   clean tree. [CLAUDE.md](CLAUDE.md#validation-and-independent-review) owns
+   this rule.
 2. Take the verdict from the log, not from a wrapper's exit code.
 3. Never fix a red gate by relaxing it — no `noqa`, no rule disabling, no
    test deletion to get green; fix the code (repo rule, see `CLAUDE.md`).
