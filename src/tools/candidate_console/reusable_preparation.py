@@ -25,6 +25,7 @@ from tools.workflow_authoring.versions import read_record, read_recovery_copy, r
 from tools.workflow_preview.models import PreviewModel
 from workflows.definition import ReusableWorkflowDocument
 
+from .error_messages import console_error_message
 from .readiness import named_credential_readiness
 from .readiness_models import CredentialReadiness
 from .reusable_models import ReusableAdmissionNotAttempted
@@ -165,7 +166,9 @@ class ReusablePreparation:
                 ):
                     raise ValueError("recovery copy is missing, unsafe or has a different hash")
             except (ValueError, OSError) as error:
-                raise OperationFailure("saved_version_unavailable", str(error)) from error
+                raise OperationFailure(
+                    "saved_version_unavailable", console_error_message(error)
+                ) from error
             source = project.recovery_directory / (selection.expected_source_sha256 + ".py")
         request = ReusableCandidatePreparationRequest(
             source_path=str(source),

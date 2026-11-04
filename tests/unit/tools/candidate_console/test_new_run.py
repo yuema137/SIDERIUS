@@ -563,5 +563,8 @@ def test_historical_same_bytes_keep_selected_save_name(historical):
     assert baseline.source_version_name == operation.request.source_version_name == "baseline"
     assert newer.source_version_name == other.request.source_version_name == "v3"
     assert baseline.expectation.observations == newer.expectation.observations
-    with pytest.raises(OperationFailure, match="recorded Save"):
+    with pytest.raises(OperationFailure) as refused:
         adapter.review("fresh", selection.model_copy(update={"saved_version_name": "v2"}))
+    # The cause stays in the private diagnostic log; the client sees the category only.
+    assert refused.value.detail.code == "saved_version_unavailable"
+    assert "recorded Save" not in refused.value.detail.message
