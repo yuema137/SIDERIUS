@@ -4,12 +4,14 @@ import importlib
 import json
 import os
 import shutil
+import stat
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 
+from core.native_writer.state import state_directory
 from core.runtime_control.process_group import GroupCleanup, GroupObservation
 from tools.candidate_operations import (
     CandidateLoopResumeOperation,
@@ -61,6 +63,11 @@ def process_segments(native_runner, monkeypatch, tmp_path):
         # The real sandbox owner: a declared name missing from the operation child's
         # environment (e.g. an unset placed device selector) refuses the launch.
         child_environment(profile, os.environ)
+        # The loop child acquires writer ownership inside the sandbox, where the
+        # workspace parent is read-only: both the fresh and continuation launches
+        # must bind the prepared private writer directory (writer_state_refused).
+        assert profile.writer_state == state_directory(profile.workspace)
+        assert stat.S_IMODE(profile.writer_state.stat().st_mode) == 0o700
         # Like the runner, poll a supplied probe first: a fired probe ends the segment as
         # cancelled before any body runs. Without a recorded intent the probe is False.
         if cancel_requested is not None and cancel_requested():

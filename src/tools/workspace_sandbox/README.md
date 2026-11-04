@@ -91,6 +91,7 @@ Edit **your external `sandbox.json`**, then run `check` again:
 | Field | Meaning |
 |---|---|
 | `workspace` | Existing canonical absolute directory where caller code and results may be written. It cannot overlap the installed runtime. |
+| `writer_state` | Optional; normally omitted in your own profile. The candidate worker sets it for authored research loops. It must be the existing private (mode 0700) native writer directory `<workspace parent>/.<workspace name>.siderius-writer`; it is then the only writable path outside `workspace`. Any other path is refused. See the [writer contract](../../core/native_writer/native-writer-contract.md#identity-and-storage). |
 | `read_only` | Existing absolute files/directories to expose without write access. A selected task or experiment inside the workspace can be frozen this way. Paths retain their host names inside the sandbox. |
 | `network` | Required explicit boolean. `false` isolates the network; `true` grants host-network access, including provider access. It does not filter destinations or authorize spending. |
 | `devices` | Explicit character-device paths under `/dev`. No GPU is exposed by default. Listing a `/dev/nvidia<N>` node also mounts read-only `/sys` and the host's NVIDIA control nodes ([GPU tasks](#gpu-tasks)). This is access, not a GPU allocation or VRAM budget. |

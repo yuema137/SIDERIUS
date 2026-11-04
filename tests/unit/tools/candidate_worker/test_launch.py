@@ -115,6 +115,23 @@ def test_process_outcome_cannot_become_validation_success(prepared, monkeypatch,
     assert receipt.validation_passed is None
 
 
+def test_non_loop_launch_binds_no_writer_state(prepared, monkeypatch):
+    """Fails if a launch without a declared loop gains the extra writable mount."""
+    from core.native_writer.state import state_directory
+
+    profiles = []
+
+    def run(profile, argv):
+        profiles.append(profile)
+        return ExecutionResult(status="failed", returncode=1, elapsed_seconds=0.1)
+
+    monkeypatch.setattr(launch_module, "run", run)
+    assert prepared.preview.document.definition.loop is None
+    receipt = launch_candidate(prepared)
+    assert [profile.writer_state for profile in profiles] == [None]
+    assert not state_directory(receipt.workspace).exists()
+
+
 def test_cli_passes_exact_typed_request_to_python_boundary(prepared, monkeypatch, tmp_path, capsys):
     """Fails if CLI invents configuration or bypasses the shared launch callable."""
     from tools.candidate_worker import __main__ as cli
