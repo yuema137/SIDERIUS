@@ -19,7 +19,7 @@ declaration and storage inputs using that contract, then submit through the same
 includes the verified per-instance trace. This profile has no training, graph
 resume or visual graph editor.
 
-With [concurrent dispatch](candidate-worker-contract.md#concurrent-dispatch-b3-4b),
+With [concurrent dispatch](candidate-worker-contract.md#concurrent-dispatch),
 independent branches can overlap. The verifier checks that each step started
 after its sources finished, including the source that chose a route. It refuses
 saved traces whose dispatch receipts contradict that order.
