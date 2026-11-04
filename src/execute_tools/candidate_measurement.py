@@ -40,6 +40,22 @@ class MeasurementRequest(BaseModel):
     model_io_json: str | None = None
 
 
+def active_run_declares_measurements() -> bool:
+    """Whether the bound run's evaluation snapshot declares a measurement component.
+
+    Reads the declaration snapshot that ``bind_run_task_composition`` binds once
+    (checked by the composition verification guard); no manifest reload and no
+    second binding. Without a binding no request is emitted, and a
+    measurement-declaring scoring child then refuses rather than skipping.
+    """
+    from agent.evaluation_context import active_evaluation_prompt_context
+
+    context = active_evaluation_prompt_context()
+    return context is not None and any(
+        isinstance(component, MeasurementComponent) for component in context.spec.components
+    )
+
+
 def read_measurement_request(path: str) -> MeasurementRequest:
     with open(path, encoding="utf-8") as handle:
         return MeasurementRequest.model_validate(json.load(handle))

@@ -67,6 +67,12 @@ ALLOWLIST: dict[Site, str] = {
     Site("execute_tools/process_seeding.py", "seeded_scope", "np.random.get_state"): (
         "seed owner: saves the caller's state"
     ),
+    Site("execute_tools/candidate_measurement.py", "_input_tensor", "torch.Generator"): (
+        "exempt: constant synthetic latency input (seed 0), never training state"
+    ),
+    Site("execute_tools/candidate_measurement.py", "_input_tensor", "torch.randn"): (
+        "exempt: drawn from the local seed-0 generator above"
+    ),
     Site("execute_tools/process_seeding.py", "seeded_scope", "np.random.set_state"): (
         "seed owner: restores the caller's state"
     ),

@@ -382,7 +382,7 @@ changes; schema/source edits can move identities even with identical prompt byte
 
 Owners: `execute_tools/candidate_measurement.py` (request schema and execution),
 `execute_tools/measurement_results.py` (typed results and record accessor),
-`workflows/evaluation_measurements.py` (whether the bound run declares any).
+`candidate_measurement.active_run_declares_measurements` (whether the bound run declares any).
 
 Execution happens only in the native TASK_OWNED scoring child, after source primary
 and secondary metrics and before aggregation. `TidmadSandbox.execute_scoring` writes a

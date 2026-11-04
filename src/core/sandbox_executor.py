@@ -983,12 +983,14 @@ class TidmadSandbox:
         component receives the flag, so every other scoring argv is unchanged.
         The scoring child re-validates the request before loading the checkpoint.
         """
-        from workflows.evaluation_measurements import active_run_declares_measurements
+        from execute_tools.candidate_measurement import (
+            MeasurementRequest,
+            active_run_declares_measurements,
+        )
 
         if not active_run_declares_measurements():
             return []
         from core.sandbox_layout import training_checkpoint_path
-        from execute_tools.candidate_measurement import MeasurementRequest
 
         request = MeasurementRequest(
             model_type=model_type,
