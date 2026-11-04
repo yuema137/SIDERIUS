@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 
 from tests.unit.tools.candidate_console.conftest import copy_quickstart_package
-from tests.unit.tools.candidate_prepare.test_reusable_preparation import reusable
+from tests.unit.tools.candidate_prepare.test_reusable_preparation import direct_child, reusable
 from tools.candidate_console.reusable_preparation import (
     NewRunIntent,
     NewRunSelection,
@@ -221,7 +221,7 @@ def test_submit_failure_is_not_presubmit_refusal(fresh, monkeypatch):
 
 
 def test_review_shows_recorded_version_name_without_changing_identity(fresh):
-    """Fails if the Save name is not projected for the bound SHA or alters the expectation."""
+    """Save names are retained as receipt metadata without changing captured source identity."""
     from tools.workflow_authoring.versions import VersionRecord, encode_record, version_record_path
 
     adapter, selection, project = fresh
@@ -243,7 +243,7 @@ def test_review_shows_recorded_version_name_without_changing_identity(fresh):
     version_record_path(project.source_file).write_bytes(encode_record(record))
     named = adapter.review("fresh", selection)
     assert named.source_version_name == "baseline"
-    assert named.expectation == unnamed.expectation
+    assert named.expectation.observations == unnamed.expectation.observations
     assert "source_version_name" not in intent(named).model_dump()
 
 
@@ -421,3 +421,147 @@ def test_busy_response_names_blocking_operation(fresh, monkeypatch):
         "message": "another operation is active or unresolved",
         "blocking_operation_id": str(blocker),
     }
+
+
+@pytest.fixture
+def historical(fresh):
+    import hashlib
+
+    from tools.workflow_authoring.versions import VersionRecord, encode_record, version_record_path
+
+    adapter, selection, project = fresh
+    original = project.source_file.read_bytes()
+    copy = project.recovery_directory / (selection.expected_source_sha256 + ".py")
+    copy.write_bytes(original)
+    current = original + b"\n# latest version\n"
+    project.source_file.write_bytes(current)
+    record = VersionRecord.model_validate(
+        {
+            "source_name": project.source_file.name,
+            "versions": [
+                {
+                    "sha256": selection.expected_source_sha256,
+                    "name": "baseline",
+                    "origin": "saved",
+                    "recorded_at": "2026-10-27T00:00:00Z",
+                },
+                {
+                    "sha256": hashlib.sha256(current).hexdigest(),
+                    "name": "v2",
+                    "origin": "saved",
+                    "recorded_at": "2026-10-28T00:00:00Z",
+                },
+            ],
+        }
+    )
+    version_record_path(project.source_file).write_bytes(encode_record(record))
+    return (
+        adapter,
+        selection.model_copy(update={"saved_version_name": "baseline"}),
+        project,
+        copy,
+        original,
+        current,
+    )
+
+
+def test_historical_prepare_snapshot_receipt_and_capture_review(
+    historical, direct_child, monkeypatch
+):
+    """Historical selection reaches native preparation and remains reviewable after source removal."""
+    from tools.candidate_console.reusable_candidate import ReusableCandidate
+    from tools.candidate_console.reusable_models import ReusableCaptureChoice
+    from tools.candidate_prepare import prepare_reusable_candidate
+
+    adapter, selection, project, copy, original, current = historical
+    review = adapter.review("fresh", selection)
+    assert review.source_version_name == "baseline"
+    assert review.source_path == str(copy)
+    assert review.expectation.observations.source.sha256 == selection.expected_source_sha256
+    results = []
+
+    def submit(operation, **kwargs):
+        results.append(prepare_reusable_candidate(operation.request))
+        return None
+
+    monkeypatch.setattr(adapter.console, "submit", submit)
+    adapter.prepare("fresh", intent(review))
+    receipt = results[0]
+    assert receipt.status == "prepared", receipt.error
+    assert receipt.source_version_name == "baseline"
+    assert (Path(receipt.envelope) / "workflow.py.snapshot").read_bytes() == original
+    assert project.source_file.read_bytes() == current
+    # Captured review is independent of mutable source/history/recovery files.
+    project.source_file.unlink()
+    copy.unlink()
+    candidate = ReusableCandidate(adapter.console)
+    selected = candidate.select(
+        "fresh", ReusableCaptureChoice(task_id=selection.task_id, run_id=selection.run_id)
+    )
+    captured = candidate.review("fresh", selected)
+    assert captured.source_version_name == "baseline"
+    assert captured.source_sha256 == selection.expected_source_sha256
+
+
+@pytest.mark.parametrize("damage", ["missing", "hash", "unrecorded"])
+def test_historical_copy_refused_before_admission(historical, monkeypatch, damage):
+    """Missing/corrupt/unrecorded recovery bytes must never dispatch or alter current source."""
+    from tests.unit.tools.candidate_console.test_http import client
+    from tools.workflow_authoring.versions import version_record_path
+
+    adapter, selection, project, copy, _, current = historical
+    review = adapter.review("fresh", selection)
+    if damage == "missing":
+        copy.unlink()
+    elif damage == "hash":
+        copy.write_bytes(b"corrupt")
+    else:
+        version_record_path(project.source_file).unlink()
+    monkeypatch.setattr(
+        adapter.console, "submit", lambda *a, **kw: pytest.fail("dispatched unavailable version")
+    )
+    with pytest.raises(OperationFailure) as raised:
+        adapter.prepare("fresh", intent(review))
+    assert raised.value.detail.code == "saved_version_unavailable"
+    response = client(adapter.console.config).post(
+        "/api/editor/fresh/reusable-preparations/review", json=selection.model_dump(mode="json")
+    )
+    assert response.status_code == 409
+    assert "recovery copy" in response.json()["error"]["message"]
+    assert "SHA-256" in response.json()["error"]["message"]
+    assert not Path(review.inputs).parent.exists()
+    assert project.source_file.read_bytes() == current
+
+
+def test_historical_same_bytes_keep_selected_save_name(historical):
+    """Restoring baseline as v3 must not relabel a Run selection of baseline."""
+    from tools.workflow_authoring.versions import (
+        RecordedVersion,
+        encode_record,
+        read_record,
+        version_record_path,
+    )
+
+    adapter, selection, project, _, _, _ = historical
+    record, _ = read_record(project.source_file)
+    assert record is not None
+    repeated = RecordedVersion.model_validate(
+        {
+            "sha256": selection.expected_source_sha256,
+            "name": "v3",
+            "origin": "saved",
+            "recorded_at": "2026-10-29T00:00:00Z",
+        }
+    )
+    version_record_path(project.source_file).write_bytes(
+        encode_record(record.model_copy(update={"versions": (*record.versions, repeated)}))
+    )
+    baseline, operation = adapter._review("fresh", selection)
+    newer, other = adapter._review(
+        "fresh", selection.model_copy(update={"saved_version_name": "v3"})
+    )
+    assert baseline.source_version_name == operation.request.source_version_name == "baseline"
+    assert newer.source_version_name == other.request.source_version_name == "v3"
+    assert baseline.expectation.observations == newer.expectation.observations
+    with pytest.raises(OperationFailure, match="recorded Save"):
+        adapter.review("fresh", selection.model_copy(update={"saved_version_name": "v2"}))

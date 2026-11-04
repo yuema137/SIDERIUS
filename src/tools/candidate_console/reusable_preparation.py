@@ -20,7 +20,8 @@ from tools.candidate_prepare import (
     inspect_reusable_source,
     preflight_reusable_candidate,
 )
-from tools.workflow_authoring.versions import recorded_name
+from tools.workflow_authoring.models import VersionName
+from tools.workflow_authoring.versions import read_record, read_recovery_copy, recorded_name
 from tools.workflow_preview.models import PreviewModel
 from workflows.definition import ReusableWorkflowDocument
 
@@ -39,6 +40,9 @@ class NewRunSelection(PreviewModel):
     run_id: UUID
     preparation_operation_id: UUID
     expected_source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    saved_version_name: VersionName | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     #: Optional operator seed for this preparation (issue #983); blank (omitted)
     #: means the preparation generates and records one at admission.
     run_seed: RunSeed | None = Field(default=None, exclude_if=lambda value: value is None)
@@ -144,13 +148,36 @@ class ReusablePreparation:
         self, project_id: str, selection: NewRunSelection
     ) -> tuple[NewRunReview, ReusablePrepareOperation]:
         project, task, root = configured_capture(self.console.setups, project_id, selection.task_id)
+        source = project.source_file
+        if selection.saved_version_name is not None:
+            try:
+                record, _ = read_record(source)
+                if record is None or not any(
+                    row.sha256 == selection.expected_source_sha256
+                    and row.name == selection.saved_version_name
+                    and row.origin == "saved"
+                    for row in record.versions
+                ):
+                    raise ValueError("version is not a recorded Save")
+                if (
+                    read_recovery_copy(project.recovery_directory, selection.expected_source_sha256)
+                    is None
+                ):
+                    raise ValueError("recovery copy is missing, unsafe or has a different hash")
+            except (ValueError, OSError) as error:
+                raise OperationFailure("saved_version_unavailable", str(error)) from error
+            source = project.recovery_directory / (selection.expected_source_sha256 + ".py")
         request = ReusableCandidatePreparationRequest(
-            source_path=str(project.source_file),
+            source_path=str(source),
+            source_version_name=selection.saved_version_name
+            or recorded_name(project.source_file, selection.expected_source_sha256),
             project_root=str(project.project_root),
             runs_root=str(root),
             # Attribution to the setup configured_capture just admitted for this task.
             setup_id=project.project_id,
-            **selection.model_dump(exclude={"task_id", "preparation_operation_id"}),
+            **selection.model_dump(
+                exclude={"task_id", "preparation_operation_id", "saved_version_name"}
+            ),
             **task.model_dump(
                 include={
                     "llm_config_file",
@@ -202,9 +229,8 @@ class ReusablePreparation:
             credential_readiness=named_credential_readiness(
                 (), native.candidate_environment_names, self.console.config.credential_file
             ),
-            source_version_name=recorded_name(
-                project.source_file, selection.expected_source_sha256
-            ),
+            source_version_name=selection.saved_version_name
+            or recorded_name(project.source_file, selection.expected_source_sha256),
             seed=review_label(selection.run_seed),
         ), operation
 
@@ -224,6 +250,10 @@ class ReusablePreparation:
             or operation.request.run_name != intent.selection.run_name
             or operation.request.expected_source_sha256 != intent.selection.expected_source_sha256
             or operation.request.run_seed != intent.selection.run_seed
+            or (
+                intent.selection.saved_version_name is not None
+                and operation.request.source_version_name != intent.selection.saved_version_name
+            )
         ):
             raise OperationFailure("conflict", "retained selection differs from admitted run")
         if operation is None:

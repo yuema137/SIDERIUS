@@ -77,6 +77,7 @@ def prepare_reusable_candidate(
         binding_sha256=binding_hash,
     )
     initial = ReusablePreparationReceipt(
+        source_version_name=request.source_version_name,
         preparation_id=control.preparation_id,
         run_id=binding.run_id,
         envelope=str(envelope),

@@ -22,6 +22,7 @@ from .resolution import ReusableCandidateLocations
 
 class ReusableCandidatePreparationRequest(PreviewModel):
     source_path: str
+    source_version_name: str | None = Field(default=None, exclude_if=lambda value: value is None)
     project_root: str
     expected_source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     runs_root: str
@@ -101,6 +102,7 @@ class ReusablePreparationControl(PreparationControl):
 
 
 class ReusablePreparationReceipt(PreviewModel):
+    source_version_name: str | None = Field(default=None, exclude_if=lambda value: value is None)
     preparation_id: UUID | None = Field(default=None, exclude_if=lambda value: value is None)
     run_id: UUID
     envelope: str
