@@ -56,16 +56,23 @@ name.
 
 ## Secondary metrics are evidence, not objectives
 
-Secondary metrics are **observational**. They are evaluated wherever the primary
-is evaluated, recorded, and shown to the agents — and they influence no ordering
-expression anywhere in the framework. Ranking, incumbent selection and
-per-partition best-of all ignore them entirely.
+By default, secondary metrics are **observational**. They are evaluated
+wherever the primary is evaluated, recorded, and shown to the agents. Ranking,
+incumbent selection and per-partition best-of ignore them.
 
-That constraint is deliberate. It is what lets you watch six quantities during a
-run without accidentally turning the run into a multi-objective optimisation
-whose trade-off nobody declared.
+The one exception is an explicit, declared trade-off: when the task's optional
+`evaluation` section uses `selection: {kind: formula}`, ranking uses a generated
+weighted-sum utility, and every secondary that a formula term references feeds
+that utility. Listing a secondary as a component without a term keeps it
+observational. See the
+[structured evaluation declaration](../agent-reference/mechanisms/metrics.md#opt-in-structured-evaluation-declaration).
 
-If you want a quantity to *decide* something, it must be the primary metric.
+That boundary is deliberate. It lets you watch six quantities during a run
+without accidentally turning the run into a multi-objective optimisation whose
+trade-off nobody declared.
+
+If you want a quantity to *decide* something, make it the primary metric or
+reference it in a declared `evaluation` formula.
 
 ## When a result cannot be scored at all
 

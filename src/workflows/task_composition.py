@@ -168,15 +168,17 @@ _MANIFEST_KEYS = frozenset(
 #: Sections a manifest must state. Health is REQUIRED-as-a-statement rather
 #: than required-as-a-path: a task with no Health family says ``none``, which
 #: is 08b's ``EXPLICIT_NONE`` — a named absence. What a composition can never
-#: express is ``LEGACY_OMITTED``, because "I said nothing" is precisely the
-#: state that resolves TIDMAD's config (design §4).
+#: express is ``LEGACY_OMITTED``: that uncomposed state is neutral (no Health
+#: family, no plugins), and a manifest must state its Health decision
+#: explicitly rather than leave it implicit.
 _REQUIRED_KEYS = frozenset(
     {"task_data_path", "dataset_profile", "metric", "task_health", "task_config"}
 )
 """``secondary_metrics`` is deliberately NOT here (Step 10 / P2b §4.1).
 
-Health is required-as-a-STATEMENT because saying nothing about it resolves
-TIDMAD's family. Secondaries have no such default: the absence of the section
+Health is required-as-a-STATEMENT so every manifest states its Health
+decision explicitly; the uncomposed ``LEGACY_OMITTED`` state is neutral and is
+not expressible in a manifest. Secondaries need no such statement: the absence of the section
 means the run has none, which is a first-class state (TIDMAD's own), and
 requiring every manifest to write ``secondary_metrics: []`` would be ceremony
 that buys no safety."""
@@ -1958,11 +1960,10 @@ def build_task_composition_ref(task_composition: Any) -> TaskCompositionRef | No
 def _compose_task_health(section: dict[str, Any], manifest_dir: str) -> TaskHealthBinding:
     """08b's binding STATES, minus the one a composition may not express.
 
-    ``LEGACY_OMITTED`` means "the caller said nothing", which is precisely
-    the state that resolves TIDMAD's task health config. A composition that
-    could express it would be able to compose a Pets run that silently used
-    TIDMAD's roster and thresholds, so it is unreachable here by
-    construction: a manifest states either a path or ``none``
+    ``LEGACY_OMITTED`` means "the caller said nothing"; it is the neutral
+    uncomposed state (``health_checks.config._load_task_binding`` returns no config and
+    no plugins). It is unreachable here by construction so that a manifest
+    always states its Health decision: either a path or ``none``
     (``EXPLICIT_NONE``, a NAMED absence).
     """
     from execute_tools.health_checks._composition import HealthBindingState

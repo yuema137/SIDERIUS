@@ -102,9 +102,12 @@ selection constraints.
 
 You may also declare **secondary metrics**. These are *observational evidence*.
 They appear in records and in what the agents read, and they influence no
-ordering, no ranking and no selection anywhere in the framework. That is a
+ordering, no ranking and no selection anywhere in the framework unless a
+`selection: {kind: formula}` term references them
+([structured evaluation](../agent-reference/mechanisms/metrics.md#opt-in-structured-evaluation-declaration)). That is a
 deliberate design rule, not an oversight: secondary metrics are how you watch a
-run without turning it into a hidden multi-objective optimisation.
+run without turning it into a hidden multi-objective optimisation; a formula
+makes the trade-off explicit and declared.
 
 Your metric also declares a **scoreability contract** — an executable check that
 runs *before* the arithmetic and answers "is this deliverable scoreable at all?".
