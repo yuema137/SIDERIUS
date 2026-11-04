@@ -79,10 +79,9 @@ A half-composed run is fatal (`CompositionNotBoundError`), never degraded.
   are relocatable.
 - **Absolute paths are never hashed** into the fingerprint, so the same package at
   two locations has one identity.
-- **`task_health` may not be omitted.** The uncomposed
-  `LEGACY_OMITTED` state is neutral and is not valid in a manifest; a composition
-  may only express `EXPLICIT_NONE`
-  (`none: true`) or a path.
+- **`task_health` may not be omitted**; the manifest states a path or
+  `none: true`. The [composition reference](../../reference/task-composition.md#why-task_health-is-required-but-may-say-none)
+  owns the states and refusals.
 - **`secondary_metrics` order is semantic** — it participates in the fingerprint
   and the record stamp.
 - Invalid composition declarations raise `TaskCompositionError`. Missing
@@ -112,11 +111,11 @@ the same file-plugin contents, since those hashes are folded in.
 ## Deliverable-absence semantics
 
 A manifest either declares indexed `deliverable` naming or supplies a task
-data path with its own `deliverable_name`. Omitting both is refused during
-composition. Own-naming tasks may use their codec without an indexed template;
-`resolve_deliverable_naming` refuses that inapplicable capability, while
-`active_deliverable_naming` returns `None`. These decisions are based on declared
-capability, never task identity.
+data path with its own `deliverable_name`; omitting both is refused during
+composition. The decision keys on declared capability, never task identity. The
+[composition reference](../../reference/task-composition.md#what-deliverable-absence-means)
+owns the composition refusal and the runtime `resolve_deliverable_naming` /
+`active_deliverable_naming` behavior.
 
 ## Source map
 

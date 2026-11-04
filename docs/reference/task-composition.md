@@ -44,7 +44,7 @@ There is **no `version` field**. (Recorded as a known gap — see
 | `model_plugins` | — | the pack's model-plugin root + the model types it must produce | nothing bound; legacy discovery only |
 | `loss_plugins` | — | the pack's loss-plugin root | nothing bound; legacy loss discovery only |
 | `objective` | — | the task's **authoritative** training objective (overrides the planner) | no override; the planner's choice governs |
-| `deliverable` | — | an indexed deliverable filename template | see below — a task that names its own artifacts is **refused** an indexed template, never handed TIDMAD's |
+| `deliverable` | — | an indexed deliverable filename template | **run refused** unless the `task_data_path` implementation names its own artifacts — see below |
 | `dynamic_observables` | — | quantities observed DURING training, once per epoch | the run observes none: `training_history.observations` stays `{}` |
 | `static_observables` | — | quantities read off the TRAINED model after training | the run observes none: no record key, no rendered bytes |
 | `parameter_rules` | — | deterministic constraints on configured parameter leaves | no task-declared parameter constraints |
@@ -58,17 +58,21 @@ There is **no `version` field**. (Recorded as a known gap — see
 
 Omitting the section and declaring `none: true` are *different states*.
 
-Omission is the legacy state, and the legacy state resolves **TIDMAD's health
-family**. A composition is therefore forbidden from expressing it — because "I
-said nothing" would silently give an unrelated task TIDMAD's thresholds. Saying
-`none: true` is a named absence and is safe.
+Omitting the section refuses composition with `TaskCompositionError`
+("missing required section(s) ['task_health']"), like any other required
+section. The uncomposed binding state (`LEGACY_OMITTED`) is neutral: it resolves
+no Health family and no plugins. A manifest cannot express that state; it must
+state either a `config:` path or the named absence `none: true`.
 
 ```yaml
 task_health:
   none: true        # explicit: this task declares no health family
 ```
 
-Declaring both `none: true` and `config:` is refused.
+Declaring both `none: true` and `config:` is refused. Without `none: true`,
+`config` must be a non-empty string naming an existing file (resolved against the
+manifest directory); a missing file is refused rather than replaced by another
+task's Health family.
 
 ### Optional scoped storage provenance
 
@@ -282,27 +286,25 @@ The workflow passes the brief through a typed adapter; neither the adapter nor
 the Data Analysis Agent mines interpretation prose or treats asset presence as
 authorization.
 
-### What `deliverable` absence means — four states, keyed on capability
+### What `deliverable` absence means
 
-`deliverable` absence is resolved by `resolve_deliverable_naming`
-(`execute_tools/deliverable_spec.py:380`), and the discriminator is a
-**declared capability** — does the task name its artifacts itself? — never a
-task identity:
+A composed manifest must satisfy one of two shapes:
 
-1. a naming is **bound** (the section was declared) → it is used, composed or
-   not;
-2. not bound and **not composed** → the legacy path, byte-for-byte unchanged;
-3. composed, and the task declares **no** deliverable name of its own → the
-   shipped indexed template (this is what TIDMAD's composed manifest resolves);
-4. composed, and the task **names its own artifacts** through its data path
-   (Pets, DAVIS) → **refused**: no indexed template exists for such a run, and
-   handing it TIDMAD's would give the cleanup glob filenames the run never
-   wrote.
+1. it declares `deliverable:` (an indexed filename template), or
+2. its `task_data_path` implementation names its own artifacts (a
+   module-level `deliverable_name`).
 
-State 4 closed the old hazard (F-A4-1, PR-12d seam E), under which absence
-silently resolved TIDMAD's template for every composed task. The historical
-finding record is
-[DOC-F1](../audit/documentation_gap_audit.md#12-findings-recorded-deliberately-not-fixed-here).
+A composed manifest with neither is refused at composition with
+`TaskCompositionError` ("declares no 'deliverable:' section and its
+task_data_path ... does not name its own artifacts"). No indexed template is
+inferred.
+
+At runtime `resolve_deliverable_naming` (`execute_tools/deliverable_spec.py`)
+returns the bound naming when `deliverable:` was declared. For a composed task
+that names its own artifacts and declares no `deliverable:`, it raises
+`DeliverableNamingNotApplicableError`: no indexed template exists for that run.
+Callers that can proceed without one use `active_deliverable_naming`, which
+reports the absence as `None`.
 
 ## Declaring code: `module:` versus `file:`
 
@@ -503,6 +505,41 @@ static_observables:                            # optional; ORDER IS SEMANTIC
 
 Notes:
 
+- `task_data_path` accepts only the keys `file`, `module`, `symbol`, `id` and
+  `config`. The optional `config:` is a mapping of keyword arguments passed to
+  the implementation's constructor; the framework knows none of its field
+  names. A value of the exact form `{ref: <path>}` is resolved against the
+  manifest directory (like every other manifest ref) before construction; every
+  other value passes through verbatim:
+
+  ```yaml
+  task_data_path:
+    file: ./plugins/my_data_path.py
+    symbol: MyTaskDataPath
+    config:
+      manifest_path: {ref: ./data/manifests/train.csv}   # resolved path
+      batch_hint: 32                                     # passed verbatim
+  ```
+
+  `TaskCompositionError` refuses: a `config` that is not a mapping; an empty,
+  whitespace-only or non-string key; a `ref` envelope with any sibling key; and
+  a `ref` that is not a non-empty string. The authored `config` mapping (with
+  unresolved `ref` strings, never absolute paths) enters the semantic
+  fingerprint as `task_data_path_config` when non-empty, so changing it is a
+  semantic change while relocating the package is not. An absent or empty
+  `config` adds no fingerprint key.
+- Named absence (`none: true`) is accepted by these optional sections, with the
+  same effect as omitting the section:
+  - `proposal_blocks`, `implementor_blocks`, `interpretation_blocks`: renders no
+    task blocks. When `none: true` is present the section's `config` is not
+    read.
+  - `model_plugins`, `loss_plugins`: binds no plugin root. `none: true` beside
+    `dir` is refused.
+  - `objective`: no task override; the planner's choice governs. `none: true`
+    beside `config` or `implementation` is refused.
+  - `judge_blocks`: see [Judge guidance and rubrics](#judge-guidance-and-rubrics).
+  - `task_health` (required): see
+    [Why `task_health` is required](#why-task_health-is-required-but-may-say-none).
 - `secondary_metrics` **order is semantic** — it participates in the composition
   fingerprint and the record stamp. Duplicate ids, or a secondary whose id
   collides with the primary's, are refused.
@@ -751,18 +788,21 @@ Identity and refusal rules:
 
 ## Beyond the manifest: `--data_dir`
 
-A composed run **requires** `--data_dir`. It fails closed before any LLM call or
-GPU work with `CompositionDataRootMissing`. Without it every child subprocess
-would fall back to the import-time TIDMAD data directory.
+A composed run **requires** `--data_dir`. Without it,
+`bind_run_task_composition` fails closed with `CompositionDataRootMissing`
+before any LLM call or GPU work. The root is validated through
+`bind_physical_data_root`; a missing, placeholder or non-directory root is
+refused before any child subprocess is spawned. There is no import-time data
+directory fallback.
 
-That same root is what the run's **measurement capability** is resolved against,
-and the capability carries the composed task's own identity (its
-`task_data_path:` `id`) rather than TIDMAD's. So the launch guard's
-"can this environment measure?" verdict is about the dataset the run actually
-reads. A composed run that cannot supply a root is refused **by name** — the
-refusal states which task could not be measured, never TIDMAD's dataset.
-An un-composed run is unchanged: it resolves TIDMAD's capability against the
-import-time data directory exactly as before.
+That same root is what the run's **measurement capability** is resolved
+against, and the capability carries the composed task's own identity (its
+`task_data_path:` `id`). The launch guard's "can this environment measure?"
+verdict is therefore about the dataset the run actually reads, and a refusal
+names that task.
+
+A run without a task composition is refused ("a task composition is required;
+the framework does not select a scientific task").
 
 ## Things the manifest does *not* declare
 
