@@ -448,6 +448,13 @@ single comparison arithmetic, shared by the scoring child and the parent verifie
 and `constrain_primary` (primary selection). Constraints are enforced as declared
 scoreability; no selection site carries a separate feasibility filter.
 
+An infeasible round takes the existing scoring-refusal path: the attempt does not
+succeed, so the tuner's attempt retry and `consecutive_fails` accounting apply
+unchanged (each retry trains again; consecutive infeasible rounds reach the
+consecutive-failure brake). The parent re-derives every constraint verdict on a
+successful evaluation; on a refusal it accepts the child's failure list, which
+fails closed.
+
 - `SelectionBinding` is bound when the spec declares formula terms OR constraints.
   `constraints: tuple[ConstraintTerm, ...]` (omitted when empty) carries each
   declared constraint and the source metric id of its component (`None` for a

@@ -374,7 +374,10 @@ What works now, and what comes later:
   `constraint balanced_accuracy >= 0.9 violated: 0.85`. Such a round is never
   chosen as the best result, the Trial winner or the incumbent, and the
   planner and interpreter see the reason. Trial and Formal rounds follow the
-  same rule. The check in step 6 still warns about a constraint that works
+  same rule. A round that breaks a constraint counts as a failed attempt:
+  the tuner retries it like any other failed round, each retry trains again,
+  and several such rounds in a row stop tuning through the usual
+  consecutive-failure limit. Set thresholds that a reasonable model can meet. The check in step 6 still warns about a constraint that works
   against the metric's own direction (for example
   `balanced_accuracy <= 0.99`).
 - **Scoring route:** constraints need the native task-owned scoring step,
