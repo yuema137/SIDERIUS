@@ -2415,15 +2415,35 @@ def compose_metric_from_manifest(manifest_path: str) -> EvaluationMetric:
     return compose_scoring_child_bindings(manifest_path)[0]
 
 
+@dataclass(frozen=True)
+class ScoringChildComposition:
+    """Only scoring declarations; never resolves candidate model/loss plugins."""
+
+    metric: EvaluationMetric
+    evaluation: ResolvedEvaluation | None
+    secondary_metrics: tuple[EvaluationMetric, ...]
+
+
+def compose_scoring_secondary_metrics(manifest_path: str) -> tuple[EvaluationMetric, ...]:
+    """Resolve secondary metrics without loading model or training declarations."""
+    resolved = os.path.abspath(manifest_path)
+    raw = _read_manifest(resolved)
+    directory = os.path.dirname(resolved)
+    with composition_package(raw.get("code_package"), directory):
+        primary, _, _ = _compose_metric(_section(raw, "metric", resolved), directory)
+        secondaries, _, _, _ = _compose_secondary_metrics(raw, directory, primary.spec.id)
+    return secondaries
+
+
 def compose_scoring_child_bindings(
     manifest_path: str,
-) -> tuple[EvaluationMetric, RunTaskComposition | None]:
+) -> tuple[EvaluationMetric, ScoringChildComposition | None]:
     """The run's PRIMARY metric, composed from its manifest. Step 11 C5.
 
     Returns the metric and, ONLY when the manifest declares ``evaluation``,
-    the one full composition the child needs for deterministic selection
-    (#1294). An absent-evaluation child composes the metric section alone,
-    exactly as before; it never pays for a full plugin/code-package load.
+    the scoring-only composition needed for deterministic selection (#1294).
+    It never resolves model/loss plugins or other training declarations.
+    An absent-evaluation child composes the metric section alone.
 
     The child-process counterpart of the metric half of
     :func:`compose_run_task_bindings`, and deliberately **only** that half:
@@ -2454,24 +2474,27 @@ def compose_scoring_child_bindings(
     """
     resolved_manifest = os.path.abspath(manifest_path)
     raw = _read_manifest(resolved_manifest)
-    composition: RunTaskComposition | None = None
-    if "evaluation" in raw:
-        from workflows.evaluation_composition import require_evaluation_runtime
-
-        composition = compose_run_task_bindings(manifest_path)
-        require_evaluation_runtime(composition.evaluation)
-        metric = composition.metric
-    else:
-        with composition_package(raw.get("code_package"), os.path.dirname(resolved_manifest)):
-            metric, _declaration, _plugin = _compose_metric(
-                _section(raw, "metric", resolved_manifest), os.path.dirname(resolved_manifest)
-            )
     from execute_tools.evaluation_metric import EvaluationMetric
+    from workflows.evaluation_composition import compose_evaluation, require_evaluation_runtime
 
-    if not isinstance(metric, EvaluationMetric):
-        raise TaskCompositionError(
-            "this metric requires complete candidate evaluation, not the local scoring child"
-        )
+    composition: ScoringChildComposition | None = None
+    directory = os.path.dirname(resolved_manifest)
+    with composition_package(raw.get("code_package"), directory):
+        metric, _, _ = _compose_metric(_section(raw, "metric", resolved_manifest), directory)
+        if not isinstance(metric, EvaluationMetric):
+            raise TaskCompositionError(
+                "this metric requires complete candidate evaluation, not the local scoring child"
+            )
+        if "evaluation" in raw:
+            secondaries, _, _, _ = _compose_secondary_metrics(raw, directory, metric.spec.id)
+            judge_task, _ = _compose_judge_task(raw, directory)
+            evaluation = compose_evaluation(
+                raw, directory, {m.spec.id: m.spec for m in (metric, *secondaries)}, judge_task
+            )
+            require_evaluation_runtime(evaluation)
+            composition = ScoringChildComposition(
+                metric=metric, evaluation=evaluation, secondary_metrics=secondaries
+            )
     return metric, composition
 
 

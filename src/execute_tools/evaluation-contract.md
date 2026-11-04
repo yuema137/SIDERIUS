@@ -12,8 +12,11 @@ source metric behavior and prompt bytes. Presence permits composition and inspec
 and primary-only metric declarations can launch with evaluation rendering.
 Weighted-sum formula aggregation (#1294) launches on the supported native route
 described in [Deterministic selection runtime](#deterministic-selection-runtime).
-Feasibility (#1295), measurements (#1296) and rubric execution (#1297) still have
-independent, currently closed capability gates. Composition never
+Rubric components and rubric balancing (#1297) launch as declared agent
+guidance only; see [Rubric guidance](#rubric-guidance). Feasibility constraints on metric and
+measurement components (#1295) launch on the same route; see [Feasibility constraints](#feasibility-constraints).
+Builtin candidate measurements (#1296) launch on the same route; see
+[Candidate measurements](#candidate-measurements). Composition never
 executes arithmetic, measurements or an LLM. A declaration is not runtime support.
 
 `RunTaskComposition.evaluation` is `ResolvedEvaluation | None`. Its `spec` is the
@@ -66,7 +69,15 @@ Builtin components:
   assertion is excluded from spec serialization; resolved identity carries the
   authoritative SHA. No rubric scores enter scalar selection or constraints.
 
-Measurement is NOT a builtin E1 schema. #1296 adds it by registering a variant.
+- `measurement` (#1296): required `measurement` (one of `trainable_parameter_count`,
+  `total_parameter_count`, `model_bytes`, `inference_latency_ms`), required explicit
+  `direction: higher | lower`, optional descriptive `range`, and `protocol` required
+  for `inference_latency_ms` and refused otherwise (`input_shape` 1-8 positive ints
+  including batch, `warmup` 0..1000 default 10, `repeats` 1..10000 default 50,
+  `timeout_seconds` (0, 3600] default 300). Units are fixed by the measurement
+  (parameters, bytes, ms), never authored or inferred. Two components with the same
+  measurement and protocol refuse. Registration requires capability `measurements`.
+
 External variants may add their own typed fields, including limits if appropriate.
 
 Selection variants:
@@ -80,8 +91,9 @@ Selection variants:
   expression language or lexicographic family in v1.
 - `{kind: rubric_balance, rubric: {id, version, sha256?}, guidance: <text>,
   deterministic_ranking: <primary or formula>}`. The deterministic ranking is
-  mandatory and cannot recursively be rubric_balance. Rubric selection is only
-  used by admitted judged paths once #1297 lands, not by every selection site.
+  mandatory and cannot recursively be rubric_balance. The rubric and guidance
+  are rendered agent guidance only; every deterministic ranking uses
+  `deterministic_ranking` (see [Rubric guidance](#rubric-guidance)).
 
 Weighted-sum arithmetic contract: normalize each term to
 `q=(value-lower)/(upper-lower)` using its explicit range policy. Convert q to
@@ -102,7 +114,7 @@ produce inspection warnings. Descriptive component ranges do not impose feasibil
 No equality, implicit tolerance or inferred scientific threshold is supported.
 
 Only a secondary referenced by a formula term or constraint becomes REQUIRED
-quantitative evidence for formula execution (constraint execution remains #1295). Merely listing it as a component leaves it
+quantitative evidence for formula and constraint execution. Merely listing it as a component leaves it
 observational. Missing or nonfinite required evidence must fail closed; unrelated
 secondary errors retain their observational behavior. Health, feasibility and
 preference remain separate authorities; Trial Health exemptions do not grant
@@ -176,9 +188,10 @@ The `evaluation.spec` renderer is gated outside its decorated boundary on
 absence: historical profiles on absent-evaluation tasks never meet the new
 boundary and need no override. Present evaluation requires an explicit override
 or native declaration in an active profile. Changed assembly hashes still require
-normal offline qualification. #1295 owns feasibility at all
-selection sites; #1296 supplies measurement schema/execution; #1297 owns candidate
-result projection and versioned replayable judge calls. Existing metric-scored
+normal offline qualification. #1295 enforces feasibility through scoreability
+(below), so every selection site inherits it; #1296 supplies measurement schema/execution (below);
+#1297 ships rubric guidance only; candidate-result projection and versioned replayable
+rubric judge calls are a separate follow-up. Existing metric-scored
 adaptor restrictions remain until deliberately amended by their owner.
 
 Composition scales with declaration/plugin bytes, not dataset size; it loads no
@@ -243,7 +256,7 @@ prediction direction rules to the named prediction metric. Under active evaluati
 the interpreter labels its legacy score field as a recorded score; serialized keys
 remain unchanged. Literature extraction preserves published source facts and
 receives no task-evaluation block. Existing judge versions remain unchanged;
-#1297 must explicitly use this renderer in new versions.
+a future rubric judge version must explicitly use this renderer.
 
 A historical profile selected for an evaluation-bearing task must declare this
 boundary native or provide a renderer accepting `context`. An empty override
@@ -347,8 +360,8 @@ metric-rank adaptor). Source per-file values must not be labelled as utility evi
 scoring-child execution is supported. ANCHOR_NORMALIZED and
 CandidateEvaluationExecutor combinations refuse; their child handoffs are #1336.
 Referenced custom quantitative kinds without runtime values refuse by component
-name and kind (#1338). Constraints and rubric capabilities remain independently
-gated; enabling formula aggregation does not enable them.
+name and kind (#1338). Constraints remain independently gated; enabling formula
+aggregation does not enable them. Rubric capabilities add no runtime value.
 
 Under formula selection, existing primary-unit thresholds refuse. Use the generated
 effective metric id for loop `metric_threshold`, route `MetricAtLeast`, and
@@ -368,3 +381,226 @@ Validation owners: `tests/unit/execute_tools/test_evaluation_aggregation.py`,
 structural guards and the complete affected package suites. Paper qualification
 must report semantic-payload parity separately from release-wide assembly identity
 changes; schema/source edits can move identities even with identical prompt bytes.
+
+## Rubric guidance
+
+`IMPLEMENTED_CAPABILITIES` sets `rubric components` and `rubric balancing` to
+True. The capabilities have exactly one runtime consumer: the
+`evaluation.spec` renderer. Launch admits a `kind: rubric` component and
+`selection: {kind: rubric_balance}` on every route that admits the rest of the
+evaluation. Their deterministic parts keep their own gates: a formula under
+`deterministic_ranking` needs `formula aggregation`; constraints need
+`feasibility constraints`.
+
+**A rubric is not a metric.** A rubric referenced by an evaluation `rubric`
+component or by `selection.kind: rubric_balance` is task-declared
+natural-language guidance. Its criteria, weights and integer scale, and the
+balance `guidance`, are rendered to agents through `evaluation.spec`. The
+rubric enters evaluation identity by resolved content hash. It has no
+direction, units or total. It is never:
+
+- a formula term or a constraint;
+- an input to MetricOrder;
+- a record score field;
+- a Health input;
+- a stop-condition value.
+
+Every deterministic ranking uses the effective metric of
+`deterministic_ranking` (`formula_terms` unwraps it; `selection_metric_spec`
+exposes it): tuner trials and planner requests, incumbent, resume folds,
+`--target_score`, metric stop conditions and metric adaptors. That effective
+metric is the source primary for `{kind: primary}`, or
+`evaluation.weighted_sum.v1.<evaluation SHA>` for a formula.
+
+No framework step judges a trained candidate against an evaluation rubric. No
+judge call, judge evidence or LLM cost is added. The existing judge strategies
+use only the rubric named in their own declaration (`rubric-rank/v1`), and
+their templates are unchanged.
+
+Rendered semantics:
+
+- A rubric component ends with `Role: qualitative guidance for agents; no
+  framework step scores it; never a deterministic scalar or ranking input.`
+- Rubric balancing states `Rubric balancing is guidance for agents; no
+  framework step judges candidates against it.`, followed by the rendered
+  `deterministic_ranking`.
+
+Evaluations without rubrics, and absent `evaluation:` sections, keep their
+prompt bytes. No new prompt boundary is added.
+
+Deferred follow-up: rubric-driven judged selection is a separate change. It
+covers a `candidate.result` projector, a `judge.rubric/v2` template rendering
+`evaluation.spec`, a dedicated judge route and budget, and rubric facts for
+adaptors over `tuning.output` and JudgeStop. Today `ITEM_PROJECTORS` holds only
+`proposal.output` and `literature.output`. No shipped profile admits an adaptor
+over `tuning.output`. Q-B2-2 forbids an LLM from reordering metric-scored
+items.
+
+Validation: `test_rubric_guidance_launches_without_entering_metric_order` (binding
+admits a rubric component with `rubric_balance` over a formula; the effective
+metric is the weighted-sum id) and the rubric wording assertions in
+`test_rubric_balance_discloses_criteria_and_deterministic_formula`.
+
+## Feasibility constraints
+
+Owner: `evaluation_aggregation.evaluate_constraints` / `evaluate_constraint` (the
+single comparison arithmetic, shared by the scoring child and the parent verifier)
+and `constrain_primary` (primary selection). Constraints are enforced as declared
+scoreability; no selection site carries a separate feasibility filter.
+
+An infeasible round takes the existing scoring-refusal path: the attempt does not
+succeed, so the tuner's attempt retry and `consecutive_fails` accounting apply
+unchanged (each retry trains again; consecutive infeasible rounds reach the
+consecutive-failure brake). The parent re-derives every constraint verdict on a
+successful evaluation; on a refusal it accepts the child's failure list, which
+fails closed.
+
+- `SelectionBinding` is bound when the spec declares formula terms OR constraints.
+  `constraints: tuple[ConstraintTerm, ...]` (omitted when empty) carries each
+  declared constraint and the source metric id of its component (`None` for a
+  non-metric quantitative component). `is_formula` is true only when the effective
+  metric id differs from the source id; constraint-only bindings keep the source
+  `MetricSpec` as the effective spec, its units and its per-sample evidence.
+- The scoring child judges every constraint on the raw post-transform value: the
+  source primary or a declared secondary by metric id, or, for a measurement
+  component, the typed `MeasurementResult` whose `component_id` matches (#1296
+  `measurement_results`, indexed by `record_measurements`); a failed measurement
+  has no value. Comparison is exact on the
+  decimal representations; `>=`/`<=` are inclusive and `>`/`<` exclusive; no
+  tolerance. A missing, null or nonfinite value is never satisfied.
+- Each unsatisfied constraint is a `ScoreabilityFailure`
+  `requirement="constraint:<component>"`, detail
+  `constraint <component> <op> <threshold> violated: <raw>` (or `has no finite
+  value`). Under formula selection these join the term failures under
+  `evaluation_inputs/v1`. Under primary selection the refusal is a
+  `NotScoreableResult` for the source metric id with contract
+  `evaluation_constraints/v1`; a source-primary refusal is returned unchanged
+  without evaluation evidence.
+- `EvaluationEvidence.constraints: tuple[ConstraintEvaluation, ...]` (omitted when
+  empty) records `{component_id, op, threshold, raw, satisfied, detail}` in
+  declaration order on success and refusal. Under primary selection a successful
+  `aggregate` equals the source scalar and `components` is empty.
+- The parent re-derives every constraint verdict from transported raw values and
+  refuses disagreement or a success that contains a violated constraint
+  (`EvaluationTransportError`). It also requires the constrained primary scalar to
+  equal the source scalar.
+- A refusal becomes the existing `error_scoring` / `failure_type=not_scoreable`
+  record with `metric_refusal` and `evaluation_result`; `memory.conclusion` names
+  every violated constraint and `memory_update` names infeasibility. Every
+  selection site already requires `status == "success"` or a finite
+  `denoising_score` (tuner best tracks and Trial winner, skip/bypass gates, chain
+  incumbent and `--target_score`, resume folds, loop stops, `MetricAtLeast`,
+  adaptors, interpretation, reports), so an infeasible candidate is never selected,
+  ranked or used as an incumbent. Health is not evaluated for a refused round, and
+  feasibility never changes Health validity or a scored record's score.
+- Trial and Formal rounds follow the same rule; there is no Trial exemption.
+- Constraint-only bindings do not change threshold units: `--target_score`, loop
+  `metric_threshold`, `MetricAtLeast` and `threshold/v1` keep the source metric.
+  Only the native TASK_OWNED scoring child produces the evidence; other routes and
+  `CandidateEvaluationExecutor` refuse at launch, as for formulas.
+- Pseudo scoring (`core.pseudo_scoring`) passes synthetic values through the same
+  child owner when constraints are declared.
+- The shared `evaluation.spec` renderer states that a Trial or Formal candidate
+  violating a constraint, or lacking a finite value for one, is not scoreable and
+  never selected.
+
+Not covered: noise-aware constraints and a feasibility-specific planner feedback
+carrier. `require_component_runtime` admits metric and builtin measurement
+components; custom plugin kinds without a runtime value remain refused (#1338).
+
+Validation: `tests/unit/execute_tools/test_evaluation_constraints.py` (refusal and
+reason, exact inclusivity, fail-closed missing values, formula constraints, parent
+re-derivation, tuner best/Trial-winner exclusion through the real record builder,
+per-sample record readback) and
+`tests/unit/core/test_stub_formula_scoring.py` (pseudo transport).
+
+## Candidate measurements
+
+Owners: `execute_tools/candidate_measurement.py` (request, measurement and supervision),
+`candidate_measurement_worker.py` (worker entry), `measurement_results.py` (typed
+results/accessor), `candidate_measurement.active_measurement_components` (bound roster).
+
+`TidmadSandbox.execute_scoring` runs declared measurements in a separate supervised
+child **before launching the scoring child**. It transports a validated
+`MeasurementWorkerRequest` containing checkpoint reconstruction inputs and the exact
+component declarations. Only the measurement worker constructs the candidate with
+`construct_inference_model`, loads it with `load_inference_checkpoint` (trainer
+sentinel enforced), and runs its forward. The scoring interpreter reads typed JSON
+and does not import candidate model/plugin modules for measurement; candidate
+monkeypatches cannot reach its aggregation or emission. This is interpreter/process
+isolation, not an OS security sandbox against filesystem writes by same-user code.
+`compose_scoring_child_bindings` and `compose_scoring_secondary_metrics` resolve
+only metric/evaluation/judge declarations through the existing owners, never the
+full task composition that would import declared model or loss plugins. Task-owned
+metric and data-path implementations still execute as the trusted scoring authority.
+
+The worker inherits the attempt's environment, plugin roots and
+`CUDA_VISIBLE_DEVICES`, selecting CUDA when visible and CPU otherwise. It uses the
+scoring role's address-space cap from `core.execution_calibration`; its supervised
+RSS ceiling is that positive cap in bytes, or physical host RAM when no extra cap
+is declared. The parent supervises the owned process group with a hard deadline of
+300 seconds for startup/checkpoint loading plus the sum of declared latency
+`timeout_seconds`. Deadline/RSS excess terminates the group (5-second TERM grace,
+then KILL and a 5-second reap bound; RSS/deadline polling is 0.2 seconds). A blocked
+model import, constructor or forward cannot evade this parent-owned deadline.
+
+Before loading the candidate, the worker redirects its stdout and stderr to
+`measurement_worker.log` in the measurement directory, so candidate output never
+reaches the parent's capture pipes; failure details quote at most the last 500 bytes
+of that log, decoded with replacement. The parent reads `measurement_results.json`
+without following symlinks or blocking, requires a regular file of at most 1 MiB,
+and treats any other file, oversized payload or undecodable bytes as invalid output.
+
+The parent validates worker JSON and writes `scoring_measurement_results.json`,
+including synthesized typed failure results after timeout, RSS excess, crash or
+invalid output. Only declaring runs receive `--measurement_results_json`; the
+scoring child refuses an absent flag or a mismatched component roster/kind. Runs
+without measurements start no worker and retain their existing scoring argv.
+
+- Parameter counts are summed over the loaded model's parameters (trainable: those
+  with `requires_grad`). `model_bytes` is the checkpoint file size.
+- `inference_latency_ms`: one synthetic input (`torch.randn` seeded 0 in the resolved
+  inference dtype, zeros for integer dtypes), `eval()` and `inference_mode()`,
+  `warmup` untimed forwards, then `repeats` `perf_counter` timed forwards with CUDA
+  synchronization. Value is the median in ms; noise is `{repeats, iqr}`. It never
+  reuses inference-phase per-file or per-batch wall times, which include I/O and
+  contention. Per-protocol checks after each forward can return an early failure;
+  the independent parent-owned worker deadline also kills blocked forwards.
+- Each failure (exception, timeout, nonfinite value) becomes a `MeasurementResult`
+  with `failure` set; measurement code never raises out of the child. Code-package
+  integrity failures still propagate.
+
+The child emits `measurement_results` (one per component, declaration order) beside
+`evaluation_result`. `aggregate_evaluation` reads measurement terms from them: a
+missing, failed or nonfinite required measurement becomes a `ScoreabilityFailure`
+naming the component and the reason, so the candidate is not scoreable. The parent
+requires exactly the declared measurement ids and kinds (no missing, extra or
+duplicate results), then re-derives each measurement term against the transported
+`measurement_results` (`SelectionTerm.source_measurement`); disagreement raises
+`EvaluationTransportError`. Constraint-only failures also include the measurement's
+failure reason. Successful scoring transport must equal the parent's validated
+worker results.
+Records carry `measurement_results` on success and on structured formula refusals;
+the field is omitted when empty, so non-declaring runs keep record and planner prompt
+bytes. `measurement_results.measurement_value(record, component_id)` is the accessor
+for feasibility (#1295) and rubric projection (#1297); it raises
+`MeasurementUnavailable` instead of returning a missing value. Pseudo mode
+(`core/pseudo_scoring.py`) synthesizes results within term bounds and passes them
+through the same aggregation owner. Rendering uses `render_measurement_component`
+through the existing `evaluation.spec` boundary.
+
+Refused combinations: a bound `CandidateEvaluationExecutor` refuses launch
+(`require_measurement_route`). The ANCHOR_NORMALIZED route scores in process and runs
+no measurement, so a formula term over a measurement fails closed there. Shared-GPU
+contention during latency timing is not detected; pair accelerator latency with an
+exclusive host-ledger placement (`time_budgeted: true`). Replay reads persisted values
+and never re-measures.
+
+Closed follow-ups (not implemented): the `CandidateMeasurement` plugin family,
+manifest-declared external hardware executors (`CandidateEvaluationExecutor` as a
+component), and FLOPs/MACs counting.
+
+Validation: `tests/unit/execute_tools/test_evaluation_measurements.py` (protocol
+applicability, median timing without warm-up, checkpoint-derived values and failure
+records, aggregation refusal reason, parent re-derivation, launch admission and the
+record accessor).

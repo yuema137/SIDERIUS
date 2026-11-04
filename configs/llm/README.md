@@ -1,19 +1,26 @@
 # Choose an LLM configuration
 
+An **LLM profile** is a JSON file that says which provider and model serve each
+role in a workflow: interpretation, data analysis, the three proposal stages,
+implementation, validation, the tuning planner and reflector, and literature
+review. This folder holds ready-made profiles. Copy one into your project
+(the other pages call the copy `llm.json`), edit it if you like, and select it
+for each run.
+
 Start with a cheap **flow check**: can your task load data, create a model,
 train, score and save results? A high score is not the goal of this first run.
 Use a separate configuration when you start evaluating scientific ideas.
 
 | Purpose | What to use | What it establishes |
 | --- | --- | --- |
-| Offline setup check | Installation checks and the launcher's `--dry-run`; no API key or model call needed | Configuration and command preparation; no real model or training calls |
+| Offline setup check | Installation checks, offline preparation, or the chain launcher's `--dry-run`; no API key or model call needed | Configuration and command preparation; no real model or training calls |
 | Default / first real run | [`default.json`](default.json) | All workflow routes use GPT-5.6 Luna, with `medium` reasoning and no automatic 429/5xx retries; start with a small dataset and short workflow |
-| Existing GPT-6 Luna demos | [`openai_smoke_luna.json`](openai_smoke_luna.json) | Explicit GPT-6 Luna profile, retained for experiments that already selected it |
-| Production / scientific research | [`openai-moderate-v1.json`](openai-moderate-v1.json) | Our recommended research starting point: Astra for proposal and validation, Luna elsewhere; plan API costs separately |
+| Existing GPT-6 Luna demos | [`openai_smoke_luna.json`](openai_smoke_luna.json) | Every route uses GPT-6 Luna (`gpt-6-luna`); retained for experiments that already selected it |
+| Production / scientific research | [`openai-moderate-v1.json`](openai-moderate-v1.json) | Our recommended research starting point: GPT-6 Astra for proposal and validation, GPT-5.6 Luna elsewhere; plan API costs separately |
 | Custom model choices | Your own reviewed copy of a routing file | Select supported providers/models for each stage and your own budget |
 | Paper history | The experiment's frozen config and compatibility packages in [siderius-exp](https://github.com/yuema137/siderius-exp) | Preserve the recorded experiment's information flow; this is a separate purpose, not a higher-quality tier |
 
-The Luna profile is for functional testing, not our recommended production
+The Luna profiles are for functional testing, not our recommended production
 configuration or a promise of scientific quality. The moderate profile is a
 research starting point, not a guarantee of better scores or lower total cost.
 You may replace its routes with your own supported model choices.
@@ -22,22 +29,36 @@ Choosing the paper's **LLM routes** does not require historical compatibility
 mode. Keep model/provider selection separate from planner strategies, runtime
 policies, and archived experiment settings; those belong to the experiment.
 
-## What happens without a config
+## Copy a profile into your project
 
-The standard workflow automatically uses `default.json`'s routing when you omit
-`--llm_config` and the legacy `--llm_model` override. The runtime constructs that
-profile from the shared defaults, so it also works in an installed package.
-Every model role uses OpenAI `gpt-5.6-luna`, with `medium` reasoning and
-`max_retries: 1`. Set `OPENAI_API_KEY` before a real run.
+From your SIDERIUS checkout, copy the profile you chose (here the default) into
+your project folder as `llm.json`. `cp -n` leaves an existing file untouched:
 
-Copy `default.json` into your external project and pass its path with
-`--llm_config` to freeze those choices. Explicit profiles, including moderate,
-keep their own models. A partial file retains the documented inheritance rules;
-it is not merged with the automatic profile. Direct node APIs use the same
-model default, while retaining their existing retry and reasoning options.
+```bash
+cp -n configs/llm/default.json /absolute/project/llm.json
+```
 
-For implementation details and how to update the shared default, see the
-[default-routing reference](../../docs/reference/llm-defaults.md).
+Keep this copy with your experiment, so later changes to the shipped profiles
+do not alter it. Keep `OPENAI_API_KEY` outside the repository and bind it at
+launch as described in [API keys](../../docs/getting-started/installation.md#api-keys).
+
+## Select the profile for a run
+
+How you select the copy depends on the route:
+
+| Route | How to select `llm.json` | Without a selection |
+| --- | --- | --- |
+| **`workflow.py`** (recommended; `tools.candidate_prepare`) | Set `llm_config_file` in the preparation request (`reusable-request.json`) to the copy's absolute path; see [getting started, step 2](../../docs/getting-started/README.md#2-save-the-preparation-request) | Not possible: `llm_config_file` is required, and preparation refuses a request without it |
+| **Older chain launcher** (`scripts/launch/run_chain.sh`) | Pass `--llm_config /absolute/project/llm.json` | It uses the same routing as `default.json` automatically |
+
+On the chain launcher, the automatic profile is built from the shared defaults,
+so it also works in an installed package: every role uses OpenAI
+`gpt-5.6-luna`, with `medium` reasoning and `max_retries: 1`. Explicit
+profiles, including moderate, keep their own models. A partial file retains the
+documented inheritance rules; it is not merged with the automatic profile.
+Direct node APIs use the same model default, while retaining their existing
+retry and reasoning options. For implementation details and how to update the
+shared default, see the [default-routing reference](../../docs/reference/llm-defaults.md).
 
 The default reduces accidental use of stronger models; it does not impose a
 run-wide spending limit. Transport timeouts, content repairs and workflow
@@ -50,17 +71,9 @@ reasoning and proposing, and for validation. Interpretation, data analysis,
 implementation, tuner planner/reflector and literature main/search use
 `gpt-5.6-luna`. Every route uses `medium` reasoning and `max_retries: 1`.
 
-From your infra checkout, copy it once into a new file in your external project:
-
-```bash
-mkdir -p /absolute/path/to/your-workspace/llm
-cp -i configs/llm/openai-moderate-v1.json /absolute/path/to/your-workspace/llm/openai-moderate-v1.json
-```
-
-Pass
-`--llm_config /absolute/path/to/your-workspace/llm/openai-moderate-v1.json` to
-your task's launch command. Keep this saved copy with your experiment so future
-profile changes do not alter its configuration. Set `OPENAI_API_KEY` through the
+To use it, copy it into your project as `llm.json` (as above, with
+`configs/llm/openai-moderate-v1.json` as the source) and select it for your
+route. Set `OPENAI_API_KEY` through the
 [credential setup](../../docs/getting-started/installation.md#api-keys) and
 verify access to both models before a paid run.
 
@@ -70,24 +83,9 @@ does not enable optional capabilities or choose training, retry-round or cost
 budgets. The separate setup-review and external orchestration models are not
 controlled by this workflow profile. Explicit research profiles and historical paper configurations remain unchanged.
 
-## Save the default profile for a first run
+## What the default profile covers
 
-From your infra checkout, copy the file to your own workspace:
-
-```bash
-mkdir -p /absolute/path/to/your-workspace/llm
-if [ -e /absolute/path/to/your-workspace/llm/agents.json ]; then
-  echo "agents.json already exists; choose a new filename or workspace" >&2
-else
-  cp configs/llm/default.json /absolute/path/to/your-workspace/llm/agents.json
-fi
-```
-
-Pass `--llm_config /absolute/path/to/your-workspace/llm/agents.json` to your
-[task's launch command](../../docs/getting-started/first-run.md).
-Keep `OPENAI_API_KEY` outside the repository and
-[check it in the launch process](../../docs/getting-started/installation.md#api-keys).
-Selecting this profile needs no Gemini or DeepSeek key. Provider account access
+Selecting `default.json` needs no Gemini or DeepSeek key. Provider account access
 and quota still need verification; the config does not prove either. Offline
 route tests verify the model selection at the request boundary, not live model
 access or successful training on your task.
@@ -101,9 +99,10 @@ clean install without an experiment package. It does not select a paper
 compatibility profile. It does not enable those capabilities
 or set data size, training budgets, iteration count, or failed-round limits.
 
-For the first flow check, explicitly set one iteration, one round and
-`--max_fail_rounds 1` in your experiment, with a small task-supported data
-selection. Keep training and measurement budgets large enough for that work.
+For the first flow check, explicitly set one iteration and few tuning rounds in
+your experiment (in `workflow.py`; on the chain launcher, also
+`--max_fail_rounds 1`), with a small task-supported data selection. Keep
+training and measurement budgets large enough for that work.
 Inspect the resolved model routes in the optional
 [setup review](../../src/tools/setup_review/README.md) before launching.
 
@@ -127,10 +126,11 @@ This is a **single reviewer configuration**, not a workflow `--llm_config` file.
 You still specify that request's input size and time limits. Skipping this
 optional review makes no reviewer call.
 
-A separate coding/orchestration agent chooses its model in its own application
-or runner. `agents.json` controls the SIDERIUS capabilities it invokes; it does
-not change the outside agent's model. Select GPT-6 Luna there as well for an
-all-Luna test, and pass the smoke config to each capability invocation.
+A separate coding or orchestration agent chooses its own model in its own
+application. Your `llm.json` controls the SIDERIUS capabilities that agent
+invokes; it does not change the agent's model. For an all-Luna test, select a
+Luna model in the agent's application as well, and pass the same `llm.json` to
+each capability invocation.
 
 ## Existing experiment routing examples
 
@@ -150,6 +150,6 @@ See [planner strategy selection](../../docs/reference/planner-strategies.md)
 for the boundary between native planning and exp-owned history.
 
 The [official GPT-6 Luna model page](https://developers.openai.com/api/docs/models/gpt-6-luna)
-describes access, pricing and supported API features. This profile is for the
+describes access, pricing and supported API features. `openai_smoke_luna.json` is for the
 framework's current plain text/JSON calls; a custom Chat Completions tool-calling
 workflow must follow the model's separate reasoning-effort requirements.

@@ -96,7 +96,8 @@ def render_selection(context: EvaluationPromptContext) -> list[str]:
         + ["- " + line for line in selection_rubric_lines(selection, context)]
         + [
             f"- Guidance: {indent_text(selection.guidance)}",
-            "- Rubric balancing applies only at admitted judged selection sites.",
+            "- Rubric balancing is guidance for agents; no framework step judges candidates "
+            "against it.",
             "- deterministic_ranking:",
         ]
         + [
@@ -115,7 +116,10 @@ def render_constraints(context: EvaluationPromptContext) -> list[str]:
         return ["- None declared."]
     components = {component.id: component for component in context.spec.components}
     lines = [
-        "- All constraints must hold on raw component values before normalization or clipping."
+        "- All constraints must hold on raw component values before normalization or clipping.",
+        "- A Trial or Formal candidate that violates any constraint, or lacks a finite value "
+        "for one, is not scoreable: it is recorded with the violated constraint and never "
+        "selected, ranked or used as an incumbent.",
     ]
     for constraint in context.spec.constraints:
         component = components[constraint.component]

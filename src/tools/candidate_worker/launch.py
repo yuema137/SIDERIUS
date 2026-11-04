@@ -186,6 +186,7 @@ def launch_candidate(
             publish_bytes_write_once(str(control / f"input_{index:03}.snapshot"), payload)
         profile = SandboxProfile(
             workspace=workspace,
+            writer_state=loop_writer_state(workspace) if definition.loop is not None else None,
             read_only=tuple(Path(p) for p in request.read_only),
             network=request.network,
             devices=tuple(Path(p) for p in request.devices),
@@ -233,6 +234,18 @@ def launch_candidate(
         terminal = bounded_terminal(initial, terminal)
     publish(control / "receipt.json", terminal, bounded=graph)
     return terminal
+
+
+def loop_writer_state(workspace: Path) -> Path:
+    """Prepare the writer directory the sandboxed loop entry acquires ownership in.
+
+    ``native.execute_native`` holds ``iteration_owner`` for a declared loop inside
+    the sandbox, where the workspace parent is read-only; the unsandboxed worker
+    creates and verifies the private sibling so the sandbox can bind exactly it.
+    """
+    from core.native_writer.state import prepare_state_directory
+
+    return prepare_state_directory(workspace)
 
 
 def bounded_terminal(

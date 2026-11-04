@@ -70,6 +70,10 @@ def command_prefix(profile: SandboxProfile) -> list[str]:
     for root in runtime_roots():
         args.extend(["--ro-bind", str(root), str(root)])
     args.extend(["--bind", str(profile.workspace), str(profile.workspace)])
+    if profile.writer_state is not None:
+        # The workspace parent stays read-only; only this private sibling is
+        # writable so the sandboxed native entry can hold writer ownership.
+        args.extend(["--bind", str(profile.writer_state), str(profile.writer_state)])
     # A declared /dev/nvidia<N> adds read-only /sys and the host's NVIDIA control
     # nodes (tools.workspace_sandbox.gpu); without one the argv is unchanged.
     gpu_read_only, gpu_devices = passthrough(profile.devices)

@@ -88,6 +88,17 @@ try {
   assert.match(await rows.first().textContent(), /v2.*Current/);
   assert.doesNotMatch(await rows.nth(1).textContent(), /Current/);
   const disk = await readFile(metadata.source);
+  // Run consumes the same version-list owner: latest default and newest Saves first.
+  const runVersion = page.locator('#new-run-version');
+  await waitUntil(async () => (await runVersion.locator('option').count()) === 3);
+  const runOptions = await runVersion.locator('option').allTextContents();
+  assert.equal(runOptions[0], 'Latest saved (v2)');
+  assert.match(runOptions[1], /^v2 · .+ · [0-9a-f]{12}$/);
+  assert.match(runOptions[2], /^baseline · .+ · [0-9a-f]{12}$/);
+  assert.equal(await runVersion.inputValue(), '');
+  await page.locator('nav a[href="#run"]').click();
+  await runVersion.selectOption('baseline');
+  await page.locator('nav a[href="#workflow"]').click();
   const posts = []; page.on('request', request => { if (request.method() === 'POST') posts.push(request.url()); });
   await rows.first().getByRole('button', {name: 'View v2'}).click();
   await page.locator('#editor-history-diff').waitFor({state: 'attached'});
@@ -115,9 +126,21 @@ try {
   assert.deepEqual(await readFile(metadata.source), disk);
   await nameInput.fill('third');
   assert.equal(await problem.isHidden(), true);
+  let releaseHistory;
+  const historyHeld = new Promise(resolve => { releaseHistory = resolve; });
+  await page.route('**/versions', async route => { await historyHeld; await route.continue(); });
   await page.locator('#editor-save').click();
   await waitUntil(async () => (await status()).includes('Saved as "third"'));
+  await waitUntil(async () => (await page.locator('#new-run-prerequisites').textContent()).includes('history is loading or unavailable'));
+  assert.equal(await runVersion.inputValue(), 'baseline', 'History reload preserves the chosen name');
+  assert.equal(await page.locator('#new-run-review').isDisabled(), true, 'Historical review waits for its history row');
+  releaseHistory();
   await waitUntil(async () => (await rows.count()) === 4);
+  await page.unroute('**/versions');
+  assert.equal(await runVersion.inputValue(), 'baseline', 'A new Save keeps the explicit historical selection');
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('run-prepare-current')));
+  assert.equal(await runVersion.inputValue(), '', 'Prepare current resets to Latest saved');
+  assert.equal(await runVersion.locator('option').first().textContent(), 'Latest saved (third)');
 
   // A-3: restore an older version as unsaved changes; nothing is written until Save.
   const beforeRestore = await readFile(metadata.source);

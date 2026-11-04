@@ -770,6 +770,11 @@ criteria:                        # 1..32 entries; names unique within the rubric
 A rubric is **not a metric**. It has no direction and no total, never enters
 `MetricOrder`, records' score fields, Health or stop conditions. A judge
 returns integers per criterion; framework code computes any weighted total.
+When an `evaluation` rubric component or `rubric_balance` selection names a
+rubric, the rubric is rendered to agents as natural-language guidance. No
+framework step judges trained candidates against it. Ranking keeps using
+`deterministic_ranking`
+([rubric guidance](../../src/execute_tools/evaluation-contract.md#rubric-guidance)).
 
 Identity and refusal rules:
 
@@ -1072,7 +1077,8 @@ errors. Agent prompts delimit the declaration block and indent multiline prose.
 The optional `evaluation` section declares candidate selection separately from
 training `objective`. It composes, validates and renders for agents. Primary-only metric selection
 and weighted-sum formula selection on the native task-owned scoring route can launch;
-feasibility, measurement and rubric runtime capabilities remain independently guarded. An absent section adds no semantic payload key or prompt
+builtin measurement components and feasibility constraints on the same route can
+launch; rubric components and rubric balancing launch as agent guidance. An absent section adds no semantic payload key or prompt
 bytes. Full fingerprints can still change with the release's estimation assembly.
 
 ```yaml
@@ -1105,16 +1111,23 @@ run is refused at launch.
 
 Metric references use post-transform scalar units and inherit direction from
 MetricSpec. Weighted_sum declares its normalization on each term and emits
-higher-is-better utility. Constraints use raw component values. Rubric components
+higher-is-better utility. Constraints use raw component values; a Trial or Formal
+candidate that violates one, or lacks a finite value for one, is not scoreable
+(`requirement: constraint:<component>`) and is therefore never selected. Rubric components
 and `selection: {kind: rubric_balance, rubric: {id, version}, guidance: ...,
 deterministic_ranking: {kind: primary}}` resolve task-declared rubrics; their actual
 SHA is pinned even when the authored reference omits it. No rubric enters arithmetic.
+Both launch as rendered agent guidance; ranking uses `deterministic_ranking`.
 
 `compose_run_task_bindings(path).evaluation.inspect()` returns composition warnings,
 term marginal utility rates and required runtime capabilities without executing a
 candidate. Custom `component_kinds` load a file-backed registration through the
-existing symbol loader. Measurement schemas are deferred to their runtime owner;
-`kind: measurement` is not a builtin yet. Exact models, defaults, registry interfaces,
+existing symbol loader. Builtin `kind: measurement` components measure the trained
+checkpoint once per candidate in the scoring child: `trainable_parameter_count`,
+`total_parameter_count`, `model_bytes`, or `inference_latency_ms` (median of timed
+forwards on a declared `protocol.input_shape`). Each declares an explicit
+`direction`; a failed measurement that a formula term needs makes the candidate not
+scoreable. Exact models, defaults, registry interfaces,
 identity and downstream Health/threshold boundaries are owned by the
 [evaluation contract](../../src/execute_tools/evaluation-contract.md).
 The task-author walkthrough, with worked utility arithmetic and the inspection

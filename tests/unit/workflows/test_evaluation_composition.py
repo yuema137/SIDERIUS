@@ -132,8 +132,18 @@ def formula(evaluation):
     return evaluation
 
 
-def test_composes_but_launch_names_every_missing_capability(task, tmp_path):
+def close_capability(monkeypatch, name):
+    """The launch guard is generic; close one landed capability to exercise it."""
+    import workflows.evaluation_composition as owner
+
+    monkeypatch.setattr(
+        owner, "IMPLEMENTED_CAPABILITIES", {**owner.IMPLEMENTED_CAPABILITIES, name: False}
+    )
+
+
+def test_composes_but_launch_names_every_missing_capability(task, tmp_path, monkeypatch):
     """The real binding boundary must not silently execute a primary-only fallback."""
+    close_capability(monkeypatch, "feasibility constraints")
     plain = compose(task, None)
     with bind_run_task_composition(plain, physical_data_root=str(tmp_path)):
         pass
@@ -319,8 +329,9 @@ def test_defaulted_schema_extension_keeps_evaluation_identity():
     )
 
 
-def test_scoring_child_cannot_bypass_launch_capability_guard(task):
+def test_scoring_child_cannot_bypass_launch_capability_guard(task, monkeypatch):
     """Direct scoring entry must not ignore an evaluation declared by its manifest."""
+    close_capability(monkeypatch, "feasibility constraints")
     from workflows.task_composition import compose_metric_from_manifest
 
     compose(task, declaration(task))
@@ -379,6 +390,49 @@ def test_rubric_resolution_pins_content_and_never_enters_formula(task):
     spec["selection"]["formula"]["params"]["terms"][0]["component"] = "judgment"
     with pytest.raises(TaskCompositionError, match="not deterministic"):
         compose(task, spec)
+
+
+def test_rubric_guidance_launches_without_entering_metric_order(task, tmp_path):
+    """Rubric declarations launch as guidance; ranking stays on deterministic_ranking.
+
+    Fails if the rubric capability gates stay closed (binding refuses), or if
+    rubric_balance displaces the declared formula as the effective ranking metric.
+    """
+    rubric = {
+        "schema_version": "siderius.rubric/v1",
+        "id": "deployability",
+        "version": "1",
+        "criteria": [{"name": "simplicity", "description": "Small model.", "weight": 1.0}],
+        "scale_min": 1,
+        "scale_max": 5,
+    }
+    (task / "rubric.yaml").write_text(yaml.safe_dump(rubric))
+    manifest_path = task / "composition.yaml"
+    manifest = yaml.safe_load(manifest_path.read_text())
+    manifest["rubrics"] = [{"config": "rubric.yaml"}]
+    manifest_path.write_text(yaml.safe_dump(manifest))
+    spec = formula(declaration(task))
+    spec["components"].append(
+        {
+            "kind": "rubric",
+            "id": "judgment",
+            "meaning": "Practical to deploy.",
+            "rubric": {"id": "deployability", "version": "1"},
+        }
+    )
+    spec["selection"] = {
+        "kind": "rubric_balance",
+        "rubric": {"id": "deployability", "version": "1"},
+        "guidance": "Prefer the simpler model when utility is close.",
+        "deterministic_ranking": spec["selection"],
+    }
+    composed = compose(task, spec)
+    assert composed.evaluation is not None
+    with bind_run_task_composition(composed, physical_data_root=str(tmp_path)):
+        pass
+    effective = composed.selection_metric_spec
+    assert effective.id == f"evaluation.weighted_sum.v1.{composed.evaluation.sha256}"
+    assert effective.aggregation == "evaluation.weighted_sum/v1"
 
 
 def test_contributor_nonfinite_identity_refuses_at_composition(task):

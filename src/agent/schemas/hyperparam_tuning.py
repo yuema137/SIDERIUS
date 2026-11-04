@@ -90,6 +90,7 @@ from execute_tools.evaluation_results import (
 )
 from execute_tools.health_checks._composition import TaskHealthBinding
 from execute_tools.health_checks.schemas import PersistedHealthGateResult
+from execute_tools.measurement_results import MeasurementResult
 from execute_tools.training_history import TrainingHistory
 from ml_models.model_descriptions import DescriptionSourcePolicy
 from ml_models.models_format_sandbox import LossConfig
@@ -885,6 +886,17 @@ class ExperimentRecord(RecordModel):
     # unchanged (optional, default None).
     evaluation_result: EvaluationEvidence | None = Field(
         default=None, exclude_if=lambda value: value is None
+    )
+    measurement_results: tuple[MeasurementResult, ...] = Field(
+        default=(),
+        strict=False,
+        exclude_if=lambda value: not value,
+        description=(
+            "#1296 — one typed result per declared evaluation `measurement` component, "
+            "taken from the serialized checkpoint in the scoring child. Raw values in the "
+            "measurement unit; read through `measurement_results.measurement_value`. "
+            "Absent on runs that declare no measurement component."
+        ),
     )
 
     metric_result: MetricResult | None = Field(

@@ -79,7 +79,7 @@ class TestTheTaskOwnedRouteEvaluatesSecondaries:
         """No re-derivation: a child asks the composition layer what was declared."""
         fn = _fn(CHILD, "_compose_child_secondary_metrics")
         body = ast.unparse(fn)
-        assert "compose_run_task_bindings" in body
+        assert "compose_scoring_secondary_metrics" in body
         assert "secondary_metrics" in body
 
     def test_the_frozen_catch_ORDER_lives_in_the_SHARED_owner(self):

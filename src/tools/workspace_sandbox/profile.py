@@ -9,6 +9,8 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from core.layout import checkout_root, package_root
+from core.native_writer.models import WriterRefusal
+from core.native_writer.state import WriterState, state_directory
 from core.runtime_control.process_visibility import PROCESS_VISIBILITY_ENV
 from tools.workspace_sandbox.gpu import GPU_NODE
 
@@ -68,6 +70,9 @@ class SandboxProfile(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
 
     workspace: Path
+    # The native writer's private control directory beside ``workspace``: the one
+    # additional writable mount. Only the exact derived path is accepted.
+    writer_state: Path | None = None
     read_only: tuple[Path, ...] = ()
     network: bool
     devices: tuple[Path, ...] = ()
@@ -121,7 +126,23 @@ class SandboxProfile(BaseModel):
     @model_validator(mode="after")
     def mount_boundaries(self) -> SandboxProfile:
         validate_mount_boundaries(self.workspace, self.read_only)
+        if self.writer_state is not None:
+            validate_writer_state(self.workspace, self.writer_state, self.read_only)
         return self
+
+
+def validate_writer_state(workspace: Path, path: Path, read_only: tuple[Path, ...]) -> None:
+    """Accept only the existing private writer directory derived from ``workspace``."""
+    if path != state_directory(workspace):
+        raise ValueError("writer_state must be the workspace's native writer control directory")
+    try:
+        # Same no-follow directory, owner and 0700 checks as the writer itself.
+        WriterState(workspace, create=False).close()
+    except (OSError, WriterRefusal) as error:
+        raise ValueError(f"writer_state is not an existing private directory: {path}") from error
+    for item in read_only:
+        if item.is_relative_to(path) or path.is_relative_to(item):
+            raise ValueError(f"read-only path overlaps the writer state directory: {item}")
 
 
 def validate_mount_boundaries(workspace: Path, read_only: tuple[Path, ...]) -> None:

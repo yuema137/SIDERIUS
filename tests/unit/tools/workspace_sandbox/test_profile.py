@@ -99,3 +99,54 @@ def test_control_trees_cannot_be_writable_workspaces(path):
 def test_host_proc_cannot_replace_private_pid_view(tmp_path):
     with pytest.raises(ValidationError, match="control mounts"):
         profile(tmp_path, read_only=(Path("/proc"),))
+
+
+def _bind_targets(command: list[str], flag: str) -> list[str]:
+    return [command[i + 1] for i, item in enumerate(command) if item == flag]
+
+
+def test_writer_state_is_the_only_writable_mount_beside_the_workspace(tmp_path, monkeypatch):
+    # Regression: a loop child acquiring writer ownership in the sandbox failed with
+    # writer_state_refused because the sibling control directory was read-only.
+    from core.native_writer.state import prepare_state_directory
+
+    monkeypatch.setattr("tools.workspace_sandbox.command.shutil.which", lambda _: "/usr/bin/bwrap")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    task = workspace / "task"
+    task.mkdir()
+    plain, _ = build_command(profile(workspace, read_only=(task,)), ["/bin/true"])
+    state = prepare_state_directory(workspace)
+    bound, _ = build_command(
+        profile(workspace, read_only=(task,), writer_state=state), ["/bin/true"]
+    )
+    assert _bind_targets(plain, "--bind") == [str(workspace)]
+    assert _bind_targets(bound, "--bind") == [str(workspace), str(state)]
+    # Nothing else changes: exactly one bind is inserted after the workspace bind.
+    after = plain.index("--bind") + 3
+    assert bound == [*plain[:after], "--bind", str(state), str(state), *plain[after:]]
+    assert str(tmp_path) not in _bind_targets(bound, "--bind")
+    assert bound[bound.index("--remount-ro") + 1] == "/"
+
+
+def test_writer_state_must_be_the_derived_private_directory(tmp_path):
+    from core.native_writer.state import prepare_state_directory, state_directory
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    with pytest.raises(ValidationError, match="existing private directory"):
+        profile(workspace, writer_state=state_directory(workspace))
+    other = tmp_path / "other"
+    other.mkdir(mode=0o700)
+    with pytest.raises(ValidationError, match="native writer control directory"):
+        profile(workspace, writer_state=other)
+    state = prepare_state_directory(workspace)
+    state.chmod(0o755)
+    with pytest.raises(ValidationError, match="existing private directory"):
+        profile(workspace, writer_state=state)
+    state.chmod(0o700)
+    inside = state / "frozen"
+    inside.mkdir()
+    with pytest.raises(ValidationError, match="overlaps the writer state"):
+        profile(workspace, writer_state=state, read_only=(inside,))
+    assert profile(workspace, writer_state=state).writer_state == state

@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Any
 
 from execute_tools.evaluation_aggregation import (
     aggregate_evaluation,
+    constrain_primary,
+    evaluate_constraints,
     index_source_results,
     term_evaluation,
     weight_total,
@@ -18,34 +20,51 @@ from execute_tools.evaluation_results import (
     SelectionBinding,
 )
 from execute_tools.evaluation_validation import formula_terms
+from execute_tools.measurement_results import MeasurementResult, record_measurements
 from workflows.evaluation_selection import SelectionCarrier, bound_selection
 
 if TYPE_CHECKING:
-    from workflows.task_composition import RunTaskComposition
+    from workflows.task_composition import RunTaskComposition, ScoringChildComposition
 
 
 class EvaluationNotScoreableError(NotScoreableError):
-    def __init__(self, refusal: NotScoreableResult, evidence: EvaluationEvidence):
+    def __init__(
+        self,
+        refusal: NotScoreableResult,
+        evidence: EvaluationEvidence,
+        measurement_results: tuple[MeasurementResult, ...] = (),
+    ):
         super().__init__(refusal)
         self.evaluation_result = evidence
+        self.measurement_results = measurement_results
 
 
 def aggregate_child_outcome(
-    composition: RunTaskComposition | None,
+    composition: RunTaskComposition | ScoringChildComposition | None,
     outcome: MetricResult | NotScoreableResult,
     secondaries: dict[str, Any],
 ) -> tuple[MetricResult | NotScoreableResult, dict[str, Any]]:
     if composition is None:
         return outcome, secondaries
     evaluation = composition.evaluation
-    if evaluation is None or not formula_terms(evaluation.spec):
+    if evaluation is None:
         return outcome, secondaries
-    result, evidence = aggregate_evaluation(
-        evaluation,
-        composition.metric.spec,
-        outcome,
-        [MetricResult.model_validate(r) for r in secondaries.get("secondary_metric_results", ())],
-    )
+    results = [
+        MetricResult.model_validate(r) for r in secondaries.get("secondary_metric_results", ())
+    ]
+    measurements = record_measurements(secondaries)
+    if formula_terms(evaluation.spec):
+        result, evidence = aggregate_evaluation(
+            evaluation, composition.metric.spec, outcome, results, measurements
+        )
+    elif evaluation.spec.constraints:
+        result, evidence = constrain_primary(
+            evaluation, composition.metric.spec, outcome, results, measurements
+        )
+        if evidence is None:
+            return result, secondaries
+    else:
+        return outcome, secondaries
     return result, {**secondaries, "evaluation_result": evidence.model_dump(mode="json")}
 
 
@@ -66,14 +85,25 @@ def validate_child_evaluation(
         raise EvaluationTransportError(
             "Scoring child evaluation identity differs from the bound composition"
         )
+    _validate_measurement_roster(results, binding)
     if evidence.failures:
         refusal = NotScoreableResult.model_validate(results.get("not_scoreable"))
-        raise EvaluationNotScoreableError(refusal, evidence)
+        raise EvaluationNotScoreableError(
+            refusal, evidence, tuple(record_measurements(results).values())
+        )
     if evidence.aggregate is None:
         raise EvaluationTransportError("Scoring child omitted the effective scalar")
     metric = MetricResult.model_validate(results.get("metric_result"))
     if metric.metric_id != spec.id or metric.direction != spec.direction:
         raise EvaluationTransportError("Scoring child effective metric identity mismatch")
+    if not binding.is_formula and (
+        evidence.source_metric_result is None
+        or evidence.source_metric_result.scalar != evidence.aggregate
+        or evidence.components
+    ):
+        raise EvaluationTransportError(
+            "Constrained primary selection must adopt the source scalar unchanged"
+        )
     if metric.scalar != evidence.aggregate or results.get("denoising_score") != evidence.aggregate:
         raise EvaluationTransportError(
             "Scoring child effective scalar disagrees with component evidence"
@@ -81,6 +111,18 @@ def validate_child_evaluation(
     _validate_source_components(evidence, binding)
     _validate_component_arithmetic(evidence, binding, results)
     return evidence
+
+
+def _validate_measurement_roster(results: dict[str, Any], binding: SelectionBinding) -> None:
+    """Transported measurements must be exactly the declared components and kinds."""
+    from execute_tools.candidate_measurement import validate_measurement_roster
+
+    try:
+        validate_measurement_roster(
+            list(record_measurements(results).values()), binding.measurements
+        )
+    except ValueError as error:
+        raise EvaluationTransportError(f"Scoring child measurement evidence: {error}") from error
 
 
 def _validate_source_components(evidence: EvaluationEvidence, binding: SelectionBinding) -> None:
@@ -115,11 +157,17 @@ def _validate_component_arithmetic(
             *(MetricResult.model_validate(r) for r in results.get("secondary_metric_results", ())),
         ]
     )
+    measurements = record_measurements(results)
     total = weight_total(t.term for t in binding.terms)
     aggregate = Fraction()
     for item, selection in zip(evidence.components, binding.terms, strict=True):
-        source = sources.get(selection.source_metric_id or "")
-        if source is None or selection.direction is None or source.scalar != item.raw:
+        if selection.source_measurement is not None:
+            measured = measurements.get(selection.source_measurement)
+            raw = None if measured is None else measured.value
+        else:
+            source = sources.get(selection.source_metric_id or "")
+            raw = None if source is None else source.scalar
+        if raw is None or selection.direction is None or raw != item.raw:
             raise EvaluationTransportError(
                 f"Component {item.component_id!r} raw value disagrees with its source result"
             )
@@ -136,15 +184,26 @@ def _validate_component_arithmetic(
                 f"Component {item.component_id!r} evidence disagrees with recomputed arithmetic"
             )
         aggregate += contribution
-    if float(aggregate) != evidence.aggregate:
+    if binding.is_formula and float(aggregate) != evidence.aggregate:
         raise EvaluationTransportError("Scoring child aggregate disagrees with its components")
+    expected_constraints, violated = evaluate_constraints(
+        binding.constraints, sources, measurements
+    )
+    if expected_constraints != evidence.constraints or violated:
+        raise EvaluationTransportError(
+            "Scoring child constraint verdicts disagree with the declared constraints"
+        )
 
 
 def evaluation_record_fields(results: dict[str, Any]) -> dict[str, Any]:
-    if "evaluation_result" not in results:
-        return {}
-    evidence = EvaluationEvidence.model_validate(results["evaluation_result"])
-    return {"evaluation_result": evidence.model_dump(mode="json")}
+    fields: dict[str, Any] = {}
+    if "evaluation_result" in results:
+        evidence = EvaluationEvidence.model_validate(results["evaluation_result"])
+        fields["evaluation_result"] = evidence.model_dump(mode="json")
+    measurements = record_measurements(results)
+    if measurements:
+        fields["measurement_results"] = [m.model_dump(mode="json") for m in measurements.values()]
+    return fields
 
 
 def read_scoring_output(path: str) -> dict[str, Any]:
@@ -180,6 +239,7 @@ def scoring_refusal_fields(path: str) -> dict[str, Any]:
             "not_scoreable": refusal.model_dump(mode="json"),
             "evaluation_result": evidence.model_dump(mode="json"),
             "denoising_score": None,
+            **evaluation_record_fields({"measurement_results": payload.get("measurement_results")}),
         }
     }
 

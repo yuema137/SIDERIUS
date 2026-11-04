@@ -14,10 +14,12 @@ from execute_tools.evaluation_metric import (
     NotScoreableResult,
     ScoreabilityFailure,
 )
-from execute_tools.evaluation_spec import WeightedTerm
+from execute_tools.evaluation_spec import EvaluationConstraint, WeightedTerm
 
 __all__ = [
     "ComponentEvaluation",
+    "ConstraintEvaluation",
+    "ConstraintTerm",
     "EvaluationEvidence",
     "EvaluationInputsScoreability",
     "EvaluationTransportError",
@@ -51,6 +53,19 @@ class ComponentEvaluation(BaseModel):
     clipped: bool
 
 
+class ConstraintEvaluation(BaseModel):
+    """One declared constraint judged on its raw component value (#1295)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+
+    component_id: str
+    op: Literal[">=", ">", "<=", "<"]
+    threshold: float
+    raw: float | None
+    satisfied: bool
+    detail: str
+
+
 class EvaluationEvidence(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
@@ -61,6 +76,23 @@ class EvaluationEvidence(BaseModel):
     components: tuple[ComponentEvaluation, ...] = Field(default=(), strict=False)
     aggregate: float | None = None
     failures: tuple[ScoreabilityFailure, ...] = Field(default=(), strict=False)
+    constraints: tuple[ConstraintEvaluation, ...] = Field(
+        default=(), strict=False, exclude_if=lambda value: not value
+    )
+
+
+class ConstraintTerm(BaseModel):
+    """One declared constraint plus where its raw value is read from.
+
+    ``source_metric_id`` names the metric result for a metric component; it is
+    ``None`` for a non-metric quantitative component (#1296 measurements), whose
+    value is read from ``measurement_results`` by component id.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    constraint: EvaluationConstraint
+    source_metric_id: str | None
 
 
 class SelectionTerm(BaseModel):
@@ -71,6 +103,8 @@ class SelectionTerm(BaseModel):
     term: WeightedTerm
     source_metric_id: str | None
     direction: MetricDirection | None
+    # #1296: the measurement component whose recorded raw value feeds this term.
+    source_measurement: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class SelectionBinding(BaseModel):
@@ -87,6 +121,17 @@ class SelectionBinding(BaseModel):
     effective_metric: MetricSpecField
     components: dict[str, dict[str, JsonValue]]
     terms: tuple[SelectionTerm, ...] = Field(strict=False)
+    constraints: tuple[ConstraintTerm, ...] = Field(
+        default=(), strict=False, exclude_if=lambda value: not value
+    )
+    # #1296: declared measurement component id -> measurement kind; the parent
+    # requires the transported results to cover exactly this roster.
+    measurements: dict[str, str] = Field(default_factory=dict, exclude_if=lambda value: not value)
+
+    @property
+    def is_formula(self) -> bool:
+        """Formula selection replaces the source scalar; constraints alone do not."""
+        return self.effective_metric.id != self.source_metric.id
 
 
 def _validate_refusal_evidence(
@@ -114,5 +159,6 @@ def validate_record_evaluation(
         raise ValueError("Successful evaluation requires effective and source metric evidence")
     if metric.metric_id != evidence.effective_metric_id or metric.scalar != evidence.aggregate:
         raise ValueError("Evaluation evidence disagrees with the record's effective metric")
-    if metric.per_sample is not None:
+    formula = evidence.source_metric_result.metric_id != evidence.effective_metric_id
+    if formula and metric.per_sample is not None:
         raise ValueError("Formula utility has no declared per-sample decomposition")

@@ -7,7 +7,8 @@ interfaces and behavior.
 
 | Your next step | Start here |
 | --- | --- |
-| Install and try a small offline example | [Getting started](getting-started/README.md) |
+| Install and run your first workflow | [Getting started](getting-started/README.md) |
+| Write a `workflow.py` | [Workflow declaration examples](../examples/workflow_declarations/README.md), then the [workflow declarations guide](guides/workflow-declarations.md) |
 | Understand tasks, scores and recorded results | [Concepts](concepts/README.md) |
 | Define a task or operate a run | [Guides](guides/README.md) |
 | Look up a configuration field or execution contract | [Reference](reference/README.md) |

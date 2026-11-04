@@ -134,6 +134,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Step 12 / PR-12bc C2: the PARENT-PINNED IDENTITY of the implementation named by --task_data_path_id. The id says WHICH implementation; this says WHICH CODE. Verified BEFORE the implementation is consumed, because a registry hit is never proof of identity — a stale registration answers to the right name while running different bytes. ABSENT -> a parent that predates this transport made no claim, and a child must not invent one.",
     )
+    parser.add_argument(
+        "--measurement_results_json",
+        type=str,
+        default=None,
+        help="Measurement results from the parent's isolated measurement worker.",
+    )
     return parser
 
 
@@ -263,10 +269,38 @@ def _emit_task_owned_score(
     with bind_task_data_path(data_path):
         outcome = metric.evaluate(scoreable_deliverables, **compute_kwargs)
         secondaries = _evaluate_task_owned_secondaries(args, deliverable, compute_kwargs)
+    secondaries = {**secondaries, **_measure_declared_components(args, composition)}
     from execute_tools.evaluation_child import aggregate_child_outcome
 
     outcome, secondaries = aggregate_child_outcome(composition, outcome, secondaries)
     _emit_outcome(args, outcome, secondaries=secondaries)
+
+
+def _measure_declared_components(args, composition) -> dict:
+    """#1296 measurement results for declared ``measurement`` components, or ``{}``.
+
+    The parent measured the checkpoint in an isolated worker; this child only
+    reads and validates the typed results and never imports model code, so
+    candidate code cannot reach this process's aggregation or emission. A run
+    declaring no measurement component writes no key (payload byte-unchanged).
+    """
+    evaluation = getattr(composition, "evaluation", None)
+    if evaluation is None:
+        return {}
+    from execute_tools.candidate_measurement import read_measurement_results
+    from execute_tools.evaluation_spec import MeasurementComponent
+
+    declared = {
+        c.id: c.measurement
+        for c in evaluation.spec.components
+        if isinstance(c, MeasurementComponent)
+    }
+    if not declared:
+        return {}
+    if args.measurement_results_json is None:
+        raise ValueError("measurement components require --measurement_results_json")
+    results = read_measurement_results(args.measurement_results_json, declared)
+    return {"measurement_results": [r.model_dump(mode="json") for r in results]}
 
 
 def _evaluate_task_owned_secondaries(args, deliverable: str, compute_kwargs: dict) -> dict:
@@ -323,9 +357,9 @@ def _compose_child_secondary_metrics(args) -> tuple:
     """
     if args.task_manifest is None:
         return ()
-    from workflows.task_composition import compose_run_task_bindings
+    from workflows.task_composition import compose_scoring_secondary_metrics
 
-    return tuple(compose_run_task_bindings(args.task_manifest).secondary_metrics or ())
+    return compose_scoring_secondary_metrics(args.task_manifest)
 
 
 def _emit_outcome(args, outcome, *, secondaries: dict | None = None) -> None:

@@ -2372,7 +2372,7 @@ prepared, accepted, rejected, stopped). For example a failed preparation reads "
 failed. The cause and its log are named below; start over to try again." and a failed
 launch "The run failed. The cause is shown below; open it in Monitor for the full log."
 A typed `problem` (refused, unknown, unresolved) still takes precedence. Step 2 names the version its prepared run holds (`ReusableCaptureReview.
-source_version_name`, display-only `recorded_name` of `source_sha256`, or before review
+source_version_name`, the retained receipt name or a legacy `recorded_name` lookup of `source_sha256`, or before review
 the preparation intent's `source_version` handed over by `openPrepared`); when it is not
 the current saved version, `#capture-source`, the top `#run-source-state` and `#run-next`
 say so and `#capture-prepare-current` ("Prepare the current version instead") starts
@@ -2858,7 +2858,11 @@ flow. The New run adapter below consumes this monitor without adding job persist
 POST `/api/editor/{project_id}/reusable-preparations/review` returns `NewRunReview`;
 POST `/prepare` returns existing `OperationHandle` with HTTP 202. `NewRunReview.source_version_name`
 (omitted when absent) is the recorded Save name of `expected_source_sha256`,
-display-only and outside the expectation and native request. `NewRunReview.credential_readiness`
+display metadata; SHA-256 remains the source version identity. The console also passes
+`source_version_name` into the native preparation request and top-level receipt so
+capture review retains the selected name after source/history removal. This optional
+field is omitted for unnamed sources and non-console callers that do not supply it;
+the exact operation request digest includes supplied metadata. `NewRunReview.credential_readiness`
 is a name-only precheck read in the server process before Prepare: it checks only the
 task's configured `candidate_environment_names` against `credential_file`
 (`named_credential_readiness((), names, path)`); provider-derived requirements exist
@@ -3467,3 +3471,38 @@ object exposes `nativeInterpretation`, `nativeLiterature` and
 loop controls use `nativeInterpretation`. Fanout has no JavaScript consumer and
 is not exported. The asset contains no task state or credentials and changes no
 profile admission or serialized identifier.
+
+### Run workflow version selection
+
+Step 1's `new-run-version` select consumes `editorVersions.listing`, populated by
+GET `/api/editor/{project_id}/versions`, the same authoring owner as editor history.
+The default is Latest saved (current file name, or current file when unnamed).
+Named saved rows follow in reverse record order with name, local saved time and
+12-character SHA-256 prefix. Selecting a row sends `NewRunSelection.saved_version_name=<name>`
+and its SHA; the default omits the name and retains current-file drift checks.
+Changing selection invalidates review. Historical review waits while its version list
+is loading or unavailable, preserving the chosen name. A retained intent locks the selector;
+Prepare the current version starts over and resets it to Latest saved.
+
+For an explicit saved row, the console requires a matching name and SHA in an `origin="saved"` record
+and validates `read_recovery_copy` before constructing the native request with
+`source_path=<configured recovery_directory>/<sha256>.py`. Missing, unsafe or
+hash-mismatched copies and missing/invalid records refuse HTTP 409
+`saved_version_unavailable` before admission. Native preparation rechecks the hash
+at capture and verifies origin during publication, so subsequent drift also refuses.
+The source file is never rewritten. Relative task locations still resolve against
+configured `project_root`; `workflow.py.snapshot` contains the selected exact bytes.
+
+Capture policy accepts only the configured source path or that setup's exact
+SHA-addressed recovery path, with the existing project/task checks. Capture review
+uses the receipt name, falling back to the configured source's version record for
+older receipts. It does not require a recovery copy after preparation. Run's older
+version notice names the captured and latest versions (SHA prefix when unnamed).
+Non-console routes retain their existing source selection behavior.
+
+Regression evidence: `tests/unit/tools/candidate_console/test_new_run.py` covers
+historical review, native preparation snapshot/receipt, current-file preservation,
+review after source/recovery removal, and missing/corrupt/unrecorded recovery refusals.
+
+`tests/browser/named_versions.mjs` witnesses shared-list ordering, historical selection
+preservation across Save and delayed history loading, and the Prepare current reset.
