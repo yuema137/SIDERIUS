@@ -59,8 +59,8 @@ Before you start, you need:
 - **Your dataset location** and a **project folder outside this checkout** for
   your task, settings and results.
 - **An NVIDIA GPU with CUDA** on the machine that runs training. There is no
-  CPU mode: a run on a machine without one stops before any model call and
-  says so. Setup checks and the synthetic Quickstart checks run on CPU.
+  CPU mode: a run that trains a model on a machine without one is refused before
+  any model call. Setup checks and the synthetic Quickstart checks run on CPU.
 - **Provider API keys** for real model calls (offline setup checks need none).
   The command line and the experimental browser console read keys from
   different places; see [API keys](docs/getting-started/installation.md#api-keys).
@@ -68,10 +68,7 @@ Before you start, you need:
   Run the [bubblewrap check](src/tools/workspace_sandbox/README.md#check-that-bubblewrap-works)
   once on that machine.
 
-Follow [getting started](docs/getting-started/README.md) for the ordered setup,
-where to put credentials, and the commands that prepare and run a workflow.
-
-Clone the repository and open it in your coding agent:
+Clone the repository and install it:
 
 ```bash
 git clone https://github.com/yuema137/SIDERIUS.git
@@ -79,19 +76,80 @@ cd SIDERIUS
 uv sync --group dev --frozen
 ```
 
+Then open the checkout in your coding agent (for example Claude Code or Codex).
+[Getting started](docs/getting-started/README.md) gives the ordered setup, where
+to put credentials, and every command that prepares, runs and reads a workflow.
+
+### What an experiment is made of
+
+Your agent writes a few ordinary files in your project folder. You can read
+every setting before anything runs:
+
+1. **Task package** (`task.yaml` and the plugins it names): the science. It
+   says how to read your data, how it is split, what a model reads and
+   produces, the main score, and the Health checks that decide whether a model
+   is valid. See [what a task package contains](docs/concepts/task-package.md).
+2. **Workflow declaration** (`workflow.py`): the experiment. It lists the
+   research steps that run (for example Propose → Implement → Validate →
+   Train & tune), how results pass between them, your advice to each step,
+   training budgets and, for a research loop, its iteration limit and stop
+   conditions. [How a workflow is built](examples/workflow_declarations/README.md#how-a-workflowpy-is-built)
+   walks through a real one.
+3. **LLM profile** (`llm.json`): which model and provider serve each role.
+4. **Preparation request** (`reusable-request.json`): the run's own settings:
+   which `workflow.py` and `llm.json` to use, where results go, time limits,
+   GPU devices, network access and the *names* of the provider keys.
+
+`.venv/bin/python -m tools.candidate_prepare` reads the preparation request and
+captures exactly what will run, offline. `.venv/bin/python -m tools.candidate_operations submit`
+launches it only when you say so; the same tool reports status and logs, and
+stops, pauses or resumes a research loop between iterations.
+
+### Choose the execution: workflow or orchestration
+
+The task package is the same either way. What changes is **who decides the
+next research step**:
+
+| Execution | Who decides the next step | When to choose it |
+| --- | --- | --- |
+| **Workflow: lightweight starting point** | You do, in advance. `workflow.py` declares the steps and the loop; SIDERIUS executes that path without an extra LLM deciding each call. | You know the research loop you want, and you want predictable cost and a recorded, repeatable path. |
+| **Orchestration: flexible exploration** | Your coding agent does, at run time. Following the SIDERIUS toolkit installed in your project, it invokes research capabilities through a caller script it writes and runs (`scripts/caller.py`), and chooses each next call from the evidence so far. | You want the research process itself to adapt beyond a fixed sequence, and accept more setup and potentially higher LLM cost. |
+
+In both, the deterministic core still owns data access, training, scoring and
+Health. `llm.json` selects the models *inside* each capability; the
+orchestrator's own model is whatever your coding agent uses. To set up
+orchestration, follow the [orchestration setup guide](src/tools/orchestration_setup/README.md).
+
+**Workflow keeps coordination lightweight; orchestration offers more room to
+adapt the research process.** In the paper's TIDMAD comparison, fixed workflows
+had the lowest estimated LLM cost, while orchestration without the Data
+Analysis step (an agent that runs analysis code on your data) produced the most
+valid models and the best valid score. This demonstrates its potential, not a
+guarantee that orchestration wins on every task.
+
+[![Paper Figure 3: valid and non-valid TIDMAD models versus estimated LLM cost](docs/assets/paper/figure3.svg)](docs/assets/paper/figure3.svg)
+
+**Figure 3. Exploration and LLM cost on TIDMAD.** The left panel counts valid
+models; the right counts non-valid models. Costs are estimates and exclude GPU
+training. See the [paper](https://arxiv.org/abs/2610.14024) for the experimental
+conditions.
+
+### Choose how you work with your agent: Professional or Assistant
+
 **Professional and Assistant are the main ways to use SIDERIUS 1.1.** Both
 start with a short request to your coding agent. They describe how you
-collaborate, not software mode switches; both produce the same files and use
-the same commands. You can also write everything by hand.
+collaborate, not software modes: both produce the same files and use the same
+commands, and both can use a workflow or orchestration. You can also write
+every file by hand.
 
 | Way of working | Who leads? |
 | --- | --- |
 | **Professional** | You choose the research plan; your agent helps implement it. |
 | **Assistant** | You describe the problem; your agent guides you through the choices. |
 
-### Professional: bring your plan
+#### Professional: bring your plan
 
-For a lightweight fixed workflow, paste:
+With a workflow, paste:
 
 ```text
 Use SIDERIUS in Professional style. My MNIST images and labels are in /data/mnist.
@@ -104,19 +162,19 @@ LLM profile, the preparation request and the result paths before preparing
 or launching anything.
 ```
 
-For orchestration, replace the words from "then write the experiment as a
-workflow declaration" through "at most three iterations." with:
+With orchestration, paste instead:
 
 ```text
-Use orchestration instead of the fixed workflow. Set up the external project and
-sandbox so my agent can choose which SIDERIUS capabilities to call and when,
-within the data-access rules and budgets we agree on.
+Use SIDERIUS in Professional style with orchestration. My MNIST images and labels
+are in /data/mnist. Build a digit-classification task package in ~/mnist-research.
+Keep the test split out of search feedback; optimize validation accuracy. Then set
+up orchestration in that project and its sandbox so you can choose which SIDERIUS
+capabilities to call and when, within the data-access rules and budgets we agree
+on. Show me the task package, the LLM profile, the sandbox settings and the caller
+before running anything.
 ```
 
-You do not need to write configuration files first. Your agent can turn your
-plan into a [task package](docs/reference/task-composition.md) and experiment.
-
-### Assistant: describe your problem
+#### Assistant: describe your problem
 
 Paste:
 
@@ -137,77 +195,49 @@ No global skill installation is needed.
 Replace the example data and project paths with your own. In either style,
 you control the scientific choices and paid execution; the agent asks about
 missing decisions before launching. A [configuration review and HTML report](src/tools/setup_review/README.md)
-is optional. See [getting started](docs/getting-started/README.md) for installation
-and detailed setup.
-
-### What your agent sets up
-
-With a fixed workflow, in either style, the experiment is an ordinary Python
-file in your project, so you can read every setting before anything runs:
-
-1. **Task package**: `task.yaml` and the plugins it names (data access, splits,
-   model input and output, main score, Health checks).
-2. **Workflow declaration** (`workflow.py`): which research steps run, your
-   advice to each step, training budgets and, for a research loop, its
-   iteration limit and stop conditions. Ready-made starting points are in
-   [`examples/workflow_declarations/`](examples/workflow_declarations/).
-3. **LLM profile** (`llm.json`): which model and provider serve each role.
-4. **Preparation and launch**: the agent prepares the workflow offline with
-   `python -m tools.candidate_prepare --reusable-request ...`, shows you what was
-   captured, and launches only when you say so with
-   `python -m tools.candidate_operations submit ...`. The same tool reports
-   status and logs, and stops, pauses or resumes a research loop between
-   iterations, optionally with new advice.
-
-The [workflow guide](docs/getting-started/README.md#write-and-run-a-workflow-declaration)
-lists these steps with their commands. An experimental browser console can also
-show and run the same files; see [below](#try-the-browser-console-experimental).
-
-### Choose the execution: workflow or orchestration
-
-Either collaboration style can use either execution approach:
-
-| Execution | What happens | When to choose it |
-| --- | --- | --- |
-| **Fixed workflow: lightweight starting point** | Research capabilities run in a predefined sequence, without an extra LLM deciding each next call. | Start quickly with lower coordination overhead and a predictable research loop. |
-| **Orchestration: flexible exploration** | An LLM (the orchestrator) chooses which research steps to call and combines them as evidence arrives. | Explore beyond a fixed sequence, with more setup and potentially higher LLM cost. |
-
-**Workflow keeps coordination lightweight; orchestration offers more room to
-adapt the research process.** In the paper's TIDMAD comparison, fixed workflows
-had the lowest estimated LLM cost, while orchestration without the Data
-Analysis step (an agent that runs analysis code on your data) produced the most valid models and the best valid score. This demonstrates its
-potential, not a guarantee that orchestration wins on every task.
-
-[![Paper Figure 3: valid and non-valid TIDMAD models versus estimated LLM cost](docs/assets/paper/figure3.svg)](docs/assets/paper/figure3.svg)
-
-**Figure 3. Exploration and LLM cost on TIDMAD.** The left panel counts valid
-models; the right counts non-valid models. Costs are estimates and exclude GPU
-training. See the [paper](https://arxiv.org/abs/2610.14024) for the experimental
-conditions, or the [orchestration setup guide](src/tools/orchestration_setup/README.md)
-to prepare your own caller and sandbox.
+is optional. An experimental browser console can also show and run the same
+files; see [below](#try-the-browser-console-experimental).
 
 ### Choose models by role
 
-Without a model configuration, the standard workflow uses **GPT-5.6 Luna for
-every role**, with medium reasoning and no automatic retries for 429/5xx
-responses. Timeout and workflow retries have separate controls.
-Start with a small flow check; stronger models are an explicit choice.
-You can save the [default profile](configs/llm/default.json) with your experiment.
-Your coding agent’s own model and the models called inside the experiment are
-separate choices.
+Every workflow run names an LLM profile: the preparation request's
+`llm_config_file` must point at one, and preparation refuses a request without
+it. For a first flow check, copy [`default.json`](configs/llm/default.json)
+into your project as `llm.json`. It uses **GPT-5.6 Luna for every role**, with
+`medium` reasoning and one transport attempt per call (no automatic retry after
+a 429/5xx response). Start with a small flow check; stronger models are an
+explicit choice. (The older chain launcher, `scripts/launch/run_chain.sh`, uses
+the same Luna routing automatically when you pass no `--llm_config`.)
 
 **For research runs, we recommend
 [`openai-moderate-v1.json`](configs/llm/openai-moderate-v1.json).** It uses
 `gpt-6-astra` for all three proposer stages and the validator, and
 `gpt-5.6-luna` for the other workflow roles, all with `medium` reasoning.
 
-SIDERIUS lets you choose a supported model and provider independently for each
-role. You can allocate stronger models to proposal and validation while using
-lighter models elsewhere, then adjust individual roles for your task and budget
-without changing the workflow code. See the [configuration guide](configs/llm/README.md)
-to copy a profile into your project and select it at launch. Model selection does
-not set a spending limit or guarantee better scores; paper replay keeps its
+You can choose a supported model and provider independently for each role:
+allocate stronger models to proposal and validation and lighter models
+elsewhere, then adjust individual roles for your task and budget without
+changing `workflow.py`. Your coding agent's own model is a separate choice. The
+[configuration guide](configs/llm/README.md) shows how to copy a profile into
+your project and select it on each route. Model selection does not set a
+spending limit or guarantee better scores; paper replay keeps its
 [recorded experiment configurations](https://github.com/yuema137/siderius-exp).
+
+### How to tell a run worked
+
+A run that finishes has not necessarily produced a valid model. A model
+**counts** only when all three hold:
+
+- its main score could be computed (it is *scoreable*);
+- it passed every **Blocking** Health check the task declares (a failing
+  **Recording** check is only stored);
+- the run declared **Scientific** result standing with Blocking Health. A run
+  declared *Diagnostic* reports scores for exploration only; none of them count.
+
+Compare runs on the best valid Formal score, not on trial scores or unfiltered
+"best" lines. [Read the result](docs/getting-started/README.md#6-read-the-result)
+shows where the score and Health verdict appear, on the command line and in the
+browser console.
 
 ## Try the browser console (experimental)
 
@@ -297,34 +327,38 @@ Their source and export details are recorded in
 To check a framework installation without credentials, GPU work or external
 data, use the [synthetic Quickstart](examples/quickstart/README.md). It shows
 how one small task supplies data access, a model contract and an accuracy metric.
+From the checkout you installed above:
 
 ```bash
-git clone https://github.com/yuema137/SIDERIUS.git
-cd SIDERIUS
-uv sync --group dev --frozen
 .venv/bin/python -m pytest \
   tests/unit/examples/test_quickstart_pack.py::test_composition_authority_resolves_from_this_checkout \
   tests/unit/examples/test_quickstart_pack.py::test_shipped_manifest_composes_with_the_declared_values -q
 ```
 
+Success: the last line reads `2 passed` and the exit status is 0.
+
 A real run needs a task package, external data, an LLM profile, a folder for
 results and an NVIDIA GPU with CUDA. Preparing a workflow
-(`python -m tools.candidate_prepare`) is offline: it captures exactly what will
-run so you can review it, but it does not prove that your provider account
-works or that training will succeed. (The older chain launcher,
+(`.venv/bin/python -m tools.candidate_prepare`) is offline: it captures exactly
+what will run so you can review it, but it does not prove that your provider
+account works or that training will succeed. (The older chain launcher,
 `scripts/launch/run_chain.sh`, has its own `--dry-run` preview with the same
-limit.) The
-[getting-started guide](docs/getting-started/README.md) leads to the exact setup
-and first-run references.
+limit.) The [getting-started guide](docs/getting-started/README.md) leads to the
+exact setup and first-run references.
 
 ## What you choose
 
-| Choice | What it controls |
-| --- | --- |
-| Task package | Data meaning, model input/output, objective, metrics and validity checks |
-| Workflow (`workflow.py`) | Which research steps run, what evidence passes between them, advice, the number of iterations and stop conditions of a research loop, tuning rounds per iteration, Trial/Formal tuning rounds and training budgets |
-| Run settings | Provider/model routing (the LLM profile, `llm.json`), plus time limits, network, devices and provider key names (the preparation request) |
-| Workspace | Where the run records its identity, generated models and results |
+Each choice lives in one file in your project folder. Change the file, not the
+framework source.
+
+| Choice | What it controls | File |
+| --- | --- | --- |
+| Task package | Data meaning and splits, model input/output, training objective, main score and other metrics, Health checks | `task.yaml` and the plugins and declarations it names |
+| Workflow | Which research steps run, what evidence passes between them, advice to each step, the iteration limit and stop conditions of a research loop, tuning rounds per iteration, Trial/Formal settings, training budgets, Health enforcement and result standing (Scientific or Diagnostic) | `workflow.py` |
+| Models | Provider and model for each role | `llm.json` (the LLM profile) |
+| Run settings | Which `workflow.py` and `llm.json` to use, runs folder, preparation and run time limits, GPU devices, network access, folders the run may read, provider key *names* | `reusable-request.json` (the preparation request) |
+| Operations store | Where prepared runs may live and where launch records are kept | `store.json` |
+| Workspace | Where the run records its identity, generated models and results | Created by preparation: one folder per run under your runs folder |
 
 For example, changing the metric changes the task's scientific meaning.
 Giving the same task more search time changes the experiment. Keep both choices
@@ -342,7 +376,8 @@ changed setting.
 | Try framework contracts on synthetic data | [Examples](examples/README.md) |
 | Find a research capability or execution owner | [Source map](src/README.md) |
 | Choose policy or provider routing | [Configuration](configs/README.md) |
-| Find launch and inspection commands | [Scripts](scripts/README.md) |
+| Prepare, launch and follow a run | [Getting started](docs/getting-started/README.md#write-and-run-a-workflow-declaration) |
+| Find the older chain launcher, Slurm and diagnostic scripts | [Scripts](scripts/README.md) |
 | Contribute a change | [Contribution reference](CONTRIBUTING.md), [tests](tests/README.md) |
 
 Repository standards are owned by [CLAUDE.md](CLAUDE.md). Scientific packages,

@@ -1,12 +1,150 @@
 # Workflow declaration examples
 
-Use these examples to review literature, choose useful findings, and run a small
-research loop that can ask you for input. They use the synthetic
-[Quickstart classification task](../quickstart/README.md), not a scientific
-benchmark. A declaration describes the nodes and their typed connections; a
-prepared request binds that declaration to files, model routes and a workspace.
+A **workflow declaration** (`workflow.py`) is the file that describes one
+SIDERIUS experiment: which research steps run, how their results connect, what
+advice each step gets, the training budgets and, optionally, a research loop
+with stop conditions. This folder holds ready-made declarations to copy into
+your project. They use the synthetic [Quickstart classification task](../quickstart/README.md),
+not a scientific benchmark.
 
-The two-step scenario is:
+To prepare and run a copied file, follow
+[Write and run a workflow declaration](../../docs/getting-started/README.md#write-and-run-a-workflow-declaration).
+
+## Choose a starting point
+
+| File | What it runs | Use it when |
+| --- | --- | --- |
+| [`reusable_training.py`](reusable_training.py) | Propose → Implement → Validate → Train & tune, once | Your first training run on your own task |
+| [`research_loop_request_input.py`](research_loop_request_input.py) | Interpret → Propose → Implement → Validate → Train & tune, repeated up to three times; it pauses for your input after an iteration that does not improve | You want a research loop |
+| [`managed_reusable_candidate.py`](managed_reusable_candidate.py) | Propose → Implement → Validate, no training | You only want to check that generated models are valid |
+| [`reusable_candidate.py`](reusable_candidate.py) | Like the previous one, but reads one input from a file you supply | Learning the format; it cannot be prepared as is |
+| [`native_training.py`](native_training.py), [`literature_debate_judged.py`](literature_debate_judged.py) | Python scripts that *write* an older, fully concrete request (every input as a JSON file) | The advanced scenario below |
+
+The first four are **reusable** declarations, the recommended format:
+preparation generates their inputs from your task package and LLM profile, so
+one file serves many runs. The older **concrete** format names every input file
+itself and is only needed for the literature-debate step below.
+
+## How a workflow.py is built
+
+SIDERIUS reads `workflow.py` without running it as a program: the file may only
+import names from `workflows.definition` and build one `document = ...` value
+from them. A mistake is reported with its line and field before anything runs.
+Check a file offline with:
+
+```bash
+.venv/bin/python -m workflows.definition to-json --input /absolute/project/workflow.py
+```
+
+Here is `research_loop_request_input.py`, shortened (`...` marks omitted lines)
+and annotated:
+
+```python
+document = ReusableWorkflowDocument(
+    definition=ReusableWorkflowDefinition(
+        # 1. Which task: the task package manifest and the data folder,
+        #    relative to your project folder.
+        task=ReusableTaskReferences(manifest="task.yaml", data_root="data"),
+
+        # 2. Outside inputs ("externals"): values that come from outside the
+        #    steps. "Managed" ones are generated at preparation from your task,
+        #    LLM profile and the settings below.
+        externals=(
+            ManagedCandidateBinding(id="initial", contract="interpretation.input"),
+            ManagedCandidateBinding(id="advice", contract="optional.expert-advice"),
+            ManagedCandidateBinding(id="training", contract="native-training.settings"),
+            ...
+        ),
+
+        # 3. Steps ("nodes"): each runs one research capability: interpretation,
+        #    literature, proposal, implementation, validation or tuning
+        #    (shown in the console as Train & tune).
+        nodes=(
+            NodeInstance(id="interpretation", capability="interpretation",
+                         request=ExternalRequest(binding="initial")),
+            NodeInstance(
+                id="proposal",
+                capability="proposal",
+                # 4. Typed connections ("protocols"): a named protocol maps
+                #    earlier results and outside inputs into this step's input.
+                request=ProtocolRequest(
+                    protocol="interpretation-to-proposal",
+                    arguments=(
+                        ArgumentBinding(name="output", source=ResultSource(node="interpretation")),
+                        ArgumentBinding(name="human_advice", source=ExternalSource(binding="advice")),
+                        ...
+                    ),
+                ),
+            ),
+            ...  # implementation, validation, then tuning
+        ),
+
+        # 5. Research loop: repeat the steps up to final_iteration times, feed
+        #    the training result back to interpretation, and stop early when a
+        #    stop condition is met.
+        loop=AuthoredLoop(
+            final_iteration=3,
+            feedback=LoopFeedback(source=ResultSource(node="tuning"), target="interpretation",
+                                  protocol="tuning-to-interpretation", history="native-research/v1"),
+            stop_conditions=(NoImprovementStop(completed_bodies=1, on_met="request_input"),),
+        ),
+    ),
+    execution_profile="native-interpretation-candidate/v1",  # which runner executes this shape
+
+    # 6. Advice to each step, and which kinds of model the proposer may produce.
+    preparation_options=CandidatePreparationOptions(
+        proposal_advice="Start with a small four-feature classifier. ...",
+        implementation_advice="Keep the Quickstart model interface and diagnostics explicit.",
+        validation_advice="Check feature and class dimensions before training.",
+        allowed_output_types=("classifier",),
+    ),
+
+    # 7. Training budgets and result rules for Train & tune.
+    training_settings={
+        "launch": {
+            "healthgate_mode": "observe_only",   # "blocking" lets Health checks invalidate a result
+            "result_authority": "diagnostic",    # "scientific" lets valid results count
+            "max_rounds": 2,                     # tuning rounds per iteration
+            "trial_time_budget_minutes": 2.0,
+            "formal_time_budget_minutes": 5.0,
+            ...
+        },
+    },
+)
+```
+
+Read it as seven decisions:
+
+1. **Task**: `ReusableTaskReferences` points at your task package and data.
+2. **Outside inputs**: every input that does not come from another step is
+   declared once in `externals`.
+3. **Steps**: each `NodeInstance` runs one capability.
+4. **Connections**: a `ProtocolRequest` names a typed protocol, such as
+   `interpretation-to-proposal`, and binds each argument to an earlier step's
+   result (`ResultSource`) or an outside input (`ExternalSource`). SIDERIUS
+   refuses a connection whose types do not match.
+5. **Loop and stop conditions**: `AuthoredLoop` sets the iteration limit
+   (`final_iteration`). A stop condition ends the loop early, or with
+   `on_met="request_input"` pauses it and waits for you.
+   `NoImprovementStop` reacts to iterations without improvement;
+   `MetricThresholdStop` to a target score; `JudgeStop` to an LLM judge's
+   decision.
+6. **Advice**: `preparation_options` gives each step your guidance.
+7. **Budgets and result rules**: `training_settings["launch"]` sets tuning
+   rounds, Trial/Formal time budgets and epochs, and whether Health is
+   enforced (`healthgate_mode`) and results count scientifically
+   (`result_authority`). The examples use `observe_only` and `diagnostic`,
+   which suit a demonstration; for results you intend to compare, use
+   `blocking` and `scientific`.
+
+The [workflow declarations guide](../../docs/guides/workflow-declarations.md)
+lists every field, protocol, stop condition and which features combine. The
+[declaration contract](../../src/workflows/definition/definition-contract.md)
+is the full reference.
+
+## Advanced scenario: a literature review that feeds a research loop
+
+This scenario chains two runs. Use it after you have run a single workflow.
 
 1. **Run A:** three literature reviews → a debate judge → one merged review →
    one proposal, implementation and validation.
@@ -16,12 +154,12 @@ The two-step scenario is:
    repeated at most three times. A completed iteration without improvement requests
    input when another iteration remains. You can resume with advice.
 
-Run A is a concrete v1 request generator in
-[`literature_debate_judged.py`](literature_debate_judged.py). Its judge strategy
-cannot be parsed as a reusable `workflow.py`. Run B is the reusable v2 source in
-[`research_loop_request_input.py`](research_loop_request_input.py). These execution
-profiles cannot be combined into one graph. File-backed `expert_context` is not
-supported by reusable preparation; the handoff deliberately uses declared advice.
+Run A is written by the script [`literature_debate_judged.py`](literature_debate_judged.py)
+in the concrete format, because its judge step is not available in a reusable
+`workflow.py`. Run B is the reusable declaration
+[`research_loop_request_input.py`](research_loop_request_input.py). The two
+cannot be combined into one declaration, so the handoff carries the findings as
+declared advice.
 
 Both runs spend real API money, and run B also consumes GPU time.
 For planning, allow roughly 15–25 LLM calls for run A and 20–40 for all three
@@ -29,7 +167,7 @@ iterations of run B; these are source-based estimates, not measured totals or ca
 Early termination reduces the count; repairs, additional loss implementations,
 interpretation history and tuning reflection can increase it.
 
-## Prerequisites
+### Prerequisites
 
 - Run commands from the selected checkout root, using its own `.venv` after
   `uv sync --group dev --frozen`.
@@ -45,13 +183,7 @@ interpretation history and tuning reflection can increase it.
   launching shell, following [API key setup](../../docs/getting-started/installation.md#api-keys).
   Do not place credentials inside the scenario directory.
 
-The remaining examples are smaller starting points:
-[`native_training.py`](native_training.py) writes concrete four-stage inputs;
-[`reusable_candidate.py`](reusable_candidate.py),
-[`managed_reusable_candidate.py`](managed_reusable_candidate.py), and
-[`reusable_training.py`](reusable_training.py) show reusable declarations.
-
-## 1. Create data and select external directories
+### 1. Create data and select external directories
 
 Choose a fresh directory outside the checkout. All generated files remain there.
 Set `MODEL` to your selected OpenAI model ID before running these commands.
@@ -80,7 +212,7 @@ Expected: four hash-checked CSV shards under `$SCENARIO/data`. The `task.yaml`
 link resolves to this checkout's Quickstart manifest, preserving its relative
 plugin references. Keep this checkout and the link available throughout both runs.
 
-## 2. Prepare and run the judged literature example
+### 2. Prepare and run the judged literature example
 
 ```bash
 .venv/bin/python examples/workflow_declarations/literature_debate_judged.py \
@@ -126,7 +258,7 @@ Its sibling `judge.json` records adaptor evidence, and `judge.judge/` contains
 the debate evidence. Run A has no loop and no pause/resume interface. Rerun it
 with fresh inputs/workspace if you want a new literature decision.
 
-## 3. Review the findings and declare run B's advice
+### 3. Review the findings and declare run B's advice
 
 Extract a reading copy, retaining the complete synthesis JSON as evidence:
 
@@ -163,7 +295,7 @@ from `proposal_advice`. Merely writing advice without that protocol argument
 would not deliver it to the loop's proposer. The original synthesis file is not
 automatically consumed by run B, and no `expert_context` external is declared.
 
-## 4. Prepare the reusable loop
+### 4. Prepare the reusable loop
 
 Generate a preparation request after editing `workflow.py`. This captures its
 current SHA-256, so later edits require a fresh request and run ID.
@@ -208,7 +340,7 @@ its `inputs/` holds the resolved declaration, generated inputs and LLM profile,
 and its future `workspace/` holds run outputs. No LLM or training runs during preparation. Inspect the prepared
 `external.advice.json` to confirm your summary before submitting.
 
-## 5. Launch, inspect and pause
+### 5. Launch, inspect and pause
 
 Create an operation submission from the verified preparation. An operation is a
 detached process with a persistent ID, which makes pause/resume possible.
@@ -263,7 +395,7 @@ The pause summary contains numbers, not a fresh scientific narrative. Use the
 recorded outputs to decide the next experiment. These diagnostic Quickstart
 runs do not establish scientific validity.
 
-## 6. Resume with advice
+### 6. Resume with advice
 
 Write `$SCENARIO/resume-advice.txt` as UTF-8 text. You may reuse your trimmed
 findings summary and add a concrete next experiment. Resume accepts 1..4000

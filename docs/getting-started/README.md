@@ -1,7 +1,8 @@
 # Get started with your coding agent
 
-SIDERIUS 1.1 has two main ways of working, and both use a coding agent (for
-example Claude Code or Codex) opened in this checkout:
+This page takes you from an installed checkout to a finished SIDERIUS run and
+its result. SIDERIUS 1.1 has two main ways of working, and both use a coding
+agent (for example Claude Code or Codex) opened in this checkout:
 
 - **Professional**: you lead the research plan. The agent reads the contracts,
   writes the files you ask for and checks the setup.
@@ -10,11 +11,22 @@ example Claude Code or Codex) opened in this checkout:
   and guides you through each choice. For example: "I have MNIST images and
   labels in `/data/mnist`; help me build and evaluate a digit classifier."
 
-Both produce the same files in a project folder you own: a task package, a
-**workflow declaration** (`workflow.py`, a short Python file that says which
-research steps run and with which settings) and an LLM profile. Both run them
-with the same command-line tools. These names do not select a CLI flag or force
-a review. Writing the files by hand is also supported.
+Both produce the same files in a project folder you own, and both run them with
+the same command-line tools. These names do not select a CLI flag or force a
+review. Writing the files by hand is also supported. The files are:
+
+- a **task package** (`task.yaml` and its plugins): your data, splits, model
+  input and output, main score and Health checks;
+- a **workflow declaration** (`workflow.py`): which research steps run, how
+  results pass between them, your advice, budgets and loop settings. SIDERIUS
+  reads this file without running it as a program; see
+  [how a workflow.py is built](../../examples/workflow_declarations/README.md#how-a-workflowpy-is-built);
+- an **LLM profile** (`llm.json`): which model serves each role;
+- a **preparation request** (`reusable-request.json`): the settings of one run.
+
+This page follows the **workflow** route, where `workflow.py` fixes the path in
+advance. To let your coding agent choose each research step at run time
+instead, see [workflow or orchestration](../../README.md#choose-the-execution-workflow-or-orchestration).
 
 A browser console is also included. It is **experimental** in this release:
 see [Try the browser console (experimental)](#try-the-browser-console-experimental).
@@ -30,23 +42,23 @@ see [Try the browser console (experimental)](#try-the-browser-console-experiment
    the agent creates your [task package](../reference/task-composition.md) and
    experiment files there. For an existing scientific task, start from a
    [companion tutorial](https://github.com/yuema137/siderius-exp/blob/main/tutorials/README.md).
-3. Save a reviewed [LLM profile](../../configs/llm/README.md) in your project.
-   This JSON file selects the experiment's providers and models by role;
-   your coding agent's own model is a separate choice. Supply only credentials
-   required by those selected routes, using the launch route below.
+3. Save a reviewed [LLM profile](../../configs/llm/README.md) in your project as
+   `llm.json`. This JSON file selects the experiment's providers and models by
+   role; your coding agent's own model is a separate choice. Supply only
+   credentials required by those selected routes, using the launch route below.
 
 For example, keep task inputs, the workflow and run outputs in your external
 project. These are example names, not a layout the tools require:
 
 ```text
 /absolute/project/                 # outside the SIDERIUS checkout
-  task.yaml                        # task manifest: ReusableTaskReferences(manifest="task.yaml")
+  task.yaml                        # task manifest (named by manifest= in workflow.py)
   task_plugins/                    # dataset/model/metric implementations
-  data/                            # dataset: ReusableTaskReferences(data_root="data")
+  data/                            # dataset (named by data_root= in workflow.py)
   workflow.py                      # workflow declaration: steps, advice, budgets, loop
   llm.json                         # saved provider/model profile
   reusable-request.json            # preparation request for one run
-  store.json                       # where detached operations keep their records
+  store.json                       # where launched operations keep their records
 /absolute/runs/                    # create it first; one folder per prepared run
 /absolute/operations/              # operation records; created by the first submit
 ```
@@ -62,78 +74,210 @@ can do each step for you; the commands below are what it runs, so you can
 check them. You need Linux with bubblewrap, this checkout's `.venv/bin/python`,
 a task package and an NVIDIA GPU with CUDA for the training step.
 
-1. **Start `workflow.py` from an example.** Copy one file from
-   [`examples/workflow_declarations/`](../../examples/workflow_declarations/)
-   into your project as `workflow.py`:
-   [`reusable_training.py`](../../examples/workflow_declarations/reusable_training.py)
-   runs Propose → Implement → Validate → Train & tune once;
-   [`managed_reusable_candidate.py`](../../examples/workflow_declarations/managed_reusable_candidate.py)
-   stops after validation. Point its `ReusableTaskReferences(manifest=...,
-   data_root=...)` at your task package and data (relative paths resolve against
-   the `project_root` you choose in step 2, normally your project folder) and set
-   the advice and training settings you want. A research loop, a literature
-   review and LLM judges are also declared in this file; the
-   [declaration contract](../../src/workflows/definition/definition-contract.md)
-   lists every field.
+### 1. Start `workflow.py` from an example
 
-2. **Save the preparation request.** Your agent writes
-   `/absolute/project/reusable-request.json` with the
-   [request recipe](../../src/tools/candidate_prepare/candidate-prepare-contract.md#reusable-request-recipe).
-   It names `workflow.py`, the LLM profile, a runs folder, the time limits and
-   the environment variable names of the provider keys (never the key values).
-   The runs folder (`/absolute/runs` above) must already exist, outside your
-   task and data folders. You will list this folder in `store.json` in step 4.
+Copy one file from
+[`examples/workflow_declarations/`](../../examples/workflow_declarations/README.md)
+into your project as `workflow.py`:
 
-3. **Prepare the run.** This step is offline: no model is called and nothing
-   is trained.
+- [`reusable_training.py`](../../examples/workflow_declarations/reusable_training.py)
+  runs Propose → Implement → Validate → Train & tune once;
+- [`research_loop_request_input.py`](../../examples/workflow_declarations/research_loop_request_input.py)
+  runs Interpret → Propose → Implement → Validate → Train & tune as a research
+  loop of up to three iterations, with a stop condition;
+- [`managed_reusable_candidate.py`](../../examples/workflow_declarations/managed_reusable_candidate.py)
+  stops after validation, without training.
+
+Point its `ReusableTaskReferences(manifest=..., data_root=...)` at your task
+package and data (relative paths resolve against the `project_root` you choose
+in step 2, normally your project folder) and set the advice and training
+settings you want. [How a workflow.py is built](../../examples/workflow_declarations/README.md#how-a-workflowpy-is-built)
+explains each part. To check the file offline, without running anything:
+
+```bash
+.venv/bin/python -m workflows.definition to-json --input /absolute/project/workflow.py
+```
+
+Success: it prints the declaration as JSON and exits 0. A mistake prints a
+diagnostic naming the line or field, and exits 2.
+
+### 2. Save the preparation request
+
+Your agent writes `/absolute/project/reusable-request.json` with the
+[request recipe](../../src/tools/candidate_prepare/candidate-prepare-contract.md#reusable-request-recipe).
+It records, for one run:
+
+- `source_path`, `project_root` and `expected_source_sha256`: which
+  `workflow.py` to run, and its exact content (preparation refuses a file that
+  changed after the request was written);
+- `llm_config_file`: your `llm.json` (required: there is no implicit profile on
+  this route);
+- `runs_root`, `run_id` and `run_name`: the folder that receives one new
+  subfolder per run, a fresh UUID for this run and a readable name;
+- `preparation_timeout_seconds` and `candidate_timeout_seconds`: time limits
+  for preparation and for the run;
+- `task_read_only`: folders the run may read (your task package and data);
+- `candidate_network`: whether the run may use the network (provider calls
+  need it);
+- `candidate_devices`: the GPU device paths the run may use, for example
+  `/dev/nvidia0`. Leave it empty only for a workflow without training: a run
+  that trains a model without a GPU is refused;
+- `candidate_environment_names`: the *names* of the provider key variables,
+  never the key values.
+
+For example:
+
+```json
+{
+  "source_path": "/absolute/project/workflow.py",
+  "project_root": "/absolute/project",
+  "expected_source_sha256": "<SHA-256 of workflow.py, computed by the recipe>",
+  "runs_root": "/absolute/runs",
+  "run_id": "3f2b6c1e-8d4a-4e2f-9b7c-5a1d0e6f4c21",
+  "run_name": "first_run",
+  "llm_config_file": "/absolute/project/llm.json",
+  "preparation_timeout_seconds": 600.0,
+  "candidate_timeout_seconds": 7200.0,
+  "task_read_only": ["/absolute/project"],
+  "candidate_network": true,
+  "candidate_devices": ["/dev/nvidia0"],
+  "candidate_environment_names": ["OPENAI_API_KEY"]
+}
+```
+
+The runs folder (`/absolute/runs` above) must already exist, outside your task
+and data folders. You will list it in `store.json` in step 4.
+
+### 3. Prepare the run
+
+This step is offline: no model is called and nothing is trained.
+
+```bash
+.venv/bin/python -m tools.candidate_prepare \
+  --reusable-request /absolute/project/reusable-request.json
+```
+
+Success: exit status 0, and the printed JSON receipt includes
+`"status": "prepared"` and `"envelope": "/absolute/runs/<run_id>"`. That
+envelope is the new run folder. The same receipt is saved there as
+`receipt.json`, and `workflow.py.snapshot` beside it is the exact workflow that
+will run; later edits to `workflow.py` only affect future runs. A request that
+cannot be prepared exits non-zero, and the error (or the receipt's `error`
+field) names the problem.
+
+### 4. Launch it
+
+First save `store.json`. It tells the operations tool where prepared runs may
+live and where to keep its own records:
+
+```json
+{
+  "state_root": "/absolute/operations",
+  "preparation_roots": ["/absolute/runs"],
+  "candidate_roots": ["/absolute/runs"]
+}
+```
+
+`state_root` must be a separate folder that does not exist yet; its parent must.
+Then your agent turns the prepared run folder into a launch request,
+`reusable-submission.json`, with the short Python
+[operation recipe](../../src/tools/candidate_operations/candidate-operations-contract.md#shared-python-and-cli-recipe):
+
+```python
+from pathlib import Path
+from uuid import uuid4
+
+from tools.candidate_operations import OperationStoreConfig, build_reusable_operation
+from tools.candidate_prepare import select_reusable_preparation
+
+config = OperationStoreConfig.model_validate_json(Path("/absolute/project/store.json").read_bytes())
+selection = select_reusable_preparation("/absolute/runs/<run_id>")
+submission = build_reusable_operation(config, selection, uuid4())
+Path("/absolute/project/reusable-submission.json").write_text(submission.model_dump_json(indent=2))
+```
+
+Read the task, workflow steps, models, time limits and advice in that file
+before you continue. Then make your provider keys available in this shell (see
+[API keys](installation.md#api-keys)) and submit. This step calls paid APIs and
+uses the GPU:
+
+```bash
+.venv/bin/python -m tools.candidate_operations submit \
+  --store-config /absolute/project/store.json \
+  --request /absolute/project/reusable-submission.json
+```
+
+Save the `operation_id` it prints. Exit status 0 means the run was admitted,
+not that it succeeded. If the response is lost, submit the same file again: you
+get the same operation back, not a second run.
+
+### 5. Follow it
+
+Read the state and the log with the operation ID:
+
+```bash
+.venv/bin/python -m tools.candidate_operations status \
+  --store-config /absolute/project/store.json --operation-id OPERATION_UUID
+.venv/bin/python -m tools.candidate_operations log \
+  --store-config /absolute/project/store.json --operation-id OPERATION_UUID \
+  --kind native --offset 0 --limit 65536
+```
+
+`status` prints JSON whose `state` moves from `active` to `completed` (or
+`operation_failed`). [Read status and logs](../../src/tools/candidate_operations/README.md#read-status-and-logs)
+explains each value.
+
+For a research loop, `stop-loop` and `pause-loop` act at the next iteration
+boundary. To resume a paused loop, `write-loop-resume --output resume.json`
+(with an optional `--advice-file`) writes a resume request, which you then
+`submit`; see
+[Stop, pause or resume a research loop](../../src/tools/candidate_operations/README.md#stop-pause-or-resume-a-research-loop).
+
+### 6. Read the result
+
+A finished run is a record, not a verdict. Read it in three layers:
+
+1. **Did the run finish?** In the `status` output, `state` is `completed` and
+   `receipt.status` says what the run reported: `completed` (training
+   returned), `stopped` or `paused` (a research loop), `accepted` or
+   `rejected` (a workflow without training), or `failed` / `timed_out` /
+   `interrupted` (read the native log). The receipt is also saved as
+   `/absolute/runs/<run_id>/workspace/candidate_run/receipt.json`. For a
+   research loop, its `loop_trace` lists each iteration and why the loop
+   stopped or paused.
+2. **What score did training reach, and did Health pass?** Each training step
+   saves its report as a file named `run_output_<run_name>.json` inside the run
+   folder: one per iteration for a research loop. List them with
 
    ```bash
-   .venv/bin/python -m tools.candidate_prepare \
-     --reusable-request /absolute/project/reusable-request.json
+   find /absolute/runs/<run_id>/workspace -name 'run_output_*.json'
    ```
 
-   Success: exit status 0, and `receipt.json` in the new run folder reports
-   `status: "prepared"`. `workflow.py.snapshot` there is the exact workflow that
-   will run; later edits to `workflow.py` only affect future runs.
+   (For a single pass, the receipt's `native_output_paths` also lists every
+   step's record.) In each report:
+   - `best_valid_formal_denoising_score` is the best main-score value among
+     Formal results that passed Health. It is the number to compare. (The field
+     name is historical: it holds your task's main score, whatever the metric.)
+     `null` means no Formal result passed Health, or none ran;
+   - `all_records` lists every training attempt with its `status`, score,
+     `health_gate_results` (each Health check's outcome) and, on Formal
+     records, `scientific_authority` (whether that result may count, and if
+     not, `blocking_reasons`);
+   - `termination_reason` says why training stopped.
 
-4. **Launch it.** First save `store.json`: it tells the operations tool where
-   prepared runs may live (list the runs folder from step 2 in both
-   `preparation_roots` and `candidate_roots`) and where to keep its own records
-   (`state_root`, a separate folder such as `/absolute/operations`). Then ask
-   your coding agent to run the short Python
-   [operation recipe](../../src/tools/candidate_operations/candidate-operations-contract.md#shared-python-and-cli-recipe),
-   which selects the prepared run folder from step 3 and writes
-   `reusable-submission.json`. Read the task, workflow steps, models, time
-   limits and advice in that file before you continue. Then make your provider
-   keys available in this shell (see [API keys](installation.md#api-keys)) and
-   submit. This step calls paid APIs and uses the GPU:
+   Fields such as `best_denoising_score` and `best_formal_denoising_score`
+   include results that failed Health; treat them as progress reports.
+3. **Does the result count scientifically?** Only when the workflow declared
+   Health enforcement `blocking` and result standing `scientific` (in
+   `workflow.py`, under `training_settings`), the score could be computed, and
+   every **Blocking** Health check passed. A run declared `diagnostic` (as the
+   files in `examples/workflow_declarations/` are) reports scores for exploration only. A failing
+   **Recording** check is stored but does not invalidate the model.
 
-   ```bash
-   .venv/bin/python -m tools.candidate_operations submit \
-     --store-config /absolute/project/store.json \
-     --request /absolute/project/reusable-submission.json
-   ```
-
-   Save the `operation_id` it prints. Exit status 0 means the run was admitted,
-   not that it succeeded.
-
-5. **Follow it.** Read the state and the log with the operation ID:
-
-   ```bash
-   .venv/bin/python -m tools.candidate_operations status \
-     --store-config /absolute/project/store.json --operation-id OPERATION_UUID
-   .venv/bin/python -m tools.candidate_operations log \
-     --store-config /absolute/project/store.json --operation-id OPERATION_UUID \
-     --kind native --offset 0 --limit 65536
-   ```
-
-   For a research loop, `stop-loop`, `pause-loop` and `write-loop-resume`
-   (with an optional `--advice-file`) act between iterations; see
-   [Stop, pause or resume a research loop](../../src/tools/candidate_operations/README.md#stop-pause-or-resume-a-research-loop).
-
-[Read status and logs](../../src/tools/candidate_operations/README.md#read-status-and-logs)
-explains each status value. A finished run is not a scientific verdict: read
-its scores and Health results before you compare it with other runs.
+In the browser console, open the run on **Monitor**. When a workflow run has
+finished, **Workflow training results** shows each iteration's training report
+separately, including **Best valid formal score**, and **Train & tune outcome**
+says what training achieved.
 
 ## Launch a native chain from the CLI
 
@@ -160,12 +304,13 @@ guide for prerequisites and path requirements.
 The [Quickstart pack](../../examples/quickstart/README.md) offers synthetic data
 preparation and component checks that run on CPU without provider calls. They
 check installation and task contracts, not scientific hardware or model
-performance. A real run, including a Quickstart research chain, needs an NVIDIA
-GPU with CUDA; the chain header and the console run review say so, and a launch
-on a machine without one stops before any model call.
+performance. Its [tutorial notebook](../../examples/quickstart/quickstart.ipynb)
+walks through the task package, a workflow and its preparation offline. A real
+run that trains, including a Quickstart research loop, needs an NVIDIA GPU with
+CUDA; on a machine without one it is refused before any model call.
 
-To let an LLM orchestrator choose the research steps instead of a fixed
-`workflow.py`, use the [external orchestration guide](../../src/tools/orchestration_setup/README.md).
+To let your coding agent choose the research steps at run time instead of a
+fixed `workflow.py`, use the [external orchestration guide](../../src/tools/orchestration_setup/README.md).
 Choosing that execution route is separate from choosing Professional or
 Assistant collaboration. See [the documentation map](../README.md) for deeper
 references.
@@ -201,8 +346,8 @@ you own; the console workspace is created inside it) and
 #### Before you start
 
 - **A Linux machine with an NVIDIA GPU and CUDA** for the run itself. Every
-  step before Launch works on CPU, but a launched run without a GPU stops
-  instead of training. See [installation](installation.md#prerequisites).
+  step before Launch works on CPU, but a launched run that trains is refused
+  without a GPU. See [installation](installation.md#prerequisites).
 - **bubblewrap**, the Linux sandbox the console runs tasks in. Run the one-line
   [bubblewrap check](../../src/tools/workspace_sandbox/README.md#check-that-bubblewrap-works)
   once on this machine.
@@ -282,7 +427,9 @@ you own; the console workspace is created inside it) and
 
 5. **Register the task and its experiment setup.**
    `add-task` finds this machine's NVIDIA GPUs (`/dev/nvidia<N>`) and passes
-   them to runs; add `--no-gpu` for a CPU-only task:
+   them to runs. On a machine without a GPU, `--no-gpu` still lets you register
+   the task, prepare and check it offline, but a run that trains is refused
+   there (SIDERIUS 1.1 has no CPU mode):
 
    ```bash
    .venv/bin/python -m tools.candidate_console add-task \
@@ -323,7 +470,8 @@ you own; the console workspace is created inside it) and
    The bundle README's
    [What to do in the browser](../../examples/console_bundle/README.md#what-to-do-in-the-browser)
    describes each tab. Success: Monitor shows the run's final status and what
-   each step reported. The example proves the path works end to end, not model
+   each step reported; [Read the result](#6-read-the-result) explains the
+   training results. The example proves the path works end to end, not model
    quality.
 
 #### Stage 2: bring your own task
