@@ -720,7 +720,10 @@ def _notebook_section_headings() -> list[str]:
 
 
 def test_notebook_html_readme_and_command_stay_in_sync() -> None:
-    """Keep current advice aligned while preserving the recorded one-round witness."""
+    """Defects caught: the static HTML drifts from the notebook (a missing
+    section heading), the README loses its copied chain-preview command or
+    flags, the tutorial stops teaching the recommended prepare/submit route,
+    or a removed path the tutorial once cited reappears."""
     headings = _notebook_section_headings()
     assert len(headings) >= 14, f"notebook lost sections: {headings}"
     html = (PACK / "quickstart.html").read_text(encoding="utf-8")
@@ -735,7 +738,7 @@ def test_notebook_html_readme_and_command_stay_in_sync() -> None:
         "--mode lilab",
         "--task_composition configs/task_composition/quickstart.yaml",
         "--data_dir",
-        "--llm_config configs/llm/openai_tiered_pro.json",
+        "--llm_config configs/llm/default.json",
         "--healthgate_mode blocking",
         "--result_authority diagnostic",
         "--num_iterations 1",
@@ -743,29 +746,15 @@ def test_notebook_html_readme_and_command_stay_in_sync() -> None:
         "--formal_portion 1.0",
     ):
         assert token in readme, f"README launch command lost {token!r}"
-        assert token in notebook_text, f"notebook launch cell lost {token!r}"
-        assert token in html, f"HTML launch command lost {token!r}"
-    notebook = json.loads(notebook_text)
-    witness = next(
-        cell
-        for cell in notebook["cells"]
-        if cell["cell_type"] == "code" and "# Executed 2026-08-25" in "".join(cell["source"])
-    )
-    recorded_command = "".join(witness["source"])
-    html_witness = re.search(
-        r'<pre class="code">%%bash\n# Executed 2026-08-25.*?</pre>', html, re.S
-    )
-    assert html_witness is not None
-    for recorded in (recorded_command, html_witness.group()):
-        assert "--max_rounds 1" in recorded
-        assert "--max_rounds 2" not in recorded
-        assert "--formal_portion" not in recorded
-    assert "for 1 rounds" in "".join(witness["outputs"][0]["text"])
-    advice = "--max_rounds 2 --formal_portion 1.0"
-    assert any(
-        cell["cell_type"] == "markdown" and advice in "".join(cell["source"])
-        for cell in notebook["cells"]
-    )
-    assert f"<code>{advice}</code>" in html
     command = re.search(r"```bash\n[^`]*bash scripts/launch/run_chain\.sh[^`]+```", readme)
     assert command, "README carries no bash launch command block"
+    for token in (
+        "tools.candidate_prepare",
+        "--reusable-request",
+        "tools.candidate_operations submit",
+        "preflight_reusable_candidate",
+    ):
+        assert token in notebook_text, f"notebook no longer teaches {token!r}"
+        assert token in html, f"HTML no longer shows {token!r}"
+    for stale in ("sdsc_submission_scripts", "scripts/inspect_run_state.py"):
+        assert stale not in notebook_text, f"notebook cites removed path {stale!r}"
