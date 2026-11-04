@@ -12,8 +12,9 @@ source metric behavior and prompt bytes. Presence permits composition and inspec
 and primary-only metric declarations can launch with evaluation rendering.
 Weighted-sum formula aggregation (#1294) launches on the supported native route
 described in [Deterministic selection runtime](#deterministic-selection-runtime).
-Feasibility (#1295), measurements (#1296) and rubric execution (#1297) still have
-independent, currently closed capability gates. Composition never
+Builtin candidate measurements (#1296) launch on the same native route (see
+[Candidate measurements](#candidate-measurements)). Feasibility (#1295) and rubric
+execution (#1297) still have independent, currently closed capability gates. Composition never
 executes arithmetic, measurements or an LLM. A declaration is not runtime support.
 
 `RunTaskComposition.evaluation` is `ResolvedEvaluation | None`. Its `spec` is the
@@ -66,7 +67,15 @@ Builtin components:
   assertion is excluded from spec serialization; resolved identity carries the
   authoritative SHA. No rubric scores enter scalar selection or constraints.
 
-Measurement is NOT a builtin E1 schema. #1296 adds it by registering a variant.
+- `measurement` (#1296): required `measurement` (one of `trainable_parameter_count`,
+  `total_parameter_count`, `model_bytes`, `inference_latency_ms`), required explicit
+  `direction: higher | lower`, optional descriptive `range`, and `protocol` required
+  for `inference_latency_ms` and refused otherwise (`input_shape` 1-8 positive ints
+  including batch, `warmup` 0..1000 default 10, `repeats` 1..10000 default 50,
+  `timeout_seconds` (0, 3600] default 300). Units are fixed by the measurement
+  (parameters, bytes, ms), never authored or inferred. Two components with the same
+  measurement and protocol refuse. Registration requires capability `measurements`.
+
 External variants may add their own typed fields, including limits if appropriate.
 
 Selection variants:
@@ -177,7 +186,7 @@ absence: historical profiles on absent-evaluation tasks never meet the new
 boundary and need no override. Present evaluation requires an explicit override
 or native declaration in an active profile. Changed assembly hashes still require
 normal offline qualification. #1295 owns feasibility at all
-selection sites; #1296 supplies measurement schema/execution; #1297 owns candidate
+selection sites; #1296 supplies measurement schema/execution (below); #1297 owns candidate
 result projection and versioned replayable judge calls. Existing metric-scored
 adaptor restrictions remain until deliberately amended by their owner.
 
@@ -368,3 +377,65 @@ Validation owners: `tests/unit/execute_tools/test_evaluation_aggregation.py`,
 structural guards and the complete affected package suites. Paper qualification
 must report semantic-payload parity separately from release-wide assembly identity
 changes; schema/source edits can move identities even with identical prompt bytes.
+
+## Candidate measurements
+
+Owners: `execute_tools/candidate_measurement.py` (request schema and execution),
+`execute_tools/measurement_results.py` (typed results and record accessor),
+`workflows/evaluation_measurements.py` (whether the bound run declares any).
+
+Execution happens only in the native TASK_OWNED scoring child, after source primary
+and secondary metrics and before aggregation. `TidmadSandbox.execute_scoring` writes a
+validated `MeasurementRequest` (model type/config, `LossConfig` loss type, model-I/O
+path, absolute checkpoint path from `training_checkpoint_path`) to
+`configs/measurement_request_<exp_id>.json` and passes `--measurement_request_json`
+only when the bound evaluation snapshot declares a measurement component; every other
+scoring argv is unchanged. The child refuses a measurement-declaring composition
+without the flag and a request for another model type or experiment. The model is
+built with `construct_inference_model` and loaded by `load_inference_checkpoint`
+(trainer sentinel enforced) on `cuda` when the child sees one (it inherits the
+attempt's `CUDA_VISIBLE_DEVICES`, the training device), otherwise `cpu`.
+
+- Parameter counts are summed over the loaded model's parameters (trainable: those
+  with `requires_grad`). `model_bytes` is the checkpoint file size.
+- `inference_latency_ms`: one synthetic input (`torch.randn` seeded 0 in the resolved
+  inference dtype, zeros for integer dtypes), `eval()` and `inference_mode()`,
+  `warmup` untimed forwards, then `repeats` `perf_counter` timed forwards with CUDA
+  synchronization. Value is the median in ms; noise is `{repeats, iqr}`. It never
+  reuses inference-phase per-file or per-batch wall times, which include I/O and
+  contention. `timeout_seconds` is a cooperative bound checked after each forward;
+  the scoring child has no hard wall-clock kill (existing behaviour, follow-up).
+- Each failure (exception, timeout, nonfinite value) becomes a `MeasurementResult`
+  with `failure` set; measurement code never raises out of the child. Code-package
+  integrity failures still propagate.
+
+The child emits `measurement_results` (one per component, declaration order) beside
+`evaluation_result`. `aggregate_evaluation` reads measurement terms from them: a
+missing, failed or nonfinite required measurement becomes a `ScoreabilityFailure`
+naming the component and the reason, so the candidate is not scoreable. The parent
+re-derives each measurement term against the transported `measurement_results`
+(`SelectionTerm.source_measurement`); disagreement raises `EvaluationTransportError`.
+Records carry `measurement_results` on success and on structured formula refusals;
+the field is omitted when empty, so non-declaring runs keep record and planner prompt
+bytes. `measurement_results.measurement_value(record, component_id)` is the accessor
+for feasibility (#1295) and rubric projection (#1297); it raises
+`MeasurementUnavailable` instead of returning a missing value. Pseudo mode
+(`core/pseudo_scoring.py`) synthesizes results within term bounds and passes them
+through the same aggregation owner. Rendering uses `render_measurement_component`
+through the existing `evaluation.spec` boundary.
+
+Refused combinations: a bound `CandidateEvaluationExecutor` refuses launch
+(`require_measurement_route`). The ANCHOR_NORMALIZED route scores in process and runs
+no measurement, so a formula term over a measurement fails closed there. Shared-GPU
+contention during latency timing is not detected; pair accelerator latency with an
+exclusive host-ledger placement (`time_budgeted: true`). Replay reads persisted values
+and never re-measures.
+
+Closed follow-ups (not implemented): the `CandidateMeasurement` plugin family,
+manifest-declared external hardware executors (`CandidateEvaluationExecutor` as a
+component), and FLOPs/MACs counting.
+
+Validation: `tests/unit/execute_tools/test_evaluation_measurements.py` (protocol
+applicability, median timing without warm-up, checkpoint-derived values and failure
+records, aggregation refusal reason, parent re-derivation, launch admission and the
+record accessor).

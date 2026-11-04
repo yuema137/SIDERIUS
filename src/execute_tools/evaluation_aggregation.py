@@ -7,7 +7,7 @@ and the declaration to verify transported evidence (``evaluation_child``).
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from fractions import Fraction
 from typing import TYPE_CHECKING
 
@@ -27,8 +27,9 @@ from execute_tools.evaluation_results import (
     EvaluationInputsScoreability,
     EvaluationTransportError,
 )
-from execute_tools.evaluation_spec import MetricComponent, WeightedTerm
+from execute_tools.evaluation_spec import MeasurementComponent, MetricComponent, WeightedTerm
 from execute_tools.evaluation_validation import formula_terms
+from execute_tools.measurement_results import MeasurementResult
 from execute_tools.metric_order import MetricOrder
 from workflows.evaluation_selection import effective_metric_spec
 
@@ -62,6 +63,18 @@ def _component_value(
     if result.scalar is None or not math.isfinite(result.scalar):
         raise ValueError("required source metric is null or nonfinite")
     return result.scalar
+
+
+def measurement_raw(component_id: str, measurements: Mapping[str, MeasurementResult]) -> float:
+    """The finite raw measurement value a term needs; failures refuse with their reason."""
+    result = measurements.get(component_id)
+    if result is None:
+        raise ValueError("required measurement is missing")
+    if result.failure is not None:
+        raise ValueError(f"required measurement failed: {result.failure}")
+    if result.value is None or not math.isfinite(result.value):
+        raise ValueError("required measurement is null or nonfinite")
+    return result.value
 
 
 def weight_total(terms: Iterable[WeightedTerm]) -> Fraction:
@@ -126,6 +139,7 @@ def aggregate_evaluation(
     source_spec: MetricSpec,
     primary: MetricResult | NotScoreableResult,
     secondaries: list[MetricResult],
+    measurements: Mapping[str, MeasurementResult] | None = None,
 ) -> tuple[MetricResult | NotScoreableResult, EvaluationEvidence]:
     """Require all referenced evidence; never silently renormalize missing terms."""
     effective = effective_metric_spec(source_spec, evaluation)
@@ -141,9 +155,12 @@ def aggregate_evaluation(
     for term in terms:
         component = components[term.component]
         try:
-            if type(component) is not MetricComponent:
+            if type(component) is MeasurementComponent:
+                raw = measurement_raw(component.id, measurements or {})
+            elif type(component) is MetricComponent:
+                raw = _component_value(component, results, evaluation)
+            else:
                 raise ValueError("component kind has no runtime value support")
-            raw = _component_value(component, results, evaluation)
             resolved = evaluation.components[term.component]
             assert resolved.direction is not None
             item, contribution = term_evaluation(

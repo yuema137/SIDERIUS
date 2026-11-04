@@ -994,6 +994,9 @@ def _build_scoring_failure_record(
         evidence = getattr(exc, "evaluation_result", None)
         if evidence is not None:
             record["evaluation_result"] = evidence.model_dump(mode="json")
+        measurements = getattr(exc, "measurement_results", ())
+        if measurements:
+            record["measurement_results"] = [m.model_dump(mode="json") for m in measurements]
     return record
 
 

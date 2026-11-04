@@ -345,11 +345,13 @@ def test_fpga_plugin_dispatch_and_tradeoffs_need_no_consumer_kind_switch(tmp_pat
     assert "-3/400" in text and "-1/4000000" in text
     assert "quality >= 0.95 fraction" in text
     assert "latency <= 80 (component units; see declaration above)" in text
-    with pytest.raises(TaskCompositionError, match="measurements"):
+    # Plugin kinds with no runtime value hook stay refused (#1338) even with
+    # builtin measurements implemented; constraints are refused until #1295.
+    with pytest.raises(TaskCompositionError, match=r"feasibility constraints|no runtime value"):
         require_evaluation_runtime(resolved)
     # Fresh composition must not inherit either user registration.
     clean, _ = evaluation_fixture(tmp_path)
-    assert set(clean.registry) == {"metric", "rubric"}
+    assert set(clean.registry) == {"metric", "rubric", "measurement"}
 
 
 @pytest.mark.parametrize(

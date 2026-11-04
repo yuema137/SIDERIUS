@@ -974,6 +974,39 @@ class TidmadSandbox:
             json.dump(contract.model_dump(mode="json"), handle)
         return path
 
+    def _measurement_request_argv(
+        self, exp_id: str, model_type: str, m_cfg: dict, l_cfg: dict
+    ) -> list[str]:
+        """#1296 checkpoint request for evaluation measurements; empty without any.
+
+        Only a composed run whose evaluation declares a ``measurement``
+        component receives the flag, so every other scoring argv is unchanged.
+        The scoring child re-validates the request before loading the checkpoint.
+        """
+        from workflows.evaluation_measurements import active_run_declares_measurements
+
+        if not active_run_declares_measurements():
+            return []
+        from core.sandbox_layout import training_checkpoint_path
+        from execute_tools.candidate_measurement import MeasurementRequest
+
+        request = MeasurementRequest(
+            model_type=model_type,
+            experiment_id=exp_id,
+            model_configuration=dict(m_cfg),
+            loss_type=LossConfig(**l_cfg).loss_type,
+            checkpoint_path=str(
+                training_checkpoint_path(self.dirs["models"], model_type, exp_id).resolve()
+            ),
+            model_io_json=self._write_model_io_config(exp_id),
+        )
+        path = os.path.abspath(
+            os.path.join(self.dirs["configs"], f"measurement_request_{exp_id}.json")
+        )
+        with open(path, "w") as handle:
+            json.dump(request.model_dump(mode="json"), handle)
+        return ["--measurement_request_json", path]
+
     def _write_dataset_profile_config(self, exp_id: str) -> str:
         """Materialize the resolved Dataset Profile for a subprocess.
 
@@ -1910,6 +1943,7 @@ class TidmadSandbox:
                     # Step 12 / PR-12d D4b — the composed run's task-built
                     # scopes, same emitter, same emitted-only-when-bound rule.
                     *task_scope_argv(self.dirs["configs"], exp_id, task_scopes),
+                    *self._measurement_request_argv(exp_id, model_type, m_cfg, l_cfg),
                 ],
                 _subprocess_env(plugin_dir=self.plugin_dir, loss_dir=self.loss_dir),
             )
