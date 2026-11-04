@@ -61,5 +61,8 @@ def render_rubric_component(component: RubricComponent, context: ComponentRender
     return "\n".join(
         [f"- {component.id} (rubric)", f"  Meaning: {indent_text(component.meaning)}"]
         + ["  " + line for line in render_rubric_details(context.rubric)]
-        + ["  Role: qualitative evidence; not a deterministic scalar."]
+        + [
+            "  Role: qualitative guidance for agents; no framework step scores it; "
+            "never a deterministic scalar or ranking input."
+        ]
     )

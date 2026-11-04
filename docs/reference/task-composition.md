@@ -770,6 +770,11 @@ criteria:                        # 1..32 entries; names unique within the rubric
 A rubric is **not a metric**. It has no direction and no total, never enters
 `MetricOrder`, records' score fields, Health or stop conditions. A judge
 returns integers per criterion; framework code computes any weighted total.
+When an `evaluation` rubric component or `rubric_balance` selection names a
+rubric, the rubric is rendered to agents as natural-language guidance. No
+framework step judges trained candidates against it. Ranking keeps using
+`deterministic_ranking`
+([rubric guidance](../../src/execute_tools/evaluation-contract.md#rubric-guidance)).
 
 Identity and refusal rules:
 
@@ -1109,6 +1114,7 @@ higher-is-better utility. Constraints use raw component values. Rubric component
 and `selection: {kind: rubric_balance, rubric: {id, version}, guidance: ...,
 deterministic_ranking: {kind: primary}}` resolve task-declared rubrics; their actual
 SHA is pinned even when the authored reference omits it. No rubric enters arithmetic.
+Both launch as rendered agent guidance; ranking uses `deterministic_ranking`.
 
 `compose_run_task_bindings(path).evaluation.inspect()` returns composition warnings,
 term marginal utility rates and required runtime capabilities without executing a

@@ -169,9 +169,9 @@ The shared constraint
 append path renders it through `evaluation.spec` using a scoped, copyable context.
 The absent-spec gate is outside the boundary, preserving historical profile
 admission and message bytes. Primary-only metric evaluation can launch; other
-evaluation capabilities retain their own guards. Rubric judgment is
-never arithmetic in MetricOrder; #1297 owns any new candidate-result projector and
-versioned judge evidence. The exact schema and future Health/source-metric binding
+evaluation capabilities retain their own guards. Rubric components and
+rubric balancing launch as rendered guidance only. They are never arithmetic in
+MetricOrder, and no candidate-result judge projector exists yet (follow-up). The exact schema and future Health/source-metric binding
 are in the [evaluation contract](../execute_tools/evaluation-contract.md).
 
 ## Pseudo model tensor geometry
