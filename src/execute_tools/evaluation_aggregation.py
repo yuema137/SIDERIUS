@@ -91,7 +91,21 @@ def _constraint_value(
     return None if measured is None or measured.failure is not None else measured.value
 
 
-def evaluate_constraint(term: ConstraintTerm, raw: float | None) -> ConstraintEvaluation:
+def _unavailable_reason(
+    term: ConstraintTerm, measurements: Mapping[str, MeasurementResult]
+) -> str | None:
+    """A failed measurement's own reason, so an infeasible record names the cause."""
+    if term.source_metric_id is not None:
+        return None
+    measured = measurements.get(term.constraint.component)
+    if measured is None:
+        return "measurement was not recorded"
+    return None if measured.failure is None else f"measurement failed: {measured.failure}"
+
+
+def evaluate_constraint(
+    term: ConstraintTerm, raw: float | None, reason: str | None = None
+) -> ConstraintEvaluation:
     """The single constraint arithmetic, shared by the child and the parent verifier.
 
     Exact comparison of the decimal representations; a missing or nonfinite
@@ -100,7 +114,7 @@ def evaluate_constraint(term: ConstraintTerm, raw: float | None) -> ConstraintEv
     constraint = term.constraint
     label = f"constraint {constraint.component} {constraint.op} {constraint.threshold}"
     if raw is None or not math.isfinite(raw):
-        satisfied, detail = False, f"{label} has no finite value: {raw}"
+        satisfied, detail = False, f"{label} has no finite value: {reason or raw}"
     else:
         value, threshold = Fraction(str(raw)), Fraction(str(constraint.threshold))
         satisfied = bool(_OPS[constraint.op](value, threshold))
@@ -122,7 +136,11 @@ def evaluate_constraints(
 ) -> tuple[tuple[ConstraintEvaluation, ...], list[ScoreabilityFailure]]:
     """Every constraint is conjunctive; each violation is a named scoreability failure."""
     verdicts = tuple(
-        evaluate_constraint(term, _constraint_value(term, sources, measurements or {}))
+        evaluate_constraint(
+            term,
+            _constraint_value(term, sources, measurements or {}),
+            _unavailable_reason(term, measurements or {}),
+        )
         for term in terms
     )
     failures = [

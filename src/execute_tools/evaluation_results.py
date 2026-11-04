@@ -124,6 +124,9 @@ class SelectionBinding(BaseModel):
     constraints: tuple[ConstraintTerm, ...] = Field(
         default=(), strict=False, exclude_if=lambda value: not value
     )
+    # #1296: declared measurement component id -> measurement kind; the parent
+    # requires the transported results to cover exactly this roster.
+    measurements: dict[str, str] = Field(default_factory=dict, exclude_if=lambda value: not value)
 
     @property
     def is_formula(self) -> bool:

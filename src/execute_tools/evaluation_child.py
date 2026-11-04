@@ -24,7 +24,7 @@ from execute_tools.measurement_results import MeasurementResult, record_measurem
 from workflows.evaluation_selection import SelectionCarrier, bound_selection
 
 if TYPE_CHECKING:
-    from workflows.task_composition import RunTaskComposition
+    from workflows.task_composition import RunTaskComposition, ScoringChildComposition
 
 
 class EvaluationNotScoreableError(NotScoreableError):
@@ -40,7 +40,7 @@ class EvaluationNotScoreableError(NotScoreableError):
 
 
 def aggregate_child_outcome(
-    composition: RunTaskComposition | None,
+    composition: RunTaskComposition | ScoringChildComposition | None,
     outcome: MetricResult | NotScoreableResult,
     secondaries: dict[str, Any],
 ) -> tuple[MetricResult | NotScoreableResult, dict[str, Any]]:
@@ -85,6 +85,7 @@ def validate_child_evaluation(
         raise EvaluationTransportError(
             "Scoring child evaluation identity differs from the bound composition"
         )
+    _validate_measurement_roster(results, binding)
     if evidence.failures:
         refusal = NotScoreableResult.model_validate(results.get("not_scoreable"))
         raise EvaluationNotScoreableError(
@@ -110,6 +111,18 @@ def validate_child_evaluation(
     _validate_source_components(evidence, binding)
     _validate_component_arithmetic(evidence, binding, results)
     return evidence
+
+
+def _validate_measurement_roster(results: dict[str, Any], binding: SelectionBinding) -> None:
+    """Transported measurements must be exactly the declared components and kinds."""
+    from execute_tools.candidate_measurement import validate_measurement_roster
+
+    try:
+        validate_measurement_roster(
+            list(record_measurements(results).values()), binding.measurements
+        )
+    except ValueError as error:
+        raise EvaluationTransportError(f"Scoring child measurement evidence: {error}") from error
 
 
 def _validate_source_components(evidence: EvaluationEvidence, binding: SelectionBinding) -> None:
