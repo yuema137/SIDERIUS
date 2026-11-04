@@ -528,6 +528,12 @@ Notes:
   fingerprint as `task_data_path_config` when non-empty, so changing it is a
   semantic change while relocating the package is not. An absent or empty
   `config` adds no fingerprint key.
+- `model_plugins` (without `none: true`) requires `dir` and a non-empty
+  `require` list of non-empty strings; a missing or empty `require` is refused,
+  because an unresolvable plugin would otherwise be indistinguishable from an
+  empty root. A required model type the root does not produce is refused by
+  name; the resolved model plugins' content identities join the fingerprint.
+  `loss_plugins.dir` must resolve to an existing directory.
 - Named absence (`none: true`) is accepted by these optional sections, with the
   same effect as omitting the section:
   - `proposal_blocks`, `implementor_blocks`, `interpretation_blocks`: renders no
@@ -814,9 +820,10 @@ the framework does not select a scientific task").
 
 Model and loss plugins *are* manifest-declarable (`model_plugins:` /
 `loss_plugins:` above). The `SIDERIUS_PLUGIN_DIRS` / `SIDERIUS_LOSS_DIRS`
-environment variables remain the un-composed channel — and at every child spawn
-the declared roots are **unioned** into them, so a child may add to the set the
-run declared but can never drop it.
+environment variables are the transport encoding: when the manifest binds no
+plugin root (section absent or `none: true`), discovery reads them as before.
+At every child spawn the declared roots are **unioned** into them, so a child
+may add to the set the run declared but can never drop it.
 
 ## What happens at composition time
 

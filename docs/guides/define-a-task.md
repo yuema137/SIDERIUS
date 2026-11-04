@@ -394,64 +394,23 @@ does not add multi-file model generation or recursive helper review by the LLM.
 
 ## Step 9 — Declare your model and loss plugins
 
-Declare them in the manifest:
+Decide three things, then write them in the manifest:
 
-```yaml
-model_plugins:
-  dir: ./plugins            # manifest-relative; resolved and identity-pinned
-  require: [my_reference_model]   # model types this root MUST produce
+1. **Which plugin root ships your models**, and which model types it must
+   produce: `model_plugins: {dir: ..., require: [...]}`.
+2. **Whether you ship a custom loss**: `loss_plugins: {dir: ...}`.
+3. **Whether the task fixes one training objective** that overrides the
+   planner: `objective:` with either a framework-provided `config` or a
+   task-owned `implementation`. A custom loss also needs a
+   `custom_loss_applicability` declaration in the task's `forward_contract`.
 
-loss_plugins:               # only if you ship a custom loss
-  dir: ./plugins
-```
-
-`require:` is not decoration — without it, an unresolvable plugin would be
-indistinguishable from a directory that simply had nothing in it. The declared
-roots become a run-scoped binding whose content identities join the run's
-fingerprint, and every child subprocess receives them automatically: the spawn
-environment **unions** the declared roots into `SIDERIUS_PLUGIN_DIRS` /
-`SIDERIUS_LOSS_DIRS`, so a child can add to the set but can never drop what the
-run declared. (The environment variables still work on their own for
-un-composed runs.)
-
-If the task requires one specific training objective, also declare it. Select a
-framework-provided objective with validated config:
-
-```yaml
-objective:
-  config:
-    loss_type: ce
-    reduction: mean
-```
-
-For task-owned arithmetic, point at the plugin's self-declaration instead:
-
-```yaml
-objective:
-  implementation:
-    file: ./plugins/my_exact_loss.py
-    symbol: PLUGIN_LOSS_TYPE
-```
-
-Both forms produce the same typed `LossConfig` authority and override the
-planner. The config form cannot select `custom`; custom code must use the
-implementation form so its content joins the run identity.
-
-Custom losses also need a prediction/target compatibility declaration in the
-task's `forward_contract`. Declare `supervision_target` plus either an
-`equal_shape` or `explicit_pair` `custom_loss_applicability`; the framework
-then filters proposer and tuner offers against one immutable contract snapshot
-and transports that snapshot through resource measurement and training. A
-loadable loss whose snapshot is missing or different is unavailable, not a
-fallback candidate.
-
-When the declared target cannot be represented by the framework's generic tiny
-tensor pair, the bound task implementation may expose a zero-argument
-`custom_loss_validation_pair()` sibling. It returns only a small deterministic
-`(prediction, target)` pair for numerical/gradient validation. It receives no
-data root or scope and must not read training data; preprocessing and real
-training batches remain `TaskDataPath` responsibilities. See the shipped
-`synthetic_masked_regression` example for the complete declaration shape.
+The [composition reference](../reference/task-composition.md#section-shapes)
+owns the exact shapes, the `require:` refusal, the `none: true` forms, objective
+validation and how declared roots reach child processes. Custom-loss
+applicability and the optional `custom_loss_validation_pair()` are owned by
+[custom-loss applicability and validation](../reference/task-composition.md#custom-loss-applicability-and-validation).
+See the shipped `synthetic_masked_regression` example for a complete
+declaration.
 
 ## Step 10 — Launch
 
