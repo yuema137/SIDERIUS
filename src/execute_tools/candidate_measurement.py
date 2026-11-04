@@ -14,7 +14,7 @@ import json
 import math
 import os
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
@@ -40,20 +40,20 @@ class MeasurementRequest(BaseModel):
     model_io_json: str | None = None
 
 
-def active_run_declares_measurements() -> bool:
-    """Whether the bound run's evaluation snapshot declares a measurement component.
+def active_measurement_components() -> tuple[MeasurementComponent, ...]:
+    """The bound run's declared measurement components, in declaration order.
 
     Reads the declaration snapshot that ``bind_run_task_composition`` binds once
     (checked by the composition verification guard); no manifest reload and no
-    second binding. Without a binding no request is emitted, and a
+    second binding. Without a binding nothing is measured, and a
     measurement-declaring scoring child then refuses rather than skipping.
     """
     from agent.evaluation_context import active_evaluation_prompt_context
 
     context = active_evaluation_prompt_context()
-    return context is not None and any(
-        isinstance(component, MeasurementComponent) for component in context.spec.components
-    )
+    if context is None:
+        return ()
+    return tuple(c for c in context.spec.components if isinstance(c, MeasurementComponent))
 
 
 def read_measurement_request(path: str) -> MeasurementRequest:
@@ -219,3 +219,134 @@ def measure_components(
             )
         results.append(result)
     return results
+
+
+# ---------------------------------------------------------------------------
+# Isolated worker (#1296 F3): candidate model code never runs in the scoring
+# child or the parent. The parent launches this worker under explicit process
+# limits before scoring and transports only validated MeasurementResult JSON.
+# ---------------------------------------------------------------------------
+
+#: Framework allowance for interpreter start, model construction and checkpoint
+#: load, added to the declared latency timeouts to form the worker deadline.
+MEASUREMENT_LOAD_ALLOWANCE_SECONDS = 300.0
+
+
+class MeasurementWorkerRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    request: MeasurementRequest
+    components: tuple[MeasurementComponent, ...] = Field(min_length=1, strict=False)
+    output_path: str = Field(min_length=1)
+
+
+def worker_deadline_seconds(components: Sequence[MeasurementComponent]) -> float:
+    return MEASUREMENT_LOAD_ALLOWANCE_SECONDS + sum(
+        c.protocol.timeout_seconds for c in components if c.protocol is not None
+    )
+
+
+def failed_results(
+    components: Sequence[MeasurementComponent], reason: str
+) -> list[MeasurementResult]:
+    """Every component fails with one worker-level reason (timeout, crash, RSS)."""
+    return [
+        MeasurementResult(
+            component_id=c.id,
+            measurement=c.measurement,
+            unit=MEASUREMENT_UNITS[c.measurement],
+            failure=reason,
+        )
+        for c in components
+    ]
+
+
+def validate_measurement_roster(
+    results: Sequence[MeasurementResult], declared: Mapping[str, str]
+) -> None:
+    """Results must cover exactly the declared components with their declared kinds."""
+    reported = [r.component_id for r in results]
+    if len(reported) != len(set(reported)) or set(reported) != set(declared):
+        raise ValueError("measurement results omit, duplicate or add components")
+    for result in results:
+        if result.measurement != declared[result.component_id]:
+            raise ValueError(
+                f"measurement {result.component_id!r} reports kind {result.measurement!r}, "
+                f"declared {declared[result.component_id]!r}"
+            )
+
+
+def read_measurement_results(path: str, declared: Mapping[str, str]) -> list[MeasurementResult]:
+    with open(path, encoding="utf-8") as handle:
+        raw = json.load(handle)
+    if not isinstance(raw, list):
+        raise ValueError("measurement results must be a JSON list")
+    results = [MeasurementResult.model_validate(item) for item in raw]
+    validate_measurement_roster(results, declared)
+    return results
+
+
+def run_measurement_worker(
+    request: MeasurementRequest,
+    components: Sequence[MeasurementComponent],
+    *,
+    directory: str,
+    env: dict[str, str],
+    preexec_fn: Callable[[], None] | None,
+    rss_limit_bytes: int,
+) -> list[MeasurementResult]:
+    """Run the worker under a hard deadline and RSS limit; failures become results.
+
+    The worker inherits ``env`` (the same ``CUDA_VISIBLE_DEVICES`` and plugin
+    roots as the training/inference children) and ``preexec_fn`` (address
+    space cap). On deadline, RSS excess, crash or malformed output every
+    component is a failure result naming the cause.
+    """
+    import sys
+
+    from core.runtime_control.observed_subprocess import (
+        ProcessLimits,
+        ProcessSupervisionError,
+        supervise_subprocess,
+    )
+
+    declared = {c.id: c.measurement for c in components}
+    os.makedirs(directory, exist_ok=True)
+    output = os.path.join(directory, "measurement_results.json")
+    request_path = os.path.join(directory, "measurement_worker_request.json")
+    worker = MeasurementWorkerRequest(
+        request=request, components=tuple(components), output_path=output
+    )
+    with open(request_path, "w", encoding="utf-8") as handle:
+        json.dump(worker.model_dump(mode="json"), handle)
+    if os.path.exists(output):
+        os.remove(output)
+    deadline = worker_deadline_seconds(components)
+    limits = ProcessLimits(
+        deadline_seconds=deadline,
+        rss_limit_bytes=rss_limit_bytes,
+        poll_seconds=0.2,
+        grace_seconds=5.0,
+        reap_seconds=5.0,
+    )
+    try:
+        observed = supervise_subprocess(
+            [sys.executable, "-m", "execute_tools.candidate_measurement_worker", request_path],
+            env=env,
+            preexec_fn=preexec_fn,
+            capture_stdout=True,
+            limits=limits,
+        )
+    except ProcessSupervisionError as error:
+        reason = error.lifecycle.stop_reason or str(error)
+        if reason == "work_deadline_exceeded":
+            reason = f"measurement worker exceeded its {deadline:g} s deadline and was killed"
+        return failed_results(components, f"measurement worker stopped: {reason}")
+    completed = observed.completed
+    if completed is None or completed.returncode != 0:
+        tail = "" if completed is None else (completed.stderr or "")[-500:]
+        return failed_results(components, f"measurement worker failed: {tail.strip()}")
+    try:
+        return read_measurement_results(output, declared)
+    except (OSError, ValueError) as error:
+        return failed_results(components, f"measurement worker output invalid: {error}")

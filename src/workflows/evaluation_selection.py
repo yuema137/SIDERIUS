@@ -59,6 +59,11 @@ def selection_binding(composition: RunTaskComposition) -> SelectionBinding | Non
         },
         terms=tuple(_selection_term(evaluation, term) for term in formula_terms(evaluation.spec)),
         constraints=constraint_terms(evaluation),
+        measurements={
+            c.id: c.measurement
+            for c in evaluation.spec.components
+            if isinstance(c, MeasurementComponent)
+        },
     )
 
 

@@ -974,22 +974,27 @@ class TidmadSandbox:
             json.dump(contract.model_dump(mode="json"), handle)
         return path
 
-    def _measurement_request_argv(
+    def _run_candidate_measurements(
         self, exp_id: str, model_type: str, m_cfg: dict, l_cfg: dict
-    ) -> list[str]:
-        """#1296 checkpoint request for evaluation measurements; empty without any.
+    ) -> list | None:
+        """#1296: measure the checkpoint in an isolated supervised worker, or ``None``.
 
-        Only a composed run whose evaluation declares a ``measurement``
-        component receives the flag, so every other scoring argv is unchanged.
-        The scoring child re-validates the request before loading the checkpoint.
+        Only a composed run whose bound evaluation declares ``measurement``
+        components measures. Candidate model code runs only in that worker:
+        never in this process and never in the scoring child, which receives
+        the validated results file. The worker gets the inference child's
+        environment (``CUDA_VISIBLE_DEVICES``, plugin roots), its address-space
+        cap, an RSS limit and a hard deadline (killed on expiry).
         """
         from execute_tools.candidate_measurement import (
             MeasurementRequest,
-            active_run_declares_measurements,
+            active_measurement_components,
+            run_measurement_worker,
         )
 
-        if not active_run_declares_measurements():
-            return []
+        components = active_measurement_components()
+        if not components:
+            return None
         from core.sandbox_layout import training_checkpoint_path
 
         request = MeasurementRequest(
@@ -1002,12 +1007,26 @@ class TidmadSandbox:
             ),
             model_io_json=self._write_model_io_config(exp_id),
         )
-        path = os.path.abspath(
-            os.path.join(self.dirs["configs"], f"measurement_request_{exp_id}.json")
+        ceiling_gb = _subprocess_rss_gb("inference")
+        rss_limit = (
+            ceiling_gb * 1024**3
+            if ceiling_gb is not None and ceiling_gb > 0
+            else os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
         )
-        with open(path, "w") as handle:
-            json.dump(request.model_dump(mode="json"), handle)
-        return ["--measurement_request_json", path]
+        return run_measurement_worker(
+            request,
+            components,
+            directory=os.path.abspath(os.path.join(self.dirs["configs"], f"measurement_{exp_id}")),
+            env=_subprocess_env(plugin_dir=self.plugin_dir, loss_dir=self.loss_dir),
+            preexec_fn=_limited_preexec(ceiling_gb),
+            rss_limit_bytes=int(rss_limit),
+        )
+
+    @staticmethod
+    def _measurement_results_argv(measured: list | None, directory: str) -> list[str]:
+        if measured is None:
+            return []
+        return ["--measurement_results_json", os.path.join(directory, "measurement_results.json")]
 
     def _write_dataset_profile_config(self, exp_id: str) -> str:
         """Materialize the resolved Dataset Profile for a subprocess.
@@ -1909,11 +1928,16 @@ class TidmadSandbox:
         from core.local_code.child import prepare_child
 
         invocation = None
+        measured = None
         try:
             # Pre-create the scoring JSON so the script can write to it
             with open(score_json_path, "w") as f:
                 json.dump({}, f)
 
+            measurement_dir = os.path.abspath(
+                os.path.join(self.dirs["configs"], f"measurement_{exp_id}")
+            )
+            measured = self._run_candidate_measurements(exp_id, model_type, m_cfg, l_cfg)
             print(f">>> [Executor] Running scoring for {exp_id}...")
             invocation = prepare_child(
                 [
@@ -1945,7 +1969,7 @@ class TidmadSandbox:
                     # Step 12 / PR-12d D4b — the composed run's task-built
                     # scopes, same emitter, same emitted-only-when-bound rule.
                     *task_scope_argv(self.dirs["configs"], exp_id, task_scopes),
-                    *self._measurement_request_argv(exp_id, model_type, m_cfg, l_cfg),
+                    *self._measurement_results_argv(measured, measurement_dir),
                 ],
                 _subprocess_env(plugin_dir=self.plugin_dir, loss_dir=self.loss_dir),
             )
@@ -1969,6 +1993,12 @@ class TidmadSandbox:
             from execute_tools.evaluation_child import read_scoring_output
 
             results.update(read_scoring_output(score_json_path))
+            if measured is not None:
+                from execute_tools.measurement_results import record_measurements
+
+                # The scoring child must transport exactly what the worker measured.
+                if list(record_measurements(results).values()) != measured:
+                    raise ValueError("scoring child altered the transported measurement results")
 
             if os.path.exists(score_json_path):
                 os.remove(score_json_path)
@@ -1984,11 +2014,13 @@ class TidmadSandbox:
             status = "oom_host_ram" if _is_oom_failure(e) else "error"
             from execute_tools.evaluation_child import scoring_refusal_fields
 
-            return {
-                "status": status,
-                "message": error_msg,
-                **scoring_refusal_fields(score_json_path),
-            }
+            refusal = scoring_refusal_fields(score_json_path)
+            if measured is not None and "results" in refusal:
+                # The parent's own worker results are the record's evidence.
+                refusal["results"]["measurement_results"] = [
+                    m.model_dump(mode="json") for m in measured
+                ]
+            return {"status": status, "message": error_msg, **refusal}
         except Exception as e:
             from core.local_code.failure import raise_if_code_package_failure
 
