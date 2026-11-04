@@ -19,6 +19,17 @@ Managed native operations create the owner inside the existing sandbox. Their
 scientific workspace is `envelope/workspace`; the sibling control directory lies
 inside the already writable envelope. No mount or cross-sandbox FD transfer is added.
 
+When the sandbox's writable root is the workspace itself, its parent is read-only
+inside the sandbox. The candidate worker's authored-loop route (fresh launch and
+continuation segment) is this case: its sandboxed child holds `iteration_owner`.
+The unsandboxed worker therefore calls `state.prepare_state_directory(workspace)`,
+which creates or reopens the directory with the same no-follow 0700/owner checks
+and takes no lock, and passes it as `SandboxProfile.writer_state`. The sandbox binds
+exactly that directory writable at its host path; the profile accepts only the
+path derived by `state.state_directory(workspace)` and only when it already passes
+the private-directory checks. The child still acquires the flock itself, on the
+host inode, so host `inspect_writer` observes `active`. No FD crosses the sandbox.
+
 ## Supported ownership
 
 On Linux every cooperating native root acquires a nonblocking exclusive flock.
