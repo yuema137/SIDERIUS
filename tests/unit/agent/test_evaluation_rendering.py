@@ -213,7 +213,8 @@ def test_rubric_balance_discloses_criteria_and_deterministic_formula(tmp_path):
     text = render_evaluation_spec(build_evaluation_prompt_context(resolved, primary, task))
     assert "Integer scale: [1, 5]" in text
     assert text.count("Criterion: supported_claims; weight 2; Use recorded evidence.") == 1
-    assert "Role: qualitative evidence; not a deterministic scalar." in text
+    assert "Role: qualitative guidance for agents; no framework step scores it;" in text
+    assert "no framework step judges candidates against it." in text
     assert "deterministic_ranking:\n  - kind: formula" in text
     assert "-1/40" in text
     assert "never an unrecorded LLM score" in text

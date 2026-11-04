@@ -381,6 +381,49 @@ def test_rubric_resolution_pins_content_and_never_enters_formula(task):
         compose(task, spec)
 
 
+def test_rubric_guidance_launches_without_entering_metric_order(task, tmp_path):
+    """Rubric declarations launch as guidance; ranking stays on deterministic_ranking.
+
+    Fails if the rubric capability gates stay closed (binding refuses), or if
+    rubric_balance displaces the declared formula as the effective ranking metric.
+    """
+    rubric = {
+        "schema_version": "siderius.rubric/v1",
+        "id": "deployability",
+        "version": "1",
+        "criteria": [{"name": "simplicity", "description": "Small model.", "weight": 1.0}],
+        "scale_min": 1,
+        "scale_max": 5,
+    }
+    (task / "rubric.yaml").write_text(yaml.safe_dump(rubric))
+    manifest_path = task / "composition.yaml"
+    manifest = yaml.safe_load(manifest_path.read_text())
+    manifest["rubrics"] = [{"config": "rubric.yaml"}]
+    manifest_path.write_text(yaml.safe_dump(manifest))
+    spec = formula(declaration(task))
+    spec["components"].append(
+        {
+            "kind": "rubric",
+            "id": "judgment",
+            "meaning": "Practical to deploy.",
+            "rubric": {"id": "deployability", "version": "1"},
+        }
+    )
+    spec["selection"] = {
+        "kind": "rubric_balance",
+        "rubric": {"id": "deployability", "version": "1"},
+        "guidance": "Prefer the simpler model when utility is close.",
+        "deterministic_ranking": spec["selection"],
+    }
+    composed = compose(task, spec)
+    assert composed.evaluation is not None
+    with bind_run_task_composition(composed, physical_data_root=str(tmp_path)):
+        pass
+    effective = composed.selection_metric_spec
+    assert effective.id == f"evaluation.weighted_sum.v1.{composed.evaluation.sha256}"
+    assert effective.aggregation == "evaluation.weighted_sum/v1"
+
+
 def test_contributor_nonfinite_identity_refuses_at_composition(task):
     """JSON-like plugin output must not inject nonstandard NaN into a run fingerprint."""
     spec = plugin_spec(task)

@@ -96,7 +96,8 @@ def render_selection(context: EvaluationPromptContext) -> list[str]:
         + ["- " + line for line in selection_rubric_lines(selection, context)]
         + [
             f"- Guidance: {indent_text(selection.guidance)}",
-            "- Rubric balancing applies only at admitted judged selection sites.",
+            "- Rubric balancing is guidance for agents; no framework step judges candidates "
+            "against it.",
             "- deterministic_ranking:",
         ]
         + [
