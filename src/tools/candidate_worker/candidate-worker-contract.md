@@ -1192,7 +1192,7 @@ review node id>, output=<review>)` per collected entry, in collected order) and
 applies `local_typed_evidence_many`; the proposer prompt therefore renders the
 existing collection section, one `### Review: <review node id>` heading per review in
 declared binding order, never completion order. Renaming a review node therefore
-changes the proposer prompt (operator-accepted, 2026-10-28). This profile is the first
+changes the proposer prompt. This profile is the first
 framework producer of a collection: before B6-4 only hand-written
 `ProposalInput.literature_review_evidence` seeds reached the collection renderer.
 Every proposal seed under either adaptor profile must leave
@@ -1409,10 +1409,14 @@ task, hardware, full constraints and Health execution; replay is not additional
 scientific certification. Timeout/interruption retains the existing supervisor
 status and may leave completed body records without a successful aggregate.
 
-`tools.candidate_operations.request_loop_stop(config, operation_id)` accepts only
-an operation-bound, already-claimed, confirmed-running authored finite loop. It
-verifies the saved request/run identity and publishes an immutable `stop.json`
-marker in native control storage. Acknowledgement means requested, not stopped.
+`tools.candidate_operations.request_loop_stop(config, operation_id)` accepts an
+operation-bound, already-claimed authored finite loop that is either confirmed
+running or an exited, verified paused tail. It verifies the saved request/run
+identity and publishes an immutable `stop.json` marker in native control storage.
+For a paused tail this ends the run immediately (End loop); paused-tail eligibility
+and its `loop_end` refusals are owned by the operations contract's
+[Authored finite-loop Stop](../candidate_operations/candidate-operations-contract.md#authored-finite-loop-stop).
+For a running loop, acknowledgement means requested, not stopped.
 The worker checks it before each body dispatch; once that check passes, the body
 counts as active even if the request arrives before its first node starts. It
 finishes that active body and reports
@@ -1675,14 +1679,19 @@ Admission and call cap (decision Q-B2-10). With a `JudgeStop` declared,
 (`admit_judge_route`) when `WorkflowLLMConfig.judge.stop` is absent, when the
 run-level `WorkflowLLMConfig.judge.max_judge_calls` is absent, or when the static
 judge call bound `judge_call_bound(loop) = final_iteration - min_completed_bodies`
-(one call per judgeable boundary; no LLM adaptor strategies exist yet to add to it)
-exceeds that cap. The route and the cap are resolved from the workspace run lock
+(one call per judgeable boundary) exceeds that cap. When the run also declares LLM
+COMBINE adaptors, `adaptor_llm.admit_llm_adaptors` separately refuses unless
+`Σ(adaptor static_call_bound) × final_iteration + judge_call_bound(loop)` fits the
+same cap (the sum is documented in
+[Workflow declarations, LLM configuration](../../../docs/guides/workflow-declarations.md#3-llm-configuration)). The route and the cap are resolved from the workspace run lock
 (`RunInvariants.judge_routes`, canonical) at call and readback time. Before each
 call, `call_stop_judge` re-checks the run's calls so far plus one against the locked
 cap and raises `StopConditionError` before any provider contact if it would be
 exceeded (the run fails; with a consistent lock admission makes this unreachable).
 Readback (`require_judge_cap`) refuses a run whose recorded judge verdicts exceed
-the locked cap. Showing the bound before launch belongs to the B2-5 GUI.
+the locked cap. Console review runs the same `admit_judge_route` before launch
+(`reusable_candidate.admit_captured_judge_route`) and refuses with `judge_route`,
+naming the route or the bound and the cap.
 
 Precedence at a completed-body boundary `N` (`needs_stop_judge` is the one pure
 predicate; the worker calls iff it is true, readback requires evidence iff it is true):
@@ -1777,8 +1786,10 @@ per judged boundary, and never more than the locked `max_judge_calls`; usage row
 in the run's `token_usage.jsonl` under label `judge.stop` (skips under
 `judge.stop.skipped`).
 
-Limitations: the GUI does not yet offer or render the judge condition or show the
-static call bound before launch (B2-5).
+GUI: the console editor offers the `JudgeStop` condition (`editor-loop-controls.js`),
+Monitor renders recorded `judge_verdicts` (`loop-control.js`), and review refuses an
+unroutable or over-cap judge before launch (above). Limitation: the console shows the
+static call bound only in that refusal message, not as a value before launch.
 
 Tests: `tests/unit/tools/candidate_worker/test_loop_stop.py` (pure precedence and
 verdict rules), `tests/unit/tools/candidate_worker/test_loop_judge.py` (stub bridge
@@ -1843,9 +1854,9 @@ Tests: `tests/unit/tools/candidate_worker/test_route_eval.py`.
 
 ## Parallel dispatch
 
-Design: B3-4 (`advanced/b3-parallel-scheduling.md`; operator decisions of
-2026-10-28: per-capability budgets, no joint budget; parallel runs work under
-the host reservation ledger). Owners: `parallel_models.py` (request, grant,
+Design: B3-4 (`advanced/b3-parallel-scheduling.md`). Rules: budgets are
+per capability, with no joint budget; parallel runs work under the host
+reservation ledger. Owners: `parallel_models.py` (request, grant,
 run-budget authority, receipts), `parallel_envelope.py` (peak concurrent demand),
 `parallel_dispatch.py` (the in-run scheduler loop), `parallel_evidence.py`
 (trace v2 drain verifier), `agent/token_unit.py` (token-ledger attribution).

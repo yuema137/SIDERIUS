@@ -1391,9 +1391,10 @@ predecessor_operation_id=..., expected_receipt_digest=review.receipt_digest,
 operator_advice=None))` through `submit_operation`; under a host ledger a loop whose
 root declared no `resources` also sets `resources` (see
 [Host reservation ledger](#host-reservation-ledger), "Loop resume"). `operator_advice` is optional
-untrusted text for the resumed segment's proposals (the worker's `OperatorAdvice`:
-surrounding whitespace removed, 1..4000 characters, no `Cc`/`Cf` (control or format) characters except
-newline and tab; invalid advice refuses at validation). It is omitted when absent, so
+untrusted text for the resumed segment's proposals, typed as the worker's `OperatorAdvice`
+(its length and allowed-character rule are owned by the worker contract's
+[Resume advice](../candidate_worker/candidate-worker-contract.md#resume-advice); invalid advice
+refuses at validation). It is omitted when absent, so
 advice-free requests keep their bytes and request digest. Reusing a request ID with
 different advice is a `conflict`. Reservation copies it into
 `LoopContinuation.operator_advice`, and `read_segment` refuses with `integrity` when

@@ -246,10 +246,16 @@ Every condition has `on_met`:
 
 - `"stop"` (default): the loop completes early.
 - `"request_input"` ("Pause and ask me"): the segment ends `paused` with an
-  input request. The status receipt holds only numbers
-  (`InputRequestSummary`: iteration, final iteration, metric id and direction,
-  best result and its iteration, iterations without improvement, iterations
-  since the last request). After a resume, a `request_input` condition counts
+  input request. The status receipt carries a bounded `InputRequestSummary`
+  (`src/tools/candidate_worker/loop_stop.py`): `iteration`, `final_iteration`,
+  `metric_id`, `direction`, `incumbent` and `incumbent_iteration` (best result
+  and its iteration), `non_improving_bodies`, `input_anchor` (the previous input
+  pause boundary, 0 if none), `bodies_since_input`, and `what_was_tried` (at most
+  20 `TriedBody` entries: `iteration`, `model_name`, `validation_passed`,
+  `best_valid_score`, `metric_id`, `direction`, `stop_reason`; omitted when
+  empty). The worker contract's
+  [Condition input pause](../../src/tools/candidate_worker/candidate-worker-contract.md#condition-input-pause)
+  owns how it is built. After a resume, a `request_input` condition counts
   from the iteration where it last asked, so it does not ask again at once.
 
 At one boundary, a met `stop` condition wins over a met `request_input`
