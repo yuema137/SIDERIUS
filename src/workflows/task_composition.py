@@ -168,15 +168,17 @@ _MANIFEST_KEYS = frozenset(
 #: Sections a manifest must state. Health is REQUIRED-as-a-statement rather
 #: than required-as-a-path: a task with no Health family says ``none``, which
 #: is 08b's ``EXPLICIT_NONE`` — a named absence. What a composition can never
-#: express is ``LEGACY_OMITTED``, because "I said nothing" is precisely the
-#: state that resolves TIDMAD's config (design §4).
+#: express is ``LEGACY_OMITTED``: that uncomposed state is neutral (no Health
+#: family, no plugins), and a manifest must state its Health decision
+#: explicitly rather than leave it implicit.
 _REQUIRED_KEYS = frozenset(
     {"task_data_path", "dataset_profile", "metric", "task_health", "task_config"}
 )
 """``secondary_metrics`` is deliberately NOT here (Step 10 / P2b §4.1).
 
-Health is required-as-a-STATEMENT because saying nothing about it resolves
-TIDMAD's family. Secondaries have no such default: the absence of the section
+Health is required-as-a-STATEMENT so every manifest states its Health
+decision explicitly; the uncomposed ``LEGACY_OMITTED`` state is neutral and is
+not expressible in a manifest. Secondaries need no such statement: the absence of the section
 means the run has none, which is a first-class state (TIDMAD's own), and
 requiring every manifest to write ``secondary_metrics: []`` would be ceremony
 that buys no safety."""
@@ -1958,11 +1960,10 @@ def build_task_composition_ref(task_composition: Any) -> TaskCompositionRef | No
 def _compose_task_health(section: dict[str, Any], manifest_dir: str) -> TaskHealthBinding:
     """08b's binding STATES, minus the one a composition may not express.
 
-    ``LEGACY_OMITTED`` means "the caller said nothing", which is precisely
-    the state that resolves TIDMAD's task health config. A composition that
-    could express it would be able to compose a Pets run that silently used
-    TIDMAD's roster and thresholds, so it is unreachable here by
-    construction: a manifest states either a path or ``none``
+    ``LEGACY_OMITTED`` means "the caller said nothing"; it is the neutral
+    uncomposed state (``health_checks.config._load_task_binding`` returns no config and
+    no plugins). It is unreachable here by construction so that a manifest
+    always states its Health decision: either a path or ``none``
     (``EXPLICIT_NONE``, a NAMED absence).
     """
     from execute_tools.health_checks._composition import HealthBindingState
@@ -2414,15 +2415,35 @@ def compose_metric_from_manifest(manifest_path: str) -> EvaluationMetric:
     return compose_scoring_child_bindings(manifest_path)[0]
 
 
+@dataclass(frozen=True)
+class ScoringChildComposition:
+    """Only scoring declarations; never resolves candidate model/loss plugins."""
+
+    metric: EvaluationMetric
+    evaluation: ResolvedEvaluation | None
+    secondary_metrics: tuple[EvaluationMetric, ...]
+
+
+def compose_scoring_secondary_metrics(manifest_path: str) -> tuple[EvaluationMetric, ...]:
+    """Resolve secondary metrics without loading model or training declarations."""
+    resolved = os.path.abspath(manifest_path)
+    raw = _read_manifest(resolved)
+    directory = os.path.dirname(resolved)
+    with composition_package(raw.get("code_package"), directory):
+        primary, _, _ = _compose_metric(_section(raw, "metric", resolved), directory)
+        secondaries, _, _, _ = _compose_secondary_metrics(raw, directory, primary.spec.id)
+    return secondaries
+
+
 def compose_scoring_child_bindings(
     manifest_path: str,
-) -> tuple[EvaluationMetric, RunTaskComposition | None]:
+) -> tuple[EvaluationMetric, ScoringChildComposition | None]:
     """The run's PRIMARY metric, composed from its manifest. Step 11 C5.
 
     Returns the metric and, ONLY when the manifest declares ``evaluation``,
-    the one full composition the child needs for deterministic selection
-    (#1294). An absent-evaluation child composes the metric section alone,
-    exactly as before; it never pays for a full plugin/code-package load.
+    the scoring-only composition needed for deterministic selection (#1294).
+    It never resolves model/loss plugins or other training declarations.
+    An absent-evaluation child composes the metric section alone.
 
     The child-process counterpart of the metric half of
     :func:`compose_run_task_bindings`, and deliberately **only** that half:
@@ -2453,24 +2474,27 @@ def compose_scoring_child_bindings(
     """
     resolved_manifest = os.path.abspath(manifest_path)
     raw = _read_manifest(resolved_manifest)
-    composition: RunTaskComposition | None = None
-    if "evaluation" in raw:
-        from workflows.evaluation_composition import require_evaluation_runtime
-
-        composition = compose_run_task_bindings(manifest_path)
-        require_evaluation_runtime(composition.evaluation)
-        metric = composition.metric
-    else:
-        with composition_package(raw.get("code_package"), os.path.dirname(resolved_manifest)):
-            metric, _declaration, _plugin = _compose_metric(
-                _section(raw, "metric", resolved_manifest), os.path.dirname(resolved_manifest)
-            )
     from execute_tools.evaluation_metric import EvaluationMetric
+    from workflows.evaluation_composition import compose_evaluation, require_evaluation_runtime
 
-    if not isinstance(metric, EvaluationMetric):
-        raise TaskCompositionError(
-            "this metric requires complete candidate evaluation, not the local scoring child"
-        )
+    composition: ScoringChildComposition | None = None
+    directory = os.path.dirname(resolved_manifest)
+    with composition_package(raw.get("code_package"), directory):
+        metric, _, _ = _compose_metric(_section(raw, "metric", resolved_manifest), directory)
+        if not isinstance(metric, EvaluationMetric):
+            raise TaskCompositionError(
+                "this metric requires complete candidate evaluation, not the local scoring child"
+            )
+        if "evaluation" in raw:
+            secondaries, _, _, _ = _compose_secondary_metrics(raw, directory, metric.spec.id)
+            judge_task, _ = _compose_judge_task(raw, directory)
+            evaluation = compose_evaluation(
+                raw, directory, {m.spec.id: m.spec for m in (metric, *secondaries)}, judge_task
+            )
+            require_evaluation_runtime(evaluation)
+            composition = ScoringChildComposition(
+                metric=metric, evaluation=evaluation, secondary_metrics=secondaries
+            )
     return metric, composition
 
 

@@ -88,7 +88,10 @@ registration and description lookup.
 
 Training objectives and evaluation metrics are separate authorities. The
 objective controls optimization; the primary metric controls scientific
-ordering through `MetricOrder`. Secondary metrics are observational evidence.
+ordering through `MetricOrder`, or the generated effective metric under
+`selection: {kind: formula}`. Secondary metrics are observational evidence
+unless a `selection: {kind: formula}` term references them (see
+[structured evaluation](agent-reference/mechanisms/metrics.md#opt-in-structured-evaluation-declaration)).
 Scoreability is checked before the ordinary evaluation metric's arithmetic;
 candidate-evaluator delegation has a separate executable contract. See
 [metric mechanisms](agent-reference/mechanisms/metrics.md).

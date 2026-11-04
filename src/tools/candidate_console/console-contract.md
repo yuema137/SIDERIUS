@@ -1157,7 +1157,8 @@ recorded, never that the loop stopped. The active body completes; the final
 iteration or a native failure may still end the loop first. Refusals: unknown
 operation 404; `kind` (not an authored candidate loop), `not_ready` (worker has
 not claimed its workspace) and `not_running` (terminal or not confirmed running)
-409 with route-local fixed messages; `integrity` and others 409 with the generic
+409 with route-local fixed messages; `loop_end` (a paused tail that cannot be ended)
+409 with the owner's message forwarded verbatim; `integrity` and others 409 with the generic
 message. Native detail and paths are never echoed. A repeated POST after the
 Stop marker exists replays the recorded request and returns 200 `requested`
 even when the loop has since become terminal (the backend replays the marker
@@ -1180,9 +1181,9 @@ receipt `stopped` reads "stopped at a completed iteration boundary after N of M
 iterations"; `completed` reads "finished after N of M iterations" (and notes that a
 requested Stop did not take effect); `paused` is described under Pause and Resume;
 other statuses read "ended (status)". The
-acknowledgement is memory-only for the selected operation: a reload or another
-selection forgets it, because no marker read exists and the receipt is the
-authority. Witnesses: `tests/unit/tools/candidate_console/test_loop_stop.py` and
+in-page acknowledgement is held for the selected operation; a recorded Stop also
+survives a reload or another tab because Monitor reads `loop.stop_requested`
+(above). The receipt remains the authority for whether Stop took effect. Witnesses: `tests/unit/tools/candidate_console/test_loop_stop.py` and
 `tests/browser/loop_controls.mjs` (stubbed API). The worker Stop semantics are
 witnessed by `candidate_worker/test_finite_loop.py`.
 
@@ -1240,7 +1241,7 @@ values stay in the state's tooltip. A paused status with `stop_requested` and no
 reads "Ended by you at the pause after iteration N." and offers no Resume or End:
 the owner refuses a stopped run. This is a terminal display derived from the
 paused receipt and durable Stop marker; the native status remains `paused`. Resuming an input
-request uses the same reviewed Resume below; it sends no advice. Without a successor it offers **Review
+request uses the same reviewed Resume below, including its optional operator advice. Without a successor it offers **Review
 resume** (one GET on click, never polled), then **Resume loop**, disabled unless
 credentials are ready. **End loop here** is offered beside these actions on a
 paused tail that is no longer finishing. End eligibility is independent of Resume:
@@ -2371,7 +2372,7 @@ prepared, accepted, rejected, stopped). For example a failed preparation reads "
 failed. The cause and its log are named below; start over to try again." and a failed
 launch "The run failed. The cause is shown below; open it in Monitor for the full log."
 A typed `problem` (refused, unknown, unresolved) still takes precedence. Step 2 names the version its prepared run holds (`ReusableCaptureReview.
-source_version_name`, display-only `recorded_name` of `source_sha256`, or before review
+source_version_name`, the retained receipt name or a legacy `recorded_name` lookup of `source_sha256`, or before review
 the preparation intent's `source_version` handed over by `openPrepared`); when it is not
 the current saved version, `#capture-source`, the top `#run-source-state` and `#run-next`
 say so and `#capture-prepare-current` ("Prepare the current version instead") starts
@@ -2589,14 +2590,14 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   plain sentence and never repeat the problem list. After undo, redo and Discard the
   problems are recomputed from the restored state's cached server inspection (or
   re-inspected).
-- Unconnected required input (operator rule 2026-10-28): the socket itself shows a soft
+- Unconnected required input: the socket itself shows a soft
   red ring (`--error`, 28% ring) and its `Required · Not connected` text is `--error`; the
   card keeps its normal outline and carries only a count badge (`.circuit-problem-badge`,
   text = count, `aria-label` "N required input(s) not connected"). Connector labels wrap
   inside the card; the requirement text is its own line. Instance ids show only with
   advanced tools. Wire and card drags suppress text selection (`body.circuit-gesture`,
   `preventDefault` on pointerdown, selection cleared at the end).
-- Framework-supplied inputs (operator rule 2026-10-28): `PortInventoryEntry.framework_supplied`
+- Framework-supplied inputs: `PortInventoryEntry.framework_supplied`
   marks a socket bound to a `ManagedCandidateBinding` in a role candidate preparation
   generates (`candidate_prepare.resolution.managed_argument_roles` /
   `managed_request_supported`: per-node `storage`, tuning `settings`, a proposal's
@@ -2616,7 +2617,7 @@ Owner: `editor-page-bar.js` / `editor-page-bar.css` (presentation only; reads
   and shows the empty state. Witness: `tests/browser/managed_storage.mjs` (Blank on
   the reusable project, Propose/Implement/Validate without any storage input, saved
   binding shape equal to `examples/workflow_declarations/reusable_candidate.py`).
-- Delete (operator rule 2026-10-28) always succeeds in the draft, with no confirmation:
+- Delete always succeeds in the draft, with no confirmation:
   Delete key, context menu or Remove in Selection adds saved nodes to the draft's
   `removed` list (pending nodes are cancelled), disconnects every socket that read them
   (binding patches / pending bindings; a required one becomes a `required_unbound`
@@ -2718,11 +2719,10 @@ the spec conformance pass to gate with the same attribute or `uiSettings.isEnabl
 | Monitor | Native chain observation details | Advanced | hook (native-chain-monitor.js) | Native recipe internals |
 | Monitor | Recorded example | Advanced | gated | Read-only validation evidence |
 
-Not yet adopted from the spec (follow-up, not in this change): Help menu (§7.4 shows
-only the tour), Lucide icons for the header gear/help and the step line, project/task in
-an inspector Workflow tab (L5; the task details are a card below the frame), tour
-backdrop (omitted so the page never blocks), canvas internals below 12 px, minimap,
-connection snap radius, palette click-to-add auto-wiring (P6) and Connection view (R3).
+The editor does not implement these spec items: Help menu (§7.4 shows only the tour),
+Lucide header/step icons, inspector Workflow tab, tour backdrop, canvas internals below
+12 px, connection snap radius, palette click-to-add auto-wiring, Connection view;
+minimap is tracked in #1351.
 
 Navigation qualification: `tests/browser/console_navigation.mjs` uses the same
 explicit environment as the editor gate. Its temporary synthetic observations
@@ -2858,7 +2858,11 @@ flow. The New run adapter below consumes this monitor without adding job persist
 POST `/api/editor/{project_id}/reusable-preparations/review` returns `NewRunReview`;
 POST `/prepare` returns existing `OperationHandle` with HTTP 202. `NewRunReview.source_version_name`
 (omitted when absent) is the recorded Save name of `expected_source_sha256`,
-display-only and outside the expectation and native request. `NewRunReview.credential_readiness`
+display metadata; SHA-256 remains the source version identity. The console also passes
+`source_version_name` into the native preparation request and top-level receipt so
+capture review retains the selected name after source/history removal. This optional
+field is omitted for unnamed sources and non-console callers that do not supply it;
+the exact operation request digest includes supplied metadata. `NewRunReview.credential_readiness`
 is a name-only precheck read in the server process before Prepare: it checks only the
 task's configured `candidate_environment_names` against `credential_file`
 (`named_credential_readiness((), names, path)`); provider-derived requirements exist
@@ -3467,3 +3471,38 @@ object exposes `nativeInterpretation`, `nativeLiterature` and
 loop controls use `nativeInterpretation`. Fanout has no JavaScript consumer and
 is not exported. The asset contains no task state or credentials and changes no
 profile admission or serialized identifier.
+
+### Run workflow version selection
+
+Step 1's `new-run-version` select consumes `editorVersions.listing`, populated by
+GET `/api/editor/{project_id}/versions`, the same authoring owner as editor history.
+The default is Latest saved (current file name, or current file when unnamed).
+Named saved rows follow in reverse record order with name, local saved time and
+12-character SHA-256 prefix. Selecting a row sends `NewRunSelection.saved_version_name=<name>`
+and its SHA; the default omits the name and retains current-file drift checks.
+Changing selection invalidates review. Historical review waits while its version list
+is loading or unavailable, preserving the chosen name. A retained intent locks the selector;
+Prepare the current version starts over and resets it to Latest saved.
+
+For an explicit saved row, the console requires a matching name and SHA in an `origin="saved"` record
+and validates `read_recovery_copy` before constructing the native request with
+`source_path=<configured recovery_directory>/<sha256>.py`. Missing, unsafe or
+hash-mismatched copies and missing/invalid records refuse HTTP 409
+`saved_version_unavailable` before admission. Native preparation rechecks the hash
+at capture and verifies origin during publication, so subsequent drift also refuses.
+The source file is never rewritten. Relative task locations still resolve against
+configured `project_root`; `workflow.py.snapshot` contains the selected exact bytes.
+
+Capture policy accepts only the configured source path or that setup's exact
+SHA-addressed recovery path, with the existing project/task checks. Capture review
+uses the receipt name, falling back to the configured source's version record for
+older receipts. It does not require a recovery copy after preparation. Run's older
+version notice names the captured and latest versions (SHA prefix when unnamed).
+Non-console routes retain their existing source selection behavior.
+
+Regression evidence: `tests/unit/tools/candidate_console/test_new_run.py` covers
+historical review, native preparation snapshot/receipt, current-file preservation,
+review after source/recovery removal, and missing/corrupt/unrecorded recovery refusals.
+
+`tests/browser/named_versions.mjs` witnesses shared-list ordering, historical selection
+preservation across Save and delayed history loading, and the Prepare current reset.

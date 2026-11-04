@@ -1,38 +1,34 @@
-# `tools/` — framework developer tooling
+# `tools/`: command-line tools for preparing, running and checking work
 
-**Audience**: framework developers maintaining deterministic checks and
-developer-facing utilities.
+This package holds the command-line tools you use to prepare and run a
+SIDERIUS experiment, plus supporting tooling for the checkout (such as CI
+selection). It is not a task package and does not own scientific data,
+generated models or run workspaces.
 
-This package contains importable tooling that supports the checkout, including
-CI selection and execution helpers. It is not a task package and does not own
-scientific data, generated models or run workspaces.
+## Find the right tool
 
-The maintained operator scripts that launch or inspect runs remain under
-[`scripts/`](../../scripts/README.md); workflow behavior belongs to
-[`workflows/`](../workflows/README.md). Follow each tool's module documentation
-for its inputs and failure behavior.
+| Need | Tool | Start here |
+| --- | --- | --- |
+| Prepare a `workflow.py` run offline | `python -m tools.candidate_prepare` | [Candidate preparation](candidate_prepare/README.md) |
+| Launch a prepared run, follow its status and logs, stop, pause or resume a research loop | `python -m tools.candidate_operations` | [Candidate operations](candidate_operations/README.md) |
+| Do the same in a browser (experimental) | `python -m tools.candidate_console` | [Local candidate console](candidate_console/README.md) |
+| Set up orchestration, where your coding agent chooses each research step | `python -m tools.orchestration_setup` | [Orchestration setup](orchestration_setup/README.md) |
+| Run commands in the bubblewrap sandbox | `python -m tools.workspace_sandbox` | [Workspace sandbox](workspace_sandbox/README.md) |
+| Review the settings of a standard chain iteration and get an HTML report | `python -m tools.setup_review` | [Setup review](setup_review/README.md) |
+
+Run each tool with this checkout's `.venv/bin/python`. The
+[getting-started guide](../../docs/getting-started/README.md#write-and-run-a-workflow-declaration)
+shows how preparation and operations fit together. The older chain launcher and
+its helper scripts are under [`scripts/`](../../scripts/README.md); workflow
+behavior belongs to [`workflows/`](../workflows/README.md).
 
 All paths are derived from the current checkout or supplied explicitly. Tools
 must not edit the checkout as a substitute for caller-owned task configuration.
 
-[`workspace_sandbox`](workspace_sandbox/README.md) is an optional operator entry
-for isolated orchestration commands. It does not alter existing workflow launches.
+## Other tools
 
-[`orchestration_setup`](orchestration_setup/README.md) installs the existing
-agent toolkit and explicit run/profile files into a user's external project.
-Its generated guide shows the selected Python and exact check/launch commands.
-
-The optional [run settings preview](setup_review/README.md) is also intended for
-operators: it writes offline JSON and HTML for a fresh standard single-iteration
-declaration. It does not launch the workflow or certify task/environment readiness.
-
-[Detached candidate operations](candidate_operations/README.md) submit native
-preparation or candidate execution and let a later command inspect the result.
-They use an explicit private local store and preserve native outcome semantics.
-
-The [local candidate console](candidate_console/README.md) adds an authenticated
-loopback page for configured preparation, review, explicit launch and known-ID
-monitoring of those operations.
+[`candidate_worker`](candidate_worker/README.md) runs one native candidate
+request directly; most users reach it through candidate operations.
 
 `python -m tools.adaptors` checks a custom adaptor that lives in your own
 project: `inspect` shows its identity, `self-test` runs its examples twice, and

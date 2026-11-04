@@ -33,12 +33,33 @@ def _private(info: os.stat_result, *, directory: bool) -> None:
         raise WriterRefusal("unsafe_writer_state")
 
 
+def state_directory(workspace: str | Path) -> Path:
+    """The private control directory path for a workspace; creates nothing."""
+    path = canonical_workspace(workspace)
+    return path.parent / f".{path.name}.siderius-writer"
+
+
+def prepare_state_directory(workspace: str | Path) -> Path:
+    """Create (or reopen) and verify the private control directory, then release it.
+
+    A sandboxing parent calls this before binding exactly this directory writable
+    beside a workspace whose parent is otherwise read-only inside the sandbox.
+    It applies the same no-follow ownership/mode checks as an owner and takes no
+    lock, so ownership is still acquired by the sandboxed native entry.
+    """
+    state = WriterState(workspace, create=True)
+    try:
+        return state.path
+    finally:
+        state.close()
+
+
 class WriterState:
     """Own only one control-directory descriptor, never an execution decision."""
 
     def __init__(self, workspace: str | Path, *, create: bool):
         self.workspace = canonical_workspace(workspace)
-        self.path = self.workspace.parent / f".{self.workspace.name}.siderius-writer"
+        self.path = state_directory(self.workspace)
         if create:
             with suppress(FileExistsError):
                 self.path.mkdir(mode=0o700)

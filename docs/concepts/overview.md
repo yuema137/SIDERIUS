@@ -23,10 +23,12 @@ are deterministic code.
 - **Not an AutoML library.** It does not search a fixed space of known models. It
   writes new model code each iteration and reasons about *why* the previous
   attempt behaved as it did.
-- **Not a general agent framework.** The workflow is a fixed, deterministic path
-  (`workflows/model_exploration.py` — "a workflow, not an orchestrator"), not an
-  agent choosing its own tools. Agents occupy specific, typed positions in that
-  path.
+- **Not a general agent framework.** Agents occupy specific, typed positions:
+  each research capability has a declared input and output schema. A caller
+  combines those capabilities in one of two ways: a fixed *workflow* declared in
+  advance (for example `workflow.py`), or *orchestration*, where a coding agent or
+  its caller script chooses which capability to call next. In both, the
+  deterministic core still owns data selection, training, scoring and validity.
 - **Not a benchmark harness.** It optimises one task at a time against that
   task's own declared metric; it does not maintain a leaderboard.
 - **Not a hyperparameter sweeper.** Tuning is one phase inside a larger loop

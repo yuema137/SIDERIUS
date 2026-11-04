@@ -6,11 +6,17 @@ from typing import TYPE_CHECKING, Protocol
 
 from execute_tools.evaluation_metric import MetricSpec
 from execute_tools.evaluation_results import (
+    ConstraintTerm,
     EvaluationInputsScoreability,
     SelectionBinding,
     SelectionTerm,
 )
-from execute_tools.evaluation_spec import MetricComponent, WeightedTerm
+from execute_tools.evaluation_spec import (
+    EvaluationConstraint,
+    MeasurementComponent,
+    MetricComponent,
+    WeightedTerm,
+)
 from execute_tools.evaluation_validation import formula_terms
 from execute_tools.metric_order import MetricOrder
 
@@ -39,8 +45,9 @@ class SelectionCarrier(Protocol):
 
 
 def selection_binding(composition: RunTaskComposition) -> SelectionBinding | None:
+    """Bound when the scoring child must emit evaluation evidence: formula or constraints."""
     evaluation = composition.evaluation
-    if evaluation is None or not formula_terms(evaluation.spec):
+    if evaluation is None or not (formula_terms(evaluation.spec) or evaluation.spec.constraints):
         return None
     return SelectionBinding(
         evaluation_sha256=evaluation.sha256,
@@ -51,6 +58,26 @@ def selection_binding(composition: RunTaskComposition) -> SelectionBinding | Non
             for term in formula_terms(evaluation.spec)
         },
         terms=tuple(_selection_term(evaluation, term) for term in formula_terms(evaluation.spec)),
+        constraints=constraint_terms(evaluation),
+        measurements={
+            c.id: c.measurement
+            for c in evaluation.spec.components
+            if isinstance(c, MeasurementComponent)
+        },
+    )
+
+
+def constraint_terms(evaluation: ResolvedEvaluation) -> tuple[ConstraintTerm, ...]:
+    return tuple(_constraint_term(evaluation, c) for c in evaluation.spec.constraints)
+
+
+def _constraint_term(
+    evaluation: ResolvedEvaluation, constraint: EvaluationConstraint
+) -> ConstraintTerm:
+    component = next(c for c in evaluation.spec.components if c.id == constraint.component)
+    return ConstraintTerm(
+        constraint=constraint,
+        source_metric_id=component.metric if isinstance(component, MetricComponent) else None,
     )
 
 
@@ -60,6 +87,7 @@ def _selection_term(evaluation: ResolvedEvaluation, term: WeightedTerm) -> Selec
         term=term,
         source_metric_id=component.metric if isinstance(component, MetricComponent) else None,
         direction=evaluation.components[term.component].direction,
+        source_measurement=component.id if isinstance(component, MeasurementComponent) else None,
     )
 
 

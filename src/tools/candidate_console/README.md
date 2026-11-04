@@ -729,11 +729,13 @@ See the [reusable configuration contract](console-contract.md#reusable-capture-c
    An already saved supported reusable declaration needs no extra Save. Resolve
    any source conflict before continuing. Select **Next: Run**; the
    **Run** page states which saved version it will use.
-2. On the Run page, in **New run**, explicitly choose the configured task and resources, enter a
-   run name, and select **Review preparation**. Check the source, dataset, model
+2. On the Run page, choose **Workflow version** in step 1. **Latest saved** uses
+   the current saved file; the other entries show each saved version’s name, time,
+   and short SHA-256. For example, choose `baseline` to prepare it after saving `v2`.
+   Choose the configured task and resources, enter a run name, and select **Check inputs**. Check the source, dataset, model
    profile, inputs/workspace destinations and resource limits. To use different
    resources, configure another task choice outside the browser.
-3. Select **Prepare saved source**. This captures the saved source and creates
+3. Select **Prepare**. This captures the selected version and creates
    native inputs in `runs/<UUID>/inputs/`; `workspace/` remains absent. Preparation
    is offline and does not need provider keys. **Check status** or **Monitor
    preparation** shows its outcome. Saving and preparation never launch a candidate.
@@ -745,6 +747,12 @@ See the [reusable configuration contract](console-contract.md#reusable-capture-c
    paid model APIs and use configured training resources. Current source
    edits remain separate. Follow **Monitor operation** for validation outcome;
    prepared inputs alone do not mean a candidate was accepted.
+
+Preparing an earlier version leaves the current `workflow.py` untouched. Check the
+verified version name and short SHA-256 in the review. If its recovery copy is missing
+or damaged, preparation is refused; choose another version or have the task author
+repair that copy. An older prepared run shows both its version and the latest saved
+version. **Prepare the current version** returns to step 1 with **Latest saved** selected.
 
 If a step does not succeed, the line under the Run steps says so in plain words, for
 example "The preparation failed. The cause and its log are named below; start over to

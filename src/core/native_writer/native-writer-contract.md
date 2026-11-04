@@ -9,15 +9,35 @@ failure-handler writes. Config printing, capture export and dry-run bypass write
 
 The canonical workspace path selects a private sibling directory
 `<parent>/.<workspace-name>.siderius-writer`. The parent must already exist and be
-writable. Directory permissions are 0700; control files are 0600, owned by the
+writable, or the state directory is prepared by the unsandboxed parent (loop route,
+below). Directory permissions are 0700; control files are 0600, owned by the
 current user, regular and opened without following symlinks. Typed records are
 bounded to 4096 bytes. The stable `writer.lock` inode is never removed or replaced.
 Aliases resolving to the same workspace share the lock; different workspaces do
 not. This is not protection against a malicious actor with the same user identity.
 
+On the candidate-worker loop route the state directory is bound writable into the
+sandbox, so sandboxed candidate code can unlink, recreate or chmod `writer.lock`
+there. That defeats exclusion only for its own run, and host `inspect_writer` may
+then report `unregistered`. This falls under the same-uid trust boundary above.
+Hardening (host pre-creates `writer.lock`, `--ro-bind` of the directory, and
+`open_lock(create=False)` with `O_RDONLY`) is a tracked follow-up, not current
+behavior.
+
 Managed native operations create the owner inside the existing sandbox. Their
 scientific workspace is `envelope/workspace`; the sibling control directory lies
 inside the already writable envelope. No mount or cross-sandbox FD transfer is added.
+
+When the sandbox's writable root is the workspace itself, its parent is read-only
+inside the sandbox. The candidate worker's authored-loop route (fresh launch and
+continuation segment) is this case: its sandboxed child holds `iteration_owner`.
+The unsandboxed worker therefore calls `state.prepare_state_directory(workspace)`,
+which creates or reopens the directory with the same no-follow 0700/owner checks
+and takes no lock, and passes it as `SandboxProfile.writer_state`. The sandbox binds
+exactly that directory writable at its host path; the profile accepts only the
+path derived by `state.state_directory(workspace)` and only when it already passes
+the private-directory checks. The child still acquires the flock itself, on the
+host inode, so host `inspect_writer` observes `active`. No FD crosses the sandbox.
 
 ## Supported ownership
 

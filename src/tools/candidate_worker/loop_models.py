@@ -71,7 +71,8 @@ def _operator_advice(value: str) -> str:
 
 
 # Untrusted operator text given at Resume; surrounding whitespace is removed, so a
-# retried request with the same text is byte-identical. Only newline and tab are kept.
+# retried request with the same text is byte-identical. Of the Cc/Cf characters, only
+# newline, tab, ZWNJ (U+200C) and ZWJ (U+200D) are allowed.
 OperatorAdvice = Annotated[str, AfterValidator(_operator_advice)]
 
 

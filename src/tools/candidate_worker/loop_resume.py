@@ -242,7 +242,7 @@ def launch_continuation(
     ``cancel_requested`` and ``on_sandbox_spawn`` have the ``launch_candidate``
     meaning for this segment.
     """
-    from .launch import bounded_terminal, publish, reconcile
+    from .launch import bounded_terminal, loop_writer_state, publish, reconcile
 
     control = segment_control(initial, binding.operation_id)
     if read_continuation(initial, binding.operation_id) != binding:
@@ -250,15 +250,18 @@ def launch_continuation(
     admitted_run_budget(request.parallel, host_grant)
     if host_grant is not None:
         publish_bytes_write_once(str(control / GRANT_CONTROL_FILE), encode_control(host_grant))
-    profile = SandboxProfile(
-        workspace=Path(initial.workspace),
-        read_only=tuple(Path(p) for p in request.read_only),
-        network=request.network,
-        devices=tuple(Path(p) for p in request.devices),
-        environment_names=request.environment_names,
-        timeout_seconds=request.timeout_seconds,
-    )
     try:
+        # Inside the try: a prior segment's change to the writer directory (for
+        # example a chmod) publishes a refusal receipt instead of raising.
+        profile = SandboxProfile(
+            workspace=Path(initial.workspace),
+            writer_state=loop_writer_state(Path(initial.workspace)),
+            read_only=tuple(Path(p) for p in request.read_only),
+            network=request.network,
+            devices=tuple(Path(p) for p in request.devices),
+            environment_names=request.environment_names,
+            timeout_seconds=request.timeout_seconds,
+        )
         observed = run_observed(
             profile,
             [sys.executable, "-m", __name__, str(control / "continuation.json")],

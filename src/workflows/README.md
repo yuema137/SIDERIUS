@@ -1,15 +1,18 @@
 # Workflows and task composition
 
-This package connects the research steps in a fixed order: interpret earlier
+This package connects the research steps of a workflow: interpret earlier
 results, gather selected evidence, propose, implement, validate and tune a model.
-It also resolves the task manifest so every step uses the same declarations.
-The caller chooses settings and order; individual nodes own their reasoning.
+It reads `workflow.py` declarations, runs the older fixed chain, and resolves the
+task manifest so every step uses the same declarations. The caller chooses
+settings and order; individual nodes own their reasoning.
 
 ## Find the right part
 
 | Need | Start here |
 | --- | --- |
-| Run a chain | [Launch scripts](../../scripts/launch/README.md) |
+| Prepare and run a `workflow.py` (recommended) | [Write and run a workflow declaration](../../docs/getting-started/README.md#write-and-run-a-workflow-declaration) |
+| Write a `workflow.py` | [How a workflow.py is built](../../examples/workflow_declarations/README.md#how-a-workflowpy-is-built) |
+| Run a chain with the older launcher | [Launch scripts](../../scripts/launch/README.md) |
 | Build another workflow | [Custom workflow reference](../../docs/guides/custom-workflow.md) |
 | Check a workflow declaration offline (not execute it) | [Declaration foundation](definition/README.md) |
 | Check and admit your own adaptor code (not run it in a workflow yet) | [Custom adaptor contract](custom_adaptors/custom-adaptor-contract.md) |

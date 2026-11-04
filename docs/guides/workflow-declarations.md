@@ -167,8 +167,8 @@ still applies. Unset fields take the `WorkflowLaunchConfig` defaults below.
 
 | `launch` field | Default | Meaning |
 | --- | --- | --- |
-| `is_trial` | `false` | `true`: tuning rounds may run in Trial mode on sampled data, and the last tuning round is Formal. `false`: single-file mode, which trains only for tasks whose dataset profile declares the TIDMAD topology; other tasks are refused before training. The shipped templates and examples (for example `reusable_training.py`) set `true`; the schema default stays `false`, so set it explicitly. |
-| `max_rounds` | `10` | Tuning rounds per iteration (the training configurations Train & tune plans and runs). With `is_trial: true`, `force_formal_round: true` and `max_rounds: 1`, Trial-only overrides are refused; use at least 2. |
+| `is_trial` | `true` | `true`: tuning rounds may run in Trial mode on sampled data, and the last tuning round is Formal. `false`: single-file mode, which trains only for tasks whose dataset profile declares the TIDMAD topology; other tasks are refused before training. The native default is `DEFAULT_IS_TRIAL = True` (`src/agent/schemas/hyperparam_tuning.py`), used by `WorkflowLaunchConfig.is_trial`. The console templates (`DECLARED_LAUNCH_POLICY` in `src/tools/workflow_authoring/templates.py`) and the shipped examples (for example `reusable_training.py`) also declare `true` explicitly. |
+| `max_rounds` | `10` | Tuning rounds per iteration (the training configurations Train & tune plans and runs). The console templates and shipped examples declare `2`, which leaves room for Trial before the forced Formal round. With `is_trial: true`, `force_formal_round: true` and `max_rounds: 1`, Trial-only overrides are refused; use at least 2. |
 | `force_formal_round` | `true` | Force a Formal tuning round. |
 | `trial_time_budget_minutes`, `formal_time_budget_minutes` | unset | Wall-time budget per Trial / Formal tuning round attempt. |
 | `runtime_verification_pathological_min_unit_ms` | unset | Finite nonnegative observation wall-time floor (ms) for streak/distribution slowdown refusal. Unset preserves the verifier's 100 ms default and existing runtime-policy evidence; `0` restores pre-#1202 relative-only checks. Explicit values are recorded in `runtime_policy.verification.pathological_min_unit_ms`; budgets and wall caps are unchanged. |
@@ -176,7 +176,7 @@ still applies. Unset fields take the `WorkflowLaunchConfig` defaults below.
 | `max_epochs` | unset | Epoch ceiling for both modes. |
 | `trial_max_epochs`, `formal_max_epochs` | unset | Per-mode epoch ceilings; unset means `max_epochs` governs. |
 | `trial_portion`, `train_portion`, `eval_portion` | unset | Trial data portions. Unset leaves them to the tuning planner; a typed value fixes them for the experiment. |
-| `formal_portion` | `0.1` | Formal sampling portion. |
+| `formal_portion` | `0.1` | Fraction of the declared training scope used in Formal mode (`0.1` is 10%, not full-data training). The console templates and shipped examples declare `1.0` (the whole training scope); unsetting it restores `0.1`. |
 | `formal_train_portion`, `formal_eval_portion` | `1.0` | Formal training / evaluation portions. |
 | `training_validation_portion` | unset | Optional seeded snapshot for per-epoch validation loss (`0 < value ≤ 1`). |
 | `attempts_per_round`, `attempts_per_formal_round` | `3`, `5` | Attempts per Trial / Formal tuning round. |
@@ -246,10 +246,20 @@ Every condition has `on_met`:
 
 - `"stop"` (default): the loop completes early.
 - `"request_input"` ("Pause and ask me"): the segment ends `paused` with an
-  input request. The status receipt holds only numbers
-  (`InputRequestSummary`: iteration, final iteration, metric id and direction,
-  best result and its iteration, iterations without improvement, iterations
-  since the last request). After a resume, a `request_input` condition counts
+  input request. The status receipt carries a bounded `InputRequestSummary`
+  (`src/tools/candidate_worker/loop_stop.py`): `iteration`, `final_iteration`,
+  `metric_id`, `direction`, `incumbent` and `incumbent_iteration` (best result
+  and its iteration), `non_improving_bodies`, `input_anchor` (the previous input
+  pause boundary, 0 if none), `bodies_since_input`, and `what_was_tried` (at most
+  20 `TriedBody` entries: `iteration`, `model_name`, `validation_passed`,
+  `best_valid_score`, `metric_id`, `direction`, `stop_reason`; omitted when
+  empty). The worker contract's
+  [Condition input pause](../../src/tools/candidate_worker/candidate-worker-contract.md#condition-input-pause)
+  owns how it is built and describes its two exits: Resume (`write-loop-resume`)
+  or Stop, which ends the paused run (End loop). End eligibility and its
+  `loop_end` refusals are owned by the operations contract's
+  [Authored finite-loop Stop](../../src/tools/candidate_operations/candidate-operations-contract.md#authored-finite-loop-stop).
+  After a resume, a `request_input` condition counts
   from the iteration where it last asked, so it does not ask again at once.
 
 At one boundary, a met `stop` condition wins over a met `request_input`
@@ -266,7 +276,8 @@ Loop controls, all with `--store-config FILE --operation-id UUID`:
 .venv/bin/python -m tools.candidate_operations submit --store-config store.json --request loop-resume.json
 ```
 
-`stop-loop` ends the run after the current iteration (terminal). `pause-loop`
+`stop-loop` ends the run after the current iteration (terminal); on a paused
+segment it ends the run immediately (End loop). `pause-loop`
 ends the current segment after the current iteration. `write-loop-resume`
 reviews the paused segment and writes the resume request once (an existing
 output file is refused); `submit` launches it as a new operation with a new

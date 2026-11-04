@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from core.runtime_control.gpu_execution_evidence import AttemptGpuExecution
     from core.runtime_control.gpu_requirement_evidence import AdmissionRequirementEvidence
+    from execute_tools.measurement_results import MeasurementResult
 
 from pydantic import StrictBool
 
@@ -974,6 +975,66 @@ class TidmadSandbox:
             json.dump(contract.model_dump(mode="json"), handle)
         return path
 
+    def _run_candidate_measurements(
+        self, exp_id: str, model_type: str, m_cfg: dict, l_cfg: dict
+    ) -> list["MeasurementResult"] | None:
+        """#1296: measure the checkpoint in an isolated supervised worker, or ``None``.
+
+        Only a composed run whose bound evaluation declares ``measurement``
+        components measures. Measurement construction and forward run in that
+        worker; the scoring child receives only validated results. The worker
+        gets the inference environment (``CUDA_VISIBLE_DEVICES``, plugin roots),
+        the scoring address-space cap, an RSS limit and a hard deadline.
+        """
+        from execute_tools.candidate_measurement import (
+            MeasurementRequest,
+            active_measurement_components,
+            run_measurement_worker,
+        )
+
+        components = active_measurement_components()
+        if not components:
+            return None
+        from core.sandbox_layout import training_checkpoint_path
+
+        request = MeasurementRequest(
+            model_type=model_type,
+            experiment_id=exp_id,
+            model_configuration=dict(m_cfg),
+            loss_type=LossConfig(**l_cfg).loss_type,
+            checkpoint_path=str(
+                training_checkpoint_path(self.dirs["models"], model_type, exp_id).resolve()
+            ),
+            model_io_json=self._write_model_io_config(exp_id),
+        )
+        ceiling_gb = _subprocess_rss_gb("scoring")
+        rss_limit = (
+            ceiling_gb * 1024**3
+            if ceiling_gb is not None and ceiling_gb > 0
+            else os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+        )
+        return run_measurement_worker(
+            request,
+            components,
+            directory=os.path.abspath(os.path.join(self.dirs["configs"], f"measurement_{exp_id}")),
+            env=_subprocess_env(plugin_dir=self.plugin_dir, loss_dir=self.loss_dir),
+            preexec_fn=_limited_preexec(ceiling_gb),
+            rss_limit_bytes=int(rss_limit),
+        )
+
+    @staticmethod
+    def _measurement_results_argv(
+        measured: list["MeasurementResult"] | None, directory: str
+    ) -> list[str]:
+        if measured is None:
+            return []
+        # Publish parent-validated evidence, including synthesized timeout/crash
+        # failures. Never hand scoring a missing or malformed worker output.
+        path = os.path.join(directory, "scoring_measurement_results.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump([result.model_dump(mode="json") for result in measured], handle)
+        return ["--measurement_results_json", path]
+
     def _write_dataset_profile_config(self, exp_id: str) -> str:
         """Materialize the resolved Dataset Profile for a subprocess.
 
@@ -1874,11 +1935,16 @@ class TidmadSandbox:
         from core.local_code.child import prepare_child
 
         invocation = None
+        measured = None
         try:
             # Pre-create the scoring JSON so the script can write to it
             with open(score_json_path, "w") as f:
                 json.dump({}, f)
 
+            measurement_dir = os.path.abspath(
+                os.path.join(self.dirs["configs"], f"measurement_{exp_id}")
+            )
+            measured = self._run_candidate_measurements(exp_id, model_type, m_cfg, l_cfg)
             print(f">>> [Executor] Running scoring for {exp_id}...")
             invocation = prepare_child(
                 [
@@ -1910,6 +1976,7 @@ class TidmadSandbox:
                     # Step 12 / PR-12d D4b — the composed run's task-built
                     # scopes, same emitter, same emitted-only-when-bound rule.
                     *task_scope_argv(self.dirs["configs"], exp_id, task_scopes),
+                    *self._measurement_results_argv(measured, measurement_dir),
                 ],
                 _subprocess_env(plugin_dir=self.plugin_dir, loss_dir=self.loss_dir),
             )
@@ -1933,6 +2000,12 @@ class TidmadSandbox:
             from execute_tools.evaluation_child import read_scoring_output
 
             results.update(read_scoring_output(score_json_path))
+            if measured is not None:
+                from execute_tools.measurement_results import record_measurements
+
+                # The scoring child must transport exactly what the worker measured.
+                if list(record_measurements(results).values()) != measured:
+                    raise ValueError("scoring child altered the transported measurement results")
 
             if os.path.exists(score_json_path):
                 os.remove(score_json_path)
@@ -1948,11 +2021,13 @@ class TidmadSandbox:
             status = "oom_host_ram" if _is_oom_failure(e) else "error"
             from execute_tools.evaluation_child import scoring_refusal_fields
 
-            return {
-                "status": status,
-                "message": error_msg,
-                **scoring_refusal_fields(score_json_path),
-            }
+            refusal = scoring_refusal_fields(score_json_path)
+            if measured is not None and "results" in refusal:
+                # The parent's own worker results are the record's evidence.
+                refusal["results"]["measurement_results"] = [
+                    m.model_dump(mode="json") for m in measured
+                ]
+            return {"status": status, "message": error_msg, **refusal}
         except Exception as e:
             from core.local_code.failure import raise_if_code_package_failure
 

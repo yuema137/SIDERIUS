@@ -45,8 +45,13 @@ def check_capture_policy(
     """Compare typed pinned metadata only; never read mutable authored source."""
     binding = inspected.binding
     request = binding.request
-    if binding.project_root != str(project.project_root) or binding.original_source.path != str(
-        project.source_file
+    allowed_sources = {
+        str(project.source_file),
+        str(project.recovery_directory / (binding.original_source.sha256 + ".py")),
+    }
+    if (
+        binding.project_root != str(project.project_root)
+        or binding.original_source.path not in allowed_sources
     ):
         raise OperationFailure("task_policy", "capture belongs to another source or project")
     check_request_policy(task, request)

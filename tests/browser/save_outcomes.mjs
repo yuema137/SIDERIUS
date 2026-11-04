@@ -1,7 +1,8 @@
 /** Save outcomes witness (red-team S-1..S-5, E-3..E-5, A-5, tour #9/#18), beginner view.
  * Real Chromium + real authoring API (workflow_editor_server) + temporary project files.
- * - S-1: a structured edit that re-renders the file names the removed comment in the Save
- *   step (server-computed), also after "Reapply my changes onto latest".
+ * - S-1: a move patches only its span, so comments survive Save and "Reapply my changes onto
+ *   latest" and no warning shows; a server review that reports removed comments is named in
+ *   the Save step (the browser never computes them).
  * - E-3 / S-3 / S-4: read-only file, a 500 text/plain reply and a busy lock each give their
  *   own "Not saved" sentence; the checked proposal and the open Save step stay.
  * - S-2: a save whose follow-up reload fails says "Saved as …", and the next save is no conflict.
@@ -61,12 +62,26 @@ try {
     await waitUntil(async () => (await strip.isVisible()) && !(await saveButton.isDisabled()), 'Save step open');
   };
 
-  // S-1 + tour #18: one move re-renders the file; the Save step says which comment goes.
+  // S-1 + tour #18: a move patches only the moved position (authoring contract: untouched
+  // spans stay exact), so no comment is lost and the Save step warns about none.
   await move();
   assert.equal(await page.locator('#editor-version-tag .dirty-dot').isVisible(), true, 'Dirty dot beside the workflow name');
   await check();
+  assert.equal(await comments.isHidden(), true, 'A move removes no comment, so no warning');
+  // When the server-computed review does report lost comments (collection edits), the
+  // beginner Save step names them; the browser never computes them itself.
+  await page.locator('#editor-save-cancel').click();
+  await page.route('**/api/editor/five_node/review', async route => {
+    const response = await route.fetch(); const body = await response.json();
+    (body.view ?? body).removed_comments = ['# my note about this workflow'];
+    await route.fulfill({response, json: body});
+  }, {times: 1});
+  await check();
   assert.equal(await comments.isVisible(), true, 'Comment loss is shown in the beginner Save step');
   assert.match(await comments.textContent(), /1 comment will be removed \(# my note about this workflow\)/);
+  await page.locator('#editor-save-cancel').click();
+  await check();
+  assert.equal(await comments.isHidden(), true, 'The warning follows the latest review');
   assert.equal(await status(), 'Checked. Name the version, then save.');
   const checked = await readFile(file, 'utf8');
 
@@ -105,7 +120,7 @@ try {
   await waitUntil(async () => (await status()).startsWith('Saved as "moved". Reloading the file afterwards failed'), 'saved, reload failed');
   reloadArmed = false;
   await page.unroute('**/api/editor/five_node');
-  assert.doesNotMatch(await readFile(file, 'utf8'), /# my note/, 'The warned comment is gone after Save');
+  assert.match(await readFile(file, 'utf8'), /# my note about this workflow/, 'The comment survives a move Save');
   await waitUntil(async () => (await page.locator('#editor-version-tag .version-tag-name').textContent()) === 'moved', 'version tag');
   await move(); await check();
   assert.equal(await comments.isHidden(), true, 'No comment left to lose');
@@ -128,7 +143,7 @@ try {
   await page.locator('#editor-rebase').click();
   await waitUntil(async () => (await status()).startsWith('Your changes are reapplied onto the latest version.'), 'reapplied');
   await check();
-  assert.match(await comments.textContent(), /1 comment will be removed \(# disk note\)/, 'Reapply path warns too');
+  assert.equal(await comments.isHidden(), true, 'Reapplying a move keeps the disk comment');
   await page.locator('#editor-save-cancel').click();
 
   // E-5: a non-JSON 502 during the draft check leaves a failed state with Check again.
@@ -159,7 +174,7 @@ try {
   await rename(file + '.aside', file);
 
   assert.deepEqual(faults, []);
-  console.log('PASS save outcomes: comment-loss warning (save + reapply), read-only/500/busy refusals keep the checked step, saved-but-reload-failed, line-diff conflict, failed check with Check again, missing-file path.');
+  console.log('PASS save outcomes: moves keep comments (save + reapply), server-reported comment loss is named, read-only/500/busy refusals keep the checked step, saved-but-reload-failed, line-diff conflict, failed check with Check again, missing-file path.');
 } finally {
   await browser?.close();
   server.kill('SIGTERM');

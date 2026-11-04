@@ -11,6 +11,7 @@ from execute_tools.evaluation_registry import ComponentKindRegistration, Resolve
 from execute_tools.evaluation_spec import (
     EvaluationSpec,
     FormulaSelection,
+    MeasurementComponent,
     MetricComponent,
     RubricBalanceSelection,
     WeightedTerm,
@@ -34,6 +35,11 @@ def validate_references(
     metric_refs = [c.metric for c in spec.components if isinstance(c, MetricComponent)]
     if len(set(metric_refs)) != len(metric_refs):
         raise ValueError("multiple evaluation components alias the same metric")
+    measured = [
+        (c.measurement, c.protocol) for c in spec.components if isinstance(c, MeasurementComponent)
+    ]
+    if len(set(measured)) != len(measured):
+        raise ValueError("multiple evaluation components alias the same measurement")
     references = [term.component for term in formula_terms(spec)]
     references.extend(constraint.component for constraint in spec.constraints)
     for reference in references:

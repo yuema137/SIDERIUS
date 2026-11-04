@@ -523,7 +523,7 @@ exception aborts further effects; remaining instances become blocked. Training,
 routing, loops, human pauses, buffers, cross-branch aggregation and graph resume
 are not supported by this profile.
 
-#### Per-unit processes (B3-3)
+#### Per-unit processes
 
 Every graph profile (`execution_profile` set, including loop bodies) runs each
 dispatched node, except adaptors (`adaptor_phase.execute_adaptor` runs those in the worker), in its
@@ -582,7 +582,7 @@ three/four-stage path is unchanged and runs in the worker.
 - `unit_child` requires the generated-library binding the worker placed in its
   environment, recomposes the task from `manifest_path`, refuses a different
   `semantic_fingerprint`, binds the composition with the transported data root
-  and calls the same native phase function the worker called before B3-3
+  and calls the same native phase function the worker would call in-process
   (`phases.run_*`, `run_literature`, `run_interpretation`, `run_training`).
   Its stderr joins the inherited stdout, so `worker.log` still holds the unit's
   output and tracebacks in order.
@@ -614,10 +614,10 @@ memory is released before the next unit starts.
 
 Parity limits, all outside recorded scientific outputs:
 
-- The torch default RNG is process-global. Before B3-3 the implementor
-  self-check and validator probes of one body drew unseeded inputs and probe
-  weights from one shared stream; each unit now starts its own fresh,
-  nondeterministic stream. Neither was reproducible. Probes stay unseeded;
+- The torch default RNG is process-global. In one shared process the implementor
+  self-check and validator probes of one body would draw unseeded inputs and probe
+  weights from one shared stream; each unit instead starts its own fresh,
+  nondeterministic stream. Neither is reproducible. Probes stay unseeded;
   seeding them is a separate behaviour decision.
 - `subprocess_env` sets `PYTHONHASHSEED=0` unless the operator set it, so unit
   string hashing is fixed where the worker's was per-process random.
@@ -651,7 +651,7 @@ routing)` (`pending` for undecided nodes), `aborted`, and `decisions` (the
 recorded `RouteEvaluationOutput` values, at most one per branch; empty for
 every profile except `native-routed-candidate/v1`). It refuses duplicate ids, undeclared
 predecessors or merge candidates, two decisions for one branch, a `skipped`
-node without a reason in `SKIP_REASONS` (B1: `route_not_selected`; B6-4:
+node without a reason in `SKIP_REASONS` (`route_not_selected`;
 `insufficient_items`, set through `skipped_input`, see "Literature adaptor
 profiles"), and a node
 whose merge candidate is also one of its `predecessors`, or whose
@@ -673,14 +673,14 @@ For a capability node, the per-node rule `_close_reason`, in precedence order:
 1. `aborted` (an earlier native failure) → `blocked/dependency_not_successful`.
 2. Any required source `failed`, `rejected` or `blocked` →
    `blocked/dependency_not_successful`. Blocked beats skipped. Exception
-   (B1-PR5, B1-Q1 fallback): `NodeRouting.control` names the branch source when
+   (routed fallback): `NodeRouting.control` names the branch source when
    the target binds no data from it (a control-only edge). That source blocks only
    when `failed` or `blocked`; a `rejected` source still produced the record its
    decision read, so rule 4 decides. A target that also reads the source's data
    keeps rule 2 (pinned: `test_readiness.py` route rows).
 3. Any required source `skipped` → `skipped` with that source's reason (first
    skipped source in predecessor order). This generic propagation applies to any
-   skip reason, so later reasons (B6 `insufficient_items`) need no second rule;
+   skip reason, so later reasons (`insufficient_items`) need no second rule;
    skipped never satisfies a required input.
 4. `NodeRouting.route` (the node is an entry target of that branch): dispatched
    when the branch decision lists it in `selected_targets`, closed
@@ -777,7 +777,7 @@ The family profile generates N independent instances, not N outputs from one
 proposer call; no scientific diversity, ranking, aggregation, parallel execution,
 training, conditional routing, buffers, human gates or graph resume is implied.
 
-Branch isolation within one body (audited for B3 parallel scheduling): no
+Branch isolation within one body (relied on by parallel dispatch): no
 family or branch reads a file or plugin registry an independent sibling wrote.
 Family inputs are materialized from the captured snapshots before the first node
 runs; the interpretation candidate re-materializes its proposal input after the
@@ -799,9 +799,9 @@ models draw initial weights from it. A family-1 node's probe tensors and weights
 therefore depend on how many draws earlier nodes made. Recorded outputs are
 unaffected (pass/fail, shapes, gradient checks and records compare equal across
 declaration orders). The stream is not reproducible even serially: an unseeded
-process starts from a nondeterministic torch default seed. Since B3-3 each unit
-runs in its own process and draws from a fresh stream instead of a shared one
-(see Per-unit processes). Seeding the probes is a behaviour change outside B3.
+process starts from a nondeterministic torch default seed. Each unit runs in its
+own process and draws from a fresh stream instead of a shared one (see Per-unit
+processes). Seeding the probes would be a separate behaviour change.
 
 The shared `token_usage.jsonl` is append-only. By source reading (the witness
 below replaces `LLMBridge`), the only in-run read is `LLMBridge`'s first-row
@@ -812,7 +812,7 @@ order only against iteration-flush markers, and warns without failing on
 non-monotonic timestamps. Rows carry no unit identity; optional unit attribution
 is deferred to parallel dispatch, so serial ledgers are unchanged.
 
-The B3-0 audit therefore found nothing to snapshot per body. Witness:
+Therefore nothing needs to be snapshotted per body. Witness:
 `tests/unit/tools/candidate_worker/test_branch_isolation.py` runs real native
 node bodies with a scripted provider in three declaration orders. Its two
 families propose distinct models. It requires the actual dispatch sequence to
@@ -831,10 +831,10 @@ Code callers may still supply version-1 native inputs directly. Both routes use
 the same existing operation/HTTP observation without loading an editor.
 
 
-### Opt-in first-passing selection (S1, B6-3)
+### Opt-in first-passing selection (S1)
 
 `WorkflowPreviewRequest.execution_profile="native-proposal-fanout-selection/v1"`
-(`workflows.definition.fanout.SELECTION_PROFILE`) admits B6 scenario S1: one
+(`workflows.definition.fanout.SELECTION_PROFILE`) admits scenario S1: one
 external proposal, its complete implementation/validation branches (the
 proposal-fanout ownership rules above), exactly one declared adaptor and exactly
 one tuning node. Admission (`fanout.selection_candidate`) requires:
@@ -857,8 +857,8 @@ those of `native-proposal-fanout/v1`; training admission and the native tuner pa
 are those of the interpretation profile's training ("Native training after
 interpretation"), so the seed must leave training-owned fields unset or equal.
 
-**Readiness.** `NodeReadiness.kind` is `"capability"` (default) or `"adaptor"`
-(B6-D8). An adaptor is ready once every bound source is terminal; `_close_reason`
+**Readiness.** `NodeReadiness.kind` is `"capability"` (default) or `"adaptor"`.
+An adaptor is ready once every bound source is terminal; `_close_reason`
 closes it `blocked/dependency_not_successful` only after an abort or when a source
 is `failed` or `blocked`. A `rejected` or `skipped` source does not close it; the
 strategy treats it as inadmissible. An adaptor never carries routing.
@@ -898,7 +898,7 @@ It is omitted when empty, so unadapted traces keep their bytes (pinned:
 `test_unadapted_training_trace_bytes_are_unchanged`). `GraphTrace` refuses an
 `"adaptor"` capability in `nodes` and any other capability in `adaptors`.
 `GraphReason` gains `no_admissible_input`, `insufficient_items` and the reserved
-`judge_failure` (B6-8). Adaptor records are not in `native_output_paths`.
+`judge_failure`. Adaptor records are not in `native_output_paths`.
 
 **Body outcome** (`adaptor_phase.body_outcome`, shared by worker and verifier).
 A `rejected` node bound to an adaptor that `succeeded` was an inadmissible input
@@ -970,7 +970,7 @@ loops, custom and LLM strategies (split distribution runs only under the literat
 split profile, "Literature adaptor profiles" below). Routes run only under
 `native-routed-candidate/v1` (next section).
 
-### Routed execution profile (B1-PR5)
+### Routed execution profile
 
 `WorkflowPreviewRequest.execution_profile="native-routed-candidate/v1"`
 (`workflows.definition.fanout.ROUTED_PROFILE`) admits the S1 selection node set
@@ -979,14 +979,14 @@ at least one declared route whose arms (targets and every node they dominate,
 `routes.branch_arms`) contain only implementation/validation nodes: an arm holding
 the selection adaptor or the tuner is refused ("the routed profile routes only
 implementation/validation arms, never the adaptor or the tuner"), because gating
-training on a predicate (B1-Q1(b), not chosen) would let a body complete untrained.
+training on a predicate would let a body complete untrained.
 It is the only profile whose `refuse_declaration_only` call passes
 `admits_routes=True`. Every other profile, the fixed candidate, v2 reusable
 sources, managed preparation and the console profile lists still refuse a routed
 document (`ROUTING_NOT_ADMITTED`). No loop is admitted (`admit_loop` admits only
-the interpretation profile; B1-Q5 leaves no admissible route target in the
+the interpretation profile; there is no admissible route target in the
 single-branch interpretation loop, so routed loops wait for a later design). First
-consumer (B1-Q1(a)): a fallback branch, e.g. `Branch(source=check0,
+consumer: a fallback branch, e.g. `Branch(source=check0,
 cases=(RouteCase(when=BoolIs("validation.passed", False), targets=("build1",)),))`:
 `build1`/`check1` run only when `check0` rejects, and the first-admissible adaptor
 trains whichever validator passed (a passing fallback rescues the body; the
@@ -1008,7 +1008,7 @@ trace's `record_sha256`, then `evaluate_route`. A `failed` source decides nothin
 and its targets are blocked. Any exception during projection or evaluation is a
 `RouteConditionError` raised out of `execute_fanout` (outside the node's own
 failure handling): the body fails as an uncertain child failure, never reading the
-route as false. This is deliberately fail-closed for B1-PR5: the child exits
+route as false. This is deliberately fail-closed: the child exits
 nonzero, the receipt is `failed` with no `graph_trace`, and native records already
 written for nodes that ran in that body stay on disk unindexed by any receipt (they
 are never read as evidence). A per-body failure that keeps its trace, as adaptor
@@ -1031,7 +1031,7 @@ adaptor cites it as `AdaptorInputRef.record_sha256` of the skipped input. The
 worker computes citations at adaptor dispatch, the verifier from the trace; both
 feed `adaptor_phase.decide`, so the adaptor record is recomputed byte for byte.
 The `routes.py` arm-label relaxation stands for this shape: the adaptor reads both
-arms (one outside, one inside the fallback arm) and runs either way (B6-D8), so its
+arms (one outside, one inside the fallback arm) and runs either way, so its
 tuner consumer is not refused.
 
 **Verification.** `verify_graph_trace` additionally runs
@@ -1124,7 +1124,7 @@ human pause or resume. Shared proposal advice is not literature advice. Historic
 scientific settings remain experiment-owned. Omitted/default fixed, fanout and
 family profiles retain their serialization and native scientific payloads.
 
-### Literature adaptor profiles (S2 collection, S3 split; B6-4)
+### Literature adaptor profiles (S2 collection, S3 split)
 
 Two opt-in v1 profiles (`fanout.LITERATURE_COLLECTION_PROFILE`,
 `fanout.LITERATURE_SPLIT_PROFILE`) connect reviews to proposals through one declared
@@ -1145,11 +1145,11 @@ either literature shape. Proposal diagnostics are per node
 | Profile | Admission (`fanout.literature_collection_candidate` / `literature_split_candidate`) |
 | --- | --- |
 | `native-literature-collection/v1` (S2) | ≥ 1 external reviews; one adaptor with one `literature.output` port binding every review result exactly once, `collect/v1` + `all/v1` + `single/v1`; exactly one proposal using `literature-collection-to-proposal(reviews=AdaptorSource(<adaptor>), proposal_input=<external seed>)`; its complete branches |
-| `native-literature-judged/v1` (B6-8a) | ≥ 1 external reviews; one adaptor with one `literature.output` port (`max_items` declared) binding every review exactly once, an LLM COMBINE kind (`fanout.literature_judged_candidate`; any other profile refuses an LLM COMBINE with `LLM_COMBINE_NOT_ADMITTED`), `single/v1` or `per-item/v1(M)`; one proposal per output through `literature-to-proposal(output=AdaptorSource(<adaptor>[, index=i]), proposal_input=<external seed>)` (no index for `single/v1`, indices `0..M-1` each once); `admit_llm_strategy` admits the kind and the deterministic validation table admits a declared `Fallback.combine` with the same SELECT/DISTRIBUTE; one complete family per proposal. See "LLM COMBINE literature profile" |
-| `native-proposal-judged/v1` (B6-8b) | ≥ 2 external proposals; one adaptor with one `proposal.output` port (`max_items` declared) binding every proposal result exactly once, an LLM COMBINE kind, `single/v1` or `per-item/v1(M)`; one branch per output: an implementation `proposal-to-implementation(output=AdaptorSource(<adaptor>[, index=i]), storage)` and exactly one validation reading it (`implementation-to-validation`, or `proposed-implementation-to-validation` whose `proposal` is the same adaptor output); no other node, tuner, loop or route (`definition/proposal_judged.py`). See "LLM COMBINE literature profile" for the executor; a judged branch's proposal value is the adaptor output it reads (`adaptor_phase.judged_proposal`) and its seed (task facts, constraints) is the seed of the proposal that output cites first; every proposal seed is reconciled against every branch's protocol externals before any effect. A synthesized `proposal.output` (`judge-merge`, `primary-advisors`, debate synthesize) gets its system `candidate_id` at the adaptor boundary, `agent.schemas.proposal.mint_candidate_id(CombinedItem.value_sha256)` (the proposer's mint owner; deterministic, so replay reproduces it; the author still leaves it unset), so the validation join's identity check holds unchanged. The worker stamps `ImplementorInput.consumed_input_sha256 = inputs.consumed_input_sha256(seed, proposal, version=ENCODING_VERSION)` and `consumed_input_encoding = "siderius.nonfinite/v1"` for judged-branch implementations only (the node echoes both into `ImplementorOutput`, on generation and Branch B reuse; absent and omitted elsewhere), and `graph_evidence.verify_judged_branches` recomputes the digest under the recorded `consumed_input_encoding` from the verified adaptor value and the owner's persisted seed: a branch that ran on another output or another owner's seed is refused. The v1 pre-image uses `core.record_encoding.model_record_value`, so `inf`/`-inf`/`NaN`/`None` inside `Any` fields (`baseline_config`, `custom_loss_spec.config_fields`, seed `best_config`, `model_knowledge_cache`, `model_selection.params`, rule `exact`/`allowed`) have distinct identities (#1326). An absent encoding (records written before #1326) replays the historical `model_dump(mode="json")` projection, in which those values were already null; finite inputs have the same digest under both, and the writer never selects the historical form. Unknown encodings refuse |
+| `native-literature-judged/v1` | ≥ 1 external reviews; one adaptor with one `literature.output` port (`max_items` declared) binding every review exactly once, an LLM COMBINE kind (`fanout.literature_judged_candidate`; any other profile refuses an LLM COMBINE with `LLM_COMBINE_NOT_ADMITTED`), `single/v1` or `per-item/v1(M)`; one proposal per output through `literature-to-proposal(output=AdaptorSource(<adaptor>[, index=i]), proposal_input=<external seed>)` (no index for `single/v1`, indices `0..M-1` each once); `admit_llm_strategy` admits the kind and the deterministic validation table admits a declared `Fallback.combine` with the same SELECT/DISTRIBUTE; one complete family per proposal. See "LLM COMBINE literature profile" |
+| `native-proposal-judged/v1` | ≥ 2 external proposals; one adaptor with one `proposal.output` port (`max_items` declared) binding every proposal result exactly once, an LLM COMBINE kind, `single/v1` or `per-item/v1(M)`; one branch per output: an implementation `proposal-to-implementation(output=AdaptorSource(<adaptor>[, index=i]), storage)` and exactly one validation reading it (`implementation-to-validation`, or `proposed-implementation-to-validation` whose `proposal` is the same adaptor output); no other node, tuner, loop or route (`definition/proposal_judged.py`). See "LLM COMBINE literature profile" for the executor; a judged branch's proposal value is the adaptor output it reads (`adaptor_phase.judged_proposal`) and its seed (task facts, constraints) is the seed of the proposal that output cites first; every proposal seed is reconciled against every branch's protocol externals before any effect. A synthesized `proposal.output` (`judge-merge`, `primary-advisors`, debate synthesize) gets its system `candidate_id` at the adaptor boundary, `agent.schemas.proposal.mint_candidate_id(CombinedItem.value_sha256)` (the proposer's mint owner; deterministic, so replay reproduces it; the author still leaves it unset), so the validation join's identity check holds unchanged. The worker stamps `ImplementorInput.consumed_input_sha256 = inputs.consumed_input_sha256(seed, proposal, version=ENCODING_VERSION)` and `consumed_input_encoding = "siderius.nonfinite/v1"` for judged-branch implementations only (the node echoes both into `ImplementorOutput`, on generation and Branch B reuse; absent and omitted elsewhere), and `graph_evidence.verify_judged_branches` recomputes the digest under the recorded `consumed_input_encoding` from the verified adaptor value and the owner's persisted seed: a branch that ran on another output or another owner's seed is refused. The v1 pre-image uses `core.record_encoding.model_record_value`, so `inf`/`-inf`/`NaN`/`None` inside `Any` fields (`baseline_config`, `custom_loss_spec.config_fields`, seed `best_config`, `model_knowledge_cache`, `model_selection.params`, rule `exact`/`allowed`) have distinct identities (#1326). An absent encoding (records written before #1326) replays the historical `model_dump(mode="json")` projection, in which those values were already null; finite inputs have the same digest under both, and the writer never selects the historical form. Unknown encodings refuse |
 | `native-literature-split/v1` (S3) | exactly one external review; one adaptor with one `literature.output` port bound to it and `split-items/v1(field="findings", count=M, on_short)` after any COMBINE/SELECT pair the declaration validation table admits (S3 is `field-rank/v1(confidence, descending)` + `top-k/v1(k)`); exactly M proposals, each `literature-to-proposal(output=AdaptorSource(<adaptor>, index=i), proposal_input=<external seed>)`, indices `0..M-1` each bound once; one complete family per proposal |
 
-**LLM COMBINE literature profile** (`native-literature-judged/v1`, B6-8a;
+**LLM COMBINE literature profile** (`native-literature-judged/v1`;
 `adaptor_llm.py`, `adaptor_phase.decide`). Before any effect, `graph.execute_fanout`
 builds `judge_adaptor_context(request, initial, composition.judge_task)`:
 
@@ -1167,12 +1167,12 @@ builds `judge_adaptor_context(request, initial, composition.judge_task)`:
   loop_stop.judge_call_bound(loop)` (0 without a loop); an absent cap refuses. A
   refusal fails the run before any node starts (receipt `failed`, no graph trace).
 
-Execution: `decide_llm` admits the items (B6 rule), and with none admissible records
-`rejected/no_admissible_input` without calling B2. Otherwise it builds
+Execution: `decide_llm` admits the items (adaptor admission rule), and with none admissible records
+`rejected/no_admissible_input` without calling the judge. Otherwise it builds
 `StrategyInvocation(evidence_dir=<adaptor dir>/<id>.judge)`, runs
 `run_llm_strategy` (bridge resolved at call time through
 `agent.judge.call.bridge_for_route`; usage rows under the run context), maps the
-outcome onto the B6 core (adaptor contract) and records the evidence anchor. A
+outcome onto the adaptor core (adaptor contract) and records the evidence anchor. A
 strategy refusal raised before any provider contact (prompt budget, item cap)
 fails the slot without a record, like any uncertain adaptor failure. The verifier
 (`verify_adaptors`) recomposes the judge declarations from the task manifest
@@ -1192,9 +1192,9 @@ review node id>, output=<review>)` per collected entry, in collected order) and
 applies `local_typed_evidence_many`; the proposer prompt therefore renders the
 existing collection section, one `### Review: <review node id>` heading per review in
 declared binding order, never completion order. Renaming a review node therefore
-changes the proposer prompt (operator-accepted, 2026-10-28). This profile is the first
-framework producer of a collection: before B6-4 only hand-written
-`ProposalInput.literature_review_evidence` seeds reached the collection renderer.
+changes the proposer prompt. This profile is the first
+framework producer of a collection; otherwise only hand-written
+`ProposalInput.literature_review_evidence` seeds reach the collection renderer.
 Every proposal seed under either adaptor profile must leave
 `literature_review_evidence` unset; `materialize_fanout` refuses one that carries it
 before any review or proposer call (the reusable-preparation rule). S3 applies `local_typed_evidence` to
@@ -1243,9 +1243,9 @@ skip of the short index with ranked findings per family; relabelled skip and swa
 finding refused; `on_short="fail"` and `too_many_items` failures recorded and blocking;
 admission refusals).
 
-Not admitted: v2 reusable source, managed preparation and console for these profiles
-(B6-7); tuning after either profile; collection over other contracts
-(`tuning.collection`, B6-9); `per-item/v1` and `replicate/v1` distribution; custom and
+Not admitted: v2 reusable source, managed preparation and console for these profiles;
+tuning after either profile; collection over other contracts
+(`tuning.collection`); `per-item/v1` and `replicate/v1` distribution; custom and
 LLM strategies.
 
 ## Opt-in native interpretation candidate
@@ -1368,8 +1368,11 @@ source when absent; the existing single-body path remains unchanged. Reusable
 source preserves this declaration but its profile preparation has a separate owner.
 
 The worker claims one fresh workspace, captures source and external inputs once,
-and holds the existing native writer lease throughout finite execution. Each body
-uses its explicit invocation iteration and managed node storage. Later-body input
+and holds the existing native writer lease throughout finite execution. The lease is
+acquired inside the sandbox; the unsandboxed worker prepares the private sibling writer
+directory (`launch.loop_writer_state`) and binds exactly it writable through
+`SandboxProfile.writer_state`, for the fresh launch and every continuation segment.
+Each body uses its explicit invocation iteration and managed node storage. Later-body input
 materialization reads the original captures and changes only declared managed
 storage, iteration and native history fields. It does not rewrite authored source,
 change its digest, replace static task/launch/advice inputs, or launch another
@@ -1409,10 +1412,14 @@ task, hardware, full constraints and Health execution; replay is not additional
 scientific certification. Timeout/interruption retains the existing supervisor
 status and may leave completed body records without a successful aggregate.
 
-`tools.candidate_operations.request_loop_stop(config, operation_id)` accepts only
-an operation-bound, already-claimed, confirmed-running authored finite loop. It
-verifies the saved request/run identity and publishes an immutable `stop.json`
-marker in native control storage. Acknowledgement means requested, not stopped.
+`tools.candidate_operations.request_loop_stop(config, operation_id)` accepts an
+operation-bound, already-claimed authored finite loop that is either confirmed
+running or an exited, verified paused tail. It verifies the saved request/run
+identity and publishes an immutable `stop.json` marker in native control storage.
+For a paused tail this ends the run immediately (End loop); paused-tail eligibility
+and its `loop_end` refusals are owned by the operations contract's
+[Authored finite-loop Stop](../candidate_operations/candidate-operations-contract.md#authored-finite-loop-stop).
+For a running loop, acknowledgement means requested, not stopped.
 The worker checks it before each body dispatch; once that check passes, the body
 counts as active even if the request arrives before its first node starts. It
 finishes that active body and reports
@@ -1670,19 +1677,27 @@ and replay are `loop_judge`; the call, evidence and readback core is `agent/judg
 (judge contract); the route is the run lock's `judge_routes.stop` (persistence
 contract).
 
-Admission and call cap (decision Q-B2-10). With a `JudgeStop` declared,
+Admission and call cap. With a `JudgeStop` declared,
 `execute_loop` refuses with `StopConditionError` before any body
 (`admit_judge_route`) when `WorkflowLLMConfig.judge.stop` is absent, when the
 run-level `WorkflowLLMConfig.judge.max_judge_calls` is absent, or when the static
 judge call bound `judge_call_bound(loop) = final_iteration - min_completed_bodies`
-(one call per judgeable boundary; no LLM adaptor strategies exist yet to add to it)
-exceeds that cap. The route and the cap are resolved from the workspace run lock
+(one call per judgeable boundary) exceeds that cap. When the run also declares LLM
+COMBINE adaptors, `adaptor_llm.admit_llm_adaptors` separately refuses unless
+`Σ(adaptor static_call_bound) × final_iteration + judge_call_bound(loop)` fits the
+same cap (the sum is documented in
+[Workflow declarations, LLM configuration](../../../docs/guides/workflow-declarations.md#3-llm-configuration)). This combined
+check is not reachable while loops are admitted only for the interpretation profile
+(`loop_models.admit_loop`), because LLM COMBINE kinds execute only under the
+judged profiles (`fanout.LLM_COMBINE_NOT_ADMITTED`). The route and the cap are resolved from the workspace run lock
 (`RunInvariants.judge_routes`, canonical) at call and readback time. Before each
 call, `call_stop_judge` re-checks the run's calls so far plus one against the locked
 cap and raises `StopConditionError` before any provider contact if it would be
 exceeded (the run fails; with a consistent lock admission makes this unreachable).
 Readback (`require_judge_cap`) refuses a run whose recorded judge verdicts exceed
-the locked cap. Showing the bound before launch belongs to the B2-5 GUI.
+the locked cap. Console review runs the same `admit_judge_route` before launch
+(`reusable_candidate.admit_captured_judge_route`) and refuses with `judge_route`,
+naming the route or the bound and the cap.
 
 Precedence at a completed-body boundary `N` (`needs_stop_judge` is the one pure
 predicate; the worker calls iff it is true, readback requires evidence iff it is true):
@@ -1777,8 +1792,10 @@ per judged boundary, and never more than the locked `max_judge_calls`; usage row
 in the run's `token_usage.jsonl` under label `judge.stop` (skips under
 `judge.stop.skipped`).
 
-Limitations: the GUI does not yet offer or render the judge condition or show the
-static call bound before launch (B2-5).
+GUI: the console editor offers the `JudgeStop` condition (`editor-loop-controls.js`),
+Monitor renders recorded `judge_verdicts` (`loop-control.js`), and review refuses an
+unroutable or over-cap judge before launch (above). Limitation: the console shows the
+static call bound only in that refusal message, not as a value before launch.
 
 Tests: `tests/unit/tools/candidate_worker/test_loop_stop.py` (pure precedence and
 verdict rules), `tests/unit/tools/candidate_worker/test_loop_judge.py` (stub bridge
@@ -1822,7 +1839,7 @@ profile" above); readiness consumes its output (skip semantics above).
 - Leaves: `bool_is` and `enum_in` compare the projected value; `metric_at_least` is
   `MetricOrder(metric).is_at_least(value, threshold)` (ties hold; direction only from
   the run `MetricSpec`); an absent metric value makes `metric_at_least` false and
-  `is_missing` true (decision B1-Q4).
+  `is_missing` true.
 - Before any case is evaluated, `evaluate_route` checks every leaf of every case:
   its observable is catalogued with the leaf's kind, present in the observation, and
   of the catalogued kind (bool; str within the catalog values; float or `None` for a
@@ -1843,13 +1860,13 @@ Tests: `tests/unit/tools/candidate_worker/test_route_eval.py`.
 
 ## Parallel dispatch
 
-Design: B3-4 (`advanced/b3-parallel-scheduling.md`; operator decisions of
-2026-10-28: per-capability budgets, no joint budget; parallel runs work under
-the host reservation ledger). Owners: `parallel_models.py` (request, grant,
+Rules: budgets are
+per capability, with no joint budget; parallel runs work under the host
+reservation ledger. Owners: `parallel_models.py` (request, grant,
 run-budget authority, receipts), `parallel_envelope.py` (peak concurrent demand),
 `parallel_dispatch.py` (the in-run scheduler loop), `parallel_evidence.py`
 (trace v2 drain verifier), `agent/token_unit.py` (token-ledger attribution).
-B3-4a: request, envelope, grant. B3-4b: concurrent dispatch inside the grant.
+Scope: the request, envelope and grant, then concurrent dispatch inside the grant.
 
 Request. `CandidateRunRequest.parallel: ParallelDispatch | None`, omitted when
 `None`, so serial request bytes and digests are unchanged.
@@ -1882,7 +1899,7 @@ clamped to the budget:
   quantity: the run never reserves less than it declared (undeclared units run
   alone under it). Unit id, ordinal, wall time and `time_budgeted` come from it;
 - the GPU part is one slot (`gpu_count=1`, `vram_source="configured_cap"`);
-- clamp (B3-4d): each quantity is `max(min(peak, capacity), largest single
+- clamp: each quantity is `max(min(peak, capacity), largest single
   unit)`, where capacity is the largest slot's `effective_gib` for VRAM and the
   budget totals for host memory, CPU slots and `max_concurrent_units` (for
   `unit_slots`, whose least value is 1). A peak the host cannot hold is
@@ -1915,7 +1932,7 @@ publishes it write-once as `candidate_run/host_grant.json`;
 
 Tests: `tests/unit/tools/candidate_operations/test_parallel_envelope.py`.
 
-### Concurrent dispatch (B3-4b)
+### Concurrent dispatch
 
 Entry. The worker reads its budget once from its control directory
 (`control_run_budget`: `host_grant.json` if present, then `admitted_run_budget`)
@@ -1940,7 +1957,7 @@ hide every GPU and silently train on CPU. Every request
 is checked against the idle budget; any refusal raises `ParallelRefused`
 (`resource_refused: …`) and the body fails before any unit runs.
 
-Loop. Readiness is B1 `next_dispatch` (`GraphBody.next_node`), with dispatched
+Loop. Readiness is `next_dispatch` (`GraphBody.next_node`), with dispatched
 units presented as `running`, so it never returns them or anything waiting on
 them. For the first ready node:
 - an adaptor runs at once in the worker (a pure step, no placement);
@@ -1962,7 +1979,7 @@ them. For the first ready node:
   receipt carrying its placement, its routes decided, and running units drain
   (#1108). Queued: the loop waits
   for a running unit to finish. Strict FIFO: nothing overtakes the first ready
-  unit (decision B3-Q4).
+  unit.
 Before each readiness step the loop collects every unit that has already exited,
 in dispatch order, so a failure that already ended stops new dispatch; when no
 node is ready it waits for one (`POLL_SECONDS` = 0.05 s). A queued unit's
@@ -1970,7 +1987,7 @@ node is ready it waits for one (`POLL_SECONDS` = 0.05 s). A queued unit's
 own. The result is read, classified and routed exactly as in the serial loop. A nonzero unit exit is `failed`/`native_failure`. The trace
 stays declaration-ordered; nothing is aggregated by completion time.
 
-Drain (decision B3-Q2). A failure (a failed unit or adaptor, or a tuning
+Drain. A failure (a failed unit or adaptor, or a tuning
 infrastructure abort) sets the body's abort, so readiness closes every
 undispatched node as `blocked`; units already running finish with their real
 outcome. A failed body may therefore hold more `succeeded` units than its serial
@@ -2052,7 +2069,7 @@ A held signal is delivered when the outermost held block exits, however it
 exits: an exception leaving the block is chained as the `__cause__` of the
 `UnitTerminated`, so a failing cleanup never drops the termination (#1108). An outer timeout or operator cancel kills the sandbox; every unit
 is in its PID namespace and ends with it. Stop and Pause keep body-boundary
-meaning: the active body, including queued units, finishes (decision B3-Q5).
+meaning: the active body, including queued units, finishes.
 
 Run lock. `admit_training(..., host_budget=...)` locks
 `scheduling_mode="parallel-v1"` with the budget's provenance

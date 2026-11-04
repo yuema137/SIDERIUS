@@ -62,6 +62,7 @@
     nameFor,
     recorded,
     get loaded() { return !!listing; },
+    get listing() { return listing; },
   });
 
   function render() {
@@ -126,6 +127,7 @@
   async function load() {
     const version = ++generation, id = project;
     listing = null; detail.hidden = true; render();
+    window.dispatchEvent(new CustomEvent('editor-versions'));
     if (!session.connected || !id) { historyStatus.textContent = 'Connect and open an experiment setup to see its saved versions.'; return; }
     try {
       const value = await session.request(`editor/${encodeURIComponent(id)}/versions`);

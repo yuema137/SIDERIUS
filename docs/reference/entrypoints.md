@@ -265,10 +265,12 @@ replacement, `--print_resolved_launch_config`, the per-agent
 the runner flag set from its parser and fails when a new flag is neither
 accepted by `run_chain.sh` nor listed there with a reason.
 
-> The header comment inside `run_chain.sh` lists `--seed_paths` under "Required
-> flags". That comment is stale — `_chain_common.sh:403-406` documents the
-> opposite and omits the flag entirely for a cold start. Cold start is in fact
-> the required posture for gate runs.
+Any flag `run_chain.sh` does not accept stops the launcher during argument
+parsing, before any Python or Slurm step: it prints `Unknown arg: <flag>` to
+stderr and exits 1. Missing required flags (`--workspace`, `--run_name`,
+`--task_composition`, `--data_dir`, `--mode`) or an invalid `--mode` (anything
+other than `lilab` or `sdsc`) also print a `Required: ...` or `Invalid --mode`
+message and exit 1.
 
 ## `run_one_iteration.py` — one iteration
 
