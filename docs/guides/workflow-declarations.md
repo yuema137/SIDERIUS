@@ -167,8 +167,8 @@ still applies. Unset fields take the `WorkflowLaunchConfig` defaults below.
 
 | `launch` field | Default | Meaning |
 | --- | --- | --- |
-| `is_trial` | `false` | `true`: tuning rounds may run in Trial mode on sampled data, and the last tuning round is Formal. `false`: single-file mode, which trains only for tasks whose dataset profile declares the TIDMAD topology; other tasks are refused before training. The shipped templates and examples (for example `reusable_training.py`) set `true`; the schema default stays `false`, so set it explicitly. |
-| `max_rounds` | `10` | Tuning rounds per iteration (the training configurations Train & tune plans and runs). With `is_trial: true`, `force_formal_round: true` and `max_rounds: 1`, Trial-only overrides are refused; use at least 2. |
+| `is_trial` | `true` | `true`: tuning rounds may run in Trial mode on sampled data, and the last tuning round is Formal. `false`: single-file mode, which trains only for tasks whose dataset profile declares the TIDMAD topology; other tasks are refused before training. The native default is `DEFAULT_IS_TRIAL = True` (`src/agent/schemas/hyperparam_tuning.py`), used by `WorkflowLaunchConfig.is_trial`. The console templates (`DECLARED_LAUNCH_POLICY` in `src/tools/workflow_authoring/templates.py`) and the shipped examples (for example `reusable_training.py`) also declare `true` explicitly. |
+| `max_rounds` | `10` | Tuning rounds per iteration (the training configurations Train & tune plans and runs). The console templates and shipped examples declare `2`, which leaves room for Trial before the forced Formal round. With `is_trial: true`, `force_formal_round: true` and `max_rounds: 1`, Trial-only overrides are refused; use at least 2. |
 | `force_formal_round` | `true` | Force a Formal tuning round. |
 | `trial_time_budget_minutes`, `formal_time_budget_minutes` | unset | Wall-time budget per Trial / Formal tuning round attempt. |
 | `runtime_verification_pathological_min_unit_ms` | unset | Finite nonnegative observation wall-time floor (ms) for streak/distribution slowdown refusal. Unset preserves the verifier's 100 ms default and existing runtime-policy evidence; `0` restores pre-#1202 relative-only checks. Explicit values are recorded in `runtime_policy.verification.pathological_min_unit_ms`; budgets and wall caps are unchanged. |
@@ -176,7 +176,7 @@ still applies. Unset fields take the `WorkflowLaunchConfig` defaults below.
 | `max_epochs` | unset | Epoch ceiling for both modes. |
 | `trial_max_epochs`, `formal_max_epochs` | unset | Per-mode epoch ceilings; unset means `max_epochs` governs. |
 | `trial_portion`, `train_portion`, `eval_portion` | unset | Trial data portions. Unset leaves them to the tuning planner; a typed value fixes them for the experiment. |
-| `formal_portion` | `0.1` | Formal sampling portion. |
+| `formal_portion` | `0.1` | Fraction of the declared training scope used in Formal mode (`0.1` is 10%, not full-data training). The console templates and shipped examples declare `1.0` (the whole training scope); unsetting it restores `0.1`. |
 | `formal_train_portion`, `formal_eval_portion` | `1.0` | Formal training / evaluation portions. |
 | `training_validation_portion` | unset | Optional seeded snapshot for per-epoch validation loss (`0 < value ≤ 1`). |
 | `attempts_per_round`, `attempts_per_formal_round` | `3`, `5` | Attempts per Trial / Formal tuning round. |
