@@ -5,6 +5,9 @@ probe, and auto-resume inspection. Use an explicit checkout and its own
 `.venv`. The launcher verifies that its Python environment imports that checkout
 before inspecting run state or starting an iteration.
 
+Every `run_chain.sh` flag, its default and its failure behavior are documented in
+the [entrypoints reference](../../docs/reference/entrypoints.md#run_chainsh--the-chain-launcher).
+
 For an optional fresh foreground chain whose selected settings are checked
 again at launch and before every iteration, use the
 [native capture walkthrough](../../src/tools/native_chain/README.md).
