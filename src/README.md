@@ -14,11 +14,14 @@ Imports keep their names: `from core.layout import package_root`, never
 | [execute_tools](execute_tools/README.md) | Training, inference, scoring and [Health](execute_tools/health_checks/README.md) |
 | [ml_models](ml_models/README.md) | Existing models, configurations and model/loss plugin loading |
 | [dashboard](dashboard/README.md) | Read-only result API and packaged browser assets |
-| [tools](tools/) | Importable developer tooling, including CI selection and execution |
+| [tools](tools/README.md) | Command-line tools that prepare, launch and follow runs (`candidate_prepare`, `candidate_operations`, the experimental console, orchestration setup), plus developer tooling such as CI selection |
 
-Users start with [installation](../docs/getting-started/installation.md),
+Users start with [getting started](../docs/getting-started/README.md), which runs
+a `workflow.py` with `.venv/bin/python -m tools.candidate_prepare` and
+`.venv/bin/python -m tools.candidate_operations`, and with
 [examples](../examples/README.md) and [task declarations](../docs/reference/task-composition.md).
-Developers follow [CLAUDE.md](../CLAUDE.md) and the [repository map](../docs/repository-map.md).
+Developers follow [CLAUDE.md](../CLAUDE.md) and the [repository map](../docs/repository-map.md);
+the sections below are for them.
 
 ## Three locations, three owners
 
@@ -41,7 +44,9 @@ No writable run state belongs under `src/` or `site-packages`.
 
 ## Current entrypoints and installation checks
 
-Chain scripts live in `scripts/launch/`; the one-iteration public entrypoint is
+The recommended user entrypoints are the `tools.candidate_prepare` and
+`tools.candidate_operations` modules (see [tools](tools/README.md)). The older
+chain scripts live in `scripts/launch/`; their one-iteration entrypoint is
 `src/workflows/run_one_iteration.py`, with supporting workflow code alongside
 it in `src/workflows/`. Routing remains in `configs/llm/`,
 and optional policy variants/manifests remain in `configs/`. The required

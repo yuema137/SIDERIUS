@@ -8,8 +8,7 @@ behavior, while repository and package READMEs remain short landing pages.
 Start with the [reference index](index.md) when you already know the change
 you need to make. It routes you to the smallest set of current mechanism,
 module, and node contract documents. For a first visit, begin with the
-[documentation map](../README.md), [installation](../getting-started/installation.md),
-or [first run](../getting-started/first-run.md).
+[documentation map](../README.md) or [getting started](../getting-started/README.md).
 
 The [mechanism index](mechanisms/README.md) is useful when a rule crosses
 several packages. Node-specific behavior belongs in the adjacent
