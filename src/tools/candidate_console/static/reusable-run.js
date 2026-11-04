@@ -53,7 +53,7 @@
     const saved = window.editorVersions?.nameFor?.(editor.savedSha256);
     let text = `This run uses ${versionLabel(version)}.`;
     if (!editor.sourceAvailable) text += ' The current workflow source is not open.';
-    else if (outdated()) text += ` You have since saved ${saved ? `version "${saved}"` : 'a newer version'}; it is not in this run. Launch runs the older version.`;
+    else if (outdated()) text += ` Latest saved is ${versionLabel({name: saved, sha256: editor.savedSha256})}; it is not in this run. Launch runs the older version.`;
     if (editor.dirty) text += ' Unsaved edits are not in this run.';
     if (editor.conflict) text += ' A disk conflict is unresolved.';
     $('source').textContent = text;
@@ -403,6 +403,7 @@
     status('Prepare a run in step 1, or open an earlier prepared run below.');
   });
   $('prepare-current').addEventListener('click', () => window.dispatchEvent(new CustomEvent('run-prepare-current')));
+  window.addEventListener('editor-versions', sourceState);
   window.reusableCandidate = Object.freeze({get capturedVersion() { return capturedVersion(); }, async openPrepared(context) {
     if (!session.connected || editor.projectId !== context.project) { status('Select the retained project in Workflow before opening this run.'); return; }
     const captureHeading = document.getElementById('capture-heading');

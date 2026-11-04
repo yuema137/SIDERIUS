@@ -161,6 +161,7 @@ def create_app(config: ConsoleConfig, settings: SettingsContext | None = None) -
                 "busy": "another operation is active or unresolved",
                 "conflict": "operation ID already identifies different content",
                 "stale_review": "reviewed source or bindings changed; review again",
+                "saved_version_unavailable": "Selected saved version is unavailable: its record or recovery copy is missing, unsafe, or does not match its SHA-256. Choose another version or repair its recovery copy.",
                 "unsupported": "saved declaration bindings cannot be reviewed; inspect source and prepared context",
                 "context": "saved declaration differs from selected prepared context",
                 "editor_policy": "project is not enabled for candidate runs",

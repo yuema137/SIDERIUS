@@ -223,8 +223,10 @@ class ReusableCandidate:
             read_only=request.read_only,
             device_warnings=device_warnings(request.devices),
             credential_readiness=credential_readiness(request, self.console.config.credential_file),
-            source_version_name=recorded_name(
-                Path(binding.original_source.path), binding.original_source.sha256
+            source_version_name=inspected.receipt.source_version_name
+            or recorded_name(
+                self.console.setups.runnable(project_id).project.source_file,
+                binding.original_source.sha256,
             ),
             seed=review_label(selection.run_seed),
         )

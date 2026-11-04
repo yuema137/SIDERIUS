@@ -20,9 +20,24 @@
     return el;
   }
   const status = text => { $('status').textContent = text; };
+  const selectedVersion = () => window.editorVersions?.listing?.versions.find(row => row.origin === 'saved' && row.name === $('version').value);
+  const versionUnavailable = () => !!$('version').value && !selectedVersion();
+  function versions() {
+    const previous = $('version').value;
+    const listing = window.editorVersions?.listing;
+    if (!listing) { invalidate(); return; }
+    const name = window.editorVersions?.nameFor(editor.savedSha256);
+    const choices = [...(listing?.versions || [])].reverse().filter(row => row.origin === 'saved').map(row =>
+      option(row.name, `${row.name} · ${new Date(row.recorded_at).toLocaleString()} · ${row.sha256.slice(0, 12)}`));
+    $('version').replaceChildren(option('', `Latest saved (${name || 'current file'})`), ...choices);
+    if (choices.some(row => row.value === previous)) $('version').value = previous;
+    if (intent?.payload.selection.saved_version_name) $('version').value = intent.payload.selection.saved_version_name;
+    invalidate();
+  }
+  window.addEventListener('editor-versions', versions);
   const ready = () => session.connected && editor.candidateEnabled &&
     editor.sourceAvailable && editor.reusableSource && editor.savedSha256 &&
-    !editor.dirty && !editor.sourceDirty && !editor.conflict && !editor.saving;
+    !editor.dirty && !editor.sourceDirty && !editor.conflict && !editor.saving && !versionUnavailable();
   // The single Run gate: page guidance reads it and never re-derives eligibility.
   window.newRunGate = Object.freeze({get ready() { return !!ready(); }});
   const current = (version, revision, project) =>
@@ -62,6 +77,7 @@
     $('review').disabled = !ready() || !$('task').value || !$('name').value || busy;
     $('prepare').disabled = !ready() || !review || busy || !!intent || !coordinator.eligible();
     $('task').disabled = $('name').disabled = !!intent;
+    $('version').disabled = !!intent || busy;
     // A setup belongs to one task: the task is a fact, not a choice (setups.py admission).
     const locked = lockedTask();
     $('task').hidden = !!locked; document.querySelector('label[for="new-run-task"]').hidden = !!locked;
@@ -79,6 +95,7 @@
       !coordinator.same('preparation', intent) || !prepared();
     $('prerequisites').textContent = !session.connected ? 'Connect to prepare a run.'
       : intent ? 'This run uses the task and name below; start over to change them.'
+      : versionUnavailable() ? 'The selected version history is loading or unavailable. Wait for it to load, or choose Latest saved.'
       : ready() ? (lockedTask() ? 'Check the inputs.' : 'Choose the task and resources, then check the inputs.')
         : 'Open an experiment setup whose runs are enabled and save your edits first.';
     window.dispatchEvent(new CustomEvent('new-run-gate', {detail: {ready: !!ready()}}));
@@ -284,7 +301,7 @@
   }
   window.addEventListener('workflow-editor-state', event => {
     const previous = JSON.stringify(editor), project = editor.projectId; editor = event.detail;
-    if (editor.projectId !== project) { nameTouched = false; suggestName(); }
+    if (editor.projectId !== project) { $('version').replaceChildren(option('', 'Latest saved')); nameTouched = false; suggestName(); }
     if (JSON.stringify(editor) !== previous) { invalidate(); if (session.connected) void tasks(); }
   });
   session.subscribe(() => {
@@ -296,6 +313,7 @@
     if (event.detail.view === 'run' && intent) void check();
   });
   $('task').addEventListener('change', invalidate);
+  $('version').addEventListener('change', () => { ids = null; invalidate(); });
   $('name').addEventListener('input', () => { nameTouched = true; invalidate(); });
   $('review').addEventListener('click', async () => {
     if (!ready() || busy || !$('task').value || !$('name').value) return;
@@ -304,9 +322,11 @@
     const version = generation;
     const revision = session.revision;
     const project = editor.projectId;
+    const savedVersion = selectedVersion();
     const selection = {
       task_id: $('task').value, run_name: $('name').value, ...ids,
-      expected_source_sha256: editor.savedSha256
+      expected_source_sha256: savedVersion?.sha256 || editor.savedSha256,
+      ...($('version').value ? {saved_version_name: $('version').value} : {})
     };
     status('Checking inputs…');
     try {
@@ -384,6 +404,7 @@
   // Step 2's "Prepare the current version" (B8-3) starts step 1 over for the saved version.
   window.addEventListener('run-prepare-current', () => {
     if (!startOver()) { status('Finish or start over the preparation above first.'); return; }
+    $('version').value = ''; invalidate();
     document.getElementById('run-entry').scrollIntoView({block: 'start'});
     $('review').focus();
   });
