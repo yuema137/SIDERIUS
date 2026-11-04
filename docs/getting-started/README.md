@@ -40,7 +40,10 @@ see [Try the browser console (experimental)](#try-the-browser-console-experiment
    dataset location and an external project directory. You do not need a
    prepared manifest. Agree on the prediction target, splits, score and budgets;
    the agent creates your [task package](../concepts/task-package.md) and
-   experiment files there. For an existing scientific task, start from a
+   experiment files there. If "best" means more than one metric, for example
+   accuracy traded against a second error measure, ask the agent to declare it
+   as the [evaluation guide](../guides/evaluation/README.md) shows. For an
+   existing scientific task, start from a
    [companion tutorial](https://github.com/yuema137/siderius-exp/blob/main/tutorials/README.md).
 3. Save a reviewed [LLM profile](../../configs/llm/README.md) in your project as
    `llm.json`. This JSON file selects the experiment's providers and models by
@@ -317,6 +320,32 @@ walks through the task package, a workflow and its preparation offline. A real
 run that trains, including a Quickstart research loop, needs an NVIDIA GPU with
 CUDA; on a machine without one it is refused before any model call.
 
+To check your own task package end to end on a CPU, without a GPU or an API
+key, run one pseudo iteration from the checkout's root. Replace the task
+manifest, data folder and workspace with your own absolute paths; use a new
+workspace folder for each check:
+
+```bash
+.venv/bin/python -m workflows.run_one_iteration \
+  --workspace /absolute/project/pseudo_ws --run_name pseudo_check --iteration 1 \
+  --task_composition /absolute/project/task.yaml --data_dir /absolute/project/data \
+  --healthgate_mode blocking --result_authority scientific \
+  --is_pseudo_llm --is_pseudo_training
+```
+
+A pseudo run uses synthetic models and scores, so it tests wiring, not
+science. Success: the command exits 0 and ends with an `ITERATION 1 COMPLETE`
+banner, after a line such as `Completed 3 tuning rounds`. Exit 0 alone is not
+enough: if every attempt failed, the run still exits 0 but prints
+`No models passed gates this iteration` with `status=no_records`; the
+`Loop Error` lines above it name the cause. On a small dataset, a common cause
+is an `exact` batch-size rule that a small trial round cannot fill; use a
+`range` rule as the
+[CSV template](../../examples/task_templates/csv_classification/README.md#small-datasets-and-trial-batches)
+does. A task
+shape the synthetic model cannot produce is refused before any work, with the
+reason. Other flags are in [entrypoints](../reference/entrypoints.md).
+
 To let your coding agent choose the research steps at run time instead of a
 fixed `workflow.py`, use the [external orchestration guide](../../src/tools/orchestration_setup/README.md).
 Choosing that execution route is separate from choosing Professional or
@@ -388,7 +417,7 @@ you own; the console workspace is created inside it) and
    ```
 
    Success: the build prints the zip's path, for example
-   `/absolute/downloads/siderius-example-quickstart-1.0.0.zip`, and `unzip`
+   `/absolute/downloads/siderius-example-quickstart-1.1.0.zip`, and `unzip`
    creates `/absolute/downloads/siderius-example-quickstart-<version>/`. The
    bundle holds a small synthetic task package and a ready experiment setup.
    The number in the name is the package version from `pyproject.toml`; it may
