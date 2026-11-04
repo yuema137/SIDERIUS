@@ -388,7 +388,9 @@ def parser() -> argparse.ArgumentParser:
         help="character devices passed to candidate runs (default: this host's /dev/nvidia<N>)",
     )
     gpu.add_argument(
-        "--no-gpu", action="store_true", help="pass no device to candidate runs (CPU only)"
+        "--no-gpu",
+        action="store_true",
+        help="pass no device to candidate runs; a GPU-less host can register, prepare and check, but runs that train are refused (there is no CPU mode)",
     )
     cli.add_argument(
         "--prepare-timeout",
