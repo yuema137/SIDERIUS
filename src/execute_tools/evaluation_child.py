@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Any
 
 from execute_tools.evaluation_aggregation import (
     aggregate_evaluation,
+    constrain_primary,
+    evaluate_constraints,
     index_source_results,
     term_evaluation,
     weight_total,
@@ -38,14 +40,24 @@ def aggregate_child_outcome(
     if composition is None:
         return outcome, secondaries
     evaluation = composition.evaluation
-    if evaluation is None or not formula_terms(evaluation.spec):
+    if evaluation is None:
         return outcome, secondaries
-    result, evidence = aggregate_evaluation(
-        evaluation,
-        composition.metric.spec,
-        outcome,
-        [MetricResult.model_validate(r) for r in secondaries.get("secondary_metric_results", ())],
-    )
+    results = [
+        MetricResult.model_validate(r) for r in secondaries.get("secondary_metric_results", ())
+    ]
+    measurements = secondaries.get("measurement_results", ())
+    if formula_terms(evaluation.spec):
+        result, evidence = aggregate_evaluation(
+            evaluation, composition.metric.spec, outcome, results, measurements
+        )
+    elif evaluation.spec.constraints:
+        result, evidence = constrain_primary(
+            evaluation, composition.metric.spec, outcome, results, measurements
+        )
+        if evidence is None:
+            return result, secondaries
+    else:
+        return outcome, secondaries
     return result, {**secondaries, "evaluation_result": evidence.model_dump(mode="json")}
 
 
@@ -74,6 +86,14 @@ def validate_child_evaluation(
     metric = MetricResult.model_validate(results.get("metric_result"))
     if metric.metric_id != spec.id or metric.direction != spec.direction:
         raise EvaluationTransportError("Scoring child effective metric identity mismatch")
+    if not binding.is_formula and (
+        evidence.source_metric_result is None
+        or evidence.source_metric_result.scalar != evidence.aggregate
+        or evidence.components
+    ):
+        raise EvaluationTransportError(
+            "Constrained primary selection must adopt the source scalar unchanged"
+        )
     if metric.scalar != evidence.aggregate or results.get("denoising_score") != evidence.aggregate:
         raise EvaluationTransportError(
             "Scoring child effective scalar disagrees with component evidence"
@@ -136,8 +156,15 @@ def _validate_component_arithmetic(
                 f"Component {item.component_id!r} evidence disagrees with recomputed arithmetic"
             )
         aggregate += contribution
-    if float(aggregate) != evidence.aggregate:
+    if binding.is_formula and float(aggregate) != evidence.aggregate:
         raise EvaluationTransportError("Scoring child aggregate disagrees with its components")
+    expected_constraints, violated = evaluate_constraints(
+        binding.constraints, sources, results.get("measurement_results", ())
+    )
+    if expected_constraints != evidence.constraints or violated:
+        raise EvaluationTransportError(
+            "Scoring child constraint verdicts disagree with the declared constraints"
+        )
 
 
 def evaluation_record_fields(results: dict[str, Any]) -> dict[str, Any]:

@@ -34,9 +34,10 @@ def require_formula_route(composition: SelectionCarrier | None, route: str = "TA
     if candidate_evaluation_executor() is not None:
         route = "CandidateEvaluationExecutor"
     if route != "TASK_OWNED":
+        what = "Formula aggregation" if binding.is_formula else "Feasibility constraints"
         raise ValueError(
-            f"Formula aggregation does not support route {route}; use native TASK_OWNED "
-            "scoring-child execution or primary selection."
+            f"{what} does not support route {route}; use native TASK_OWNED "
+            "scoring-child execution" + (" or primary selection." if binding.is_formula else ".")
         )
 
 
@@ -55,7 +56,8 @@ def admit_evaluation_settings(composition: SelectionCarrier | None, settings: An
     """Used by workflow and standalone tuner entry points before their first effect."""
     require_formula_route(composition)
     binding = bound_selection(composition)
-    if binding is None:
+    if binding is None or not binding.is_formula:
+        # Constraints alone keep the source metric and its units (#1295).
         return
     effective = binding.effective_metric
     if getattr(settings, "target_score", None) is not None:
@@ -78,7 +80,7 @@ def admit_evaluation_settings(composition: SelectionCarrier | None, settings: An
 def admit_formula_definition(composition: SelectionCarrier, definition: Any) -> None:
     """Check all thresholds, including unvisited branches, before graph dispatch."""
     binding = bound_selection(composition)
-    if binding is None:
+    if binding is None or not binding.is_formula:
         return
     effective_id = binding.effective_metric.id
     pending = [definition.model_dump(mode="python")]

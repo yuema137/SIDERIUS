@@ -20,10 +20,11 @@ def carrier():
         aggregation="evaluation.weighted_sum/v1",
         scoreability=PresenceScoreabilityContract(),
     )
+    source = spec.model_copy(update={"id": "source", "aggregation": "mean"})
     return SimpleNamespace(
         selection_binding=SelectionBinding(
             evaluation_sha256="a" * 64,
-            source_metric=spec,
+            source_metric=source,
             effective_metric=spec,
             components={},
             terms=(),

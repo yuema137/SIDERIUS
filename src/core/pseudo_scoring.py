@@ -72,7 +72,8 @@ def synthetic_formula_scoring(
 ) -> dict[str, Any] | None:
     """Scoring-child result fields for a formula-selection run, or ``None``.
 
-    ``None`` means the run is un-composed or declares no formula terms; the
+    ``None`` means the run is un-composed or declares neither formula terms nor
+    constraints (#1295, which judge the same synthetic values); the
     caller then keeps its legacy synthetic payload and random stream unchanged.
     Formula-referenced source metrics draw within their declared term bounds;
     an unreferenced primary keeps ``source_scalar``. A non-scoreable outcome
@@ -84,7 +85,8 @@ def synthetic_formula_scoring(
     metric, composition = compose_scoring_child_bindings(manifest)
     if composition is None or composition.evaluation is None:
         return None
-    if not formula_terms(composition.evaluation.spec):
+    spec = composition.evaluation.spec
+    if not (formula_terms(spec) or spec.constraints):
         return None
     bounds = _term_bounds(composition)
     primary = _synthetic_result(metric, rng, bounds, source_scalar, per_sample=file_vector)
