@@ -103,7 +103,9 @@ every setting before anything runs:
 `.venv/bin/python -m tools.candidate_prepare` reads the preparation request and
 captures exactly what will run, offline. `.venv/bin/python -m tools.candidate_operations submit`
 launches it only when you say so; the same tool reports status and logs, and
-stops, pauses or resumes a research loop between iterations.
+stops, pauses or resumes a research loop between iterations. With
+orchestration (next section), a caller script and its sandbox settings take the
+place of `workflow.py` and the preparation request.
 
 ### Choose the execution: workflow or orchestration
 
