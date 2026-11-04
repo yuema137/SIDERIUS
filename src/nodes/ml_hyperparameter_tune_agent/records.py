@@ -951,6 +951,18 @@ def _build_scoring_failure_record(
             "satisfy what the metric requires (missing file, channel, attrs or wrong "
             "storage dtype). Inspect the inference/output path before retrying this config."
         )
+        if any(f.requirement.startswith("constraint:") for f in failures):
+            # #1295: a declared task constraint was violated or unmeasurable. The
+            # candidate is infeasible, not broken; it is never selected.
+            discovery = (
+                "Training, inference and scoring completed, but the result violates "
+                "declared task constraints, so it is infeasible and cannot be selected."
+            )
+            memory_update = (
+                "Infeasible candidate — it violates the task's declared constraints "
+                "(see the conclusion). Change the configuration toward satisfying "
+                "every constraint before optimizing the objective further."
+            )
         failure_type = "not_scoreable"
     else:
         error_msg = f"{type(exc).__name__}: {exc}"
