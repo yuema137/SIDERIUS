@@ -37,10 +37,10 @@ proof that the candidate passed. Inspect the returned status and diagnostics.
 ## Existing entrypoints and parameters
 
 Python import: `nodes.ml_code_validator_agent.ml_code_validator_agent.MLCodeValidatorAgent`.
-Native constructor at reference revision `1c68bc81`:
+Native constructor at revision `5ccb436f` (v1.1.0):
 
 ```text
-MLCodeValidatorAgent(provider: str='gemini', model_id: str='gemini-3.1-flash-lite-preview', max_retries: int | None=None, reasoning_effort: str | None=None, bridge_factory=None, **kwargs)
+MLCodeValidatorAgent(provider: str='openai', model_id: str | None=None, max_retries: int | None=None, reasoning_effort: str | None=None, bridge_factory=None, max_output_tokens: int | None=None, probe_seed: SeedContext | None=None, **kwargs)
 ```
 
 `bridge_factory` is existing dependency injection, not a model-provider choice.
@@ -117,7 +117,7 @@ Imports candidate plugins, runs pytest and structural/gradient checks, and may u
 
 ### Skipped tests and acceptance evidence
 
-At the reference revision, an empty `test_file_path`, a nonexistent path or a
+At revision `5ccb436f`, an empty `test_file_path`, a nonexistent path or a
 path that is not a file makes the native pytest stage return `tests_passed=True`
 with a `Skipped:` explanation. This supports an existing model-reuse path; the
 boolean does not establish that tests executed or that this candidate is a

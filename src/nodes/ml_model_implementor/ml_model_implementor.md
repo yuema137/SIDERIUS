@@ -99,8 +99,8 @@ The CLI reads `{workspace}/proposal_{run_name}.json` (the upstream proposal agen
 |---|---|---|---|
 | `--workspace` | `str` | `./siderius_workspace` | Root directory for reading the proposal and writing the output record. Richer workflow fields (task description, `ForwardContract.model_io`, and `implementor_blocks`) are not represented by this minimal CLI. |
 | `--run_name` | `str` | `v1` | Filename suffix shared across the chain (proposal, implementor). |
-| `--provider` | `str` (`gemini` \| `openai`) | `gemini` | LLM provider for both the reasoning and code calls. |
-| `--model_id` | `str` | `gemini-3.1-pro-preview` | Specific model id. Note the default is `gemini-3.1-pro-preview` (not `flash-lite`) — code generation benefits from the stronger model. |
+| `--provider` | `str` (`gemini` \| `openai`) | `DEFAULT_LLM_PROVIDER` (`openai`) | LLM provider for both the reasoning and code calls. |
+| `--model_id` | `str` | `None` | Specific model id. `None` selects the provider's default model (`default_model_for_provider`). |
 | `--run_seed` | `int` in `[0, 2**53 - 1]` | none (generated) | Run seed for the model probes' `validation.probe` stream (issue #983). Omitted: a seed is generated through `core.seeding` and printed as `[seed] run_seed=N source=generated`. |
 
 ## Python API usage

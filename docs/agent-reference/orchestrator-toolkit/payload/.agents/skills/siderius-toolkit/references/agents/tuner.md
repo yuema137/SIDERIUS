@@ -40,7 +40,7 @@ of an earlier experiment's model. Declare any historical reuse separately.
 ## Existing entrypoints and parameters
 
 Python import: `nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent.HyperparamTuningAgent`.
-Native constructor at reference revision `1c68bc81`:
+Native constructor at revision `5ccb436f` (v1.1.0):
 
 ```text
 HyperparamTuningAgent(bridge_factory=None, sandbox_factory=None, capability_index_path: str | None=None)
