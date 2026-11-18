@@ -110,7 +110,8 @@ def test_writer_state_is_bound_read_only_beside_the_workspace(tmp_path, monkeypa
     # Regression (#1522): a loop child acquiring writer ownership in the sandbox
     # failed with writer_state_refused because the sibling directory was absent.
     # Hardening (#1525): the directory is bound read-only, so sandboxed code cannot
-    # unlink, replace or chmod writer.lock; a writable bind here would allow that.
+    # unlink, rename or replace writer.lock; a writable directory bind would allow
+    # that. Only the lock file is writable on top (NFS/SMB flock needs O_RDWR).
     from core.native_writer.state import prepare_state_directory
 
     monkeypatch.setattr("tools.workspace_sandbox.command.shutil.which", lambda _: "/usr/bin/bwrap")
@@ -123,10 +124,16 @@ def test_writer_state_is_bound_read_only_beside_the_workspace(tmp_path, monkeypa
     bound, _ = build_command(
         profile(workspace, read_only=(task,), writer_state=state), ["/bin/true"]
     )
-    assert _bind_targets(bound, "--bind") == _bind_targets(plain, "--bind") == [str(workspace)]
-    # Nothing else changes: exactly one read-only bind follows the workspace bind.
+    assert _bind_targets(plain, "--bind") == [str(workspace)]
+    # Nothing else changes: the read-only directory, then its lock file, follow the
+    # workspace bind (the lock bind must come after, or the directory hides it).
+    lock = str(state / "writer.lock")
     after = plain.index("--bind") + 3
-    assert bound == [*plain[:after], "--ro-bind", str(state), str(state), *plain[after:]]
+    assert bound == [
+        *plain[:after],
+        *("--ro-bind", str(state), str(state), "--bind", lock, lock),
+        *plain[after:],
+    ]
     assert bound[bound.index("--remount-ro") + 1] == "/"
 
 

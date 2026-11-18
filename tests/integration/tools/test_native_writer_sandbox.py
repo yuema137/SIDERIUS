@@ -10,14 +10,18 @@ Ownership acquired inside must be the host's: while the child holds it, host
 ``inspect_writer`` reports ``active``. This also rules out a directory created on a
 sandbox-private tmpfs (for example when ``--basetemp`` is under ``/tmp``).
 
-Hardening (#1525): the directory is bound read-only with a host pre-created
-``writer.lock``, so while it holds ownership the sandboxed child cannot unlink,
-rename, replace or chmod the lock or create files beside it; the host inode stays
-the same. Skips when bubblewrap cannot create user namespaces on this host.
+Hardening (#1525): the directory is bound read-only with only the host
+pre-created ``writer.lock`` bound writable on top (NFS/SMB flock needs O_RDWR), so
+while it holds ownership the sandboxed child cannot unlink, rename or replace the
+lock, chmod the directory or create files beside it; the host inode stays the same
+and the lock stays lockable. Writing to or chmodding the lock file itself is within
+the same-uid trust boundary and not attempted here. Skips when bubblewrap cannot
+create user namespaces on this host.
 """
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -26,7 +30,7 @@ from pathlib import Path
 
 import pytest
 
-from core.native_writer import inspect_writer
+from core.native_writer import inspect_writer, iteration_owner
 from tools.candidate_worker.launch import loop_writer_state
 from tools.workspace_sandbox.command import build_command
 from tools.workspace_sandbox.profile import SandboxProfile
@@ -47,7 +51,6 @@ attacks = {
     "rename": lambda: os.rename(lock, state / "moved"),
     "create": lambda: (state / "forged").write_text("x"),
     "replace": lambda: os.replace(workspace / "forged", lock),
-    "chmod_lock": lambda: os.chmod(lock, 0o666),
     "chmod_state": lambda: os.chmod(state, 0o777),
 }
 try:
@@ -121,6 +124,9 @@ def test_sandboxed_loop_entry_holds_the_host_writer_lock(tmp_path):
     assert (after.st_dev, after.st_ino, after.st_mode) == (lock.st_dev, lock.st_ino, lock.st_mode)
     assert sorted(path.name for path in state.iterdir()) == ["writer.lock"]
     assert oct(state.stat().st_mode & 0o777) == oct(0o700)
+    # The lock is still the lockable host inode: a new owner acquires and releases it.
+    with iteration_owner(str(workspace)) as lease:
+        assert lease is not None and os.fstat(lease.fd).st_ino == lock.st_ino
     # Released cleanly; the parent stayed read-only apart from the bound directory.
     assert inspect_writer(workspace).status == "unregistered"
     assert not (tmp_path / "escape").exists()

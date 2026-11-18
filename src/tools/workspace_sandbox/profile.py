@@ -72,7 +72,8 @@ class SandboxProfile(BaseModel):
 
     workspace: Path
     # The native writer's private control directory beside ``workspace``, bound
-    # read-only with its pre-created lock. Only the exact derived path is accepted.
+    # read-only except its pre-created lock file. Only the exact derived path is
+    # accepted.
     writer_state: Path | None = None
     read_only: tuple[Path, ...] = ()
     network: bool
@@ -135,8 +136,8 @@ class SandboxProfile(BaseModel):
 def validate_writer_state(workspace: Path, path: Path, read_only: tuple[Path, ...]) -> None:
     """Accept only the prepared private writer directory derived from ``workspace``.
 
-    The directory is bound read-only, so its ``writer.lock`` must already exist:
-    a sandboxed entry cannot create it.
+    The directory is bound read-only and its ``writer.lock`` is bound on top, so
+    the lock must already exist: a sandboxed entry cannot create it.
     """
     if path != state_directory(workspace):
         raise ValueError("writer_state must be the workspace's native writer control directory")

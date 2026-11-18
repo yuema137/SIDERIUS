@@ -16,10 +16,13 @@ bounded to 4096 bytes. The stable `writer.lock` inode is never removed or replac
 Aliases resolving to the same workspace share the lock; different workspaces do
 not. This is not protection against a malicious actor with the same user identity.
 
-`WriterState.open_lock` opens `writer.lock` with `O_RDONLY | O_NOFOLLOW` (plus
-`O_CREAT` when creating). An exclusive `flock` needs no write access, so every lock
-descriptor, including the `SIDERIUS_NATIVE_WRITER` transport FD, is read-only and
-its holder cannot write the lock file. The lock file has no content.
+`WriterState.open_lock` opens `writer.lock` with `O_RDWR | O_NOFOLLOW` (plus
+`O_CREAT` when creating) for every caller, including the `SIDERIUS_NATIVE_WRITER`
+transport FD. On local filesystems an exclusive `flock` would also work on a
+read-only descriptor, but NFS (Linux 2.6.12 and later) and SMB/CIFS emulate `flock`
+with an `fcntl` whole-file lock, and an exclusive `fcntl` lock requires a descriptor
+open for writing (otherwise `EBADF`). Native workspaces, such as a home directory on
+a cluster, can live on such filesystems. The lock file has no content.
 
 Managed native operations create the owner inside the existing sandbox. Their
 scientific workspace is `envelope/workspace`; the sibling control directory lies
@@ -32,21 +35,28 @@ The unsandboxed worker therefore calls `state.prepare_state_directory(workspace)
 which creates or reopens the directory and creates or reopens `writer.lock`, with
 the same no-follow 0700/0600, owner and single-link checks, takes no lock, and
 passes the directory as `SandboxProfile.writer_state`. The sandbox binds exactly
-that directory read-only (`--ro-bind`) at its host path; the profile accepts only
-the path derived by `state.state_directory(workspace)` and only when the directory
-and its `writer.lock` already pass the private checks, so a missing, symlinked or
-hard-linked lock refuses before any spawn. The child still acquires the flock
-itself, on the host inode, so host `inspect_writer` observes `active`. No FD crosses
-the sandbox.
+that directory read-only (`--ro-bind <dir> <dir>`) at its host path and then binds
+only `<dir>/writer.lock` writable on top of it (`--bind <lock> <lock>`); the profile
+accepts only the path derived by `state.state_directory(workspace)` and only when
+the directory and its `writer.lock` already pass the private checks, so a missing,
+symlinked or hard-linked lock refuses before any spawn. The child still acquires
+the flock itself, on the host inode, so host `inspect_writer` observes `active`.
+No FD crosses the sandbox.
 
-The sandboxed child needs no write access: its `acquire(workspace)` carries no
-capture digest, so its lease has no claim and it never publishes or removes a
-record, and a registered workspace refuses it (`registered_owner_required`). The
-read-only bind (and the read-only workspace parent) therefore prevents sandboxed
-candidate code from unlinking, renaming, replacing or chmodding `writer.lock` or
-its directory, or creating files there; such attempts fail (`EROFS`, or `EXDEV`
-for a rename from another mount). The
-directory's records remain readable inside the sandbox; they carry no secret.
+The sandboxed child writes no record: its `acquire(workspace)` carries no capture
+digest, so its lease has no claim and it never publishes or removes a record, and
+a registered workspace refuses it (`registered_owner_required`). It needs write
+access only to open the lock `O_RDWR` (above).
+
+What the binds protect: the directory and the workspace parent are read-only, so
+sandboxed candidate code cannot unlink, rename or replace `writer.lock`, chmod the
+directory, or create files in it; such attempts fail (`EROFS`, `EBUSY` for the
+bind-mounted lock, or `EXDEV` for a rename from another mount). Writer exclusion
+and host `inspect_writer` therefore keep seeing the one lock inode. What they do
+not protect: sandboxed code can write to the empty lock file or chmod it. That
+stays within the same-uid trust boundary above; a chmod only makes a later
+`WriterState` use refuse with `unsafe_writer_state` for that run. The directory's
+records remain readable inside the sandbox; they carry no secret.
 
 ## Supported ownership
 

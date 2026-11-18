@@ -131,19 +131,19 @@ def test_unsafe_state_refuses_before_scientific_directory(tmp_path, damage):
 @pytest.mark.skipif(
     os.geteuid() == 0, reason="root ignores the mode bits simulating a read-only bind"
 )
-def test_prepared_state_holds_ownership_without_write_access(tmp_path):
-    """#1525: the candidate sandbox binds the prepared writer directory read-only.
+def test_prepared_state_holds_ownership_without_directory_write_access(tmp_path):
+    """#1525: the candidate sandbox binds the prepared writer directory read-only,
+    with only ``writer.lock`` writable on top.
 
-    Mode bits stand in for that bind. Fails if ``prepare_state_directory`` stops
-    pre-creating ``writer.lock`` (creating it then needs write access) or if
-    ``open_lock`` asks for write access again (EACCES on the 0400 lock).
+    Mode 0500 on the directory stands in for that bind. Fails if
+    ``prepare_state_directory`` stops pre-creating ``writer.lock`` (creating it then
+    needs directory write access, EACCES).
     """
     from core.native_writer import iteration_owner
     from core.native_writer.state import prepare_state_directory
 
     workspace = tmp_path / "run"
     state = prepare_state_directory(workspace)
-    (state / "writer.lock").chmod(0o400)
     state.chmod(0o500)
     try:
         with iteration_owner(str(workspace)) as lease:
@@ -157,6 +157,34 @@ def test_prepared_state_holds_ownership_without_write_access(tmp_path):
         assert inspect_writer(workspace).status == "unregistered"
     finally:
         state.chmod(0o700)
+
+
+def test_exclusive_lock_works_where_flock_needs_a_writable_descriptor(tmp_path, monkeypatch):
+    """#1525 review B1: NFS and SMB/CIFS emulate flock with fcntl whole-file locks,
+    and an exclusive one refuses a read-only descriptor with EBADF. A native run on
+    such a workspace would then refuse before starting (writer_state_refused).
+    Models that filesystem; fails if ``open_lock`` opens the lock read-only."""
+    import errno
+    import fcntl
+
+    from core.native_writer import iteration_owner, ownership
+
+    real = fcntl.flock
+
+    def nfs_flock(fd: int, operation: int) -> None:
+        if operation & fcntl.LOCK_EX and (fcntl.fcntl(fd, fcntl.F_GETFL) & os.O_ACCMODE) == (
+            os.O_RDONLY
+        ):
+            raise OSError(errno.EBADF, "Bad file descriptor")
+        real(fd, operation)
+
+    monkeypatch.setattr(ownership.fcntl, "flock", nfs_flock)
+    workspace = tmp_path / "run"
+    with iteration_owner(str(workspace)) as lease:
+        assert lease is not None
+        assert fcntl.fcntl(lease.fd, fcntl.F_GETFL) & os.O_ACCMODE == os.O_RDWR
+        assert inspect_writer(workspace).status == "active"
+    assert inspect_writer(workspace).status == "unregistered"
 
 
 def test_inspection_absent_state_never_creates_control_or_workspace(tmp_path):
