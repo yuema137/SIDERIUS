@@ -20,6 +20,7 @@ after each test (PR-12bc C1 overlay).
 from __future__ import annotations
 
 import hashlib
+import html
 import importlib.util
 import json
 import re
@@ -758,3 +759,30 @@ def test_notebook_html_readme_and_command_stay_in_sync() -> None:
         assert token in html, f"HTML no longer shows {token!r}"
     for stale in ("sdsc_submission_scripts", "scripts/inspect_run_state.py"):
         assert stale not in notebook_text, f"notebook cites removed path {stale!r}"
+
+
+def test_html_code_cells_equal_the_notebook_code_cells() -> None:
+    """Defect caught (#1545): a notebook code cell is edited, added or removed
+    and the hand-maintained static `quickstart.html` keeps showing the old
+    code. The heading/token check above cannot see code drift. Every
+    `<pre class="code">` block, unescaped, must equal the notebook code cell
+    with the same index, in order."""
+    notebook = json.loads((PACK / "quickstart.ipynb").read_text(encoding="utf-8"))
+    cells = [
+        (index, "".join(cell["source"]))
+        for index, cell in enumerate(notebook["cells"])
+        if cell["cell_type"] == "code"
+    ]
+    rendered = [
+        (int(index), html.unescape(body))
+        for index, body in re.findall(
+            r'<div class="cell-label">code cell (\d+)</div><pre class="code">(.*?)</pre>',
+            (PACK / "quickstart.html").read_text(encoding="utf-8"),
+            re.S,
+        )
+    ]
+    assert [index for index, _ in rendered] == [index for index, _ in cells], (
+        "quickstart.html shows a different set of code cells than the notebook"
+    )
+    for (index, source), (_, shown) in zip(cells, rendered, strict=True):
+        assert shown == source, f"quickstart.html code cell {index} differs from the notebook"

@@ -156,3 +156,27 @@ def test_wsl2_gpu_node_gets_its_driver_libraries_and_no_nvidia_nodes(tmp_path):
     assert _pairs(argv, "--dev-bind") == ["/dev/dxg"]
     # Read-only binds stay ordered by depth, so /usr/lib/wsl follows /usr.
     assert binds.index("/usr") < binds.index(str(WSL_LIBRARIES))
+
+
+def test_host_gpu_devices_lists_every_providers_gpu_nodes(tmp_path, monkeypatch):
+    """Defect: control nodes such as /dev/nvidia-uvm are written into a request's
+    candidate_devices (the node can be absent until first CUDA use, and admission then
+    refuses the run), a symlink alias is listed, GPUs are ordered as text (nvidia10
+    before nvidia2), or a WSL2 /dev/dxg is missed (#1524). The recipes and add-task
+    call this function. Fails if it returns anything but the providers' GPU nodes,
+    NVIDIA by number then /dev/dxg, as strings."""
+    import functools
+
+    dev = tmp_path / "dev"
+    dev.mkdir()
+    for name in ("nvidia-uvm", "nvidia0", "nvidia10", "nvidia2", "nvidiactl", "dxg", "null"):
+        (dev / name).write_text("")
+    (dev / "nvidia3").symlink_to(dev / "nvidia0")
+    real = Path.is_char_device
+    monkeypatch.setattr(Path, "is_char_device", lambda self: self.parent == dev or real(self))
+    monkeypatch.setattr(
+        gpu, "host_gpu_nodes", functools.partial(gpu_devices.host_gpu_nodes, dev=dev)
+    )
+    assert gpu.host_gpu_devices() == tuple(
+        str(dev / name) for name in ("nvidia0", "nvidia2", "nvidia10", "dxg")
+    )

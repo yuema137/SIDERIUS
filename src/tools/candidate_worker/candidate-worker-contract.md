@@ -432,7 +432,9 @@ refusal. Status readers import no task/plugin runtime to perform this check.
 
 `examples/workflow_declarations/native_training.py` writes a matched synthetic
 seed/settings pair and both Python-model-derived workflow and serialized
-request. It performs no launch. Offline tests qualify propagation/admission and
+request. Because the workflow trains, the request's `devices` are
+`tools.workspace_sandbox.gpu.host_gpu_devices()` on the generating host (`()` on
+a host without a GPU node, where launch refuses training). It performs no launch. Offline tests qualify propagation/admission and
 artifact reading, not real LLM behavior, scientific training, GUI readiness,
 resume, historical-profile parity or paper reproduction.
 
@@ -1370,8 +1372,10 @@ source preserves this declaration but its profile preparation has a separate own
 The worker claims one fresh workspace, captures source and external inputs once,
 and holds the existing native writer lease throughout finite execution. The lease is
 acquired inside the sandbox; the unsandboxed worker prepares the private sibling writer
-directory (`launch.loop_writer_state`) and binds exactly it writable through
-`SandboxProfile.writer_state`, for the fresh launch and every continuation segment.
+directory and its `writer.lock` (`launch.loop_writer_state`) and binds exactly that
+directory read-only, with only `writer.lock` writable on top, through
+`SandboxProfile.writer_state`, for the fresh launch and every continuation segment,
+so sandboxed code cannot replace or remove the lock.
 Each body uses its explicit invocation iteration and managed node storage. Later-body input
 materialization reads the original captures and changes only declared managed
 storage, iteration and native history fields. It does not rewrite authored source,

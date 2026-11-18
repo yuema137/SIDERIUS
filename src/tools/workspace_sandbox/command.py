@@ -71,9 +71,12 @@ def command_prefix(profile: SandboxProfile) -> list[str]:
         args.extend(["--ro-bind", str(root), str(root)])
     args.extend(["--bind", str(profile.workspace), str(profile.workspace)])
     if profile.writer_state is not None:
-        # The workspace parent stays read-only; only this private sibling is
-        # writable so the sandboxed native entry can hold writer ownership.
-        args.extend(["--bind", str(profile.writer_state), str(profile.writer_state)])
+        # The directory is read-only, so sandboxed code cannot unlink, rename or
+        # replace the host's pre-created writer.lock or create files beside it (the
+        # workspace parent is read-only too). Only the lock file itself is writable:
+        # NFS/SMB emulate flock with fcntl locks, which need a writable descriptor.
+        state, lock = str(profile.writer_state), str(profile.writer_state / "writer.lock")
+        args.extend(["--ro-bind", state, state, "--bind", lock, lock])
     # A declared GPU node adds its provider's read-only runtime paths and present
     # companion nodes (tools.workspace_sandbox.gpu); without one the argv is unchanged.
     gpu_read_only, gpu_devices = passthrough(profile.devices)

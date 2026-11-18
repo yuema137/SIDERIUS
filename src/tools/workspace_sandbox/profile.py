@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -70,8 +71,9 @@ class SandboxProfile(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
 
     workspace: Path
-    # The native writer's private control directory beside ``workspace``: the one
-    # additional writable mount. Only the exact derived path is accepted.
+    # The native writer's private control directory beside ``workspace``, bound
+    # read-only except its pre-created lock file. Only the exact derived path is
+    # accepted.
     writer_state: Path | None = None
     read_only: tuple[Path, ...] = ()
     network: bool
@@ -133,14 +135,25 @@ class SandboxProfile(BaseModel):
 
 
 def validate_writer_state(workspace: Path, path: Path, read_only: tuple[Path, ...]) -> None:
-    """Accept only the existing private writer directory derived from ``workspace``."""
+    """Accept only the prepared private writer directory derived from ``workspace``.
+
+    The directory is bound read-only and its ``writer.lock`` is bound on top, so
+    the lock must already exist: a sandboxed entry cannot create it.
+    """
     if path != state_directory(workspace):
         raise ValueError("writer_state must be the workspace's native writer control directory")
     try:
-        # Same no-follow directory, owner and 0700 checks as the writer itself.
-        WriterState(workspace, create=False).close()
+        # Same no-follow owner/mode checks as the writer: 0700 directory and a
+        # private single-link regular lock file.
+        state = WriterState(workspace, create=False)
+        try:
+            os.close(state.open_lock(create=False))
+        finally:
+            state.close()
     except (OSError, WriterRefusal) as error:
-        raise ValueError(f"writer_state is not an existing private directory: {path}") from error
+        raise ValueError(
+            f"writer_state is not a prepared private directory with its lock: {path}"
+        ) from error
     for item in read_only:
         if item.is_relative_to(path) or path.is_relative_to(item):
             raise ValueError(f"read-only path overlaps the writer state directory: {item}")

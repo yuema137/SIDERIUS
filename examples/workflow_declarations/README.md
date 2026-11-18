@@ -176,8 +176,9 @@ interpretation history and tuning reflection can increase it.
   Preparation is offline; actual runs need provider credentials and network access.
   Run A also retrieves papers through the literature resolver.
 - Run B trains models in Trial/Formal mode (`is_trial=True`) and needs a
-  supported NVIDIA GPU/CUDA setup. Select its
-  device paths explicitly; the sample paths below must match your host.
+  supported NVIDIA GPU/CUDA setup. Its preparation request passes this
+  machine's GPUs, found by `host_gpu_devices()`, so prepare it on the machine
+  that will run it.
 - Choose an OpenAI model available to your account. This example uses that model
   for every route and passes only `OPENAI_API_KEY` to candidate processes.
   Bind that key from a trusted external mode-600 file or managed secret in each
@@ -194,7 +195,6 @@ uv sync --group dev --frozen
 export REPO="$PWD"
 export SCENARIO="$(mktemp -d /tmp/siderius-scenario.XXXXXX)"
 export MODEL="your-openai-model-id"
-export GPU_DEVICES='["/dev/nvidia0", "/dev/nvidiactl", "/dev/nvidia-uvm"]'
 
 .venv/bin/python - <<'PY'
 import os
@@ -304,12 +304,12 @@ current SHA-256, so later edits require a fresh request and run ID.
 ```bash
 .venv/bin/python - <<'PY'
 import hashlib
-import json
 import os
 from pathlib import Path
 from uuid import uuid4
 from tools.candidate_operations import OperationStoreConfig
 from tools.candidate_prepare import ReusableCandidatePreparationRequest
+from tools.workspace_sandbox.gpu import host_gpu_devices
 root = Path(os.environ["SCENARIO"]).resolve()
 repo = Path(os.environ["REPO"]).resolve()
 source = root / "workflow.py"
@@ -320,7 +320,7 @@ request = ReusableCandidatePreparationRequest(
     llm_config_file=str(root / "run-a-inputs/llm.json"),
     preparation_timeout_seconds=120, candidate_timeout_seconds=3600,
     task_read_only=(str(repo),), candidate_network=True,
-    candidate_devices=tuple(json.loads(os.environ["GPU_DEVICES"])),
+    candidate_devices=host_gpu_devices(),  # This machine's GPU device nodes.
     candidate_environment_names=("OPENAI_API_KEY",),
 )
 store = OperationStoreConfig(

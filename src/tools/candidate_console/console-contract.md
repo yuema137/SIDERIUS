@@ -29,7 +29,7 @@ create the output roots before checking):
     "preparation_timeout_seconds": 120.0,
     "candidate_timeout_seconds": 600.0,
     "candidate_network": true,
-    "candidate_devices": [],
+    "candidate_devices": ["/dev/nvidia0"],
     "candidate_environment_names": ["OPENAI_API_KEY"],
     "allowed_output_types": null
   }],
@@ -40,6 +40,12 @@ create the output roots before checking):
   "credential_file": "/absolute/project/credentials.json"
 }
 ```
+
+`candidate_devices` lists the host's GPU nodes (`/dev/nvidia<N>`, or `/dev/dxg` under
+WSL2), as `tools.workspace_sandbox.gpu.host_gpu_devices()` returns them (`add-task` writes
+exactly that by default); `[]` suits only a task whose workflows do not train,
+because a real run trains on a CUDA device and a training run without one is
+refused at launch (`core.gpu_requirement`).
 
 Resource paths must be canonical and local, without symlinks. Output roots exist
 inside registered operation roots; each browser preparation uses
@@ -171,11 +177,12 @@ Owner: `add_task.py`; CLI `python -m tools.candidate_console add-task --config
   `--prepare-timeout`, `--candidate-timeout` or `--no-network` is given; they are
   starting values for the operator to review, not resource limits the framework
   chooses. `candidate_devices` is `--device` when given and `[]` with `--no-gpu`
-  (the two are mutually exclusive); otherwise it is `add_task.host_gpu_devices()`,
-  the host's GPU device nodes from `core.gpu_devices.host_gpu_nodes()` (every
-  provider's nodes in provider order: `/dev/nvidia<N>` sorted by number, then
-  `/dev/dxg`; character devices only, symlinks excluded), with no prompt on a TTY or
-  elsewhere. Control nodes are never written, because the
+  (the two are mutually exclusive); otherwise it is `tools.workspace_sandbox.gpu.host_gpu_devices()`
+  (the one host GPU-node detector, also used by the documented request recipes), a
+  thin consumer of `core.gpu_devices.host_gpu_nodes()`: every provider's nodes in
+  provider order (`/dev/nvidia<N>` sorted by number, then `/dev/dxg`; character
+  devices only, symlinks excluded), with no prompt on a TTY or elsewhere. Control
+  nodes are never written, because the
   sandbox passes the present ones at launch and a written, lazily created node
   (`/dev/nvidia-uvm`) would make admission refuse the run. The command prints
   `candidate_devices: <paths> (<provider label> found on this machine; runs also get

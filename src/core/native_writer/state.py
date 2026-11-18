@@ -40,15 +40,19 @@ def state_directory(workspace: str | Path) -> Path:
 
 
 def prepare_state_directory(workspace: str | Path) -> Path:
-    """Create (or reopen) and verify the private control directory, then release it.
+    """Create (or reopen) and verify the private control directory and its lock.
 
-    A sandboxing parent calls this before binding exactly this directory writable
-    beside a workspace whose parent is otherwise read-only inside the sandbox.
-    It applies the same no-follow ownership/mode checks as an owner and takes no
-    lock, so ownership is still acquired by the sandboxed native entry.
+    A sandboxing parent calls this before binding this directory read-only, with
+    only ``writer.lock`` bound writable on top, beside a workspace whose parent is
+    also read-only inside the sandbox. The sandboxed native entry cannot create
+    the lock there, so it must exist first; code in the sandbox then cannot
+    unlink, rename or replace the lock inode or create files beside it. The same
+    no-follow ownership/mode checks as an owner apply; no lock is taken, so
+    ownership is still acquired by the sandboxed native entry.
     """
     state = WriterState(workspace, create=True)
     try:
+        os.close(state.open_lock(create=True))
         return state.path
     finally:
         state.close()
@@ -75,6 +79,8 @@ class WriterState:
 
     def open_lock(self, *, create: bool = True) -> int:
         # The inode is permanent: replacing it could admit two independent owners.
+        # Read-write on purpose: NFS and SMB/CIFS emulate flock with fcntl
+        # whole-file locks, and an exclusive one needs a descriptor open for writing.
         flags = os.O_RDWR | os.O_NOFOLLOW | (os.O_CREAT if create else 0)
         fd = os.open("writer.lock", flags, 0o600, dir_fd=self.fd)
         try:

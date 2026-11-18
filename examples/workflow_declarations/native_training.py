@@ -13,6 +13,7 @@ from agent.schemas.proposer_evidence import ProposerInterpretationEvidence
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from tools.candidate_worker import CandidateRunRequest
 from tools.workflow_preview import WorkflowPreviewRequest, preview_workflow
+from tools.workspace_sandbox.gpu import host_gpu_devices
 from workflows.candidate_training_settings import CandidateTrainingSettings
 from workflows.constraint_disclosure import workflow_constraint_context
 from workflows.definition import (
@@ -160,7 +161,7 @@ def write_example(project: Path, data: Path, workspace: Path) -> Path:
         run_name="candidate",
         timeout_seconds=600.0,
         network=True,
-        devices=(),
+        devices=host_gpu_devices(),  # This workflow trains: pass this host's GPUs.
         read_only=(str(project), str(data), str(manifest.parents[2])),
         environment_names=("OPENAI_API_KEY",),
     )

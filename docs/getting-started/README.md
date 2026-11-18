@@ -125,8 +125,10 @@ It records, for one run:
 - `candidate_network`: whether the run may use the network (provider calls
   need it);
 - `candidate_devices`: the GPU device paths the run may use, for example
-  `/dev/nvidia0` (`/dev/dxg` under Windows WSL2). Leave it empty only for a
-  workflow without training: a run that trains a model without a GPU is refused;
+  `/dev/nvidia0` (`/dev/dxg` under Windows WSL2). The recipe fills in this
+  machine's GPUs for you, so write the request on the machine that will run it.
+  The list is empty only on a machine without a GPU, and then only a workflow
+  without training can run: a run that trains a model without a GPU is refused;
 - `candidate_environment_names`: the *names* of the provider key variables,
   never the key values.
 

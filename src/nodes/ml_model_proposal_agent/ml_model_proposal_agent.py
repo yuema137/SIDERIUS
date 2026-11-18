@@ -101,6 +101,7 @@ from nodes.ml_model_proposal_agent.routing import (
 from nodes.ml_model_proposal_agent.stage_validation import (
     StageVocabularyError,
     correct_comparison_vocabulary,
+    earlier_response_errors,
     stage_vocabulary,
 )
 from nodes.proposal_helpers import evidence_order
@@ -2239,6 +2240,7 @@ class MLModelProposalAgent:
         # satisfy both the causal and consumed-vocabulary contracts. A pipeline
         # without a causal_reasoning stage validates empty defaults unchanged.
         causal_raw = accumulated.get("causal_reasoning")
+        causal_errors: list[tuple[int, str]] = []  # #1553: earlier rejected responses
         for causal_attempt in range(_MAX_CAUSAL_CORRECTION_RETRIES + 1):
             causal_dict = causal_raw if isinstance(causal_raw, dict) else {}
             try:
@@ -2266,13 +2268,15 @@ class MLModelProposalAgent:
                         for e in exc.errors()[:5]
                     )
                 )
+                history = earlier_response_errors(causal_errors, error_summary)
+                causal_errors.append((causal_attempt + 1, error_summary))
                 if causal_attempt == _MAX_CAUSAL_CORRECTION_RETRIES:
                     raise RuntimeError(
                         f"Causal-reasoning stage output failed validation of its "
                         f"causal-owned fields (inherited_components / "
                         f"falsifiable_prediction) after "
                         f"{_MAX_CAUSAL_CORRECTION_RETRIES} correction retries. "
-                        f"Last error: {error_summary}"
+                        f"Last error: {error_summary}" + (f"\n\n{history}" if history else "")
                     ) from exc
                 print(
                     f"   Stage 'causal_reasoning': causal-owned field validation "
@@ -2321,7 +2325,8 @@ class MLModelProposalAgent:
                     "Your previous response failed schema validation of "
                     "causal-stage-owned fields:\n"
                     f"{error_summary}\n"
-                    "Return the FULL corrected JSON object (same output schema "
+                    + (f"{history}\n" if history else "")
+                    + "Return the FULL corrected JSON object (same output schema "
                     "as instructed above), fixing ONLY the invalid fields and "
                     "keeping every other field unchanged."
                 )

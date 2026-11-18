@@ -411,10 +411,11 @@ class ImplementorInput(BaseModel):
     )
     previous_validation_failure: str | None = Field(
         default=None,
-        description="Validation error message from the previous implementation attempt "
-        "for this same proposal. When set, the implementor knows upfront "
-        "what spec-alignment issue to fix and can target the repair in its "
-        "reasoning phase rather than discovering the problem after the fact. "
+        description="Validator rejection feedback for this same proposal. The latest "
+        "rejection leads; when earlier implementation attempts were also rejected, an "
+        "'Earlier implementation attempts for this proposal failed validation' block "
+        "follows (issue #1553), so the implementor can target the repair in its "
+        "reasoning phase without reintroducing an earlier mistake. "
         "None on the first attempt.",
     )
     storage: StorageConfig = Field(

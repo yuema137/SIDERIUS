@@ -338,7 +338,19 @@ A coding agent or Python caller constructs the strict request from explicit
 operator choices. Compute the expected source identity and allocate a fresh UUID
 programmatically; do not ask the operator to transcribe or compare digest strings.
 The preparation owner reobserves the source and refuses drift before allocation.
-For example, in the selected checkout's frozen environment:
+Select devices with `tools.workspace_sandbox.gpu.host_gpu_devices()`, the one
+detector of this host's GPU device nodes, a thin consumer of the
+`core.gpu_devices` providers (`/dev/nvidia<N>` sorted by number, then WSL2's
+`/dev/dxg`; character devices, symlinks excluded; control nodes are never listed
+because the sandbox passes the present ones at launch). It returns `()` on a
+machine without one.
+Preparation admission validates `candidate_devices` on the preparing host
+(`SandboxProfile.device_paths`) and the worker's launch sandbox revalidates them
+on the launching host, so call it on the machine that will run the candidate. A real run trains only on a CUDA device
+(`core.gpu_requirement`; there is no CPU execution mode), so `()` suits only a
+workflow without training; a training workflow prepared with `()` is refused at
+launch. Do not hard-code a node list or add control nodes. For example, in the
+selected checkout's frozen environment:
 
 ```python
 import hashlib
@@ -346,6 +358,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from tools.candidate_prepare import ReusableCandidatePreparationRequest
+from tools.workspace_sandbox.gpu import host_gpu_devices
 
 project = Path("/projects/my-task").resolve()
 source = project / "workflow.py"
@@ -361,7 +374,8 @@ request = ReusableCandidatePreparationRequest(
     candidate_timeout_seconds=600.0,
     task_read_only=(str(project / "package"),),
     candidate_network=True,
-    candidate_devices=(),
+    # This host's GPU nodes; () without one, which suits only a workflow without training.
+    candidate_devices=host_gpu_devices(),
     candidate_environment_names=("OPENAI_API_KEY",),
 )
 (project / "reusable-request.json").write_text(request.model_dump_json(indent=2))

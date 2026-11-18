@@ -6,8 +6,9 @@ The command appends one ``tasks[]`` entry and writes nothing else:
   ``preparation_timeout_seconds``, ``candidate_timeout_seconds`` and
   ``candidate_network`` from :data:`STARTER_VALUES` unless overridden;
   ``candidate_devices`` from ``--device``, none with ``--no-gpu``, otherwise
-  this host's GPU device nodes (``core.gpu_devices``: ``/dev/nvidia<N>``, or
-  ``/dev/dxg`` under WSL2; detected, never asked);
+  this host's GPU device nodes (detected by the sandbox owner
+  ``tools.workspace_sandbox.gpu.host_gpu_devices`` from the ``core.gpu_devices``
+  providers: ``/dev/nvidia<N>``, or ``/dev/dxg`` under WSL2; never asked);
   ``candidate_environment_names`` from the credential requirement owner
   (``candidate_worker.preflight.credential_requirements``) applied to every
   route of the task's resolved LLM profile, plus any ``--env`` names;
@@ -43,8 +44,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from core.gpu_devices import declared_providers, gpu_node_examples, host_gpu_nodes
+from core.gpu_devices import declared_providers, gpu_node_examples
 from tools.candidate_operations.models import OperationFailure
+from tools.workspace_sandbox.gpu import host_gpu_devices
 
 from .error_messages import console_error_message
 from .files import canonical, config_bytes, private_file_lock
@@ -101,16 +103,6 @@ class TaskPlan:
 
 
 # Inputs -------------------------------------------------------------------------------
-
-
-def host_gpu_devices() -> tuple[str, ...]:
-    """This host's GPU device nodes (``core.gpu_devices`` providers), by GPU number.
-
-    Control nodes (``nvidiactl``, ``nvidia-uvm``, ...) are not listed: the run
-    sandbox adds the ones present at launch (``tools.workspace_sandbox.gpu``), and
-    writing them would refuse a run whenever a lazily created node is absent.
-    """
-    return tuple(str(node) for node in host_gpu_nodes())
 
 
 def choose_devices(devices: tuple[str, ...] | None) -> tuple[str, ...]:

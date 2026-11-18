@@ -5,6 +5,7 @@ Pydantic `model_fields`; the installed classes remain the execution authority.
 The `vram_budget_gb` row was synced by hand to the landed annotation after that
 snapshot (issue #1044).
 The `reference_code` row was synced by hand (#1530).
+The `previous_validation_failure` row was synced by hand (#1553).
 Defaults below describe the generic API, not permission to override the
 frozen task, information treatment, budget, or candidate-selection contract.
 Custom validators can impose cross-field requirements not expressible by a
@@ -38,7 +39,7 @@ Import: `agent.schemas.implementor.ImplementorInput`.
 | reference_code | dict[str, str] | factory: dict | [] | Source code of referenced ancestor models. Keyed by model_type. Supplied by the caller from experiment-source inherited_components (the native exploration loop loads it; the candidate worker supplies none). Rendered whole into the reasoning, code and every repair prompt so the implementor can carry over claimed components. Empty dict = no reference code available. |
 | expert_advice | str \| agent.schemas.hyperparam_tuning.ExpertAdvice | '' | [] | Structured guidance from upstream agents or orchestrators. Accepts a plain string or a structured ExpertAdvice object. |
 | human_advice | str \| None | None | [] | Optional human-provided guidance (highest priority — overrides expert_advice). When present, injected into the LLM prompt as high-priority context. |
-| previous_validation_failure | str \| None | None | [] | Validation error message from the previous implementation attempt for this same proposal. When set, the implementor knows upfront what spec-alignment issue to fix and can target the repair in its reasoning phase rather than discovering the problem after the fact. None on the first attempt. |
+| previous_validation_failure | str \| None | None | [] | Validator rejection feedback for this same proposal. The latest rejection leads; when earlier implementation attempts were also rejected, an 'Earlier implementation attempts for this proposal failed validation' block follows (issue #1553), so the implementor can target the repair in its reasoning phase without reintroducing an earlier mistake. None on the first attempt. |
 | storage | agent.schemas.storage.StorageConfig | factory: ImplementorInput.<lambda> | [] | Where this node reads its inputs and writes its own output record (e.g. implementor_output_{run_name}.json). Omitted generated-code destinations are derived from this local workspace. |
 
 Read the complete nested JSON Schema from the same public class:

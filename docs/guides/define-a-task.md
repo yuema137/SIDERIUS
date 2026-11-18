@@ -447,6 +447,7 @@ Composition failures are deliberate and specific. Common ones:
 | `CompositionDataRootMissing` | composed run without `--data_dir` |
 | id mismatch | the `id:` in your manifest does not match the class's `task_data_path_id` |
 | health config refused | you declared both `none: true` and `config:` |
+| `proposal_blocks`, `implementor_blocks` or `interpretation_blocks` refused | the section is not exactly `none: true` or exactly `config: <path>` (for example both, `none: false`, or a misspelt key) |
 | exit code 2 | missing `--healthgate_mode` or `--result_authority` on a formal launch |
 | a resume fails at startup | scope, gate enablement or effective-config hash differs from the workspace's invariants lock |
 | `LocalCodeError` / `code_package_integrity` | a declared Python member, dependency or captured pin is invalid; restore the exact source, or use a fresh composition/workspace for intentional edits |

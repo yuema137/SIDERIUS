@@ -10,11 +10,24 @@ from typing import Any
 from pydantic import TypeAdapter, ValidationError
 
 from agent.llm_bridge import LLMBridge
+from agent.prompt_templates.attempt_history import earlier_attempts_block
 from agent.schemas.proposal import ProposalOutput
 
 _LINKS = TypeAdapter(ProposalOutput.model_fields["proposed_vocab_links"].annotation)
 _CANDIDATES = TypeAdapter(ProposalOutput.model_fields["proposed_vocab_candidates"].annotation)
 _DISCOVERIES = TypeAdapter(ProposalOutput.model_fields["proposed_discoveries"].annotation)
+_CORRECTION_HISTORY_HEADING = "Earlier responses also failed validation (oldest first):"
+
+
+def earlier_response_errors(errors: list[tuple[int, str]], current: str) -> str:
+    """Earlier rejected responses of one stage correction loop, or ``""`` (#1553).
+
+    ``errors`` holds ``(response_number, error)`` for responses before the one
+    that failed with ``current``; response 1 is the stage's original output.
+    """
+    return earlier_attempts_block(
+        errors, current, heading=_CORRECTION_HISTORY_HEADING, unit="Response"
+    )
 
 
 class StageVocabularyError(ValueError):
@@ -86,23 +99,35 @@ def correct_comparison_vocabulary(
     components: Any,
     max_retries: int,
 ) -> Any:
-    """Bounded repair before the comparison output reaches downstream stages."""
+    """Bounded repair before the comparison output reaches downstream stages.
+
+    Each correction request and the final failure carry every earlier
+    response's vocabulary error (#1553), so a correction cannot reintroduce a
+    mistake an earlier response was already rejected for. The block is owned by
+    ``agent.prompt_templates.attempt_history``; with no earlier error the text is
+    unchanged.
+    """
     import json
 
+    errors: list[tuple[int, str]] = []
     for attempt in range(max_retries + 1):
         try:
             stage_vocabulary(raw, stage="comparison")
             return raw
         except StageVocabularyError as exc:
+            history = earlier_response_errors(errors, str(exc))
+            errors.append((attempt + 1, str(exc)))
             if attempt == max_retries:
-                raise RuntimeError(
+                message = (
                     f"Comparison stage vocabulary failed after {max_retries} correction retries. "
                     f"Last error: {exc}"
-                ) from exc
+                )
+                raise RuntimeError(f"{message}\n\n{history}" if history else message) from exc
             correction = (
                 user_prompt
                 + "\n\n## VALIDATION ERROR — CORRECT AND RESEND\n"
                 + f"Your previous comparison response failed vocabulary validation:\n{exc}\n"
+                + (f"{history}\n" if history else "")
                 + "Previous response:\n"
                 + json.dumps(raw, ensure_ascii=False)
                 + "\nReturn the FULL corrected JSON object (same output schema as instructed above), "

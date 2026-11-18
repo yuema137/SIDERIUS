@@ -91,7 +91,7 @@ Edit **your external `sandbox.json`**, then run `check` again:
 | Field | Meaning |
 |---|---|
 | `workspace` | Existing canonical absolute directory where caller code and results may be written. It cannot overlap the installed runtime. |
-| `writer_state` | Optional; normally omitted in your own profile. The candidate worker sets it for authored research loops. It must be the existing private (mode 0700) native writer directory `<workspace parent>/.<workspace name>.siderius-writer`; it is then the only writable path outside `workspace`. Any other path is refused. See the [writer contract](../../core/native_writer/native-writer-contract.md#identity-and-storage). |
+| `writer_state` | Optional; normally omitted in your own profile. The candidate worker sets it for authored research loops. It must be the prepared private (mode 0700) native writer directory `<workspace parent>/.<workspace name>.siderius-writer` with its `writer.lock` already inside. The sandbox mounts the folder read-only and only `writer.lock` writable, so code in the sandbox can take the writer lock but cannot remove or replace it. Any other path is refused. See the [writer contract](../../core/native_writer/native-writer-contract.md#identity-and-storage). |
 | `read_only` | Existing absolute files/directories to expose without write access. A selected task or experiment inside the workspace can be frozen this way. Paths retain their host names inside the sandbox. |
 | `network` | Required explicit boolean. `false` isolates the network; `true` grants host-network access, including provider access. It does not filter destinations or authorize spending. |
 | `devices` | Explicit character-device paths under `/dev`. No GPU is exposed by default. Listing a GPU device node (`/dev/nvidia<N>`, or `/dev/dxg` under Windows WSL2) also mounts what that GPU needs beside it, such as read-only `/sys` ([GPU tasks](#gpu-tasks)). This is access, not a GPU allocation or VRAM budget. |
@@ -162,6 +162,18 @@ for example with `GPU device /dev/nvidia3 is not present on this machine`.
 The WSL2 row follows NVIDIA's CUDA-on-WSL layout but has not been run on a WSL2
 machine yet; see [Windows (WSL2)](../../../docs/getting-started/installation.md#windows-wsl2)
 for what is and is not supported there.
+
+To list just this machine's GPUs, call `host_gpu_devices()` from
+[`gpu.py`](gpu.py). It returns the `/dev/nvidia<N>` nodes (or `/dev/dxg` under
+WSL2; no control nodes, since the sandbox adds those), or an empty tuple on a
+machine without a GPU:
+
+```bash
+.venv/bin/python -c "from tools.workspace_sandbox.gpu import host_gpu_devices; print(host_gpu_devices())"
+```
+
+The console's `add-task` and the preparation request recipes use it, so a
+request written on a GPU machine passes its GPUs without anyone typing paths.
 
 The sandbox applies no seccomp filter. The NVIDIA driver uses `memfd_create`
 during CUDA initialization, so a seccomp profile added later must allow it.

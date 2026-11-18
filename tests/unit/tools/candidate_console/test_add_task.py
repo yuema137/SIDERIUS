@@ -12,12 +12,12 @@ from tests.unit.tools.candidate_console.conftest import copy_quickstart_package
 from tools.candidate_console.add_task import (
     AddTaskRefused,
     AddTaskRequest,
-    host_gpu_devices,
     plan_task,
     publish_task,
 )
 from tools.candidate_console.settings_models import SETTINGS_SCHEMA, GlobalSettings, LibraryRef
 from tools.candidate_console.workspace import init_workspace
+from tools.workspace_sandbox.gpu import host_gpu_devices
 
 REPO = Path(__file__).resolve().parents[4]
 
@@ -319,9 +319,7 @@ def test_wsl2_host_writes_dxg_and_names_its_passthrough(workspace, monkeypatch, 
     detected /dev/dxg is not written, or the printout claims NVIDIA control nodes
     instead of the WSL driver libraries the sandbox adds."""
     _, config, manifest = workspace
-    monkeypatch.setattr(
-        "tools.candidate_console.add_task.host_gpu_nodes", lambda: (Path("/dev/dxg"),)
-    )
+    monkeypatch.setattr("tools.workspace_sandbox.gpu.host_gpu_nodes", lambda: (Path("/dev/dxg"),))
     monkeypatch.setattr("tools.candidate_console.package_mounts.device_problem", lambda _: None)
     # The real detection: conftest stubs add_task.host_gpu_devices for every other test.
     monkeypatch.setattr("tools.candidate_console.add_task.host_gpu_devices", host_gpu_devices)
