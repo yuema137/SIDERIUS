@@ -259,20 +259,65 @@ class TestPB5NoReferencePrompts:
     gained the ancestor section, from ``fixture_input(reference_code={})``.
     They fail if supplying the section to more calls adds any byte (an empty
     heading, a separator) when no ancestor exists, which would move every
-    paper-era implementor prompt.
+    paper-era implementor prompt. The fixture carries a validator rejection,
+    which the code and repair calls render since #1572; the test pins that
+    axis with the empty ``implementor.validator_feedback`` renderer (the
+    siderius-exp pin) so it keeps isolating the reference axis.
     """
 
-    def test_reasoning_code_and_repair_user_prompts(self):
+    def test_reasoning_code_and_repair_user_prompts(self, tmp_path):
+        from agent.prompt_rendering import bind_prompt_profile
+
         inp = fixture_input(reference_code={})
-        rendered = {
+        with bind_prompt_profile(_pinned_profile(tmp_path, {})):
+            rendered = self._render(inp)
+        for name, text in rendered.items():
+            assert_golden(text, GOLDENS / name, surface=f"PB-5 no-reference {name}")
+
+    @staticmethod
+    def _render(inp):
+        return {
             "pb5_no_reference_reasoning_user.txt": _build_reasoning_prompt(inp),
             "pb5_no_reference_code_user.txt": _build_code_prompt("FIXTURE REASONING", inp),
             "pb5_no_reference_repair_user.txt": _build_repair_prompt(
                 _FROZEN_CODE_DICT, _FROZEN_ERROR, inp, [(1, "earlier")]
             ),
         }
+
+
+def _pinned_profile(tmp_path, renderers):
+    """A profile pinning the pre-#1572 code/repair prompts (empty feedback
+    renderer) plus ``renderers``; other implementor boundaries stay native."""
+    from agent.prompt_rendering import PromptRenderingProfile
+
+    source = tmp_path / "provider.txt"
+    source.write_text("pre-1572 validator feedback renderer")
+    native = {"implementor.reference_code"} - set(renderers)
+    return PromptRenderingProfile(
+        "pre-1572",
+        "1",
+        {"implementor.validator_feedback": lambda **_: "", **renderers},
+        frozenset(native),
+        {"source": source},
+    )
+
+
+class TestPB5NoRejectionPrompts:
+    """Without a validator rejection the code and repair calls gain no bytes
+    (#1572). Goldens captured at 9910a2153 from
+    ``fixture_input(previous_validation_failure=None)``; they fail if the
+    feedback section adds a heading or separator when nothing was rejected."""
+
+    def test_code_and_repair_user_prompts(self):
+        inp = fixture_input(previous_validation_failure=None)
+        rendered = {
+            "pb5_no_rejection_code_user.txt": _build_code_prompt("R", inp),
+            "pb5_no_rejection_repair_user.txt": _build_repair_prompt(
+                _FROZEN_CODE_DICT, _FROZEN_ERROR, inp, [(1, "e")]
+            ),
+        }
         for name, text in rendered.items():
-            assert_golden(text, GOLDENS / name, surface=f"PB-5 no-reference {name}")
+            assert_golden(text, GOLDENS / name, surface=f"PB-5 no-rejection {name}")
 
 
 # Test-owned copy of the pre-#1530 reasoning-only reference block (5ccb436f8,
@@ -330,17 +375,11 @@ class TestPB5PreFix1530ProfilePin:
     """
 
     def test_profile_reproduces_5ccb436f8_goldens(self, tmp_path):
-        from agent.prompt_rendering import PromptRenderingProfile, bind_prompt_profile
+        from agent.prompt_rendering import bind_prompt_profile
 
-        source = tmp_path / "provider.txt"
-        source.write_text("pre-1530 reference renderer")
-        profile = PromptRenderingProfile(
-            "pre-1530",
-            "1",
-            {"implementor.reference_code": _pre_1530_reference},
-            frozenset(),
-            {"source": source},
-        )
+        # The paper pin needs both renderers since #1572: the fixture carries a
+        # validator rejection, which the code and repair calls now render.
+        profile = _pinned_profile(tmp_path, {"implementor.reference_code": _pre_1530_reference})
         inp = fixture_input()
         with bind_prompt_profile(profile):
             rendered = {

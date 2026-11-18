@@ -911,3 +911,32 @@ def test_single_attempt_failure_message_is_unchanged(agent_with_mocks, inp, monk
         "Code generation failed after 1 attempts for 'gated_dilated_tcn': E only\n\n"
         "The assembled plugin source:\n"
     )
+
+
+# ---------------------------------------------------------------------------
+# Validator rejection reaches the code and every repair call (#1572)
+# ---------------------------------------------------------------------------
+
+_REJECTION_MARKER = "VALIDATOR-REJECTION-MARKER: forward ignores the gating branch"
+
+
+def test_validator_rejection_reaches_code_and_every_repair_call(agent_with_mocks, inp, monkeypatch):
+    """The code and repair calls are separate requests. Fails on the #1572
+    defect (only the reasoning call saw the rejection, so a repair could
+    reintroduce the rejected mismatch) and if a call repeats the rejection."""
+    inp.previous_validation_failure = _REJECTION_MARKER
+    errors = iter(["first repair trigger", "second repair trigger", None])
+    monkeypatch.setattr(agent_with_mocks, "_validate_code", lambda *_: next(errors))
+    agent_with_mocks.run(inp)
+    calls = (
+        agent_with_mocks.bridge.generate_text.call_args_list
+        + agent_with_mocks.bridge.generate.call_args_list
+    )
+    assert [recorded.kwargs["label"] for recorded in calls] == [
+        "implementor.reasoning",
+        "implementor.code",
+        "implementor.repair",
+        "implementor.repair",
+    ]
+    for recorded in calls:
+        assert recorded.args[1].count(_REJECTION_MARKER) == 1, recorded.kwargs["label"]

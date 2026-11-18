@@ -11,6 +11,13 @@ FIXTURE REASONING TEXT (test-owned, frozen)
 ## Implement Advice (high priority)
 Keep the receptive field under 1000 samples.
 
+## ⚠ Previous Implementation Failed Validation — Do Not Reproduce
+
+The validator rejected an earlier implementation of this same proposal
+with the following feedback. The code you output must not reproduce it:
+
+Previous attempt failed: fixture shape mismatch [B, 255, T].
+
 ## Reference Code (from ancestor models)
 
 The proposal builds on the earlier models below. Their complete source is

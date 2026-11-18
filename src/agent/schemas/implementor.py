@@ -414,8 +414,8 @@ class ImplementorInput(BaseModel):
         description="Validator rejection feedback for this same proposal. The latest "
         "rejection leads; when earlier implementation attempts were also rejected, an "
         "'Earlier implementation attempts for this proposal failed validation' block "
-        "follows (issue #1553), so the implementor can target the repair in its "
-        "reasoning phase without reintroducing an earlier mistake. "
+        "follows (issue #1553). Rendered in the reasoning, code and every repair "
+        "prompt (issue #1572) so no call reintroduces a rejected mistake. "
         "None on the first attempt.",
     )
     storage: StorageConfig = Field(
