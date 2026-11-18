@@ -33,10 +33,10 @@ this toolkit does not choose them or prescribe a scientific model.
 ## Existing entrypoints and parameters
 
 Python import: `nodes.ml_model_implementor.ml_model_implementor.MLModelImplementor`.
-Native constructor at reference revision `1c68bc81`:
+Native constructor at revision `5ccb436f` (v1.1.0):
 
 ```text
-MLModelImplementor(provider: str='gemini', model_id: str='gemini-3.1-pro-preview', max_retries: int | None=None, reasoning_effort: str | None=None, bridge_factory=None, capability_index_path: str | None=None, **kwargs)
+MLModelImplementor(provider: str='openai', model_id: str | None=None, max_retries: int | None=None, reasoning_effort: str | None=None, bridge_factory=None, capability_index_path: str | None=None, max_output_tokens: int | None=None, probe_seed: SeedContext | None=None, **kwargs)
 ```
 
 `bridge_factory` is existing dependency injection, not a model-provider choice.
@@ -88,7 +88,7 @@ Writes generated code and tests, may run probes and repair attempts, and persist
 
 ### Generated test import paths
 
-At the reference revision, the test-generation prompt contains a sibling
+At revision `5ccb436f`, the test-generation prompt contains a sibling
 `../models` import-path example. Supplying an arbitrary `plugin_dir` such as
 `attempt/plugin` can still produce tests that import from `attempt/models`.
 One compatible caller-owned layout, when the run leaves paths open, is:

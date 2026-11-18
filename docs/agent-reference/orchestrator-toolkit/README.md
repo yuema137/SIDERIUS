@@ -31,3 +31,6 @@ added options, and its documented step/batch defaults match `build_parser()`.
 The other five CLI parser files did not change between the original inventory
 and v0.2.9. Nested structures and runtime cross-field rules still require
 inspection of the installed schemas before constructing a request.
+
+Fields and options added after v0.2.9 can be missing from the tables; the
+[interface limitations](COMPATIBILITY.md) page records what was re-checked at v1.1.0.

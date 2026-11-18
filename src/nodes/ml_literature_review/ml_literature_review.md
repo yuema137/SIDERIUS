@@ -121,8 +121,8 @@ no side effects.
 | `--run_name` | `v1` | Run identifier — reads `interpretation_{run_name}.json` (unless `--experiment-history` overrides), writes `ml_literature_review_{run_name}.json`. |
 | `--experiment-history` | `{workspace}/interpretation_{run_name}.json` | Explicit path to the upstream `InterpretationOutput` JSON. `--experiment_history` is accepted as an alias (repo flag style); the dashed form is the issue-#303 acceptance spelling. |
 | `--lit_review_config` | required | Node-knob YAML (`root_papers` / `dynamic_search` / `synthesis` / `confidence_rubric` / `findings_verbosity`) — same file and key mapping as the workflow. A relative path resolves against the repo root. The YAML's top-level `enabled:` key gates the **workflow** stage only and is ignored by the CLI — invoking the CLI is the enablement. |
-| `--provider` | `gemini` | LLMBridge provider (`gemini` / `openai`) for compression + search-decision + synthesis. The CLI does not expose the optional `search_llm_*` split; the search-decision step falls back to this provider (schema semantics). |
-| `--model_id` | `gemini-3.1-flash-lite-preview` | LLMBridge model id. |
+| `--provider` | `DEFAULT_LLM_PROVIDER` (`openai`) | LLMBridge provider (`gemini` / `openai`) for compression + search-decision + synthesis. The CLI does not expose the optional `search_llm_*` split; the search-decision step falls back to this provider (schema semantics). |
+| `--model_id` | `None` | LLMBridge model id. `None` selects the provider's default model (`default_model_for_provider`). |
 
 **Limitations of standalone CLI use** (compared to workflow-driven use): no `search_llm_provider` / `search_llm_model_id` split (that routing lives in the chain's `WorkflowLLMConfig`), and no downstream typed edge traversal. The CLI produces this node's output JSON only.
 

@@ -22,10 +22,10 @@ preparing another operation.
 ## Existing entrypoints and parameters
 
 Python import: `nodes.ml_model_proposal_agent.ml_model_proposal_agent.MLModelProposalAgent`.
-Native constructor at reference revision `1c68bc81`:
+Native constructor at revision `5ccb436f` (v1.1.0):
 
 ```text
-MLModelProposalAgent(provider: str='gemini', model_id: str='gemini-3.1-flash-lite-preview', max_retries: int | None=None, reasoning_effort: str | None=None, bridge_factory=None, capability_index_path: str | None=None, **kwargs)
+MLModelProposalAgent(provider: str='openai', model_id: str | None=None, max_retries: int | None=None, reasoning_effort: str | None=None, bridge_factory=None, capability_index_path: str | None=None, max_output_tokens: int | None=None, **kwargs)
 ```
 
 `bridge_factory` is existing dependency injection, not a model-provider choice.
@@ -35,7 +35,69 @@ may choose only parameters left open there; schema defaults do not override it.
 
 [CLI flags](../cli/proposer.md)
 
-Standalone CLI uses the legacy entry path and lacks the full Python context. Constructor **kwargs do not establish per-stage routing: the implementation explicitly leaves those future stage overrides unused. Configure only supported provider fields and the declared reasoning pipeline.
+### Stage model routing
+
+The constructor's `provider`, `model_id`, `reasoning_effort`,
+`max_output_tokens` and `max_retries` form the legacy constructor route.
+`**kwargs` accepts flat per-stage overrides named `{stage}_{field}`, where
+`stage` is `comparison`, `reasoning` or `proposing` and `field` is one of those
+five names: for example `comparison_model_id`, `reasoning_reasoning_effort` or
+`proposing_max_retries`. `resolve_proposer_routing` applies them once at
+construction. A key that is absent inherits the legacy constructor value. A
+supplied value replaces it, including `None` or `0` where the field allows it
+(for example `proposing_model_id=None` or `comparison_max_retries=0`). Each
+resolved route is validated as a `ProposerRoute`, so an invalid value such as
+`proposing_provider=None` or `proposing_max_output_tokens=0` raises a
+`ValidationError` at construction. Keyword names outside this pattern are ignored
+without an error, so a misspelled key leaves that stage on the legacy
+constructor route. After construction, read the immutable `node.routing`
+(`ProposerRouting` with `comparison`, `reasoning` and `proposing` routes) to
+confirm what will be used.
+
+Stages use their routes as follows:
+
+| Route | Calls |
+| --- | --- |
+| `comparison` | Comparison stage, including its vocabulary corrections |
+| `reasoning` | `causal_reasoning` stage with its boldness retries and corrections; any other stage in `reasoning_pipeline.stages`; both calls of legacy two-call mode |
+| `proposing` | Final proposing stage, including its structural retries |
+
+`node.bridge` is the eager bridge for the `reasoning` route. A stage whose
+route equals the `reasoning` route uses `node.bridge`. Any other route gets
+its own bridge from `bridge_factory` when that stage first runs; stages with an
+identical route share it. Legacy two-call mode (no enabled stage in
+`reasoning_pipeline`) uses only `node.bridge`.
+
+The fixed workflow constructs this agent as
+`MLModelProposalAgent(**llm_config.get("propose"), bridge_factory=...)`.
+`WorkflowLLMConfig.get("propose")` flattens the `propose.comparison`,
+`propose.reasoning` and `propose.proposing` entries of a workflow LLM profile
+into these keys and sets the legacy constructor route from
+`propose.reasoning`; a profile without a `propose` entry yields an empty
+mapping, so constructor defaults apply. When the run declaration supplies such
+a profile, pass the same mapping, for example
+`MLModelProposalAgent(**WorkflowLLMConfig.from_json(profile_path).get("propose"))`
+with `WorkflowLLMConfig` from `workflows.llm_config`. Otherwise pass the
+declared per-stage values as the flat keys above.
+
+The standalone CLI constructs the agent with only `--provider` and
+`--model_id`, so every stage uses that one route with the constructor defaults
+for effort, retries and output limit. It builds `ProposalInput` without a
+`reasoning_pipeline`, which selects legacy two-call mode, and it binds no run
+context. Use the Python API for stage routing, a reasoning pipeline or token
+recording.
+
+### Token recording
+
+Bind recording with the proposer's own method,
+`node.set_run_context(workspace=..., iter=..., run_name=..., run_id=...)`,
+before `run()`. It binds `node.bridge` and any stage bridges already created,
+and keeps the context to bind each later stage bridge before its first call.
+Do not call `node.bridge.set_run_context(...)` for the proposer: that binds only
+the `reasoning` bridge. Calls on separately routed stages still reach the
+provider but write no `token_usage.jsonl` rows, because an unbound bridge
+records nothing. Shared preconditions are in
+[configuration and observations](../invocation.md#configuration-and-observations).
 
 ## Single native call
 
@@ -54,11 +116,16 @@ from agent.schemas.proposal import ProposalInput, ProposalOutput
 from nodes.ml_model_proposal_agent.ml_model_proposal_agent import MLModelProposalAgent
 
 
-def invoke(request: ProposalInput, result_path, *, provider, model_id, reasoning_effort=None):
+def invoke(request: ProposalInput, result_path, *, routing, run_context=None):
     if not isinstance(request, ProposalInput):
         raise TypeError("Assemble or restore the native request before invocation")
-    node = MLModelProposalAgent(provider=provider, model_id=model_id,
-        reasoning_effort=reasoning_effort)
+    # routing: the complete constructor routing keywords, either
+    # WorkflowLLMConfig.from_json(profile_path).get("propose") or the declared
+    # {"provider": ..., "model_id": ..., "proposing_model_id": ..., ...} values.
+    node = MLModelProposalAgent(**routing)
+    if run_context is not None:
+        # The four keywords workspace/iter/run_name/run_id; binds every stage bridge.
+        node.set_run_context(**run_context)
     result = node.run(request)
     if not isinstance(result, ProposalOutput):
         raise TypeError("Unexpected native output type")
