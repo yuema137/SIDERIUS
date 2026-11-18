@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -105,9 +106,11 @@ def _bind_targets(command: list[str], flag: str) -> list[str]:
     return [command[i + 1] for i, item in enumerate(command) if item == flag]
 
 
-def test_writer_state_is_the_only_writable_mount_beside_the_workspace(tmp_path, monkeypatch):
-    # Regression: a loop child acquiring writer ownership in the sandbox failed with
-    # writer_state_refused because the sibling control directory was read-only.
+def test_writer_state_is_bound_read_only_beside_the_workspace(tmp_path, monkeypatch):
+    # Regression (#1522): a loop child acquiring writer ownership in the sandbox
+    # failed with writer_state_refused because the sibling directory was absent.
+    # Hardening (#1525): the directory is bound read-only, so sandboxed code cannot
+    # unlink, replace or chmod writer.lock; a writable bind here would allow that.
     from core.native_writer.state import prepare_state_directory
 
     monkeypatch.setattr("tools.workspace_sandbox.command.shutil.which", lambda _: "/usr/bin/bwrap")
@@ -120,12 +123,10 @@ def test_writer_state_is_the_only_writable_mount_beside_the_workspace(tmp_path, 
     bound, _ = build_command(
         profile(workspace, read_only=(task,), writer_state=state), ["/bin/true"]
     )
-    assert _bind_targets(plain, "--bind") == [str(workspace)]
-    assert _bind_targets(bound, "--bind") == [str(workspace), str(state)]
-    # Nothing else changes: exactly one bind is inserted after the workspace bind.
+    assert _bind_targets(bound, "--bind") == _bind_targets(plain, "--bind") == [str(workspace)]
+    # Nothing else changes: exactly one read-only bind follows the workspace bind.
     after = plain.index("--bind") + 3
-    assert bound == [*plain[:after], "--bind", str(state), str(state), *plain[after:]]
-    assert str(tmp_path) not in _bind_targets(bound, "--bind")
+    assert bound == [*plain[:after], "--ro-bind", str(state), str(state), *plain[after:]]
     assert bound[bound.index("--remount-ro") + 1] == "/"
 
 
@@ -134,7 +135,7 @@ def test_writer_state_must_be_the_derived_private_directory(tmp_path):
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    with pytest.raises(ValidationError, match="existing private directory"):
+    with pytest.raises(ValidationError, match="prepared private directory"):
         profile(workspace, writer_state=state_directory(workspace))
     other = tmp_path / "other"
     other.mkdir(mode=0o700)
@@ -142,9 +143,23 @@ def test_writer_state_must_be_the_derived_private_directory(tmp_path):
         profile(workspace, writer_state=other)
     state = prepare_state_directory(workspace)
     state.chmod(0o755)
-    with pytest.raises(ValidationError, match="existing private directory"):
+    with pytest.raises(ValidationError, match="prepared private directory"):
         profile(workspace, writer_state=state)
     state.chmod(0o700)
+    # The read-only bind cannot create the lock in the sandbox, and a symlinked or
+    # shared lock is not the writer's inode: both refuse before any spawn.
+    lock = state / "writer.lock"
+    lock.rename(tmp_path / "moved.lock")
+    with pytest.raises(ValidationError, match="prepared private directory with its lock"):
+        profile(workspace, writer_state=state)
+    lock.symlink_to(tmp_path / "moved.lock")
+    with pytest.raises(ValidationError, match="prepared private directory with its lock"):
+        profile(workspace, writer_state=state)
+    lock.unlink()
+    os.link(tmp_path / "moved.lock", lock)
+    with pytest.raises(ValidationError, match="prepared private directory with its lock"):
+        profile(workspace, writer_state=state)
+    (tmp_path / "moved.lock").unlink()
     inside = state / "frozen"
     inside.mkdir()
     with pytest.raises(ValidationError, match="overlaps the writer state"):

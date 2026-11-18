@@ -9,7 +9,11 @@ created. The fix prepares that directory outside the sandbox
 Ownership acquired inside must be the host's: while the child holds it, host
 ``inspect_writer`` reports ``active``. This also rules out a directory created on a
 sandbox-private tmpfs (for example when ``--basetemp`` is under ``/tmp``).
-Skips when bubblewrap cannot create user namespaces on this host.
+
+Hardening (#1525): the directory is bound read-only with a host pre-created
+``writer.lock``, so while it holds ownership the sandboxed child cannot unlink,
+rename, replace or chmod the lock or create files beside it; the host inode stays
+the same. Skips when bubblewrap cannot create user namespaces on this host.
 """
 
 from __future__ import annotations
@@ -28,16 +32,35 @@ from tools.workspace_sandbox.command import build_command
 from tools.workspace_sandbox.profile import SandboxProfile
 
 _CHILD = """
-import sys, time
+import os, sys, time
 from pathlib import Path
 from core.native_writer import iteration_owner
 workspace = Path(sys.argv[1])
+state = workspace.parent / f".{workspace.name}.siderius-writer"
+lock = state / "writer.lock"
 try:
     (workspace.parent / "escape").write_text("x")
 except OSError:
     pass
+attacks = {
+    "unlink": lambda: os.unlink(lock),
+    "rename": lambda: os.rename(lock, state / "moved"),
+    "create": lambda: (state / "forged").write_text("x"),
+    "replace": lambda: os.replace(workspace / "forged", lock),
+    "chmod_lock": lambda: os.chmod(lock, 0o666),
+    "chmod_state": lambda: os.chmod(state, 0o777),
+}
 try:
     with iteration_owner(str(workspace)):
+        (workspace / "forged").write_text("x")
+        succeeded = []
+        for name, attack in attacks.items():
+            try:
+                attack()
+                succeeded.append(name)
+            except OSError:
+                pass
+        (workspace / "attacks").write_text(",".join(succeeded))
         (workspace / "held").write_text("1")
         deadline = time.monotonic() + 60
         while not (workspace / "release").exists() and time.monotonic() < deadline:
@@ -87,9 +110,17 @@ def test_sandboxed_loop_entry_holds_the_host_writer_lock(tmp_path):
     _require_bwrap()
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    observed, code = _run(workspace, loop_writer_state(workspace))
+    state = loop_writer_state(workspace)
+    lock = (state / "writer.lock").stat()
+    observed, code = _run(workspace, state)
     error = (workspace / "error").read_text() if (workspace / "error").exists() else None
     assert (observed, code, error) == ("active", 0, None)
+    # #1525: every attempt to change the lock or its directory was refused.
+    assert (workspace / "attacks").read_text() == ""
+    after = (state / "writer.lock").stat()
+    assert (after.st_dev, after.st_ino, after.st_mode) == (lock.st_dev, lock.st_ino, lock.st_mode)
+    assert sorted(path.name for path in state.iterdir()) == ["writer.lock"]
+    assert oct(state.stat().st_mode & 0o777) == oct(0o700)
     # Released cleanly; the parent stayed read-only apart from the bound directory.
     assert inspect_writer(workspace).status == "unregistered"
     assert not (tmp_path / "escape").exists()

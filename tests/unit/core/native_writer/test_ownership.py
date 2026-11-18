@@ -128,6 +128,37 @@ def test_unsafe_state_refuses_before_scientific_directory(tmp_path, damage):
     assert not workspace.exists()
 
 
+@pytest.mark.skipif(
+    os.geteuid() == 0, reason="root ignores the mode bits simulating a read-only bind"
+)
+def test_prepared_state_holds_ownership_without_write_access(tmp_path):
+    """#1525: the candidate sandbox binds the prepared writer directory read-only.
+
+    Mode bits stand in for that bind. Fails if ``prepare_state_directory`` stops
+    pre-creating ``writer.lock`` (creating it then needs write access) or if
+    ``open_lock`` asks for write access again (EACCES on the 0400 lock).
+    """
+    from core.native_writer import iteration_owner
+    from core.native_writer.state import prepare_state_directory
+
+    workspace = tmp_path / "run"
+    state = prepare_state_directory(workspace)
+    (state / "writer.lock").chmod(0o400)
+    state.chmod(0o500)
+    try:
+        with iteration_owner(str(workspace)) as lease:
+            assert lease is not None and lease.claim is None
+            loser = python(
+                "from core.native_writer.ownership import acquire; import sys; acquire(sys.argv[1])",
+                workspace,
+            )
+            assert loser.returncode != 0 and "writer_active" in loser.stderr
+            assert inspect_writer(workspace).status == "active"
+        assert inspect_writer(workspace).status == "unregistered"
+    finally:
+        state.chmod(0o700)
+
+
 def test_inspection_absent_state_never_creates_control_or_workspace(tmp_path):
     workspace = tmp_path / "run"
     assert inspect_writer(workspace).status == "unregistered"
