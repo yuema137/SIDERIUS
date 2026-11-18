@@ -39,7 +39,7 @@ def normalize(
     *,
     json_mode: str | None,
     tool_names: set[str],
-    metadata: dict[str, str | int | None],
+    metadata: dict[str, str | int | float | None],
 ) -> Completion:
     """Refuse lossy results AFTER returning usage to the bridge's accounting owner."""
     texts = [part.content for part in result.parts if isinstance(part, TextPart)]

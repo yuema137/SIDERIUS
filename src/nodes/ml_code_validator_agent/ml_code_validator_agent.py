@@ -52,6 +52,7 @@ import torch
 
 from agent.llm_bridge import LLMBridge
 from agent.llm_settings import DEFAULT_LLM_PROVIDER, default_model_for_provider
+from agent.llm_transport.contracts import PydanticTransportConfig
 from agent.prompt_templates.constraints import append_constraint_disclosure
 from agent.prompt_templates.native_training import render_native_training_appendix
 from agent.schemas.generated_model_config import non_scalar_defaults
@@ -810,6 +811,7 @@ class MLCodeValidatorAgent:
         reasoning_effort: str | None = VALIDATE.reasoning_effort,
         bridge_factory=None,
         max_output_tokens: int | None = None,
+        transport: PydanticTransportConfig | None = None,
         probe_seed: SeedContext | None = None,
         **kwargs,
     ):
@@ -823,6 +825,7 @@ class MLCodeValidatorAgent:
             max_retries=max_retries,
             reasoning_effort=reasoning_effort,
             max_output_tokens=max_output_tokens,
+            transport=transport,
         )
         self.bridge = self._bridge_factory(**bridge_kwargs)
 

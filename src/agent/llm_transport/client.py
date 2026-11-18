@@ -1,10 +1,14 @@
 """Lazy synchronous facade; optional packages are never imported on the old route."""
 
 import asyncio
+from collections.abc import Callable, Coroutine
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agent.llm_transport.contracts import Completion, PydanticTransportConfig
+
+if TYPE_CHECKING:
+    from agent.llm_transport.background import BackgroundTicket
 
 
 class PydanticClient:
@@ -34,14 +38,36 @@ class PydanticClient:
     def create(self, **kwargs: Any) -> Completion:
         from agent.llm_transport.runtime import request
 
-        def run() -> Completion:
-            return asyncio.run(request(self, kwargs))
+        return _run(lambda: request(self, kwargs))
 
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return run()
-        # The public bridge is synchronous, including inside async node callers.
-        # A separate loop avoids nested run_until_complete and cross-loop clients.
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            return executor.submit(run).result()
+    def submit_background(self, **kwargs: Any) -> "BackgroundTicket | Completion":
+        """Create one background response; a pending response returns a ticket."""
+        from agent.llm_transport.runtime import submit_background
+
+        return _run(lambda: submit_background(self, kwargs))
+
+    def await_background(self, ticket: "BackgroundTicket", expires_at: float) -> Completion:
+        """Poll an accepted response until a terminal state or ``expires_at`` (monotonic)."""
+        from agent.llm_transport.background import await_completion
+
+        return _run(lambda: await_completion(ticket, expires_at))
+
+    def cancel_background(self, ticket: "BackgroundTicket") -> str:
+        """Best-effort cancel of an accepted response; returns the outcome."""
+        from agent.llm_transport.background import cancel
+
+        return _run(lambda: cancel(ticket))
+
+
+def _run[T](coroutine: Callable[[], Coroutine[Any, Any, T]]) -> T:
+    def run() -> T:
+        return asyncio.run(coroutine())
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return run()
+    # The public bridge is synchronous, including inside async node callers.
+    # A separate loop avoids nested run_until_complete and cross-loop clients.
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        return executor.submit(run).result()

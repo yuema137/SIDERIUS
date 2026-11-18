@@ -117,6 +117,73 @@ Use your provider/project controls and an external run limit for paid tests.
 Never switch to a stronger model automatically after a failed flow check.
 See the [retry contract](../../src/agent/retry-policy.md) for exact inheritance and limits.
 
+## Trade waiting time for lower cost (OpenAI background windows)
+
+Some runs are unattended, for example overnight. Their steps do not need an
+answer within seconds. OpenAI can run such requests in the background and
+charge lower token rates: 30% below Standard with a 2-hour completion window,
+40% below with an 8-hour window. This applies to eligible models on Standard
+processing; see OpenAI's [background mode guide](https://developers.openai.com/api/docs/guides/background).
+The price of the discount is time: a step may wait hours for its answer.
+
+You switch it on for one role at a time in `llm.json`. Here only the proposal
+"proposing" stage waits, for up to 9 hours; every other role keeps its normal
+request:
+
+```json
+"proposing": {
+  "provider": "openai",
+  "model_id": "gpt-6.1-terra",
+  "openai_background": {"completion_window": "8h", "max_wait_seconds": 32400}
+}
+```
+
+What happens on each call of that role:
+
+1. SIDERIUS submits the request in the background and writes a
+   `<label>.background_submitted` row with the request id to `token_usage.jsonl`.
+2. It checks back regularly until OpenAI finishes, then continues with the
+   answer as usual. The final row records the tokens and the window used.
+3. If there is no answer after `max_wait_seconds`, SIDERIUS cancels the request
+   and the step fails with `BackgroundWaitExpired`.
+
+**Choose the wait deliberately.** `max_wait_seconds` is required. The window is
+OpenAI's target, not a promise, so give it some margin (32400 s is 9 hours for
+an 8-hour window).
+
+**Budget the total time.** A workflow calls its roles one after another, so
+the waits add up. Some roles run more than once per iteration: the tuning
+planner and reflector run once per tuning round. Three calls on 8-hour windows
+can stretch one iteration to a day or more.
+
+Make your outer limits cover that sum: the scheduler's wall time, and
+`candidate_timeout_seconds` in the preparation request. SIDERIUS does not check
+those limits for you. When it sees an internal deadline that is shorter than
+the window, it refuses before sending anything.
+
+**Only the roles you mark wait.** A role without its own `openai_background`
+never inherits it. This also holds when a role borrows the `interpret` settings
+because its own block is missing (data analysis, literature review): it borrows
+the model, not the background wait.
+
+**Before you start.**
+
+- Only `provider: "openai"` routes accept the setting.
+- Install the optional `pydantic-ai` extra, as in the
+  [additional-provider setup](../../src/agent/llm_transport/README.md).
+- Stopping or killing a run does not stop a request that OpenAI has already
+  accepted. OpenAI keeps working on it and bills it. Look up the request id
+  in the `background_submitted` row to find it in your OpenAI account.
+- If the network drops right after OpenAI accepts a request, SIDERIUS never
+  sees its id and sends the request again. The first one keeps running and
+  has no `background_submitted` row. Normal requests share this risk.
+- Token counts in `token_usage.jsonl` are what OpenAI reported. To price a row,
+  use the discounted rate only when it shows `service_tier_served: "default"`
+  and the model is eligible.
+
+The exact request, polling, timing and failure rules are in the
+[transport contract](../../src/agent/llm_transport/transport-contract.md#openai-background-completion-windows).
+
 ## Optional review and orchestration agents
 
 The optional LLM setup review has its own model selection. Copy

@@ -32,6 +32,7 @@ from pydantic import ValidationError
 
 from agent.llm_bridge import LLMBridge
 from agent.llm_settings import DEFAULT_LLM_PROVIDER
+from agent.llm_transport.contracts import PydanticTransportConfig
 from agent.prompt_templates.constraints import append_constraint_disclosure
 from agent.prompt_templates.formal_failure import render_formal_failure_feedback
 from agent.prompt_templates.proposal import (
@@ -1581,6 +1582,7 @@ class MLModelProposalAgent:
         bridge_factory=None,
         capability_index_path: str | None = None,
         max_output_tokens: int | None = None,
+        transport: PydanticTransportConfig | None = None,
         **kwargs,
     ):
         self._bridge_factory = bridge_factory or LLMBridge
@@ -1591,6 +1593,7 @@ class MLModelProposalAgent:
                 max_retries=max_retries,
                 reasoning_effort=reasoning_effort,
                 max_output_tokens=max_output_tokens,
+                transport=transport,
             ),
             kwargs,
         )

@@ -33,8 +33,10 @@ valid names are preserved unchanged. Archived schemas remain readable.
 
 The public node module exports immutable `ProposerRoute`, `ProposerRouting`
 and the pure `resolve_proposer_routing(legacy, stage_options)` resolver. A route
-contains provider, model_id, reasoning_effort, max_output_tokens and
-max_retries. The agent's read-only `routing` property exposes the resolved
+contains provider, model_id, reasoning_effort, max_output_tokens, max_retries
+and an optional `transport` carrier (`PydanticTransportConfig`, excluded from
+serialization when unset; workflow `openai_background` projects it per stage
+and stages never inherit another stage's carrier). The agent's read-only `routing` property exposes the resolved
 settings without inspecting private modules. This describes configured
 settings; provider-level model defaults still belong to LLMBridge.
 

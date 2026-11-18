@@ -22,6 +22,7 @@ the proposal provides expert_advice and baseline_config for the tuning agent.
 from typing import Any, Literal
 
 from agent.llm_settings import DEFAULT_LLM_PROVIDER, ProviderName, default_model_for_provider
+from agent.llm_transport.contracts import PydanticTransportConfig
 from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.hyperparam_tuning import (
     DEFAULT_IS_TRIAL,
@@ -226,6 +227,8 @@ def local_validated_model(
     constraint_context: ConstraintContext | None = None,
     max_output_tokens: int | None = None,
     reflect_max_output_tokens: int | None = None,
+    transport: PydanticTransportConfig | None = None,
+    reflect_transport: PydanticTransportConfig | None = None,
 ) -> HyperparamTuningInput:
     """
     Map ValidatorOutput + ProposalOutput -> HyperparamTuningInput in-memory.
@@ -386,6 +389,8 @@ def local_validated_model(
         reflect_model_id=reflect_model_id,
         reflect_reasoning_effort=reflect_reasoning_effort,
         reflect_retry_policy=reflect_retry_policy,
+        transport=transport,
+        reflect_transport=reflect_transport,
         storage=storage,
         is_trial=is_trial,
         trial_portion=trial_portion,
