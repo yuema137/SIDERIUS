@@ -432,7 +432,9 @@ refusal. Status readers import no task/plugin runtime to perform this check.
 
 `examples/workflow_declarations/native_training.py` writes a matched synthetic
 seed/settings pair and both Python-model-derived workflow and serialized
-request. It performs no launch. Offline tests qualify propagation/admission and
+request. Because the workflow trains, the request's `devices` are
+`tools.workspace_sandbox.gpu.host_gpu_devices()` on the generating host (`()` on
+a host without a GPU node, where launch refuses training). It performs no launch. Offline tests qualify propagation/admission and
 artifact reading, not real LLM behavior, scientific training, GUI readiness,
 resume, historical-profile parity or paper reproduction.
 

@@ -6,7 +6,8 @@ The command appends one ``tasks[]`` entry and writes nothing else:
   ``preparation_timeout_seconds``, ``candidate_timeout_seconds`` and
   ``candidate_network`` from :data:`STARTER_VALUES` unless overridden;
   ``candidate_devices`` from ``--device``, none with ``--no-gpu``, otherwise
-  this host's ``/dev/nvidia<N>`` GPU nodes (detected, never asked);
+  this host's ``/dev/nvidia<N>`` GPU nodes (detected by the sandbox owner
+  ``tools.workspace_sandbox.gpu.host_gpu_devices``, never asked);
   ``candidate_environment_names`` from the credential requirement owner
   (``candidate_worker.preflight.credential_requirements``) applied to every
   route of the task's resolved LLM profile, plus any ``--env`` names;
@@ -34,7 +35,6 @@ experiment setup is created through ``SetupStore.create``.
 from __future__ import annotations
 
 import argparse
-import glob
 import json
 import os
 import re
@@ -44,7 +44,7 @@ from pathlib import Path
 from typing import Any
 
 from tools.candidate_operations.models import OperationFailure
-from tools.workspace_sandbox.gpu import GPU_NODE
+from tools.workspace_sandbox.gpu import host_gpu_devices
 
 from .error_messages import console_error_message
 from .files import canonical, config_bytes, private_file_lock
@@ -101,21 +101,6 @@ class TaskPlan:
 
 
 # Inputs -------------------------------------------------------------------------------
-
-
-def host_gpu_devices() -> tuple[str, ...]:
-    """This host's GPU device nodes (``/dev/nvidia<N>`` character devices), by number.
-
-    Control nodes (``nvidiactl``, ``nvidia-uvm``, ...) are not listed: the run
-    sandbox adds the ones present at launch (``tools.workspace_sandbox.gpu``), and
-    writing them would refuse a run whenever a lazily created node is absent.
-    """
-    found = []
-    for name in sorted(glob.glob("/dev/nvidia*")):
-        path = Path(name)
-        if GPU_NODE.fullmatch(name) and path.is_char_device() and not path.is_symlink():
-            found.append(name)
-    return tuple(sorted(found, key=lambda name: int(name.removeprefix("/dev/nvidia"))))
 
 
 def choose_devices(devices: tuple[str, ...] | None) -> tuple[str, ...]:
