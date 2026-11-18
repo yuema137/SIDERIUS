@@ -26,6 +26,7 @@ for offline CI. Legacy routes do not import Pydantic AI at runtime.
 | `accounting.py` | Raw JSON/SSE accounting capture before SDK defaults |
 | `tool_admission.py` | Shared complete single-tool admission for legacy and Direct API routes |
 | `responses.py` | Admit complete representable results and normalize measured usage |
+| `background.py` | OpenAI background mode: window admission, poll loop, cancellation, submission ledger row and pricing evidence |
 | `LLMBridge` | Retry policies, remaining-deadline clipping, content repair, labels and usage persistence |
 
 ## Selection, credentials, and configuration
@@ -57,7 +58,10 @@ Python callers may pass `transport=PydanticTransportConfig(protocol=...)` to
 For example, an OpenAI caller can explicitly select `openai-responses` while
 keeping the same bridge methods. These protocol selectors are bridge constructor
 options, not workflow JSON fields. They select a protocol rather than claiming
-that an arbitrary endpoint/model combination implements it.
+that an arbitrary endpoint/model combination implements it. The one workflow
+path to this carrier is `NodeLLMConfig.openai_background`, which selects
+`openai-responses` with background mode for that route only (see
+[OpenAI background completion windows](#openai-background-completion-windows)).
 
 `max_output_tokens` is an optional positive integer output ceiling.
 `reflect_max_output_tokens` overrides it for the reflector; omission inherits
@@ -147,6 +151,107 @@ fallback is performed.
 `list_models()` is explicitly unsupported on this backend and raises
 `NotImplementedError`. Provider enumeration requires a separately implemented
 contract; a Direct API request adapter does not establish one.
+
+## OpenAI background completion windows
+
+`PydanticTransportConfig.background` (`OpenAIBackgroundConfig`:
+`completion_window` `2h` | `8h`, required finite `max_wait_seconds > 0`) opts one
+route into Responses API background mode. It requires `protocol="openai-responses"`
+(schema refusal) and provider `openai` (`optional_client` refusal). It is excluded
+from serialization when unset. Without it every request path is unchanged.
+Provider facts used here (OpenAI background guide, 2026-11-18): the window is a
+completion target from acceptance, not a guarantee; eligible models are in public
+beta (GPT-6.2 Astra, GPT-6.2 Sol, GPT-6.1 Terra, GPT-6 Luna); 2h/8h share the
+Batch/Background rate limit; prompt-cache entries from these windows are not
+reusable by non-window Standard requests.
+
+**Submission.** The create request carries `background: true`,
+`service_tier: "default"` (Standard processing, which the discount requires),
+`background_options: {"completion_window": ...}` via `extra_body` (the locked
+OpenAI SDK has no typed field) and `stream: false`. It runs inside
+`LLMBridge._call_with_retry` exactly like a foreground request: 429/5xx retries
+(unbounded 429 by default), bounded timeout/connection retries and the
+other-4xx immediate raise are unchanged. An unsupported model or setting is a
+provider 4xx and raises immediately. A response already terminal at creation is
+normalized directly; a pending one returns a `BackgroundTicket`.
+
+**Admission.** Before submission, if a cooperative `execution_deadline` is
+visible to the bridge and its remaining time is shorter than the window
+(7200 s / 28800 s), `BackgroundWindowRefused` (an `ExecutionDeadlineExceeded`)
+is raised and nothing is sent or billed. Budgets the bridge cannot see (for
+example a candidate worker's `timeout_seconds`, enforced by a sandbox kill) are
+not consulted; budget them for the summed waits of sequential steps.
+
+**Polling.** `finish_background` runs after `_call_with_retry` has returned, so
+an accepted request can never be resubmitted by the transport retry owner. It
+first appends a submission ledger row (below), then polls
+`GET /v1/responses/{id}` through pydantic-ai continuation of the suspended
+response. Cadence doubles from 2 s to a 60 s cap. Each GET is bounded by
+`request_timeout` clipped to the remaining wait. Transient poll failures (HTTP
+429/5xx, connection, timeout) are retried in place until the wait expires. A
+404 (`SuspendedResponseExpired`) ends polling as a refused completion with
+nothing to cancel. An undecodable body, a non-transient HTTP error (for example
+400/403) or a failed response body first cancels the job (idempotent; an already
+terminal job returns its final object), records the outcome as
+`background_cancel`, then ends polling as a refused completion. A caller that
+retries the step therefore never leaves the first job billing.
+
+**Wait limit.** Expiry is `accepted_at + max_wait_seconds`, clipped by the
+visible execution deadline when that is earlier. On expiry the response is
+cancelled once (`POST /v1/responses/{id}/cancel`, best effort), its usage row is
+recorded with `background_status: "wait_expired"`, `background_waited_seconds`
+and `background_cancel`, and `BackgroundWaitExpired` (a `TimeoutError`, never a
+transport error) is raised naming the route label, response id, completion
+window, waited seconds and the binding limit (`max_wait_seconds` or
+`execution_deadline`). When the execution deadline was the binding limit the
+raised type is `BackgroundDeadlineExpired`, which is also an
+`ExecutionDeadlineExceeded`, so deadline-aware callers report a deadline only
+in that case. There is no implicit default wait.
+
+**Terminal outcomes.** `completed` is admitted through the ordinary
+normalization path. `failed`, `cancelled`, `incomplete` and the poll refusals
+above are recorded once with whatever usage the provider reported and then
+refused by `validate_completion` (`APIError`), outside retries. Content repair in
+`_chat_json` still issues a new request (a new background submission) for
+invalid JSON, within its existing bounded budget.
+
+**Cancellation and stops.** Any in-process failure from the submission ledger
+row through polling (a ledger write error, a deadline, KeyboardInterrupt,
+asyncio cancellation, an unexpected exception) triggers one best-effort cancel
+in `finish_background` before the exception propagates; a cancel failure never
+masks the original exception. A response accepted just
+before a continuing deadline expires is cancelled before the late receipt is
+recorded. SIGTERM/SIGKILL of the process (candidate Stop, sandbox timeout,
+scheduler kill) cannot run a cancel: the accepted response keeps running
+server-side and is billed. Its submission row is the evidence for finding it.
+When the bridge runs inside an existing event loop, the poll runs in a worker
+thread and an interrupt in the calling thread does not reach it before the wait
+limit. Resume does not reattach to a pending response; a resumed phase submits
+a new request. If the create request is accepted but its response is lost (a
+connection drop or timeout), the bounded timeout/connection retry submits again;
+the first job keeps running with no ledger row because its id was never seen.
+Foreground requests have the same exposure, without the background delay.
+
+**Ledger rows.** At acceptance, `emit_marker` appends
+`label="<call label>.background_submitted"` with zero tokens and characters and
+`extra` = `{attempt, status: "background_submitted", model, provider,
+background_response_id, completion_window, service_tier_requested: "default",
+service_tier_served}`. The final row is the call site's ordinary usage row with
+provider-measured token counts and the same evidence plus `background_status`
+(the provider finish reason, e.g. `completed`). A submitted row without a final
+row carrying the same `background_response_id` identifies an orphaned request.
+
+**Cost.** Token counts stay exactly as the provider reports them. The framework
+has no price table and records no USD figure. A cost consumer applies the window
+rate (Standard model token rates times 0.7 for `2h`, 0.6 for `8h`) only when
+`service_tier_served == "default"` and the model is eligible; otherwise it
+applies the rate of the served tier. The response does not echo the window or
+confirm a discount, so this rule is the contract.
+
+**Reflector and stage isolation.** A reflector without its own transport never
+reuses a background main client; the bridge constructs its default client.
+Workflow projection never lets literature search or proposal stages inherit
+another route's background carrier (see the workflow contract).
 
 ## Accounting and provenance
 

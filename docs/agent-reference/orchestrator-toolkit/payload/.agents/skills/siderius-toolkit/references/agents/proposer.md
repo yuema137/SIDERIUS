@@ -22,10 +22,12 @@ preparing another operation.
 ## Existing entrypoints and parameters
 
 Python import: `nodes.ml_model_proposal_agent.ml_model_proposal_agent.MLModelProposalAgent`.
-Native constructor at revision `5ccb436f` (v1.1.0):
+Native constructor at revision `5ccb436f` (v1.1.0), plus the optional
+`transport` route carrier added by #1533 (OpenAI background mode; see the
+workflow `openai_background` setting):
 
 ```text
-MLModelProposalAgent(provider: str='openai', model_id: str | None=None, max_retries: int | None=None, reasoning_effort: str | None=None, bridge_factory=None, capability_index_path: str | None=None, max_output_tokens: int | None=None, **kwargs)
+MLModelProposalAgent(provider: str='openai', model_id: str | None=None, max_retries: int | None=None, reasoning_effort: str | None=None, bridge_factory=None, capability_index_path: str | None=None, max_output_tokens: int | None=None, transport: PydanticTransportConfig | None=None, **kwargs)
 ```
 
 `bridge_factory` is existing dependency injection, not a model-provider choice.
@@ -38,10 +40,10 @@ may choose only parameters left open there; schema defaults do not override it.
 ### Stage model routing
 
 The constructor's `provider`, `model_id`, `reasoning_effort`,
-`max_output_tokens` and `max_retries` form the legacy constructor route.
-`**kwargs` accepts flat per-stage overrides named `{stage}_{field}`, where
+`max_output_tokens`, `max_retries` and `transport` form the legacy constructor
+route. `**kwargs` accepts flat per-stage overrides named `{stage}_{field}`, where
 `stage` is `comparison`, `reasoning` or `proposing` and `field` is one of those
-five names: for example `comparison_model_id`, `reasoning_reasoning_effort` or
+six names: for example `comparison_model_id`, `reasoning_reasoning_effort` or
 `proposing_max_retries`. `resolve_proposer_routing` applies them once at
 construction. A key that is absent inherits the legacy constructor value. A
 supplied value replaces it, including `None` or `0` where the field allows it

@@ -55,6 +55,8 @@ def materialize_literature(
         search_reasoning_effort=value.search_llm_reasoning_effort,
         max_retries=value.llm_max_retries,
         search_retry_policy=value.search_llm_retry_policy,
+        transport=value.llm_transport,
+        search_transport=value.search_llm_transport,
     )
     routes = node_llm_routes(config, "lit_review")
     actual = (arguments.main, arguments.search or arguments.main)

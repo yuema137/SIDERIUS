@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from agent.llm_settings import DEFAULT_LLM_PROVIDER
+from agent.llm_transport.contracts import PydanticTransportConfig
 from agent.schemas.llm_retry import RetryPolicy
 
 
@@ -37,6 +38,7 @@ def node_bridge_kwargs(
     reasoning_effort: str | None,
     omit_unset_retries: bool = False,
     max_output_tokens: int | None = None,
+    transport: PydanticTransportConfig | None = None,
 ) -> dict[str, Any]:
     """Preserve existing node keyword omission, including DA's retry policy."""
     result: dict[str, Any] = {"provider": provider, "model_id": model_id}
@@ -46,6 +48,8 @@ def node_bridge_kwargs(
         result["reasoning_effort"] = reasoning_effort
     if max_output_tokens is not None:
         result["max_output_tokens"] = max_output_tokens
+    if transport is not None:
+        result["transport"] = transport
     return result
 
 
@@ -69,8 +73,14 @@ def literature_bridge_arguments(
     search_retry_policy: RetryPolicy | None = None,
     max_output_tokens: int | None = None,
     search_max_output_tokens: int | None = None,
+    transport: PydanticTransportConfig | None = None,
+    search_transport: PydanticTransportConfig | None = None,
 ) -> LiteratureBridgeArguments:
-    """Project validated literature input; main routing has no default here."""
+    """Project validated literature input; main routing has no default here.
+
+    Transport carriers (background mode) never inherit between main and search:
+    differing carriers require a separate search bridge.
+    """
     main = node_bridge_kwargs(
         provider=provider,
         model_id=model_id,
@@ -78,6 +88,7 @@ def literature_bridge_arguments(
         reasoning_effort=reasoning_effort,
         max_output_tokens=max_output_tokens,
         omit_unset_retries=True,
+        transport=transport,
     )
     search = None
     search_routing_override = bool(search_provider or search_model_id or search_reasoning_effort)
@@ -85,6 +96,7 @@ def literature_bridge_arguments(
         search_routing_override
         or search_retry_policy is not None
         or search_max_output_tokens is not None
+        or search_transport != transport
     ):
         search = node_bridge_kwargs(
             provider=search_provider or provider,
@@ -101,5 +113,6 @@ def literature_bridge_arguments(
                 else max_output_tokens
             ),
             omit_unset_retries=True,
+            transport=search_transport,
         )
     return LiteratureBridgeArguments(main, search)

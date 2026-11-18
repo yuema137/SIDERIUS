@@ -46,6 +46,7 @@ from agent.llm_settings import (
     ProviderName,
     default_model_for_provider,
 )
+from agent.llm_transport.contracts import OpenAIBackgroundConfig, PydanticTransportConfig
 from agent.schemas.llm_retry import RetryPolicy
 from workflows.advice import ADVICE_INERT_KEY_PREFIX as INERT_KEY_PREFIX
 
@@ -214,6 +215,24 @@ class NodeLLMConfig(BaseModel):
         ),
     )
 
+    openai_background: OpenAIBackgroundConfig | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Opt this route into OpenAI Responses background mode with a discounted "
+            "completion window ('2h' or '8h') and an explicit max_wait_seconds. "
+            "Requires provider='openai'. Omitted = the default synchronous request."
+        ),
+    )
+
+    def transport(self) -> PydanticTransportConfig | None:
+        """The bridge transport carrier this route selects; None keeps the default client."""
+        if self.openai_background is None:
+            return None
+        return PydanticTransportConfig(
+            protocol="openai-responses", background=self.openai_background
+        )
+
     @model_serializer(mode="wrap")
     def serialize_retry_intent(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
         """Keep retry inheritance distinct from an explicitly unbounded limit."""
@@ -226,6 +245,8 @@ class NodeLLMConfig(BaseModel):
     def validate_reasoning_effort(self) -> NodeLLMConfig:
         if self.reasoning_effort is not None and self.provider != "openai":
             raise ValueError("reasoning_effort requires provider='openai'")
+        if self.openai_background is not None and self.provider != "openai":
+            raise ValueError("openai_background requires provider='openai'")
         return self
 
 
@@ -618,8 +639,12 @@ class WorkflowLLMConfig(BaseModel):
                 result["llm_max_output_tokens"] = self.interpret.max_output_tokens
             if self.interpret.reasoning_effort is not None:
                 result["llm_reasoning_effort"] = self.interpret.reasoning_effort
+            # OpenAI background mode is strictly per configured route: the
+            # interpret fallback never carries interpret's background setting.
             return result
-        if node_name == "data_analysis" and config is None:
+        # The same rule applies to the data-analysis fallback below.
+        inherited_slot = node_name == "data_analysis" and config is None
+        if inherited_slot:
             config = self.interpret
 
         if config is None:
@@ -654,6 +679,11 @@ class WorkflowLLMConfig(BaseModel):
                 result["reflect_max_output_tokens"] = config.reflector.max_output_tokens
             if config.reflector.reasoning_effort is not None:
                 result["reflect_reasoning_effort"] = config.reflector.reasoning_effort
+            # Background mode never inherits between sub-calls (see LLMBridge).
+            if (transport := config.planner.transport()) is not None:
+                result["transport"] = transport
+            if (reflect_transport := config.reflector.transport()) is not None:
+                result["reflect_transport"] = reflect_transport
             return result
         if isinstance(config, ProposalLLMConfig):
             # Flatten the nested ProposalLLMConfig into per-stage kwargs.
@@ -687,6 +717,12 @@ class WorkflowLLMConfig(BaseModel):
                 result["max_output_tokens"] = config.reasoning.max_output_tokens
             if config.reasoning.reasoning_effort is not None:
                 result["reasoning_effort"] = config.reasoning.reasoning_effort
+            stages = (config.comparison, config.reasoning, config.proposing)
+            if any(stage.openai_background is not None for stage in stages):
+                # Every stage states its own transport, so none inherits another's.
+                for stage_name in ("comparison", "reasoning", "proposing"):
+                    result[f"{stage_name}_transport"] = getattr(config, stage_name).transport()
+                result["transport"] = config.reasoning.transport()
             return result
         if isinstance(config, LitReviewLLMConfig):
             # Flatten the nested LitReviewLLMConfig into the 4-field shape
@@ -715,6 +751,10 @@ class WorkflowLLMConfig(BaseModel):
                 result["search_llm_max_output_tokens"] = config.search.max_output_tokens
             if config.search.reasoning_effort is not None:
                 result["search_llm_reasoning_effort"] = config.search.reasoning_effort
+            if (transport := config.main.transport()) is not None:
+                result["llm_transport"] = transport
+            if (search_transport := config.search.transport()) is not None:
+                result["search_llm_transport"] = search_transport
             return result
         # Plain NodeLLMConfig — single-sub-call agent
         result = {"provider": config.provider, "model_id": config.model_id}
@@ -724,6 +764,8 @@ class WorkflowLLMConfig(BaseModel):
             result["max_output_tokens"] = config.max_output_tokens
         if config.reasoning_effort is not None:
             result["reasoning_effort"] = config.reasoning_effort
+        if not inherited_slot and (transport := config.transport()) is not None:
+            result["transport"] = transport
         return result
 
     @classmethod

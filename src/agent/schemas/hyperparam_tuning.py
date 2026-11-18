@@ -27,6 +27,7 @@ from pydantic import (
 from pydantic_core import PydanticCustomError
 
 from agent.llm_settings import DEFAULT_LLM_PROVIDER, ProviderName, default_model_for_provider
+from agent.llm_transport.contracts import PydanticTransportConfig
 from agent.prompt_templates.timing_attribution import TIMING_SPLIT_SEMANTICS
 from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.custom_loss_contract import CustomLossApplicability, TaskOwnedCustomLoss
@@ -3294,6 +3295,16 @@ class HyperparamTuningInput(BaseModel):
     )
     reflect_reasoning_effort: str | None = Field(
         default=None, description="Explicit OpenAI reflector reasoning effort."
+    )
+    transport: PydanticTransportConfig | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Planner transport carrier (e.g. OpenAI background mode); absent = default client.",
+    )
+    reflect_transport: PydanticTransportConfig | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Reflector transport carrier; never inherited from the planner's.",
     )
     max_retries: int | None = Field(
         default=None,

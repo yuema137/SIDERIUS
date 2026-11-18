@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from agent.llm_transport.contracts import PydanticTransportConfig
 from agent.schemas.llm_retry import RetryPolicy
 
 if TYPE_CHECKING:
@@ -23,6 +24,8 @@ def tuner_bridge_arguments(agent_input: HyperparamTuningInput) -> dict[str, Any]
         reflect_max_output_tokens=agent_input.reflect_max_output_tokens,
         reflect_reasoning_effort=agent_input.reflect_reasoning_effort,
         reflect_retry_policy=agent_input.reflect_retry_policy,
+        transport=agent_input.transport,
+        reflect_transport=agent_input.reflect_transport,
     )
 
 
@@ -38,6 +41,8 @@ def tuner_bridge_kwargs(
     reflect_retry_policy: RetryPolicy | None = None,
     max_output_tokens: int | None = None,
     reflect_max_output_tokens: int | None = None,
+    transport: PydanticTransportConfig | None = None,
+    reflect_transport: PydanticTransportConfig | None = None,
 ) -> dict[str, Any]:
     """Project already-resolved settings without fabricating a full tuner input."""
     kwargs: dict[str, Any] = {
@@ -57,4 +62,8 @@ def tuner_bridge_kwargs(
         kwargs["max_output_tokens"] = max_output_tokens
     if reflect_max_output_tokens is not None:
         kwargs["reflect_max_output_tokens"] = reflect_max_output_tokens
+    if transport is not None:
+        kwargs["transport"] = transport
+    if reflect_transport is not None:
+        kwargs["reflect_transport"] = reflect_transport
     return kwargs

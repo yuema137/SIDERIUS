@@ -62,6 +62,7 @@ from agent.llm_settings import (
 from agent.llm_settings import (
     ProviderConfig as _ProviderConfig,
 )
+from agent.llm_transport.background import BackgroundTicket, admit_window, finish_background
 from agent.llm_transport.client import PydanticClient
 from agent.llm_transport.contracts import Completion, PydanticTransportConfig, validate_completion
 from agent.llm_transport.selection import optional_client, validate_output_limit
@@ -405,8 +406,23 @@ class LLMBridge:
             else:
                 kwargs["timeout"] = remaining
         if isinstance(client, PydanticClient):
+            if client.config.background is not None:
+                # Admission precedes submission; polling happens after the retry owner.
+                admit_window(client.config.background, model_id=kwargs["model"])
+                return client.submit_background(**kwargs)
             return client.create(**kwargs)
         return cast(Any, client.chat.completions.create)(**kwargs)
+
+    def _legacy_client(self, base_url: str | None) -> OpenAI:
+        """The default OpenAI SDK client; omitting ``base_url`` keeps the SDK endpoint."""
+        if base_url:
+            return OpenAI(
+                api_key=self.api_key,
+                max_retries=0,
+                timeout=self.request_timeout,
+                base_url=base_url,
+            )
+        return OpenAI(api_key=self.api_key, max_retries=0, timeout=self.request_timeout)
 
     def __init__(
         self,
@@ -569,9 +585,9 @@ class LLMBridge:
         # The conditional ``**({"base_url": ...} if base_url else {})``
         # spread used here previously collapsed pyright's kwarg resolution
         # into spurious ``default_headers``/``default_query`` complaints.
-        # Branching the call keeps the runtime identical (omitting
-        # ``base_url`` lets the SDK fall back to its default endpoint) while
-        # giving the type-checker concrete keyword arguments to match.
+        # ``_legacy_client`` branches the call instead, keeping the runtime
+        # identical (omitting ``base_url`` lets the SDK fall back to its default
+        # endpoint) while giving the type-checker concrete keyword arguments.
         self.max_output_tokens = max_output_tokens
         self.reflect_max_output_tokens = (
             max_output_tokens if reflect_max_output_tokens is None else reflect_max_output_tokens
@@ -585,21 +601,7 @@ class LLMBridge:
             max_output_tokens=max_output_tokens,
             config=transport,
         )
-        if native is not None:
-            self.client = native
-        elif base_url:
-            self.client = OpenAI(
-                api_key=self.api_key,
-                max_retries=0,
-                timeout=self.request_timeout,
-                base_url=base_url,
-            )
-        else:
-            self.client = OpenAI(
-                api_key=self.api_key,
-                max_retries=0,
-                timeout=self.request_timeout,
-            )
+        self.client = native if native is not None else self._legacy_client(base_url)
 
         # --- Reflect client setup (Phase A.2: cross-provider support) ---
         # When reflect_provider is None or matches the main provider, the
@@ -636,10 +638,17 @@ class LLMBridge:
                 max_output_tokens=self.reflect_max_output_tokens,
                 config=reflect_transport,
             )
+        # Background mode is opted into per route: a reflector without its own
+        # background transport never inherits the main route's background client.
+        main_background = (
+            isinstance(self.client, PydanticClient) and self.client.config.background is not None
+        )
         if reflect_native is not None:
             self.reflect_client = reflect_native
-        elif reflect_settings.reuse_main_client:
+        elif reflect_settings.reuse_main_client and not main_background:
             self.reflect_client = self.client
+        elif reflect_settings.reuse_main_client:
+            self.reflect_client = self._legacy_client(base_url)
         else:
             reflect_known = _KNOWN_PROVIDERS[reflect_settings.provider]
             reflect_api_key = _provider_credential_or_refuse(
@@ -1497,6 +1506,8 @@ class LLMBridge:
                 try:
                     remaining_seconds(label)
                 except ExecutionDeadlineExceeded:
+                    if isinstance(result, BackgroundTicket):
+                        result.cancel_quietly()
                     if on_late_response is not None:
                         on_late_response(result)
                     raise
@@ -1655,10 +1666,10 @@ class LLMBridge:
             extra:          Free-form caller context, e.g.
                             ``{"attempt": 0, "status": "ok"}``.
         """
-        if isinstance(response, Completion):
+        if isinstance(response, (Completion, BackgroundTicket)):
             extra = {**(extra or {}), **response.transport_metadata}
-            if response.failure:
-                extra["status"] = "invalid_provider_response"
+        if isinstance(response, Completion) and response.failure:
+            extra = {**(extra or {}), "status": "invalid_provider_response"}
         if self._token_usage_path is None:
             # Context not set — silent no-op until set_run_context is called.
             return
@@ -1872,6 +1883,15 @@ class LLMBridge:
                 ),
                 **retry_options,
             )
+            response = finish_background(
+                response,
+                label=label,
+                attempt=attempt,
+                model_name=model_name,
+                provider=provider,
+                record_usage=record_usage,
+                emit_marker=self.emit_marker,
+            )
             raw = response.choices[0].message.content or ""
             text = self._sanitize_json_text(raw.strip())
             last_text = text
@@ -2065,6 +2085,15 @@ class LLMBridge:
                 response=response, extra={"attempt": 0, "status": "deadline_exceeded"}
             ),
         )
+        response = finish_background(
+            response,
+            label=label,
+            attempt=0,
+            model_name=self.model_name,
+            provider=self.provider,
+            record_usage=record_usage,
+            emit_marker=self.emit_marker,
+        )
         # Telemetry: one row per successful API response. Plain-text mode
         # has no content-retry, so attempt is always 0 and status "ok".
         record_usage(
@@ -2148,6 +2177,15 @@ class LLMBridge:
             on_late_response=lambda response: record_usage(
                 response=response, extra={"attempt": 0, "status": "deadline_exceeded"}
             ),
+        )
+        response = finish_background(
+            response,
+            label=label,
+            attempt=0,
+            model_name=self.model_name,
+            provider=self.provider,
+            record_usage=record_usage,
+            emit_marker=self.emit_marker,
         )
 
         # Account even an empty or ambiguous envelope before admission rejects it.
@@ -2254,6 +2292,10 @@ class StubLLMBridge(LLMBridge):
         reflect_reasoning_effort: str | None = None,
         max_retries: int | None = 0,
         reflect_retry_policy: RetryPolicy | None = None,
+        max_output_tokens: int | None = None,
+        reflect_max_output_tokens: int | None = None,
+        transport: PydanticTransportConfig | None = None,
+        reflect_transport: PydanticTransportConfig | None = None,
     ):
         """Initialise stub bridge state without any OpenAI client.
 
@@ -2281,6 +2323,11 @@ class StubLLMBridge(LLMBridge):
             max_retries: Honoured for API-shape parity only — no HTTP calls
                          are made, so the value is unused. Defaults to ``0``
                          (clearer than ``None`` for "no retries needed").
+            max_output_tokens, reflect_max_output_tokens, transport, reflect_transport:
+                Route options a workflow profile may forward; accepted for
+                call-shape parity. The stub sends no request, but a background
+                transport still applies its window admission, so a pseudo run
+                catches a deadline shorter than the configured window.
 
         Brake-stress hook (Stage 4 / Commit 4.6): the env var
         ``SIDERIUS_STUB_FORCE_CRASH=1`` flips ``self._force_crash`` to
@@ -2309,6 +2356,12 @@ class StubLLMBridge(LLMBridge):
         # (NoneType attribute access) instead of silently masking a bug.
         self.client = None
         self.reflect_client = None
+        self._stub_background = {
+            "main": transport.background if transport is not None else None,
+            "tuner.reflector": (
+                reflect_transport.background if reflect_transport is not None else None
+            ),
+        }
 
         # --- Run-context state (mirrors LLMBridge.__init__) ---
         self._token_usage_path: Path | None = None
@@ -2389,6 +2442,12 @@ class StubLLMBridge(LLMBridge):
                 f"on label={label!r} for brake-stress (Commit 4.6)."
             )
 
+    def _admit_stub_background(self, label: str) -> None:
+        """Apply the real background window admission; the stub submits nothing."""
+        background = self._stub_background.get(label, self._stub_background["main"])
+        if background is not None:
+            admit_window(background, model_id=f"{self.model_name}")
+
     # ------------------------------------------------------------------
     # Entry-point overrides.
     # ------------------------------------------------------------------
@@ -2413,6 +2472,7 @@ class StubLLMBridge(LLMBridge):
         parity but ignored — synthesis is purely label-driven.
         """
         self._maybe_crash(label)
+        self._admit_stub_background(label)
         if label == self._DEFAULT_LABEL:
             self._warn_default_label("_chat_json")
         return self._synthesise_json(label)
@@ -2427,6 +2487,7 @@ class StubLLMBridge(LLMBridge):
     ) -> str:
         """Bypass HTTP; dispatch to the text synthesiser registered for ``label``."""
         self._maybe_crash(label)
+        self._admit_stub_background(label)
         if label == self._DEFAULT_LABEL:
             self._warn_default_label("generate_text")
         return self._synthesise_text(label)
@@ -2449,6 +2510,7 @@ class StubLLMBridge(LLMBridge):
         dispatch table rather than silently returning a sentinel.
         """
         self._maybe_crash(label)
+        self._admit_stub_background(label)
         raise NotImplementedError(
             f"StubLLMBridge.tool_call() has no synthesiser for label={label!r}. "
             f"No production label routes through tool_call() today. If a new "

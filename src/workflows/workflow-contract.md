@@ -376,6 +376,31 @@ instead of inheriting another configured stage's ceiling. Literature search
 inherits the main ceiling when its separate ceiling is omitted. Tuner reflector
 inheritance follows the bridge's `reflect_max_output_tokens` contract.
 
+`NodeLLMConfig.openai_background` is an optional per-route opt-in to OpenAI
+Responses background mode: `{"completion_window": "2h" | "8h", "max_wait_seconds": <finite > 0>}`.
+Both fields are required when the object is present, extra keys are refused,
+and the route must use `provider: "openai"` (any other provider is refused at
+validation). Absent/None is excluded from serialized configuration and from
+projected bridge arguments, so existing profiles, run locks and setup snapshots
+keep their bytes. `NodeLLMConfig.transport()` turns the setting into the
+bridge's single transport carrier, `PydanticTransportConfig(protocol="openai-responses",
+background=...)`; `WorkflowLLMConfig.get` projects it as `transport` (single
+nodes and the tuner planner), `reflect_transport` (tuner reflector),
+`<stage>_transport` plus `transport` from `reasoning` (proposal stages; all three
+stage keys are emitted when any stage opts in), and `llm_transport` /
+`search_llm_transport` (literature main/search). Background mode never inherits
+between routes: an omitted reflector, search or stage setting means that route
+keeps its default client, and the bridge or literature helper builds a separate
+client for it. The slot fallbacks follow the same rule: an omitted
+`data_analysis` slot and an omitted `lit_review` block inherit every other
+`interpret` field as before, but never `openai_background`, so those routes use
+the default client unless their own slot opts in. The carrier threads through the same layers as `max_output_tokens`
+(input schemas `HyperparamTuningInput.transport/reflect_transport` and
+`LiteratureReviewInput.llm_transport/search_llm_transport`, `ProposerRoute.transport`,
+node constructors); future transport options extend `PydanticTransportConfig`
+without new layer plumbing. Request, polling, timing, accounting and failure
+semantics are owned by the [transport contract](../agent/llm_transport/transport-contract.md#openai-background-completion-windows).
+
 Projection owners are `WorkflowLLMConfig.get`, node bridge-argument helpers,
 and the validator-to-tuner protocol. Setup review and candidate-worker
 credential checks use the same provider metadata and argument projections.
