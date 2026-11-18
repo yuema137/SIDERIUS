@@ -393,9 +393,11 @@ class ImplementorInput(BaseModel):
     reference_code: dict[str, str] = Field(
         default_factory=dict,
         description="Source code of referenced ancestor models. Keyed by model_type. "
-        "Loaded automatically from inherited_components — the implementor "
-        "uses this as a template to copy-and-modify rather than writing "
-        "from scratch. Empty dict = no reference code available.",
+        "Supplied by the caller from experiment-source inherited_components "
+        "(the native exploration loop loads it; the candidate worker supplies "
+        "none). Rendered whole into the reasoning, code and every repair prompt "
+        "so the implementor can carry over claimed components. "
+        "Empty dict = no reference code available.",
     )
     expert_advice: ExpertAdviceInput = Field(
         default="",

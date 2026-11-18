@@ -1,0 +1,42 @@
+## Model to implement: `step00_fixture_model`
+
+## Description
+Fixture description: a gated residual 1-D denoiser.
+
+## Mathematical definition
+y = x + f(x) with f a dilated conv stack (fixture math).
+
+## Baseline configuration
+model_config:
+{
+  "channels": 64,
+  "depth": 2
+}
+
+train_config (for context only — do not implement training logic):
+  segmentation_size: 64 (if present)
+  batch_size: 1
+
+## Forward contract (non-negotiable)
+The model must satisfy this forward contract (non-negotiable):
+    input:  [B, T] int64   — noisy int8 samples shifted to class indices
+    output: [B, 256, T] float32  — per-timestep logits over 256 denoising classes
+
+Task type: classification (per-timestep 256-class).
+
+## Expert Guidance (from upstream agents)
+Prefer small dilation stacks; keep channels <= 128.
+
+## Human Guidance (high priority)
+Keep the receptive field under 1000 samples.
+
+## ⚠ Previous Implementation Failed Validation — Fix This
+
+Your previous implementation of this same proposal was rejected by the
+validator with the following error. Address it explicitly in your reasoning
+before committing to code:
+
+Previous attempt failed: fixture shape mismatch [B, 255, T].
+
+Do NOT reproduce the same mistake. Your reasoning must explain how you will
+fix each issue raised above.

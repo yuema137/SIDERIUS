@@ -924,13 +924,19 @@ this contract is not a sandbox.
 The implementor, code validator and proposer share the native training
 appendix boundary. Supported boundaries are `native_training.appendix`, `proposal.template`,
 `interpretation.model_system`, `interpretation.model_user`, `interpretation.score_value`,
-`tuner.execution_provenance`, `tuner.training_dynamics`, and the
+`tuner.execution_provenance`, `tuner.training_dynamics`, `implementor.reference_code`, and the
 `data_analysis.` stages `skill_selection`, `analysis_plan`,
 `generated_program`, `report_synthesis`, `generated_skill_promotion`,
 and `structured_output_repair`. See the decorated functions for exact typed
 input signatures. An undeclared boundary raises when reached; it never silently
 uses another historical profile. These boundaries are not a universal replacement
 for every message produced by every node.
+
+The `implementor.reference_code` boundary renders the ancestor-source section of
+the implementor's reasoning, code and repair user prompts; its `stage` argument
+names the calling request. It is entered only when `reference_code` is nonempty,
+so a profile that does not declare it raises only for a proposal with ancestor
+source. See the [implementor contract](../../src/nodes/ml_model_implementor/ml_model_implementor.md#ancestor-reference-source).
 
 The `tuner.training_dynamics` boundary renders the shared diagnostic line used
 by planner, reflector and interpreter. Native rendering uses shortest round-trip decimal
