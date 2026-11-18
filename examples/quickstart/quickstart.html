@@ -297,9 +297,10 @@ from tools.candidate_prepare import (
     ReusableCandidatePreparationRequest,
     preflight_reusable_candidate,
 )
+from tools.workspace_sandbox.gpu import host_gpu_devices
 
 workflow_file = PROJECT / &quot;workflow.py&quot;
-gpus = tuple(sorted(str(p) for p in Path(&quot;/dev&quot;).glob(&quot;nvidia[0-9]*&quot;)))
+gpus = host_gpu_devices()  # this machine&#x27;s /dev/nvidia&lt;N&gt; GPUs; () without one
 prep_request = ReusableCandidatePreparationRequest(
     source_path=str(workflow_file),
     project_root=str(PROJECT),

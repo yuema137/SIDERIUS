@@ -120,3 +120,23 @@ def test_sys_is_added_only_when_the_host_has_it(tmp_path, monkeypatch):
     assert gpu.passthrough((Path("/dev/nvidia0"),)) == ((), CONTROL)
     monkeypatch.setattr(gpu, "SYSFS", tmp_path)
     assert gpu.passthrough((Path("/dev/nvidia0"),)) == ((tmp_path,), CONTROL)
+
+
+def test_host_gpu_devices_lists_only_gpu_nodes(monkeypatch):
+    """Defect: control nodes such as /dev/nvidia-uvm are written into a request's
+    candidate_devices; the node can be absent until first CUDA use, and admission then
+    refuses the run. Fails if anything but /dev/nvidia<N> character devices (no
+    symlinks) is returned, or if they are ordered as text (nvidia10 before nvidia2)
+    instead of by GPU number."""
+    names = [
+        "/dev/nvidia-uvm",
+        "/dev/nvidia0",
+        "/dev/nvidia10",
+        "/dev/nvidia2",
+        "/dev/nvidiactl",
+        "/dev/nvidia3",
+    ]
+    monkeypatch.setattr(gpu.glob, "glob", lambda _: names)
+    monkeypatch.setattr(gpu.Path, "is_char_device", lambda self: True)
+    monkeypatch.setattr(gpu.Path, "is_symlink", lambda self: str(self) == "/dev/nvidia3")
+    assert gpu.host_gpu_devices() == ("/dev/nvidia0", "/dev/nvidia2", "/dev/nvidia10")

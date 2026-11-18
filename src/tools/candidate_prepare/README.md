@@ -27,12 +27,20 @@ absent, have existing parents, and be separate from each other and all inputs.
      "candidate_timeout_seconds": 600.0,
      "task_read_only": ["/projects/my-task/package"],
      "candidate_network": true,
-     "candidate_devices": [],
+     "candidate_devices": ["/dev/nvidia0"],
      "candidate_environment_names": ["OPENAI_API_KEY"],
      "proposal_advice": "State the hypothesis clearly.",
      "implementation_advice": null,
      "validation_advice": null
    }
+   ```
+
+   `candidate_devices` gives the candidate this machine's GPUs. The candidate
+   trains a model, and training needs an NVIDIA GPU, so an empty list is
+   refused at launch. Print the right list for this machine with:
+
+   ```bash
+   .venv/bin/python -c "from tools.workspace_sandbox.gpu import host_gpu_devices; print(list(host_gpu_devices()))"
    ```
 
    Select environment names for the providers in your saved LLM configuration;
@@ -99,8 +107,9 @@ helps write your external project files; it does not use a different backend.
    Have your coding assistant or Python integration create
    `/projects/my-task/reusable-request.json` using the
    [request construction recipe](candidate-prepare-contract.md#reusable-request-recipe).
-   It records those choices and the selected source automatically. Advice stays
-   in `workflow.py`; credential values stay in the launch environment.
+   It records those choices, and fills in the selected source and this machine's
+   GPUs automatically. Advice stays in `workflow.py`; credential values stay in
+   the launch environment.
 3. Prepare without launching:
 
    ```bash

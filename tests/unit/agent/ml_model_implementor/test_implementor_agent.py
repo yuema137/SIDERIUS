@@ -874,3 +874,40 @@ def test_reference_boundary_is_profile_renderable_per_stage(inp, tmp_path):
         reasoning, code, repair = builders(_with_ancestor(inp))
     assert "HISTORICAL REFERENCE" in reasoning and _ANCESTOR_MARKER not in reasoning
     assert (code, repair) == absent[1:]
+
+
+# ---------------------------------------------------------------------------
+# Final failure keeps every repair attempt's error (#1538)
+# ---------------------------------------------------------------------------
+
+
+def test_exhausted_repairs_report_every_attempt_error(agent_with_mocks, inp, monkeypatch):
+    """The proposer learns why an implementation failed only from this
+    message. Fails on the #1538 defect (only the last error survived), if the
+    earlier errors lose their order, or if the headline stops leading with the
+    final error that existing consumers match."""
+    errors = iter(["E1 source not supplied", "E2 name 'helper' is not defined", "E3 final"])
+    monkeypatch.setattr(agent_with_mocks, "_validate_code", lambda *_: next(errors))
+    with pytest.raises(ValueError) as raised:
+        agent_with_mocks.run(inp)
+    message = str(raised.value)
+    assert message.startswith(
+        "Code generation failed after 3 attempts for 'gated_dilated_tcn': E3 final\n\n"
+        "Earlier attempt errors (oldest first):\n"
+        "  Attempt 1: E1 source not supplied\n"
+        "  Attempt 2: E2 name 'helper' is not defined\n\n"
+        "The assembled plugin source:\n"
+    )
+
+
+def test_single_attempt_failure_message_is_unchanged(agent_with_mocks, inp, monkeypatch):
+    """With no repair attempt there is no history; the message must keep the
+    pre-#1538 bytes so proposals without repairs feed identical feedback."""
+    inp.max_retries = 0
+    monkeypatch.setattr(agent_with_mocks, "_validate_code", lambda *_: "E only")
+    with pytest.raises(ValueError) as raised:
+        agent_with_mocks.run(inp)
+    assert str(raised.value).startswith(
+        "Code generation failed after 1 attempts for 'gated_dilated_tcn': E only\n\n"
+        "The assembled plugin source:\n"
+    )
