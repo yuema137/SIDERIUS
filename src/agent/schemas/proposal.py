@@ -1102,10 +1102,11 @@ class ProposalInput(BaseModel):
     )
     previous_failures: list[str] = Field(
         default_factory=list,
-        description="Validation error messages from previous failed attempts in this "
-        "iteration. The workflow populates this when retrying after a "
-        "validation failure so the proposal agent avoids the same mistakes. "
-        "Each entry is the error_message from a ValidatorOutput.",
+        description="Failure feedback from earlier proposal attempts. The native workflow "
+        "appends one entry per failed proposal attempt: the final validator rejection, "
+        "implementor or other node error, followed by every earlier implementation "
+        "attempt's rejection or repair error (issue #1538), plus tuner physical-rejection "
+        "summaries. Rendered verbatim under Previous Failed Proposals.",
     )
     recent_gate_exhaustions: list[GateExhaustionInfo] = Field(
         default_factory=list,

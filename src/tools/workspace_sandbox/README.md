@@ -155,6 +155,17 @@ unchanged. A profile that already lists `/sys` (or a `/sys` subdirectory) in
 `/dev/nvidia<N>` that this machine does not have is refused before launch with
 `GPU device /dev/nvidia<N> is not present on this machine`.
 
+To list just this machine's GPUs, call `host_gpu_devices()` from
+[`gpu.py`](gpu.py). It returns the `/dev/nvidia<N>` nodes (no control nodes,
+since the sandbox adds those), or an empty tuple on a machine without a GPU:
+
+```bash
+.venv/bin/python -c "from tools.workspace_sandbox.gpu import host_gpu_devices; print(host_gpu_devices())"
+```
+
+The console's `add-task` and the preparation request recipes use it, so a
+request written on a GPU machine passes its GPUs without anyone typing paths.
+
 The sandbox applies no seccomp filter. The NVIDIA driver uses `memfd_create`
 during CUDA initialization, so a seccomp profile added later must allow it.
 
