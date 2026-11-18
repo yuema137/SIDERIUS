@@ -545,8 +545,10 @@ Notes:
 - Named absence (`none: true`) is accepted by these optional sections, with the
   same effect as omitting the section:
   - `proposal_blocks`, `implementor_blocks`, `interpretation_blocks`: renders no
-    task blocks. When `none: true` is present the section's `config` is not
-    read.
+    task blocks. The section must be exactly `{none: true}` or exactly
+    `{config: <path>}` (the same rule as `judge_blocks`): `none` beside
+    `config` (whatever its value), `none` with a value other than `true`, and
+    any other key are refused with `TaskCompositionError` naming the section.
   - `model_plugins`, `loss_plugins`: binds no plugin root. `none: true` beside
     `dir` is refused.
   - `objective`: no task override; the planner's choice governs. `none: true`
