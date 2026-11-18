@@ -635,6 +635,30 @@ def test_public_example_writes_portable_matching_inputs(tmp_path):
     }
 
 
+def test_public_training_example_passes_this_hosts_gpus(tmp_path, monkeypatch):
+    """Defect #1521: the shipped four-stage example wrote ``devices=()``, so the request it
+    generates for a training workflow carried no GPU and launch refused it (no CPU mode).
+    Fails if the written request's devices are not the host GPU nodes reported by
+    ``tools.workspace_sandbox.gpu.host_gpu_devices``."""
+    import importlib.util
+
+    from tools.candidate_worker.models import CandidateRunRequest
+
+    repo = Path(__file__).resolve().parents[4]
+    spec = importlib.util.spec_from_file_location(
+        "native_training_example", repo / "examples/workflow_declarations/native_training.py"
+    )
+    assert spec is not None and spec.loader is not None
+    example = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(example)
+    monkeypatch.setattr(example, "host_gpu_devices", lambda: ("/dev/nvidia0", "/dev/nvidia1"))
+    data = tmp_path / "data"
+    data.mkdir()
+    path = example.write_example(tmp_path / "inputs", data, tmp_path / "workspace")
+    request = CandidateRunRequest.model_validate_json(path.read_bytes())
+    assert request.devices == ("/dev/nvidia0", "/dev/nvidia1")
+
+
 def test_real_child_process_uses_captured_training_request(training_request, monkeypatch):
     """A fresh interpreter must dispatch the serialized request and preserve tuner budgets."""
     import subprocess

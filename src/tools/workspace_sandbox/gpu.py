@@ -8,10 +8,16 @@ mounts sysfs read-only; Apptainer binds host ``/sys``), so a driver that reads o
 sysfs metadata keeps working. It also passes the NVIDIA control nodes the host
 has. Nothing here is user configuration and a profile without a GPU node gets
 no passthrough at all.
+
+:func:`host_gpu_devices` is the one detector of this host's GPU nodes for a
+request's device list (``candidate_devices``): console ``add-task`` and the
+documented request recipes call it, so a copied recipe passes the GPUs this
+machine has, and none on a machine without one.
 """
 
 from __future__ import annotations
 
+import glob
 import re
 from collections.abc import Iterable
 from pathlib import Path
@@ -34,6 +40,22 @@ def declares_gpu(devices: Iterable[Path]) -> bool:
 
 def _host_node(path: Path) -> bool:
     return path.is_char_device() and not path.is_symlink()
+
+
+def host_gpu_devices() -> tuple[str, ...]:
+    """This host's GPU device nodes (``/dev/nvidia<N>`` character devices), by number.
+
+    Empty on a machine without an NVIDIA GPU node. Control nodes (``nvidiactl``,
+    ``nvidia-uvm``, ...) are not listed: :func:`passthrough` adds the ones present
+    at launch, and listing them would refuse a run whenever a lazily created node
+    is absent.
+    """
+    found = [
+        name
+        for name in glob.glob("/dev/nvidia*")
+        if GPU_NODE.fullmatch(name) and _host_node(Path(name))
+    ]
+    return tuple(sorted(found, key=lambda name: int(name.removeprefix("/dev/nvidia"))))
 
 
 def control_nodes() -> tuple[Path, ...]:

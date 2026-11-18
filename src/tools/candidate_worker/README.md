@@ -65,6 +65,7 @@ from pathlib import Path
 
 from tools.candidate_worker import CandidateRunRequest
 from tools.workflow_preview.models import WorkflowPreview, WorkflowPreviewRequest
+from tools.workspace_sandbox.gpu import host_gpu_devices
 
 project = Path("/projects/my-task")  # Your external project, outside SIDERIUS.
 preview_request = WorkflowPreviewRequest.model_validate_json(
@@ -80,7 +81,7 @@ request = CandidateRunRequest(
     run_name="candidate",
     timeout_seconds=600.0,
     network=True,  # Explicit permission for the configured remote providers.
-    devices=(),
+    devices=host_gpu_devices(),  # This machine's GPUs; training needs one.
     read_only=(
         reviewed.data_root,
         *(item.path for item in reviewed.files),
@@ -157,7 +158,8 @@ write inputs into an external directory separate from both data and workspace:
 
 This writes `settings.json`, `seed.json`, `storage.json`, `workflow.json`,
 `llm.json` and `candidate_request.json`; it makes no provider calls and starts
-no training. Edit the example's typed settings and seed together before
+no training. Its `devices` are this machine's GPUs, so generate it on the
+machine that will run it. Edit the example's typed settings and seed together before
 generating a new request. In particular, an explicit null budget in an existing
 seed cannot be replaced by a non-null settings budget. The example declares
 two trial minutes and five formal minutes, diagnostic results and explicit
