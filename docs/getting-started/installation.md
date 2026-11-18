@@ -84,8 +84,9 @@ Ubuntu, and follow this page inside that distribution.
 Why GPUs differ under WSL2: CUDA does not see `/dev/nvidia0`, `/dev/nvidia1`, ...
 there. WSL2 exposes every GPU through one device node, `/dev/dxg`, and mounts the
 Windows driver's CUDA libraries (`libcuda`, `libdxcore`, NVML, `nvidia-smi`) under
-`/usr/lib/wsl`. SIDERIUS recognizes `/dev/dxg` as a GPU device node
-([`core/gpu_devices.py`](../../src/core/gpu_devices.py), provider `wsl2`):
+`/usr/lib/wsl`. SIDERIUS recognizes `/dev/dxg` as a GPU device node (its `wsl2`
+GPU device provider; the sandbox's [GPU tasks](../../src/tools/workspace_sandbox/README.md#gpu-tasks)
+section names the owning module):
 
 - `add-task` writes `/dev/dxg` into the task's `candidate_devices`, printing
   `candidate_devices: /dev/dxg (WSL2 GPU found on this machine; ...)`;

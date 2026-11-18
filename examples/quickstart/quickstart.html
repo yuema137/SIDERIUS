@@ -300,7 +300,7 @@ from tools.candidate_prepare import (
 from tools.workspace_sandbox.gpu import host_gpu_devices
 
 workflow_file = PROJECT / &quot;workflow.py&quot;
-gpus = host_gpu_devices()  # this machine&#x27;s /dev/nvidia&lt;N&gt; GPUs; () without one
+gpus = host_gpu_devices()  # GPU nodes: /dev/nvidia&lt;N&gt; (or /dev/dxg on WSL2); () without one
 prep_request = ReusableCandidatePreparationRequest(
     source_path=str(workflow_file),
     project_root=str(PROJECT),
