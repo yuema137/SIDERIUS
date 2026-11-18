@@ -66,6 +66,9 @@ def reference_code_section(reference_code: Mapping[str, str], stage: ReferenceSt
 
     Prompt builders call this, never the boundary directly, so an absent
     ancestor neither adds bytes nor requires a profile to declare the boundary.
+    This is the single ordering owner: entries are sorted by ``model_type``
+    before the boundary, so native and profile renderings of several ancestors
+    are reproducible across processes whatever the mapping's insertion order.
     """
     if not reference_code:
         return ""
@@ -78,15 +81,14 @@ def render_reference_code_section(reference_code: dict[str, str], stage: Referen
 
     ``stage`` names the calling request (reasoning, code or repair): the native
     text does not depend on it, but a profile may render each one differently.
-    Entries are rendered in sorted ``model_type`` order, independent of the
-    mapping's insertion order, so prompts with several ancestors are
-    reproducible across processes; each source is embedded whole in a fenced
-    block under its ``model_type`` heading. The result carries no leading or trailing blank line, so each
-    prompt builder owns its own separators.
+    Entries render in the order received (``reference_code_section`` sorts
+    them); each source is embedded whole in a fenced block under its
+    ``model_type`` heading. The result carries no leading or trailing blank
+    line, so each prompt builder owns its own separators.
     """
     del stage  # The native rendering is stage-independent by design (#1530).
     lines = list(_REFERENCE_PREAMBLE)
-    for model_type, source in sorted(reference_code.items()):
+    for model_type, source in reference_code.items():
         lines += [
             f"### {model_type} (ancestor source)",
             "```python",

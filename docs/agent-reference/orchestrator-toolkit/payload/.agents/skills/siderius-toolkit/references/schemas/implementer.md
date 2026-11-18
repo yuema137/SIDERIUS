@@ -4,6 +4,7 @@ Reference snapshot: SIDERIUS `1c68bc81d7e44bbdc6e03a445a8422c3f77f45ff`. Derived
 Pydantic `model_fields`; the installed classes remain the execution authority.
 The `vram_budget_gb` row was synced by hand to the landed annotation after that
 snapshot (issue #1044).
+The `reference_code` row was synced by hand (#1530).
 Defaults below describe the generic API, not permission to override the
 frozen task, information treatment, budget, or candidate-selection contract.
 Custom validators can impose cross-field requirements not expressible by a
