@@ -99,6 +99,7 @@ A half-composed run is fatal (`CompositionNotBoundError`), never degraded.
 | metric implementation is neither `EvaluationMetric` nor `CandidateEvaluationMetric`, or rewrites the declared id | `TaskCompositionError` |
 | duplicate secondary id, or collision with the primary | `TaskCompositionError` |
 | `task_health` declaring both `none: true` and `config:` | `TaskCompositionError` |
+| `proposal_blocks`, `implementor_blocks` or `interpretation_blocks` declaring `none` beside `config:`, `none` other than `true`, or any other key | `TaskCompositionError` naming the section |
 | composed run without `--data_dir` | `CompositionDataRootMissing`, before any LLM/GPU work |
 | bindings not actually live | `CompositionNotBoundError` |
 

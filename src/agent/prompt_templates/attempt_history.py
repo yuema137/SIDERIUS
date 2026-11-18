@@ -1,23 +1,31 @@
-"""Earlier-attempt history carried by a final generation or implementation failure.
+"""Earlier-attempt history carried by a failure or a retry request.
 
-A node that retries (the implementor's repair loop, the workflow's
-implement-validate loop) used to report only its last error. That string is
-what reaches the proposer's ``previous_failures``, so the proposer lost the
-cause an earlier attempt exposed and proposed the same thing again (issue
-#1538, user report #1530). Callers keep the final error where it was and
-append the block rendered here.
+A node that retries used to report only its last error. Two consumers lost the
+cause an earlier attempt exposed:
+
+* the proposer's ``previous_failures`` received only the final implementor or
+  validator error, so it proposed the same thing again (issue #1538, user
+  report #1530);
+* each retry request (the next implementation attempt's validator feedback,
+  the proposer's comparison and causal-reasoning correction requests) showed
+  only the latest rejection, so a retry could oscillate back to a mistake an
+  earlier attempt was already rejected for (issue #1553).
+
+Callers keep the latest error where it was and append the block rendered here.
 
 Bound: one line per distinct earlier error string, so a history never exceeds
-the caller's configured attempt count (``max_retries + 1`` or
-``max_impl_attempts``), and each line is the exact error string an earlier
-retry already carried to its own LLM request. No character cap is applied: a
-cap would be a guess and could cut the very cause this block exists to carry.
-Rendering is a pure function of the ordered history, so it is deterministic.
+the caller's configured attempt count (``max_retries + 1``,
+``max_impl_attempts`` or a stage's correction budget), and each line is the
+exact error string an earlier attempt already carried to its own LLM request.
+No character cap is applied: a cap would be a guess and could cut the very
+cause this block exists to carry. Rendering is a pure function of the ordered
+history, so it is deterministic.
 
 ``proposal.failure_attempt_history`` is a published prompt boundary. Callers
-enter it only when an earlier attempt exists, so a single-attempt failure is
-byte-identical to the pre-#1538 text under native and historical profiles; an
-experiment-owned profile restores the pre-#1538 text by returning ``""``.
+enter it only when an earlier attempt exists, so a single-attempt failure or a
+first retry is byte-identical to the pre-#1538 / pre-#1553 text under native and
+historical profiles; an experiment-owned profile restores that text everywhere
+by returning ``""``.
 """
 
 from __future__ import annotations
