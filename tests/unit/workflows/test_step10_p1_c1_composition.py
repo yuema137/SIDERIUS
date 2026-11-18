@@ -393,6 +393,42 @@ class TestFailClosed:
         with pytest.raises(TaskCompositionError, match="either has a Health family"):
             compose_run_task_bindings(str(manifest))
 
+    @pytest.mark.parametrize(
+        ("section", "match"),
+        [
+            ("none: true\n  config: declared/interpretation.yaml", "both 'none' and a 'config'"),
+            ("none: false\n  config: declared/interpretation.yaml", "both 'none' and a 'config'"),
+            ("none: false", "'none' must be true"),
+            ("configs: declared/interpretation.yaml", "unknown key"),
+        ],
+        ids=["none-beside-config", "none-false-beside-config", "none-false-alone", "misspelt"],
+    )
+    @pytest.mark.parametrize(
+        "family", ["interpretation_blocks", "proposal_blocks", "implementor_blocks"]
+    )
+    def test_a_contradictory_blocks_section_refuses(self, tmp_path, family, section, match):
+        """#1515. `none: true` beside `config` used to return no blocks and
+        drop the config silently, and a misspelt key was ignored the same way:
+        the author got no error and no task science in the prompts. Each of
+        these must refuse at composition instead."""
+        body = _VALID_BODY.replace(
+            "interpretation_blocks:\n  config: declared/interpretation.yaml\n", ""
+        )
+        manifest = _write_manifest(tmp_path, f"{body}\n{family}:\n  {section}\n")
+        with pytest.raises(TaskCompositionError, match=match):
+            compose_run_task_bindings(str(manifest))
+
+    @pytest.mark.parametrize(
+        "family", ["interpretation_blocks", "proposal_blocks", "implementor_blocks"]
+    )
+    def test_a_blocks_section_declaring_none_alone_composes_to_no_blocks(self, tmp_path, family):
+        """The named absence stays legal: the refusal above must not catch it."""
+        body = _VALID_BODY.replace(
+            "interpretation_blocks:\n  config: declared/interpretation.yaml\n", ""
+        )
+        manifest = _write_manifest(tmp_path, f"{body}\n{family}:\n  none: true\n")
+        assert getattr(compose_run_task_bindings(str(manifest)), family) is None
+
     def test_an_empty_task_description_refuses(self, tmp_path):
         manifest = _write_manifest(tmp_path, _VALID_BODY)
         config = manifest.parent / "declared" / "task_config.yaml"
