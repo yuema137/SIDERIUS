@@ -69,6 +69,17 @@ reads it (CLAUDE.md binding rule).
   waits for a top-up and the chain resumes); timeouts and connection errors
   carry their own **bounded** budget; every other 4xx (bad key, unknown
   model) is **raised immediately** — it will not heal on retry.
+- **OpenAI background completion windows** (opt-in per route via
+  `NodeLLMConfig.openai_background`): submission stays inside the retry owner
+  (unbounded 429 unchanged); polling runs after it and never resubmits an
+  accepted request. The wait is bounded by the route's explicit
+  `max_wait_seconds`, clipped by any visible execution deadline; a visible
+  deadline shorter than the window refuses before submission. A submission
+  ledger row records the response id; token counts stay provider-measured and
+  the row records window and requested/served tier as pricing evidence. A
+  SIGTERM/SIGKILL'd process cannot cancel its accepted response, which keeps
+  running and billing server-side. Exact semantics:
+  [transport contract](llm_transport/transport-contract.md#openai-background-completion-windows).
 - **Prompt byte-surfaces are pinned.** The planner/reflector prompt bodies
   are guarded by exact renders in tests; a template edit is a semantic change
   with its own gate obligations, not a copyedit.
@@ -122,6 +133,8 @@ checkout.
 | `ValueError: Unknown reflect_provider …` | a reflect route names a provider with no known defaults — supply `base_url`/`api_key` |
 | immediate raise on 4xx (e.g. HTTP 401) | wrong or revoked API key; the bridge does not retry it |
 | `[LLMBridge.…] N attempts timed out …; raising` | the bounded timeout budget working — raise `request_timeout`, do not loop |
+| `BackgroundWindowRefused` | a visible execution deadline is shorter than the route's completion window; nothing was submitted |
+| `BackgroundWaitExpired` | an accepted background response missed its `max_wait_seconds` / deadline; it was cancelled and its usage recorded — raise the wait or use a shorter window |
 | schema `ValidationError` after a call | the model's payload failed the node contract; content-level retry policy applies before the node sees it |
 
 ## Files normally edited

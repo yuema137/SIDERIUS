@@ -40,6 +40,14 @@ literature block is omitted, its existing interpretation fallback now forwards
 an explicitly supplied interpretation retry limit too. No provider discovery,
 installation or effect is added during projection.
 
+## Background-mode polling
+
+For a route with OpenAI background mode, `max_retries` and the timeout budget
+govern only the create (submission) request. Status polls of an accepted
+response run after `_call_with_retry` returns and retry their own transient
+failures until the route's wait limit, so a poll failure never resubmits the
+request. See the [transport contract](llm_transport/transport-contract.md#openai-background-completion-windows).
+
 ## Defaults, reporting and scope
 
 Configurations without explicit retry fields retain previous bridge kwargs and

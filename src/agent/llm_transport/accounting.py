@@ -18,6 +18,10 @@ class AccountingCapture:
             return
         if isinstance(body.get("model"), str):
             self.raw["model"] = body["model"]
+        # The processing tier the provider reports having served (Responses API).
+        # Background-route pricing evidence; foreground metadata does not read it.
+        if isinstance(body.get("service_tier"), str):
+            self.raw["service_tier"] = body["service_tier"]
         if isinstance(body.get("usage"), dict):
             self.raw.setdefault("usage", {}).update(body["usage"])
 

@@ -39,6 +39,8 @@ def optional_client(
             )
         )
     )
+    if config.background is not None and provider != "openai":
+        raise ValueError("OpenAI background completion windows require provider 'openai'")
     if metadata:
         api_key = api_key if api_key is not None else os.getenv(metadata["api_key_env"])
         base_url = base_url or metadata["base_url"]
