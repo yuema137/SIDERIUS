@@ -31,6 +31,7 @@ from typing import Any
 
 from agent.llm_bridge import LLMBridge
 from agent.llm_settings import DEFAULT_LLM_PROVIDER
+from agent.llm_transport.contracts import PydanticTransportConfig
 from agent.prompt_templates.constraints import append_constraint_disclosure
 from agent.prompt_templates.implementor.task_blocks import load_implementor_task_blocks
 from agent.prompt_templates.native_training import render_native_training_appendix
@@ -1738,6 +1739,7 @@ class MLModelImplementor:
         bridge_factory=None,
         capability_index_path: str | None = None,
         max_output_tokens: int | None = None,
+        transport: PydanticTransportConfig | None = None,
         probe_seed: SeedContext | None = None,
         **kwargs,
     ):
@@ -1751,6 +1753,7 @@ class MLModelImplementor:
             max_retries=max_retries,
             reasoning_effort=reasoning_effort,
             max_output_tokens=max_output_tokens,
+            transport=transport,
         )
         self.bridge = self._bridge_factory(**bridge_kwargs)
         # L4b — registry handle for custom-loss provenance writes. Tests pass

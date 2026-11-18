@@ -24,6 +24,7 @@ from pydantic import ValidationError
 from agent.cache_consolidator import consolidate
 from agent.llm_bridge import LLMBridge
 from agent.llm_settings import DEFAULT_LLM_PROVIDER
+from agent.llm_transport.contracts import PydanticTransportConfig
 from agent.prompt_templates.constraints import append_constraint_disclosure
 from agent.prompt_templates.interpretation.rendering import (
     DEDUP_SYSTEM_PROMPT,
@@ -206,6 +207,7 @@ class ResultInterpretationAgent:
         reasoning_effort: str | None = INTERPRET.reasoning_effort,
         bridge_factory=None,
         max_output_tokens: int | None = None,
+        transport: PydanticTransportConfig | None = None,
         **kwargs,
     ):
         self._bridge_factory = bridge_factory or LLMBridge
@@ -217,6 +219,7 @@ class ResultInterpretationAgent:
             max_retries=max_retries,
             reasoning_effort=reasoning_effort,
             max_output_tokens=max_output_tokens,
+            transport=transport,
         )
         self.bridge = self._bridge_factory(**bridge_kwargs)
 

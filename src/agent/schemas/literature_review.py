@@ -20,6 +20,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from agent.llm_transport.contracts import PydanticTransportConfig
 from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.external_agents import ExternalAgentOutput
 from agent.schemas.llm_retry import RetryPolicy
@@ -529,6 +530,16 @@ class LiteratureReviewInput(BaseModel):
         default=None,
         exclude_if=lambda value: value is None,
         description="Explicit search retry limit; omitted inherits the main limit, a policy with None is unbounded.",
+    )
+    llm_transport: PydanticTransportConfig | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Main-bridge transport carrier (e.g. OpenAI background mode); absent = default client.",
+    )
+    search_llm_transport: PydanticTransportConfig | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Search-bridge transport carrier; never inherited from the main bridge's.",
     )
     search_llm_provider: str | None = Field(
         default=None,

@@ -72,8 +72,16 @@ def _tuner_routes(config: WorkflowLLMConfig, state: RouteApplicability) -> list[
         reflect_max_output_tokens=options.get("reflect_max_output_tokens"),
         reflect_reasoning_effort=options.get("reflect_reasoning_effort"),
         reflect_retry_policy=options.get("reflect_retry_policy"),
+        transport=options.get("transport"),
+        reflect_transport=options.get("reflect_transport"),
     )
     planner = _route("tune.planner", kwargs, state)
+    # Mirrors LLMBridge: an own reflector transport, or a background planner
+    # transport, gives the reflector its own client.
+    planner_transport = kwargs.get("transport")
+    shares_planner_client = "reflect_transport" not in kwargs and (
+        planner_transport is None or planner_transport.background is None
+    )
     main = resolve_main_transport(
         provider=kwargs["provider"],
         model_id=kwargs["model_id"],
@@ -102,7 +110,9 @@ def _tuner_routes(config: WorkflowLLMConfig, state: RouteApplicability) -> list[
             request_timeout=main.request_timeout,
             timeout_retries=main.timeout_retries,
         ),
-        shares_client_with=planner.name if reflect.reuse_main_client else None,
+        shares_client_with=(
+            planner.name if reflect.reuse_main_client and shares_planner_client else None
+        ),
     )
     return [planner, reflector]
 
@@ -132,6 +142,8 @@ def _literature_routes(config: WorkflowLLMConfig, state: RouteApplicability) -> 
         search_reasoning_effort=options.get("search_llm_reasoning_effort"),
         max_retries=options.get("llm_max_retries"),
         search_retry_policy=options.get("search_llm_retry_policy"),
+        transport=options.get("llm_transport"),
+        search_transport=options.get("search_llm_transport"),
     )
     main = _route("lit_review.main", arguments.main, state)
     search = _route("lit_review.search", arguments.search or arguments.main, state)
@@ -176,6 +188,7 @@ def node_llm_routes(
         reasoning_effort=options.get("reasoning_effort", defaults.reasoning_effort),
         max_output_tokens=options.get("max_output_tokens"),
         omit_unset_retries=role == "data_analysis",
+        transport=options.get("transport"),
     )
     return [_route(role, kwargs, state)]
 
@@ -190,6 +203,7 @@ def _proposer_routes(config: WorkflowLLMConfig, state: RouteApplicability) -> li
             max_retries=options.get("max_retries", PROPOSE.max_retries),
             reasoning_effort=options.get("reasoning_effort", PROPOSE.reasoning_effort),
             max_output_tokens=options.get("max_output_tokens"),
+            transport=options.get("transport"),
         ),
         options,
     )

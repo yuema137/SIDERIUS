@@ -7,6 +7,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent.llm_transport.contracts import PydanticTransportConfig
+
 
 class ProposerRoute(BaseModel):
     """All bridge settings that can differ between proposal stages."""
@@ -20,12 +22,18 @@ class ProposerRoute(BaseModel):
         default=None, gt=0, exclude_if=lambda value: value is None
     )
     max_retries: int | None
+    transport: PydanticTransportConfig | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     def bridge_kwargs(self) -> dict[str, Any]:
         # Preserve the bridge's existing omitted-effort constructor contract.
-        values = self.model_dump()
+        values = self.model_dump(exclude={"transport"})
         if self.reasoning_effort is None:
             values.pop("reasoning_effort")
+        if self.transport is not None:
+            # The bridge receives the typed carrier, not its serialized form.
+            values["transport"] = self.transport
         return values
 
 

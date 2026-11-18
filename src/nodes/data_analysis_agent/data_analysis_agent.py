@@ -34,6 +34,7 @@ from agent.data_analysis.structured_output import (
     generate_validated,
 )
 from agent.llm_bridge import LLMBridge
+from agent.llm_transport.contracts import PydanticTransportConfig
 from agent.prompt_templates.data_analysis import (
     render_analysis_plan_prompt,
     render_generated_skill_promotion_prompt,
@@ -126,6 +127,7 @@ class DataAnalysisAgent:
         reasoning_effort: str | None = ANALYZE.reasoning_effort,
         bridge_factory: Callable[..., object] | None = None,
         max_output_tokens: int | None = None,
+        transport: PydanticTransportConfig | None = None,
         historical_model_inference_capability: HistoricalModelInferenceCapability | None = None,
         run_seed: int | None = None,
         analysis_iteration: int | None = None,
@@ -142,6 +144,7 @@ class DataAnalysisAgent:
         self._max_retries = max_retries
         self._reasoning_effort = reasoning_effort
         self._max_output_tokens = max_output_tokens
+        self._transport = transport
         self._bridge_factory = bridge_factory or LLMBridge
         self._historical_inference_capability = historical_model_inference_capability
 
@@ -153,6 +156,7 @@ class DataAnalysisAgent:
             reasoning_effort=self._reasoning_effort,
             max_output_tokens=self._max_output_tokens,
             omit_unset_retries=True,
+            transport=self._transport,
         )
         return self._bridge_factory(**kwargs)
 

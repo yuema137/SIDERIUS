@@ -128,9 +128,12 @@ def test_shared_proposer_client_does_not_assume_comparison_runs_first(tmp_path):
     assert routes["propose.reasoning"].shares_client_with is None
 
 
+@pytest.mark.parametrize("planner_background", [False, True])
 @pytest.mark.parametrize("planner_retries", [None, 0, 6])
 @pytest.mark.parametrize("reflect_provider", ["openai", "gemini"])
-def test_actual_workflow_tuner_forwarding_and_protocol(tmp_path, planner_retries, reflect_provider):
+def test_actual_workflow_tuner_forwarding_and_protocol(
+    tmp_path, planner_retries, reflect_provider, planner_background
+):
     """Evaluate real forwarding expressions, then run the real typed protocol.
 
     This isolates the LLM edge; it does not claim to run a workflow or task.
@@ -153,6 +156,11 @@ def test_actual_workflow_tuner_forwarding_and_protocol(tmp_path, planner_retries
             "reflector": {"provider": reflect_provider, "model_id": "reflector", "max_retries": 19},
         }
     }
+    if planner_background:
+        payload["tune"]["planner"]["openai_background"] = {
+            "completion_window": "2h",
+            "max_wait_seconds": 9000,
+        }
     options = resolve_standard_tuner_llm_options(
         WorkflowLLMConfig.model_validate(payload).get("tune")
     )
@@ -176,6 +184,8 @@ def test_actual_workflow_tuner_forwarding_and_protocol(tmp_path, planner_retries
         "reasoning_effort",
         "reflect_reasoning_effort",
         "reflect_retry_policy",
+        "transport",
+        "reflect_transport",
     }
     forwarded = {
         keyword.arg: eval(
@@ -219,8 +229,11 @@ def test_actual_workflow_tuner_forwarding_and_protocol(tmp_path, planner_retries
     assert reflector.max_retries == 19
     assert reflector.model_id == "reflector"
     assert reflector.reasoning_effort == ("high" if reflect_provider == "openai" else None)
+    assert (actual.transport is not None) is planner_background
+    assert actual.reflect_transport is None
+    # A background planner never lends its client to the reflector.
     assert routes["tune.reflector"].shares_client_with == (
-        "tune.planner" if reflect_provider == "openai" else None
+        "tune.planner" if reflect_provider == "openai" and not planner_background else None
     )
 
 
