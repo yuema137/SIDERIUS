@@ -270,8 +270,8 @@ The CLI reads `{workspace}/run_output_{run_name}.json` (the upstream tuning agen
 | `--workspace` | `str` | `./siderius_workspace` | Root directory for reading the upstream tuning agent's `run_output_{run_name}.json` and writing `interpretation_{run_name}.json`. |
 | `--run_name` | `str` | `v1` | Filename suffix shared with the upstream run. |
 | `--model_type` | `str` | required | Model architecture (e.g. `punet`, `wavenet`, `fcnet`). |
-| `--provider` | `str` (`gemini` \| `openai`) | `gemini` | LLM provider for the per-model + synthesis + dedup calls. |
-| `--model_id` | `str` | `gemini-3.1-flash-lite-preview` | Specific model id passed to the provider. |
+| `--provider` | `str` (`gemini` \| `openai`) | `DEFAULT_LLM_PROVIDER` (`openai`) | LLM provider for the per-model + synthesis + dedup calls. |
+| `--model_id` | `str` | `None` | Specific model id passed to the provider. `None` selects the provider's default model (`default_model_for_provider`). |
 | `--required_gate_ids` | zero or more `str` | omitted (`None`) | Caller-resolved scientific gate roster; omitted means unknown, explicitly no IDs means no required gates. |
 
 ## Python API usage

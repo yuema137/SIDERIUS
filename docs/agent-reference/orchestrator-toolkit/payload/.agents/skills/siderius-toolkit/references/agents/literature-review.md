@@ -17,7 +17,7 @@ Supply typed interpretation evidence, task description, storage and run name; se
 ## Existing entrypoints and parameters
 
 Python import: `nodes.ml_literature_review.ml_literature_review.MLLiteratureReviewAgent`.
-Native constructor at reference revision `1c68bc81`:
+Native constructor at revision `5ccb436f` (v1.1.0):
 
 ```text
 MLLiteratureReviewAgent(bridge_factory=None, *, root_cache_dir: str)
