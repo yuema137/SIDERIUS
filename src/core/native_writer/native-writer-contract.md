@@ -56,7 +56,11 @@ and host `inspect_writer` therefore keep seeing the one lock inode. What they do
 not protect: sandboxed code can write to the empty lock file or chmod it. That
 stays within the same-uid trust boundary above; a chmod only makes a later
 `WriterState` use refuse with `unsafe_writer_state` for that run. The directory's
-records remain readable inside the sandbox; they carry no secret.
+records remain readable inside the sandbox; they carry no secret. Bubblewrap
+resolves the bind sources by path at spawn time, after `SandboxProfile` validation,
+so a same-uid host process could swap `writer.lock` between validation and spawn;
+that race is inside the same-uid trust boundary above (binding the whole directory
+had the same race).
 
 ## Supported ownership
 
