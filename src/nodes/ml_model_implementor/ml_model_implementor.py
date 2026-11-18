@@ -66,7 +66,15 @@ from core.record_encoding import decode_record, record_json
 from core.run_seed_lock import run_seed_argument
 from core.training_seeds import SeedContext
 from nodes.llm_settings import IMPLEMENT, node_bridge_kwargs
+from nodes.ml_model_implementor.reference_code import reference_code_section
 from workflows.task_config import render_forward_contract
+
+__all__ = [
+    "MLModelImplementor",
+    "main",
+]
+# The reference-section renderer is a new private module (#1530), not a moved API.
+_COMPATIBILITY_REEXPORTS: tuple[str, ...] = ()
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1386,41 +1394,10 @@ def _build_reasoning_prompt(inp: ImplementorInput) -> str:
             inp.human_advice,
         ]
 
-    # --- Reference code from ancestor models ---
-    if inp.reference_code:
-        lines += [
-            "",
-            "## Reference Code (from ancestor models — for ARCHITECTURAL INSPIRATION ONLY)",
-            "",
-            "⚠ WARNING — read before using the snippets below:",
-            "",
-            "1. Private helper classes (e.g. `CausalConv1d`, `WaveNetBlock`,",
-            "   `DoubleConv`, `PositionalEncoding`, `Down`, `Up`, etc.) shown below",
-            "   are NOT available in your plugin's runtime — they live in",
-            "   `ml_models/models_sandbox.py` which the plugin loader does not import.",
-            "   You MUST inline their logic using only the allowed primitives",
-            "   (torch, torch.nn, torch.nn.functional). Do NOT reference these helper",
-            "   class names in your `init_body` or `forward_body` — that produces",
-            "   `NameError` at smoke-test time.",
-            "",
-            "2. The `self.config = config` + `self.config.X` access pattern that some",
-            "   reference samples use is FORBIDDEN in your plugin. The `config` object",
-            "   is only in scope during `__init__`. Store every value you need as a",
-            "   plain attribute on `self` (e.g. `self.channels = config.channels`)",
-            "   inside `init_body`, then reference `self.channels` in `forward_body`.",
-            "",
-            "3. Use the references for architectural ideas (block structure, dilation",
-            "   schedules, skip-connection topology) — not as code to copy verbatim.",
-            "",
-        ]
-        for model_type, source in inp.reference_code.items():
-            lines += [
-                f"### {model_type} (reference implementation — inspiration only)",
-                "```python",
-                source,
-                "```",
-                "",
-            ]
+    # --- Reference code from ancestor models (#1530: one renderer for every call) ---
+    reference_section = reference_code_section(inp.reference_code, "reasoning")
+    if reference_section:
+        lines += ["", reference_section, ""]
 
     # --- Previous validation failure (retry context) ---
     if inp.previous_validation_failure:
@@ -1452,6 +1429,11 @@ def _build_code_prompt(reasoning: str, inp: ImplementorInput) -> str:
         advice_block = f"\n{probe_block}\n"
     if inp.human_advice:
         advice_block += f"\n## Implement Advice (high priority)\n{inp.human_advice}\n"
+    # #1530: the code call is a separate request; it needs its own copy of the
+    # ancestor source to carry over inherited components.
+    reference_section = reference_code_section(inp.reference_code, "code")
+    if reference_section:
+        advice_block += f"\n{reference_section}\n"
     return (
         f"## Your Reasoning\n\n{reasoning}\n\n"
         f"---\n\n"
@@ -1490,6 +1472,10 @@ def _build_repair_prompt(
         for attempt_num, past_error in error_history:
             history_lines.append(f"Attempt {attempt_num}: {past_error}")
         history_section = "\n".join(history_lines) + "\n\n"
+    # #1530: each repair is a separate request; a missing inherited helper can
+    # only be restored from the ancestor source. Rendered once, never per history entry.
+    reference_section = reference_code_section(inp.reference_code, "repair")
+    reference_block = f"{reference_section}\n\n" if reference_section else ""
 
     return (
         f"## Previous code (failed)\n\n"
@@ -1501,6 +1487,7 @@ def _build_repair_prompt(
         f"## Model name: `{inp.model_name}`\n"
         f"## Class name: `{_class_name(inp.model_name)}`\n"
         f"## Baseline model_config: {json.dumps(model_cfg)}\n\n"
+        f"{reference_block}"
         "Fix the current error without reintroducing any error from the history. "
         "Output the corrected JSON code sections."
     )
