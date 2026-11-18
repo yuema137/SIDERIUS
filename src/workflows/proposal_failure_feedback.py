@@ -1,16 +1,18 @@
-"""Proposer feedback for a proposal whose implementation attempts all failed (#1538).
+"""Rejection history of one proposal's implementation attempts (#1538, #1553).
 
 The native exploration loop gives each proposal up to ``max_impl_attempts``
 implement-validate attempts and then reports one ``previous_failures`` entry
 to the next proposal. That entry used to carry only the last validation
 rejection, or only the exception that ended the proposal, so earlier
-rejections that named the real cause never reached the proposer. These pure
-helpers build the entry from the recorded per-attempt validation failures;
-``run_workflow`` only records them and calls these helpers.
+rejections that named the real cause never reached the proposer. Likewise
+each implementation attempt saw only the latest rejection, so the implementor
+could oscillate between mistakes (#1553). These pure helpers build both texts
+from the recorded per-attempt validation failures; ``run_workflow`` only
+records them and calls these helpers.
 
 The earlier-attempt block, its bound and its prompt boundary are owned by
-``agent.prompt_templates.attempt_history``. A proposal with at most one
-recorded rejection produces exactly the pre-#1538 entry.
+``agent.prompt_templates.attempt_history``. With at most one recorded
+rejection both texts are exactly the pre-#1538 / pre-#1553 strings.
 """
 
 from __future__ import annotations
@@ -23,6 +25,13 @@ _HEADING = "Earlier implementation attempts for this proposal failed validation 
 _UNIT = "Implementation attempt"
 
 
+def _rejection_history(validation_failures: Sequence[tuple[int, str]]) -> str:
+    """The latest rejection followed by every earlier one; non-empty input only."""
+    *earlier, (_, latest) = validation_failures
+    block = earlier_attempts_block(earlier, latest, heading=_HEADING, unit=_UNIT)
+    return f"{latest}\n\n{block}" if block else latest
+
+
 def exhausted_validation_feedback(validation_failures: Sequence[tuple[int, str]]) -> str:
     """Entry for a proposal whose every implementation failed validation.
 
@@ -31,9 +40,21 @@ def exhausted_validation_feedback(validation_failures: Sequence[tuple[int, str]]
     """
     if not validation_failures:
         return "Unknown error"
-    *earlier, (_, final) = validation_failures
-    block = earlier_attempts_block(earlier, final, heading=_HEADING, unit=_UNIT)
-    return f"{final}\n\n{block}" if block else final
+    return _rejection_history(validation_failures)
+
+
+def next_attempt_validation_feedback(
+    validation_failures: Sequence[tuple[int, str]],
+) -> str | None:
+    """``previous_validation_failure`` for the proposal's next implementation (#1553).
+
+    ``None`` before any rejection. Otherwise the latest rejection leads, as
+    before, and every earlier rejection follows, so the implementor cannot
+    oscillate back to a mistake an earlier attempt was already rejected for.
+    """
+    if not validation_failures:
+        return None
+    return _rejection_history(validation_failures)
 
 
 def implementation_error_feedback(

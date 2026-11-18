@@ -182,6 +182,7 @@ from workflows.plugin_staging import stage_native_plugins
 from workflows.proposal_failure_feedback import (
     exhausted_validation_feedback,
     implementation_error_feedback,
+    next_attempt_validation_feedback,
 )
 from workflows.research_history import (
     acquire_iteration_order as _acquire_iteration_order,  # noqa: F401 — compatibility import
@@ -2709,7 +2710,9 @@ def run_workflow(
                         vram_budget_gb=bindings.active_vram_budget_gb,
                         human_advice=launch.human_advice_implement,
                         reference_code=ref_code,
-                        previous_validation_failure=previous_validation_failure,
+                        previous_validation_failure=next_attempt_validation_feedback(
+                            validation_failures
+                        ),
                     )
 
                     _impl_agent = MLModelImplementor(

@@ -270,3 +270,49 @@ def test_causal_corrections_share_one_budget_and_show_latest_bad_response(tmp_pa
     assert all(
         call.kwargs["label"] != "proposer.proposing" for call in bridge.generate.call_args_list
     )
+
+
+_EARLIER = "Earlier responses also failed validation (oldest first):"
+
+
+def test_second_comparison_correction_and_exhaustion_carry_earlier_errors(tmp_path):
+    """#1553: each correction is a fresh request; without the earlier errors a
+    correction can reintroduce a mistake response 1 was rejected for. Fails if
+    the second correction or the final RuntimeError shows only the latest
+    error, or if the first correction gains any block."""
+    bad_links = deepcopy(FAKE_COMPARISON_OUTPUT)
+    bad_links["proposed_vocab_links"] = [
+        {"feature": "conv", "capability": "context", "evidence": []}
+    ]
+    bad_candidates = deepcopy(FAKE_COMPARISON_OUTPUT)
+    bad_candidates["proposed_vocab_candidates"] = [{"kind": "feature", "description": []}]
+    agent, bridge, inp = run_responses(tmp_path, [bad_links, bad_candidates, bad_candidates])
+    with pytest.raises(RuntimeError, match=r"Comparison stage.*2 correction retries") as raised:
+        agent.run(inp)
+    first, second = (call.args[1] for call in bridge.generate.call_args_list[1:3])
+    assert _EARLIER not in first
+    history = second[second.index(_EARLIER) :]
+    assert "Response 1: " in history and "proposed_vocab_links" in history
+    assert f"{_EARLIER}\n  Response 1: " in str(raised.value)
+    assert "Response 2: same error as the final attempt" in str(raised.value)
+
+
+def test_second_causal_correction_carries_the_first_rejection(tmp_path):
+    """Same defect in the causal-owned correction loop: the second correction
+    must still name the first response's citation error after a different
+    (vocabulary) error replaced it."""
+    from .test_causal_stage_validation import MALFORMED_REASONING
+
+    bad_vocab = deepcopy(FAKE_REASONING_OUTPUT)
+    bad_vocab["proposed_vocab_candidates"] = [{"kind": "feature", "description": []}]
+    agent, bridge, inp = run_responses(
+        tmp_path, [FAKE_COMPARISON_OUTPUT, MALFORMED_REASONING, bad_vocab, bad_vocab]
+    )
+    with pytest.raises(
+        RuntimeError, match=r"Causal-reasoning stage.*2 correction retries"
+    ) as raised:
+        agent.run(inp)
+    first, second = (call.args[1] for call in bridge.generate.call_args_list[2:4])
+    assert _EARLIER not in first
+    assert f"{_EARLIER}\n  Response 1: inherited_components" in second
+    assert f"{_EARLIER}\n  Response 1: inherited_components" in str(raised.value)

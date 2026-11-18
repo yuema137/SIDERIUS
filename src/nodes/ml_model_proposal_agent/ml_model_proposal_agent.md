@@ -389,8 +389,16 @@ repair sees the latest invalid causal response, including one returned by an
 earlier correction. The existing causal-field correction prompt remains unchanged
 when that is the only failing contract.
 
-Exhaustion raises a stage-naming `RuntimeError` with field diagnostics before the
-proposing stage is called. Proposing retries still own only proposing-controlled
+From the second correction on, the comparison and causal correction requests
+append `Earlier responses also failed validation (oldest first):` after the
+current error, listing every earlier rejected response's error (response 1 is the
+stage's original output; identical errors share one line). Exhaustion raises a
+stage-naming `RuntimeError` with field diagnostics, followed by the same block,
+before the proposing stage is called (#1553). The block is rendered by
+`stage_validation.earlier_response_errors` through
+`agent.prompt_templates.attempt_history` (boundary
+`proposal.failure_attempt_history`); a first correction and its single-error
+exhaustion text are unchanged. Proposing retries still own only proposing-controlled
 errors; a new proposing response cannot replace the earlier stage's injected
 vocabulary. No accepted response gains an LLM call. Disabled, custom and text
 stages keep their existing behavior; legacy two-call mode does not enter this path.

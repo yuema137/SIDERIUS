@@ -942,11 +942,15 @@ so a profile that does not declare it raises only for a proposal with ancestor
 source. See the [implementor contract](../../src/nodes/ml_model_implementor/ml_model_implementor.md#ancestor-reference-source).
 
 The `proposal.failure_attempt_history` boundary renders the earlier-attempt
-block appended to a final failure message: the implementor's repair-exhaustion
-`ValueError` and the native loop's per-proposal `previous_failures` entry. It is
-entered only when an earlier attempt exists, so a single-attempt failure is
-byte-identical to the pre-#1538 text; a profile that returns `""` restores the
-pre-#1538 text for every failure. See `agent/prompt_templates/attempt_history.py`.
+block appended after the latest error in two kinds of text. Final failure
+messages (#1538): the implementor's repair-exhaustion `ValueError` and the
+native loop's per-proposal `previous_failures` entry. Retry requests (#1553):
+the next implementation attempt's `previous_validation_failure` and the
+proposer's comparison and causal-reasoning correction requests (and their
+final `RuntimeError`). It is entered only when an earlier attempt exists, so a
+single-attempt failure or first retry is byte-identical to the pre-#1538 /
+pre-#1553 text; a profile that returns `""` restores that text everywhere. See
+`agent/prompt_templates/attempt_history.py`.
 
 The `tuner.training_dynamics` boundary renders the shared diagnostic line used
 by planner, reflector and interpreter. Native rendering uses shortest round-trip decimal
