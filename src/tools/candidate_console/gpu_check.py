@@ -14,6 +14,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from core.gpu_devices import NVIDIA, declared_providers, gpu_node_examples
 from tools.workspace_sandbox.command import SandboxUnavailable
 from tools.workspace_sandbox.gpu import declares_gpu, passthrough
 from tools.workspace_sandbox.profile import SandboxProfile
@@ -25,7 +26,8 @@ from .models import ConsoleConfig, TaskChoice
 #: Wall-clock cap for one probe (PyTorch import plus CUDA initialization).
 PROBE_TIMEOUT_SECONDS = 120.0
 RESULT_FILE = "gpu-check.json"
-#: Created by the driver on first CUDA use; the sandbox can pass it but not create it.
+#: NVIDIA only: created by the driver on first CUDA use; the sandbox can pass it
+#: but not create it.
 UVM_NODE = Path("/dev/nvidia-uvm")
 UVM_NOTE = (
     "/dev/nvidia-uvm is missing on this host and the sandbox cannot create it; run "
@@ -85,9 +87,13 @@ def _check_task(task: TaskChoice) -> tuple[bool, str]:
         passed = ", ".join(str(p) for p in (*profile.devices, *extra_devices))
         print(
             f"Task {task.task_id}: sandbox passes {passed}"
-            + (" and read-only /sys" if extra_read_only else "")
+            + (
+                " and read-only " + ", ".join(str(p) for p in extra_read_only)
+                if extra_read_only
+                else ""
+            )
         )
-        if not UVM_NODE.is_char_device():
+        if NVIDIA in declared_providers(profile.devices) and not UVM_NODE.is_char_device():
             print(f"Task {task.task_id}: note: {UVM_NOTE}")
         command = [sys.executable, "-m", __name__, str(workspace / RESULT_FILE)]
         try:
@@ -115,7 +121,10 @@ def check_gpu(config: ConsoleConfig, task_id: str | None = None) -> int:
     gpu_tasks = [task for task in tasks if declares_gpu(map(Path, task.candidate_devices))]
     for task in tasks:
         if task not in gpu_tasks:
-            print(f"Task {task.task_id}: no /dev/nvidia<N> in candidate_devices; not probed")
+            print(
+                f"Task {task.task_id}: no GPU device node ({gpu_node_examples()}) "
+                "in candidate_devices; not probed"
+            )
     if not gpu_tasks:
         print("check --gpu: no selected task lists a GPU device node", file=sys.stderr)
         return 2

@@ -1,30 +1,41 @@
-"""The sandbox-owned GPU passthrough: read-only /sys and NVIDIA control nodes.
+"""The sandbox-owned GPU passthrough: provider runtime paths and companion nodes.
 
-Profiles here are built with ``model_construct`` because CI hosts have no
-``/dev/nvidia<N>`` character device; ``command_prefix`` does not revalidate, and
-admission of a missing node is tested separately against the real validator.
+Profiles here are built with ``model_construct`` because CI hosts have no GPU
+character device; ``command_prefix`` does not revalidate, and admission of a
+missing node is tested separately against the real validator. Which nodes are
+GPUs and what each provider needs is owned by ``core.gpu_devices``.
 """
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
+from core import gpu_devices
+from core.gpu_devices import NVIDIA, WSL2, GpuDeviceProvider
 from tools.workspace_sandbox import gpu
 from tools.workspace_sandbox.command import command_prefix
 from tools.workspace_sandbox.profile import SandboxProfile
 
-REAL_CONTROL_NODES = gpu.control_nodes  # captured before the autouse stub
+REAL_CONTROL_NODES = GpuDeviceProvider.present_control_nodes  # before the autouse stub
+REAL_READ_ONLY = GpuDeviceProvider.present_read_only
 CONTROL = (Path("/dev/nvidiactl"), Path("/dev/nvidia-uvm"), Path("/dev/nvidia-caps/nvidia-cap1"))
+WSL_LIBRARIES = Path("/usr/lib/wsl")
 
 
 @pytest.fixture(autouse=True)
 def gpu_host(monkeypatch):
-    """Pretend bwrap exists and this host has NVIDIA control nodes."""
+    """Pretend bwrap exists, this host has NVIDIA control nodes, /sys and /usr/lib/wsl."""
     monkeypatch.setattr("tools.workspace_sandbox.command.shutil.which", lambda _: "/usr/bin/bwrap")
-    monkeypatch.setattr(gpu, "control_nodes", lambda: CONTROL)
+    monkeypatch.setattr(
+        GpuDeviceProvider,
+        "present_control_nodes",
+        lambda self: CONTROL if self.name == "nvidia" else (),
+    )
+    monkeypatch.setattr(GpuDeviceProvider, "present_read_only", lambda self: self.read_only)
 
 
 def _profile(tmp_path: Path, devices=(), read_only=()) -> SandboxProfile:
@@ -48,10 +59,10 @@ def test_cpu_only_profile_gets_no_passthrough_on_a_gpu_host(tmp_path, monkeypatc
     built with the passthrough disabled."""
     profiles = [_profile(tmp_path, d) for d in ((), ("/dev/null",), ("/dev/nvidiactl",))]
     on_gpu_host = [command_prefix(value) for value in profiles]
-    monkeypatch.setattr(gpu, "control_nodes", lambda: ())
-    monkeypatch.setattr(gpu, "SYSFS", tmp_path / "absent")
+    monkeypatch.setattr(GpuDeviceProvider, "present_control_nodes", lambda self: ())
+    monkeypatch.setattr(GpuDeviceProvider, "present_read_only", lambda self: ())
     assert [command_prefix(value) for value in profiles] == on_gpu_host
-    assert not any("/sys" in argv for argv in on_gpu_host)
+    assert not any("/sys" in argv or str(WSL_LIBRARIES) in argv for argv in on_gpu_host)
 
 
 def test_gpu_node_adds_read_only_sys_and_present_control_nodes(tmp_path):
@@ -81,20 +92,27 @@ def test_existing_sys_in_read_only_is_not_mounted_twice(tmp_path):
     assert binds.index("/sys") < binds.index("/sys/bus/pci")
 
 
-def test_missing_gpu_node_is_refused_with_a_plain_cause(tmp_path):
+@pytest.mark.parametrize(
+    "node,listing",
+    [("/dev/nvidia97", "(ls /dev/nvidia*)"), ("/dev/dxg", "(ls -l /dev/dxg)")],
+)
+def test_missing_gpu_node_is_refused_with_a_plain_cause(tmp_path, node, listing):
     """Defect: a task naming a GPU this machine lacks launches anyway, or is refused
-    with only a path error. Fails if admission's validator accepts the node or the
-    refusal stops saying the GPU is not on this machine."""
-    with pytest.raises(ValidationError, match="GPU device /dev/nvidia97 is not present"):
+    with only a path error. Fails if admission's validator accepts the node, the
+    refusal stops saying the GPU is not on this machine, or a WSL2 operator is told
+    to list NVIDIA nodes. (CI hosts have neither node.)"""
+    with pytest.raises(ValidationError) as error:
         SandboxProfile(
             workspace=tmp_path,
             network=False,
-            devices=(Path("/dev/nvidia97"),),
+            devices=(Path(node),),
             timeout_seconds=10,
         )
+    assert f"GPU device {node} is not present on this machine" in str(error.value)
+    assert listing in str(error.value)
 
 
-def test_control_nodes_keep_only_real_character_devices(tmp_path, monkeypatch):
+def test_control_nodes_keep_only_real_character_devices(tmp_path):
     """Defect: a symlink or regular file named like a control node (or under
     /dev/nvidia-caps) is dev-bound, or a host without the caps folder crashes.
     Fails if anything but a non-symlink character device is returned."""
@@ -105,18 +123,36 @@ def test_control_nodes_keep_only_real_character_devices(tmp_path, monkeypatch):
     (tmp_path / "ctl-link").symlink_to("/dev/null")
     (tmp_path / "ctl-file").write_text("")
     real = (Path("/dev/null"), tmp_path / "ctl-link", tmp_path / "ctl-file", tmp_path / "gone")
-    monkeypatch.setattr(gpu, "CONTROL_NODES", real)
-    monkeypatch.setattr(gpu, "CAPS_DIRECTORY", caps)
-    assert REAL_CONTROL_NODES() == (Path("/dev/null"),)
-    monkeypatch.setattr(gpu, "CAPS_DIRECTORY", tmp_path / "no-caps")
-    assert REAL_CONTROL_NODES() == (Path("/dev/null"),)
+    provider = dataclasses.replace(NVIDIA, control_nodes=real, control_directory=caps)
+    assert REAL_CONTROL_NODES(provider) == (Path("/dev/null"),)
+    provider = dataclasses.replace(provider, control_directory=tmp_path / "no-caps")
+    assert REAL_CONTROL_NODES(provider) == (Path("/dev/null"),)
 
 
-def test_sys_is_added_only_when_the_host_has_it(tmp_path, monkeypatch):
-    """Defect: a host (or container) without /sys gets a bind of a missing path, so
-    bwrap fails before CUDA can report anything. Fails if the missing /sys is bound
-    or the device nodes stop being passed."""
-    monkeypatch.setattr(gpu, "SYSFS", tmp_path / "absent")
+def test_runtime_paths_are_added_only_when_the_host_has_them(tmp_path, monkeypatch):
+    """Defect: a host (or container) without /sys, or a WSL2 install whose driver
+    library folder is missing, gets a bind of a missing path, so bwrap fails before
+    CUDA can report anything. Fails if a missing path is returned or a present one
+    is dropped."""
+    absent = dataclasses.replace(NVIDIA, read_only=(tmp_path / "absent",))
+    present = dataclasses.replace(WSL2, read_only=(tmp_path, tmp_path / "absent"))
+    assert REAL_READ_ONLY(absent) == ()
+    assert REAL_READ_ONLY(present) == (tmp_path,)
+    monkeypatch.setattr(gpu_devices, "PROVIDERS", (absent, present))
+    monkeypatch.setattr(GpuDeviceProvider, "present_read_only", REAL_READ_ONLY)
     assert gpu.passthrough((Path("/dev/nvidia0"),)) == ((), CONTROL)
-    monkeypatch.setattr(gpu, "SYSFS", tmp_path)
-    assert gpu.passthrough((Path("/dev/nvidia0"),)) == ((tmp_path,), CONTROL)
+    assert gpu.passthrough((Path("/dev/dxg"),)) == ((tmp_path,), ())
+
+
+def test_wsl2_gpu_node_gets_its_driver_libraries_and_no_nvidia_nodes(tmp_path):
+    """Defect #1524: under WSL2 the GPU is /dev/dxg with the CUDA driver in
+    /usr/lib/wsl, so a sandbox that knows only /dev/nvidia<N> passes no GPU. Fails
+    if /dev/dxg gains no read-only /sys and /usr/lib/wsl before the root is frozen,
+    is not dev-bound exactly once, or pulls in the NVIDIA control nodes."""
+    argv = command_prefix(_profile(tmp_path, ("/dev/dxg",)))
+    binds = _pairs(argv, "--ro-bind")
+    assert binds.count("/sys") == 1 and binds.count(str(WSL_LIBRARIES)) == 1
+    assert argv.index(str(WSL_LIBRARIES)) < argv.index("--remount-ro")
+    assert _pairs(argv, "--dev-bind") == ["/dev/dxg"]
+    # Read-only binds stay ordered by depth, so /usr/lib/wsl follows /usr.
+    assert binds.index("/usr") < binds.index(str(WSL_LIBRARIES))

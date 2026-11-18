@@ -5,7 +5,9 @@
   'use strict';
   window.consoleCompute = Object.freeze({
     gpuWarning: 'This task does not pass a GPU into the run sandbox; runs that train a model will be refused.',
-    // Only a numbered device node passes a GPU; /dev/nvidiactl alone does not.
-    gpuDevices: devices => devices.filter(device => /^\/dev\/nvidia\d+$/.test(device))
+    // A GPU device node of a core/gpu_devices.py provider passes a GPU (/dev/nvidia<N>,
+    // or /dev/dxg under WSL2); /dev/nvidiactl alone does not. Kept equal to the
+    // providers by tests/unit/core/test_gpu_devices.py.
+    gpuDevices: devices => devices.filter(device => /^\/dev\/(?:nvidia[0-9]+|dxg)$/.test(device))
   });
 })();

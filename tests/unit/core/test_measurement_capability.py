@@ -249,6 +249,17 @@ class TestAMissingCudaDeviceNamesItsCause:
         (dev / "nvidia0").write_text("")
         assert observe_gpu_unavailable_cause(dev=dev, sys_root=sys_root) == "no_device_nodes"
 
+    @pytest.mark.parametrize("pci,cause", [(False, "sys_not_mounted"), (True, "cuda_init_failed")])
+    def test_a_wsl2_dxg_node_counts_as_a_passed_gpu(self, tmp_path, pci, cause):
+        """#1524: under WSL2 the GPU node is /dev/dxg. Fails if a sandbox given
+        /dev/dxg is told no device node was passed (the operator would re-list the
+        node they already listed instead of fixing /sys or the driver)."""
+        from core.gpu_requirement import observe_gpu_unavailable_cause
+
+        dev, sys_root = self._roots(tmp_path, node=False, pci=pci)
+        (dev / "dxg").symlink_to("/dev/null")  # a character device
+        assert observe_gpu_unavailable_cause(dev=dev, sys_root=sys_root) == cause
+
     @pytest.mark.parametrize("cause", ["no_device_nodes", "sys_not_mounted", "cuda_init_failed"])
     def test_the_resolver_carries_the_cause_to_the_capability(self, monkeypatch, cause):
         """Production reachability: the reason the resolver records must map back to

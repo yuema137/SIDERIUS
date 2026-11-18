@@ -1210,9 +1210,11 @@ timeout and 1 MiB observation budget are example caller choices. Configure
 provider environment names for enabled real routes. Explicit GPU device paths
 may be needed to reproduce captured hardware facts; select the actual host paths,
 never bypass installation/hardware binding. Native chains run through the same
-`workspace_sandbox.command.command_prefix`, so a `/dev/nvidia<N>` device adds
-read-only `/sys` and the present NVIDIA control nodes automatically
-(`tools.workspace_sandbox.gpu.passthrough`); no `/sys` path is selected. No GUI or automatic capture builder is implied.
+`workspace_sandbox.command.command_prefix`, so a GPU device node adds its
+`core.gpu_devices` provider's present read-only paths and companion nodes
+automatically (`/dev/nvidia<N>`: read-only `/sys` and the present NVIDIA control
+nodes; `/dev/dxg`: read-only `/sys` and `/usr/lib/wsl`;
+`tools.workspace_sandbox.gpu.passthrough`); no `/sys` path is selected. No GUI or automatic capture builder is implied.
 
 ## Captured native continuation
 

@@ -6,7 +6,8 @@ The command appends one ``tasks[]`` entry and writes nothing else:
   ``preparation_timeout_seconds``, ``candidate_timeout_seconds`` and
   ``candidate_network`` from :data:`STARTER_VALUES` unless overridden;
   ``candidate_devices`` from ``--device``, none with ``--no-gpu``, otherwise
-  this host's ``/dev/nvidia<N>`` GPU nodes (detected, never asked);
+  this host's GPU device nodes (``core.gpu_devices``: ``/dev/nvidia<N>``, or
+  ``/dev/dxg`` under WSL2; detected, never asked);
   ``candidate_environment_names`` from the credential requirement owner
   (``candidate_worker.preflight.credential_requirements``) applied to every
   route of the task's resolved LLM profile, plus any ``--env`` names;
@@ -34,7 +35,6 @@ experiment setup is created through ``SetupStore.create``.
 from __future__ import annotations
 
 import argparse
-import glob
 import json
 import os
 import re
@@ -43,8 +43,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from core.gpu_devices import declared_providers, gpu_node_examples, host_gpu_nodes
 from tools.candidate_operations.models import OperationFailure
-from tools.workspace_sandbox.gpu import GPU_NODE
 
 from .error_messages import console_error_message
 from .files import canonical, config_bytes, private_file_lock
@@ -104,18 +104,13 @@ class TaskPlan:
 
 
 def host_gpu_devices() -> tuple[str, ...]:
-    """This host's GPU device nodes (``/dev/nvidia<N>`` character devices), by number.
+    """This host's GPU device nodes (``core.gpu_devices`` providers), by GPU number.
 
     Control nodes (``nvidiactl``, ``nvidia-uvm``, ...) are not listed: the run
     sandbox adds the ones present at launch (``tools.workspace_sandbox.gpu``), and
     writing them would refuse a run whenever a lazily created node is absent.
     """
-    found = []
-    for name in sorted(glob.glob("/dev/nvidia*")):
-        path = Path(name)
-        if GPU_NODE.fullmatch(name) and path.is_char_device() and not path.is_symlink():
-            found.append(name)
-    return tuple(sorted(found, key=lambda name: int(name.removeprefix("/dev/nvidia"))))
+    return tuple(str(node) for node in host_gpu_nodes())
 
 
 def choose_devices(devices: tuple[str, ...] | None) -> tuple[str, ...]:
@@ -125,13 +120,16 @@ def choose_devices(devices: tuple[str, ...] | None) -> tuple[str, ...]:
         return devices
     nodes = host_gpu_devices()
     if nodes:
+        providers = declared_providers(map(Path, nodes))
         print(
-            "candidate_devices: " + ", ".join(nodes) + " (NVIDIA GPU found on this machine; "
-            "runs also get read-only /sys and the NVIDIA control nodes; pass --no-gpu to "
-            "give runs no GPU)"
+            "candidate_devices: "
+            + ", ".join(nodes)
+            + f" ({' and '.join(item.label for item in providers)} found on this machine; "
+            + f"runs also get {'; '.join(item.passthrough_note for item in providers)}; "
+            + "pass --no-gpu to give runs no GPU)"
         )
         return nodes
-    print("candidate_devices: none (no NVIDIA GPU device node on this machine)")
+    print(f"candidate_devices: none (no GPU device node, {gpu_node_examples()}, on this machine)")
     return ()
 
 
@@ -385,7 +383,10 @@ def parser() -> argparse.ArgumentParser:
         "--device",
         nargs="+",
         metavar="PATH",
-        help="character devices passed to candidate runs (default: this host's /dev/nvidia<N>)",
+        help=(
+            "character devices passed to candidate runs "
+            "(default: this host's /dev/nvidia<N>, or /dev/dxg under WSL2)"
+        ),
     )
     gpu.add_argument(
         "--no-gpu",

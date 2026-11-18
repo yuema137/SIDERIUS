@@ -151,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help=(
             "check only: start CUDA inside the run sandbox for each task that lists a "
-            "/dev/nvidia<N> device (no network, no model calls)"
+            "GPU device node, /dev/nvidia<N> or /dev/dxg (no network, no model calls)"
         ),
     )
     parser.add_argument("--task", help="check --gpu only: probe just this task ID")

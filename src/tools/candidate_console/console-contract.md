@@ -108,21 +108,25 @@ print `Warning: Task <id>: Device <path> cannot be passed into the run sandbox
 (<reason>); a run given it will be refused.` to stderr. Run admission
 (`SandboxProfile.device_paths` in `candidate_prepare.admission`) stays the hard gate.
 
-GPU passthrough (#1164): the console adds no `/sys` setting. The run sandbox owns
-it (`tools.workspace_sandbox.gpu.passthrough`, applied in `command.command_prefix`):
-a profile whose `devices` contain a `/dev/nvidia<N>` node also gets `--ro-bind /sys
-/sys` and `--dev-bind` of each present, undeclared NVIDIA control node (`nvidiactl`,
-`nvidia-uvm`, `nvidia-uvm-tools`, `nvidia-modeset`, `nvidia-caps/*`). A `"/sys"`
-already in `task_read_only` is mounted once. `package_mounts.device_warnings(devices)`
+GPU passthrough (#1164, #1524): the console adds no `/sys` setting. Which device
+nodes are GPUs, and what each driver stack needs beside them, is owned by
+`core.gpu_devices` (providers `nvidia`: `/dev/nvidia<N>`; `wsl2`: `/dev/dxg`). The
+run sandbox applies it (`tools.workspace_sandbox.gpu.passthrough`, called in
+`command.command_prefix`): a profile whose `devices` contain a `/dev/nvidia<N>` node
+also gets `--ro-bind /sys /sys` and `--dev-bind` of each present, undeclared NVIDIA
+control node (`nvidiactl`, `nvidia-uvm`, `nvidia-uvm-tools`, `nvidia-modeset`,
+`nvidia-caps/*`); a `/dev/dxg` node also gets `--ro-bind` of `/sys` and
+`/usr/lib/wsl` when present, and no NVIDIA control node. A `"/sys"` already in
+`task_read_only` is mounted once. `package_mounts.device_warnings(devices)`
 reports only device paths the sandbox would refuse; `check`/`serve` prefix each with
 `Task <id>: `, and Run review shows the same list for the reviewed request.
-`SandboxProfile.device_paths` refuses a missing `/dev/nvidia<N>` with `GPU device
-<path> is not present on this machine, ...`; the console retains its recovery
-instructions to list the available nodes (`ls /dev/nvidia*`) or use the machine
-that has the declared GPU.
+`SandboxProfile.device_paths` refuses a missing GPU node of any provider with `GPU
+device <path> is not present on this machine, ...`; the console retains its recovery
+instructions to list the available nodes (the provider's `listing_command`:
+`ls /dev/nvidia*` or `ls -l /dev/dxg`) or use the machine that has the declared GPU.
 
 `check --gpu [--task <id>]` (`gpu_check.check_gpu`) runs, for each task whose
-`candidate_devices` lists a `/dev/nvidia<N>` node, `python -m
+`candidate_devices` lists a GPU device node (`/dev/nvidia<N>` or `/dev/dxg`), `python -m
 tools.candidate_console.gpu_check <result>` inside `SandboxProfile(workspace=<fresh
 temporary directory>, read_only=data_root + task_manifest + task_read_only,
 network=False, devices=candidate_devices, environment_names=(),
@@ -130,7 +134,8 @@ timeout_seconds=120)` through `workspace_sandbox.runner.run`. The child imports
 PyTorch, checks `torch.cuda.is_available()` (otherwise reports
 `core.gpu_requirement.real_launch_gpu_refusal()`), allocates `torch.zeros(1,
 device="cuda")` and writes `{"passed", "message"}` JSON. The host prints `Task <id>:
-sandbox passes <devices>[ and read-only /sys]`, then `Task <id>: GPU PASS: <message>`
+sandbox passes <devices>[ and read-only <paths>]` (`<paths>` are the provider's
+present read-only folders, `/sys` for NVIDIA), then `Task <id>: GPU PASS: <message>`
 or `GPU FAIL: <cause>` (profile refusal, sandbox unavailable, timeout, or exit before
 a result). Exit status 0 only when at least one task was probed and all passed;
 otherwise 2. `--gpu`/`--task` are refused for `serve`/`init`; `--task` needs `--gpu`.
@@ -167,14 +172,17 @@ Owner: `add_task.py`; CLI `python -m tools.candidate_console add-task --config
   starting values for the operator to review, not resource limits the framework
   chooses. `candidate_devices` is `--device` when given and `[]` with `--no-gpu`
   (the two are mutually exclusive); otherwise it is `add_task.host_gpu_devices()`,
-  the host's `/dev/nvidia<N>` character devices (regex
-  `tools.workspace_sandbox.gpu.GPU_NODE`, symlinks excluded), sorted by number, with no
-  prompt on a TTY or elsewhere. Control nodes are never written, because the
+  the host's GPU device nodes from `core.gpu_devices.host_gpu_nodes()` (every
+  provider's nodes in provider order: `/dev/nvidia<N>` sorted by number, then
+  `/dev/dxg`; character devices only, symlinks excluded), with no prompt on a TTY or
+  elsewhere. Control nodes are never written, because the
   sandbox passes the present ones at launch and a written, lazily created node
   (`/dev/nvidia-uvm`) would make admission refuse the run. The command prints
-  `candidate_devices: <paths> (NVIDIA GPU found on this machine; ...)`,
-  `candidate_devices: none (no NVIDIA GPU device node on this machine)`, or the
-  explicit choice. `candidate_environment_names` is
+  `candidate_devices: <paths> (<provider label> found on this machine; runs also get
+  <provider passthrough note>; pass --no-gpu to give runs no GPU)` (for NVIDIA:
+  `NVIDIA GPU found on this machine; runs also get read-only /sys and the NVIDIA
+  control nodes`), `candidate_devices: none (no GPU device node, /dev/nvidia<N> or
+  /dev/dxg, on this machine)`, or the explicit choice. `candidate_environment_names` is
   `credential_requirements(routes, ()).required_names` (the worker preflight owner)
   for every route of the task's resolved LLM profile
   (`setup_review.routes.standard_llm_routes` with literature and analysis enabled,
@@ -449,11 +457,12 @@ Compute requirement (issue #1136, presentation only). A reviewed run whose
 captured workflow has a `tuning` node (native training, which refuses a sandbox
 without a CUDA device) shows `#capture-compute-review` "Compute: NVIDIA GPU
 required"; when the reviewed `devices` (the task's `candidate_devices`) contain no
-`/dev/nvidia<N>` node, `#capture-compute-warning` adds "This task does not pass a
+GPU device node (`/dev/nvidia<N>` or `/dev/dxg`), `#capture-compute-warning` adds "This task does not pass a
 GPU into the run sandbox; runs that train a model will be refused." (`/dev/nvidiactl`
 alone is not a GPU node). The sentence and the device test have one browser owner,
 `compute-requirement.js` (`window.consoleCompute.gpuWarning`, `gpuDevices`), shared
-with the Task tab's Run policy. A workflow without a `tuning` node says no GPU check applies. Read
+with the Task tab's Run policy; its GPU-node regex is a browser copy of the
+`core.gpu_devices` providers, kept equal by `tests/unit/core/test_gpu_devices.py`. A workflow without a `tuning` node says no GPU check applies. Read
 from `ReusableCaptureReview.nodes`/`devices`. For every workflow the review then shows
 one `#capture-device-warning-<i>` line (class `warning`, prefixed "Warning: ") per
 `ReusableCaptureReview.device_warnings`, which the server computes with
@@ -3260,8 +3269,8 @@ aggregation; `#task-observational-metrics` labels secondary metrics **Recording*
 the declared `role`; "This task declares no Health checks" for zero gates),
 `#task-plugins` (`#task-plugin-table`: configured ref, symbol, roles; model types),
 `#task-locked` (`#task-locked-table`: path, rule, JSON value), `#task-deliverable`
-and `#task-run-policy` (timeouts, network, devices, GPU: the passed `/dev/nvidia<N>`
-nodes or the shared #1148 sentence "This task does not pass a GPU into the run sandbox;
+and `#task-run-policy` (timeouts, network, devices, GPU: the passed GPU device
+nodes (`/dev/nvidia<N>` or `/dev/dxg`) or the shared #1148 sentence "This task does not pass a GPU into the run sandbox;
 runs that train a model will be refused." from `compute-requirement.js`, credential names, allowed output types). `#task-refresh`
 requests `?refresh=1` and is disabled while observing. `GET /api/tasks` items carry
 `revision` (the configured `task_revision.revision`, `null` when unversioned).

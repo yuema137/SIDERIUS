@@ -106,7 +106,7 @@ SIDERIUS checkout's root folder.
    ```
 
    You do not need `--device`. `add-task` finds this machine's NVIDIA GPUs
-   (`/dev/nvidia<N>`), passes them to runs and prints them as
+   (`/dev/nvidia<N>`, or `/dev/dxg` under WSL2), passes them to runs and prints them as
    `candidate_devices: ...`. On a machine without one it passes none: you can
    still register, prepare and check the task, but a run that trains is refused
    (SIDERIUS 1.1 has no CPU mode). Add `--device PATH [PATH ...]` to pass

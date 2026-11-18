@@ -14,8 +14,9 @@
   refused before any iteration directory or model call, with
   `SIDERIUS real training needs an NVIDIA GPU with CUDA, and none is visible here (...)`
   and exit code 2. In the browser console, the task's `candidate_devices` must
-  also list the GPU device nodes (for example `/dev/nvidia0`) so the GPU reaches
-  the run sandbox; `add-task` writes this machine's nodes for you. A CPU is enough for installation, focused tests, `--dry-run`,
+  also list the GPU device nodes (for example `/dev/nvidia0`, or `/dev/dxg` under
+  [Windows WSL2](#windows-wsl2)) so the GPU reaches the run sandbox; `add-task`
+  writes this machine's nodes for you. A CPU is enough for installation, focused tests, `--dry-run`,
   pseudo runs (`--is_pseudo_llm`, `--is_pseudo_training`) and the synthetic
   Quickstart's data preparation and component checks
 - API keys for your [selected model providers](#api-keys) for **real
@@ -67,6 +68,52 @@ packages inside the frozen environment to bypass these limits. Intel GPU
 execution is not currently supported. See the
 [accelerator facts contract](../../src/core/accelerator-runtime.md) for the
 difference between detected properties and a successful runtime check.
+
+### Windows (WSL2)
+
+SIDERIUS is a Linux framework. Native Windows is not supported; on Windows, use
+it inside WSL2 (Windows Subsystem for Linux 2) with a Linux distribution such as
+Ubuntu, and follow this page inside that distribution.
+
+| Use under WSL2 | Status |
+|---|---|
+| Installation, focused tests, `--dry-run`, pseudo runs, authoring task packages and workflows, kit self-checks, synthetic data preparation and component checks | Supported, as on any Linux machine without a GPU |
+| The run sandbox (workflow preparation, operations, browser console) | Needs bubblewrap with user namespaces inside WSL2; check once with `bwrap --unshare-all --ro-bind / / true` ([sandbox check](../../src/tools/workspace_sandbox/README.md#check-that-bubblewrap-works)) |
+| Real GPU runs | **Experimental**: implemented from NVIDIA's CUDA-on-WSL layout, not yet run on a WSL2 machine |
+
+Why GPUs differ under WSL2: CUDA does not see `/dev/nvidia0`, `/dev/nvidia1`, ...
+there. WSL2 exposes every GPU through one device node, `/dev/dxg`, and mounts the
+Windows driver's CUDA libraries (`libcuda`, `libdxcore`, NVML, `nvidia-smi`) under
+`/usr/lib/wsl`. SIDERIUS recognizes `/dev/dxg` as a GPU device node
+([`core/gpu_devices.py`](../../src/core/gpu_devices.py), provider `wsl2`):
+
+- `add-task` writes `/dev/dxg` into the task's `candidate_devices`, printing
+  `candidate_devices: /dev/dxg (WSL2 GPU found on this machine; ...)`;
+- the run sandbox passes `/dev/dxg` with read-only `/sys` and read-only
+  `/usr/lib/wsl` ([GPU tasks](../../src/tools/workspace_sandbox/README.md#gpu-tasks));
+- `check --gpu` starts CUDA inside that sandbox for the task, and a launch
+  refusal names a missing `/dev/dxg` instead of asking for `/dev/nvidia<N>`.
+
+Before a GPU run under WSL2:
+
+1. Install the current NVIDIA Windows driver (it provides WSL2 GPU support). Do
+   not install a Linux NVIDIA display driver inside the WSL2 distribution; it
+   would replace the WSL libraries.
+2. Inside WSL2, `ls -l /dev/dxg` must show a character device and
+   `/usr/lib/wsl/lib/nvidia-smi` must list the GPU.
+3. Register the task with `add-task` (or list `/dev/dxg` in `candidate_devices`
+   yourself) and run `check --gpu`; it must print `GPU PASS`.
+
+Known limits, unverified on WSL2 hardware:
+
+- Inside the run sandbox `PATH` is `<environment>/bin:/usr/bin:/bin`, so
+  `nvidia-smi` (in `/usr/lib/wsl/lib`) is not found there, and WSL2's
+  `nvidia-smi` does not report per-process GPU memory. GPU telemetry and
+  per-process GPU memory accounting inside the sandbox therefore report
+  "unavailable"; a path that requires that accounting can refuse.
+- Paper experiments and the qualified hardware are native Linux with NVIDIA
+  GPUs. For real campaigns, prefer a native Linux GPU machine or a remote Linux
+  server.
 
 ### Installed packages and checkout resources
 

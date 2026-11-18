@@ -35,10 +35,11 @@ records the iteration as failed (`iter:2`) and the chain ends incomplete. The
 runtime-control launch guard raises `LaunchGuardFailure` with the same requirement
 when its measurement capability reports `accelerator_unavailable`, worded for the
 observed cause (`core.gpu_requirement.observe_gpu_unavailable_cause`, from filesystem
-facts only: no `/dev/nvidia<N>` character device → pass device nodes in
+facts only: no GPU device node of a `core.gpu_devices` provider (`/dev/nvidia<N>`,
+or `/dev/dxg` under WSL2) as a character device → pass device nodes in
 `candidate_devices`; nodes but no `/sys/bus/pci/devices` → `/sys` is not mounted,
 CUDA error 304 (the console run sandbox mounts it read-only by itself for a task listing
-a `/dev/nvidia<N>` node; `check --gpu` confirms); both present → CUDA failed to
+a GPU device node; `check --gpu` confirms); both present → CUDA failed to
 initialize: check the driver; the sandbox passes the NVIDIA control nodes present at
 launch and cannot create one, so if `/dev/nvidia-uvm` is missing on the host run
 `nvidia-smi` (or `nvidia-modprobe -u -c=0`) once on the host, then relaunch; and do not
