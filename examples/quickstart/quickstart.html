@@ -48,10 +48,10 @@ import os
 import sys
 from pathlib import Path
 
+import workflows.task_composition as task_composition
+
 PACK_DIR = Path.cwd().resolve()  # examples/quickstart
 REPO_ROOT = PACK_DIR.parents[1]
-
-import workflows.task_composition as task_composition
 
 resolved = Path(task_composition.__file__).resolve()
 assert resolved.is_relative_to(REPO_ROOT), (
@@ -107,7 +107,11 @@ for family, value in manifest.items():
 
 composition = compose_run_task_bindings(str(MANIFEST))
 print(&quot;data access    :&quot;, composition.task_data_path_id)
-print(&quot;main score     :&quot;, composition.metric.spec.id, f&quot;({composition.metric.spec.direction} is better)&quot;)
+print(
+    &quot;main score     :&quot;,
+    composition.metric.spec.id,
+    f&quot;({composition.metric.spec.direction} is better)&quot;,
+)
 print(&quot;partitions     :&quot;, composition.dataset_profile.partition_count)
 print(&quot;Health checks  :&quot;, composition.task_health_binding)
 print(&quot;models allowed :&quot;, tuple(composition.model_plugins.required_model_types))
@@ -127,11 +131,23 @@ data_path = qs.QuickstartTaskDataPath()
 request = ScopeBuildRequest(round_kind=&quot;formal&quot;, selection_strategy=&quot;snapshot&quot;, portion=1.0, seed=7)
 train_scope = data_path.build_training_scope(request)
 eval_scope = data_path.build_eval_scope(request)
-print(&quot;training rows  :&quot;, len(train_scope.rows), &quot;from shards&quot;, sorted({r.shard for r in train_scope.rows}))
-print(&quot;evaluation rows:&quot;, len(eval_scope.rows), &quot;from shard&quot;, sorted({r.shard for r in eval_scope.rows}))
+print(
+    &quot;training rows  :&quot;,
+    len(train_scope.rows),
+    &quot;from shards&quot;,
+    sorted({r.shard for r in train_scope.rows}),
+)
+print(
+    &quot;evaluation rows:&quot;,
+    len(eval_scope.rows),
+    &quot;from shard&quot;,
+    sorted({r.shard for r in eval_scope.rows}),
+)
 try:
     data_path.build_training_scope(
-        ScopeBuildRequest(round_kind=&quot;formal&quot;, selection_strategy=&quot;target&quot;, portion=1.0, target_partitions=(3,))
+        ScopeBuildRequest(
+            round_kind=&quot;formal&quot;, selection_strategy=&quot;target&quot;, portion=1.0, target_partitions=(3,)
+        )
     )
 except ValueError as refusal:
     print(&quot;refused        :&quot;, refusal)</pre></div>
@@ -140,7 +156,9 @@ except ValueError as refusal:
 <p>The main score is a declaration plus code. The declaration fixes the name and the direction (higher or lower is better); SIDERIUS never guesses the direction from the name. Before computing a number, the score checks that a prediction file exists. A missing file gives a <em>not scoreable</em> result with a reason, never a made-up number.</p>
 <div class="cell"><div class="cell-label">code cell 12</div><pre class="code">from execute_tools.evaluation_metric import metric_spec_from_declaration
 
-spec = metric_spec_from_declaration(json.loads((PACK_DIR / &quot;declared&quot; / &quot;metric_accuracy.json&quot;).read_text()))
+spec = metric_spec_from_declaration(
+    json.loads((PACK_DIR / &quot;declared&quot; / &quot;metric_accuracy.json&quot;).read_text())
+)
 qm = load_plugin(&quot;quickstart_metrics&quot;, &quot;_quickstart_metrics.py&quot;)
 metric = qm.QuickstartAccuracyMetric(spec)
 print(&quot;score:&quot;, spec.id, &quot;| direction:&quot;, spec.direction)
@@ -148,11 +166,18 @@ print(&quot;score:&quot;, spec.id, &quot;| direction:&quot;, spec.direction)
 probe = WORKSPACE / &quot;metric_probe.json&quot;
 truth = {r.sample_id: r.label for r in eval_scope.rows}
 probe.write_text(json.dumps(truth))
-perfect = metric.evaluate({0: str(probe)}, evaluation_payload=truth, task_scope=eval_scope, data_dir=None)
-wrong = metric.evaluate(
-    {0: str(probe)}, evaluation_payload={k: 1 - v for k, v in truth.items()}, task_scope=eval_scope, data_dir=None
+perfect = metric.evaluate(
+    {0: str(probe)}, evaluation_payload=truth, task_scope=eval_scope, data_dir=None
 )
-missing = metric.evaluate({0: str(probe) + &quot;.gone&quot;}, evaluation_payload=truth, task_scope=eval_scope, data_dir=None)
+wrong = metric.evaluate(
+    {0: str(probe)},
+    evaluation_payload={k: 1 - v for k, v in truth.items()},
+    task_scope=eval_scope,
+    data_dir=None,
+)
+missing = metric.evaluate(
+    {0: str(probe) + &quot;.gone&quot;}, evaluation_payload=truth, task_scope=eval_scope, data_dir=None
+)
 print(&quot;all correct :&quot;, type(perfect).__name__, perfect.scalar)
 print(&quot;all wrong   :&quot;, type(wrong).__name__, wrong.scalar)
 print(&quot;no file     :&quot;, type(missing).__name__, &quot;|&quot;, missing.verdict.failures[0].detail)</pre></div>
@@ -168,7 +193,9 @@ model = mlp.PLUGIN_MODEL_CLASS(mlp.PLUGIN_CONFIG_CLASS())
 print(&quot;model type :&quot;, mlp.PLUGIN_MODEL_TYPE)
 print(&quot;parameters :&quot;, sum(p.numel() for p in model.parameters()))
 
-dataset = data_path.training_dataset(train_scope, EpochSamplingParams(data_dir=str(DATA_DIR), epoch_seed=0))
+dataset = data_path.training_dataset(
+    train_scope, EpochSamplingParams(data_dir=str(DATA_DIR), epoch_seed=0)
+)
 batch = torch.stack([dataset[i][0] for i in range(8)])
 print(&quot;forward    :&quot;, tuple(batch.shape), &quot;-&gt;&quot;, tuple(model(batch).shape))</pre></div>
 <p>Expected: <code>quickstart_reference_mlp</code> with 114 parameters, mapping a batch of shape <code>(8, 4)</code> (eight rows of four features) to <code>(8, 2)</code> (two class scores).</p>
@@ -183,10 +210,16 @@ prediction_dir = WORKSPACE / &quot;predictions&quot;
 with bind_run_task_composition(composition, physical_data_root=str(DATA_DIR)):
     bound = composition.task_data_path
     predictions = {r.sample_id: r.label for r in eval_scope.rows}
-    bound.write_deliverable(predictions, DeliverableWriteRequest(output_dir=str(prediction_dir), **identity))
-    payload = bound.read_evaluation_payload(EvaluationReadRequest(deliverable_dir=str(prediction_dir), **identity))
+    bound.write_deliverable(
+        predictions, DeliverableWriteRequest(output_dir=str(prediction_dir), **identity)
+    )
+    payload = bound.read_evaluation_payload(
+        EvaluationReadRequest(deliverable_dir=str(prediction_dir), **identity)
+    )
     artifact = prediction_dir / bound.deliverable_name(**identity)
-    outcome = composition.metric.evaluate({0: str(artifact)}, evaluation_payload=payload, task_scope=eval_scope, data_dir=None)
+    outcome = composition.metric.evaluate(
+        {0: str(artifact)}, evaluation_payload=payload, task_scope=eval_scope, data_dir=None
+    )
 
 print(&quot;prediction file:&quot;, artifact.name)
 print(&quot;score          :&quot;, type(outcome).__name__, outcome.scalar)</pre></div>
@@ -198,7 +231,9 @@ print(&quot;score          :&quot;, type(outcome).__name__, outcome.scalar)</pre
 
 EXAMPLE_WORKFLOW = REPO_ROOT / &quot;examples&quot; / &quot;workflow_declarations&quot; / &quot;reusable_training.py&quot;
 document = parse_workflow_source(EXAMPLE_WORKFLOW.read_text())
-print(&quot;task      :&quot;, document.definition.task.manifest, &quot;| data:&quot;, document.definition.task.data_root)
+print(
+    &quot;task      :&quot;, document.definition.task.manifest, &quot;| data:&quot;, document.definition.task.data_root
+)
 print(&quot;steps     :&quot;)
 for node in document.definition.nodes:
     source = getattr(node.request, &quot;protocol&quot;, None) or &quot;outside input &quot; + node.request.binding
@@ -258,7 +293,10 @@ for path in sorted(PROJECT.iterdir()):
 <div class="cell"><div class="cell-label">code cell 24</div><pre class="code">import hashlib
 from uuid import uuid4
 
-from tools.candidate_prepare import ReusableCandidatePreparationRequest, preflight_reusable_candidate
+from tools.candidate_prepare import (
+    ReusableCandidatePreparationRequest,
+    preflight_reusable_candidate,
+)
 
 workflow_file = PROJECT / &quot;workflow.py&quot;
 gpus = tuple(sorted(str(p) for p in Path(&quot;/dev&quot;).glob(&quot;nvidia[0-9]*&quot;)))
@@ -348,7 +386,12 @@ if not reports:
 for report_path in reports:
     report = json.loads(report_path.read_text())
     print(report_path.relative_to(RUNS))
-    for field in (&quot;status&quot;, &quot;termination_reason&quot;, &quot;best_valid_formal_denoising_score&quot;, &quot;result_authority&quot;):
+    for field in (
+        &quot;status&quot;,
+        &quot;termination_reason&quot;,
+        &quot;best_valid_formal_denoising_score&quot;,
+        &quot;result_authority&quot;,
+    ):
         print(f&quot;  {field:35s} {report.get(field)}&quot;)</pre></div>
 <p>Offline, the cell prints <code>No finished run yet</code>.</p>
 <h2>16. Use your own task</h2>
