@@ -135,8 +135,8 @@ dummy-tensor check). Does NOT require real training.
 schema (implementor, proposer, validator, interpreter).
 
 **Setup**:
-- Real LLM: `llm_configs/openai_tiered_pro.json` (gpt-5.5 across every
-  role) — see the real-LLM Gate config policy above
+- Real LLM: `configs/llm/openai_tiered_pro.json` (gpt-5.5 for every role
+  except `lit_review`, which uses deepseek-v4-pro) — see the real-LLM Gate config policy above
 - Pseudo training: dummy-tensor check only — no GPU, no real training loop
 - Estimated wall time: ~2-5 min
 - Estimated cost: ~$0.05-0.20
@@ -174,10 +174,12 @@ split — including why there is no force-trial flag.
 #### Canonical command (cold-start, bounded)
 
 ```bash
-bash sdsc_submission_scripts/run_chain.sh \
+bash scripts/launch/run_chain.sh \
     --mode lilab \
     --workspace /tmp/gate2_$(date +%s) \
     --run_name gate2_smoke \
+    --task_composition <task-manifest.yaml> \
+    --data_dir <task-data-root> \
     --num_iterations 1 \
     --max_rounds 1 \
     --max_proposal_attempts 3 \
@@ -191,36 +193,43 @@ bash sdsc_submission_scripts/run_chain.sh \
     --no-force_formal_round \
     --trial_vram_budget_gb 24 \
     --formal_vram_budget_gb 24 \
-    --llm_config llm_configs/openai_tiered_pro.json
+    --llm_config configs/llm/openai_tiered_pro.json
 ```
+
+`<task-manifest.yaml>` is the task composition under test (for TIDMAD, the
+composition in siderius-exp `tasks/tidmad/compositions/`); `run_chain.sh`
+exits 1 without it, because the framework never selects a task. The
+`--data_scope 4-9` / `--health_gate_files 4,...,9` values are TIDMAD
+partitions; use the task's own partition ids for another task.
 
 No `--seed_paths`: every real-training gate run is cold-start (see
 "Partial-scope rules" below).
 
-#### The dataset directory is resolved automatically — do not hardcode it
+#### The dataset directory is an explicit, required input
 
-The canonical command deliberately does **not** pass `--data_dir`. The
-launcher resolves the physical dataset directory at launch, from the
-machine-local `tidmad_data_config.yaml` (`execute_tools.data_paths`), and
-**validates it before any LLM or training work begins**. A machine-specific
+The canonical command passes `--data_dir`; there is no default dataset
+directory and no machine-local data configuration. The launcher validates the
+supplied directory (`execute_tools.data_paths.resolve_dataset_dir`) **before
+any LLM or training work begins**, and the composed run binds the same value
+(`bind_run_task_composition(..., physical_data_root=...)`). A machine-specific
 absolute path must never appear in this standard, in the chain scripts or in
-tests — only in that per-machine (gitignored) config.
+tests; the operator supplies it on the command line for each launch.
 
 ```text
---data_dir <path>          operator override, highest precedence
-omitted (the default)      tidmad_data_config.yaml answers
-neither resolvable         LAUNCH REFUSED, exit 2, before any spend
+--data_dir <existing-directory>   required; validated at launch
+omitted or empty                  refused before any spend (run_chain.sh:
+                                  "Required: --data_dir DIRECTORY", exit 1)
+not a readable directory          "LAUNCH REFUSED: ... dataset directory ...",
+                                  exit 2, before any spend
 ```
-
-Pass `--data_dir` only to point a run at a *different* copy of the data.
 
 **Why this is stated here.** During Step-04a's Gate validation a run reached
 the tuner with `data_dir=None`, and the pre-phase GPU measurement failed
 closed — *after* a real LLM had generated, validated and registered a
-candidate. The launcher performs the resolution now, so that failure mode
-costs nothing instead of ~10 minutes of paid work. If a Gate refuses at
-launch with `LAUNCH REFUSED: ... dataset directory ...`, fix the machine
-config or pass `--data_dir`; do not work around it by editing this file.
+candidate. The launcher validates the directory first now, so that failure
+mode costs nothing instead of ~10 minutes of paid work. If a Gate refuses at
+launch with `LAUNCH REFUSED: ... dataset directory ...`, correct the
+`--data_dir` value; do not work around it by editing this file.
 
 **Important**: do NOT use `tee` to capture chain stdout. The Claude Code
 harness capture file is sufficient and can be read on demand. `tee` writes

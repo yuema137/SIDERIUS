@@ -1,11 +1,10 @@
 """A real directory for tests that bind a composition (Step 11 C4).
 
 ``bind_run_task_composition`` requires ``physical_data_root`` for a
-composed run (R-11-8): without it every subprocess child falls back to the
-import-time ``TIDMAD_DATA_DIR``, so the run reads TIDMAD's data whatever it
-composed — silently. That fail-closed contract is the point, so tests must
-state a root like production does rather than the production function
-growing a default that would restore the hole.
+composed run and refuses with ``CompositionDataRootMissing`` without it:
+the framework has no default data root. That fail-closed contract is the
+point, so tests must state a root like production does rather than the
+production function growing a default.
 
 The tests that use this are not testing the data root; they compose in
 order to exercise something else. They need *a real, existing directory*

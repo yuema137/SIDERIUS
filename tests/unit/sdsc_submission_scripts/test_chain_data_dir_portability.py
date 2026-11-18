@@ -5,9 +5,8 @@ per-iteration command with no side effects) to prove that:
 
 * the chain no longer injects the old hardcoded lilab data path;
 * an explicit ``--data_dir`` is preserved end-to-end;
-* with no ``--data_dir`` the rendered ``run_one_iteration.py`` invocation omits
-  the flag, so the Python config layer (``data_paths.py`` ->
-  ``tidmad_data_config.yaml``) resolves the data directory;
+* an empty ``--data_dir`` is refused before any command is rendered: there is
+  no default data directory;
 * the existing seeded dry-run still renders successfully (lilab back-compat).
 """
 

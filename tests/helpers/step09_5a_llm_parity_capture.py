@@ -10,9 +10,12 @@ Both sides must execute, and both must be prepared IDENTICALLY:
 
     git worktree add --detach <base_wt> 14b7e22a
     git worktree add --detach <head_wt> <head>
-    # both worktrees: share the machine-local registry and data config,
-    # because they are gitignored state, not code
+    # both worktrees: share the machine-local registry, because it is
+    # gitignored state, not code
     ln -s <repo>/agent_generated <wt>/agent_generated
+    # only for revisions that still import the machine-local
+    # tidmad_data_config.yaml (such as the recorded base 14b7e22a); current
+    # source has no such file and this harness passes data_dir explicitly
     cp <repo>/tidmad_data_config.yaml <wt>/
     cd <wt> && <repo>/.venv/bin/python this_file.py out.json
 

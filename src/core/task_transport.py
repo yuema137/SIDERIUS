@@ -32,9 +32,9 @@ def data_root_argv(flag: str) -> list[str]:
 
     Step 11 C4 (R-11-7, R-11-8). Follows the ``--task_data_path_id``
     precedent exactly: emitted only when the run explicitly bound a root,
-    so an un-composed run's argv is byte-identical to its pre-C4 form
-    (R-11-1) and its children keep resolving through the import-time
-    legacy fallback.
+    so an un-composed run's argv carries no data-root flag (R-11-1). There
+    is no fallback root: a child that needs one and receives none refuses
+    through ``resolve_dataset_dir``.
 
     ``flag`` differs per role because the CHILDREN's flags differ, and the
     difference is load-bearing rather than cosmetic:

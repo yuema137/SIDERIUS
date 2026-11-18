@@ -20,7 +20,8 @@ data_source:
   type: local           # "local" | "postgres"
 
   local:
-    # Must match siderius_data_dir in tidmad_data_config.yaml.
+    # Directory holding one result subdirectory per model
+    # (layout: dashboard/data_sources/local_json.py).
     root_data_dir: /path/to/SIDEREIS_DATA
     # Empty list = auto-discover all models from root_data_dir subdirectories.
     # Explicit list example: [punet, wavenet, rnn, fcnet, transformer, gated_fno]
