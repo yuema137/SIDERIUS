@@ -273,3 +273,103 @@ class TestPB5NoReferencePrompts:
         }
         for name, text in rendered.items():
             assert_golden(text, GOLDENS / name, surface=f"PB-5 no-reference {name}")
+
+
+# Test-owned copy of the pre-#1530 reasoning-only reference block (5ccb436f8,
+# ml_model_implementor.py:1389-1422). It is the renderer text an experiment
+# profile declares to pin paper-era prompts for proposals with ancestors.
+_PRE_1530_REFERENCE_PREAMBLE = (
+    "## Reference Code (from ancestor models — for ARCHITECTURAL INSPIRATION ONLY)",
+    "",
+    "⚠ WARNING — read before using the snippets below:",
+    "",
+    "1. Private helper classes (e.g. `CausalConv1d`, `WaveNetBlock`,",
+    "   `DoubleConv`, `PositionalEncoding`, `Down`, `Up`, etc.) shown below",
+    "   are NOT available in your plugin's runtime — they live in",
+    "   `ml_models/models_sandbox.py` which the plugin loader does not import.",
+    "   You MUST inline their logic using only the allowed primitives",
+    "   (torch, torch.nn, torch.nn.functional). Do NOT reference these helper",
+    "   class names in your `init_body` or `forward_body` — that produces",
+    "   `NameError` at smoke-test time.",
+    "",
+    "2. The `self.config = config` + `self.config.X` access pattern that some",
+    "   reference samples use is FORBIDDEN in your plugin. The `config` object",
+    "   is only in scope during `__init__`. Store every value you need as a",
+    "   plain attribute on `self` (e.g. `self.channels = config.channels`)",
+    "   inside `init_body`, then reference `self.channels` in `forward_body`.",
+    "",
+    "3. Use the references for architectural ideas (block structure, dilation",
+    "   schedules, skip-connection topology) — not as code to copy verbatim.",
+    "",
+)
+
+
+def _pre_1530_reference(reference_code: dict[str, str], stage: str) -> str:
+    if stage != "reasoning":
+        return ""
+    lines = list(_PRE_1530_REFERENCE_PREAMBLE)
+    for model_type, source in reference_code.items():
+        lines += [
+            f"### {model_type} (reference implementation — inspiration only)",
+            "```python",
+            source,
+            "```",
+            "",
+        ]
+    return "\n".join(lines).rstrip("\n")
+
+
+class TestPB5PreFix1530ProfilePin:
+    """The ``implementor.reference_code`` boundary can restore paper-era bytes.
+
+    With the pre-#1530 renderer bound, the reasoning, code and repair prompts
+    of a proposal WITH an ancestor must equal the goldens committed at
+    5ccb436f8. Fails if the builders' separators or placement around the
+    boundary drift, which would make the siderius-exp pin unable to reproduce
+    the paper prompts it exists to preserve.
+    """
+
+    def test_profile_reproduces_5ccb436f8_goldens(self, tmp_path):
+        from agent.prompt_rendering import PromptRenderingProfile, bind_prompt_profile
+
+        source = tmp_path / "provider.txt"
+        source.write_text("pre-1530 reference renderer")
+        profile = PromptRenderingProfile(
+            "pre-1530",
+            "1",
+            {"implementor.reference_code": _pre_1530_reference},
+            frozenset(),
+            {"source": source},
+        )
+        inp = fixture_input()
+        with bind_prompt_profile(profile):
+            rendered = {
+                "pb5_pre1530_reasoning_user.txt": _build_reasoning_prompt(inp),
+                "pb5_pre1530_code_user.txt": _build_code_prompt(
+                    "FIXTURE REASONING TEXT (test-owned, frozen)", inp
+                ),
+                "pb5_pre1530_repair_user_attempt2.txt": _build_repair_prompt(
+                    _FROZEN_CODE_DICT,
+                    _FROZEN_ERROR,
+                    inp,
+                    [(1, "Attempt-1 frozen error: fixture forward returned [B, 255, T].")],
+                ),
+            }
+        for name, text in rendered.items():
+            assert_golden(text, GOLDENS / name, surface=f"PB-5 pre-#1530 pin {name}")
+
+
+def test_ancestor_order_does_not_change_prompt_bytes():
+    """Several ancestors render in one order whatever the mapping's insertion
+    order. Fails if the renderer follows insertion order, which the native loop
+    derives from a set whose order varies with PYTHONHASHSEED across processes."""
+    first = {"alpha_model": "# alpha source\n", "beta_model": "# beta source\n"}
+    second = dict(reversed(list(first.items())))
+    for build in (
+        _build_reasoning_prompt,
+        lambda inp: _build_code_prompt("reasoning", inp),
+        lambda inp: _build_repair_prompt(_FROZEN_CODE_DICT, _FROZEN_ERROR, inp, []),
+    ):
+        assert build(fixture_input(reference_code=first)) == build(
+            fixture_input(reference_code=second)
+        )

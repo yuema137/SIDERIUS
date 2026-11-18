@@ -2637,7 +2637,8 @@ def run_workflow(
                         for ic in proposal.inherited_components
                         if ic.source_type == "experiment" and ic.source_id
                     }
-                    for mt in ref_models:
+                    # Sorted: set order varies with PYTHONHASHSEED across processes.
+                    for mt in sorted(ref_models):
                         src = load_model_source(mt)
                         if src:
                             ref_code[mt] = src

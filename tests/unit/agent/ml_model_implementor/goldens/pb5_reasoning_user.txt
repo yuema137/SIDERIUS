@@ -37,19 +37,20 @@ repeated in every implementation step because each step is a separate request.
 
 How to use it:
 
-1. Where the description keeps parts of an ancestor, carry those parts over
-   from this source and change only what the proposal changes. Otherwise use
-   it for architectural ideas (block structure, dilation schedules,
-   skip-connection topology).
+1. Where the description keeps parts of an ancestor, carry their computation
+   over from this source (inlined as rule 2 requires) and change only what the
+   proposal changes. Otherwise use it for architectural ideas (block
+   structure, dilation schedules, skip-connection topology).
 
-2. Names defined in a reference (helper classes and functions such as
-   `CausalConv1d`, `WaveNetBlock`, `DoubleConv` or `PositionalEncoding`) are
-   NOT available in your plugin's runtime: the plugin loader imports neither
-   `ml_models/models_sandbox.py` nor another plugin. Write whatever you carry
-   over into your own code sections using only the allowed primitives
-   (torch, torch.nn, torch.nn.functional). Referencing such a name without
-   writing its logic into your sections produces `NameError` at smoke-test
-   time.
+2. Helper classes and functions defined in a reference (e.g. `CausalConv1d`,
+   `WaveNetBlock`, `DoubleConv`, `PositionalEncoding`, `Down`, `Up`) are NOT
+   available in your plugin's runtime: the plugin loader imports neither
+   `ml_models/models_sandbox.py` nor another plugin, and the template has no
+   slot for class definitions. Do NOT define or reference these helper
+   classes. Inline their logic in `init_body` and `forward_body` with
+   nn.ModuleList, nn.Sequential and the allowed primitives (torch, torch.nn,
+   torch.nn.functional). Referencing a helper name produces `NameError` at
+   smoke-test time.
 
 3. The `self.config = config` + `self.config.X` access pattern that some
    reference samples use is FORBIDDEN in your plugin. The `config` object

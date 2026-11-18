@@ -37,19 +37,20 @@ _REFERENCE_PREAMBLE = (
     "",
     "How to use it:",
     "",
-    "1. Where the description keeps parts of an ancestor, carry those parts over",
-    "   from this source and change only what the proposal changes. Otherwise use",
-    "   it for architectural ideas (block structure, dilation schedules,",
-    "   skip-connection topology).",
+    "1. Where the description keeps parts of an ancestor, carry their computation",
+    "   over from this source (inlined as rule 2 requires) and change only what the",
+    "   proposal changes. Otherwise use it for architectural ideas (block",
+    "   structure, dilation schedules, skip-connection topology).",
     "",
-    "2. Names defined in a reference (helper classes and functions such as",
-    "   `CausalConv1d`, `WaveNetBlock`, `DoubleConv` or `PositionalEncoding`) are",
-    "   NOT available in your plugin's runtime: the plugin loader imports neither",
-    "   `ml_models/models_sandbox.py` nor another plugin. Write whatever you carry",
-    "   over into your own code sections using only the allowed primitives",
-    "   (torch, torch.nn, torch.nn.functional). Referencing such a name without",
-    "   writing its logic into your sections produces `NameError` at smoke-test",
-    "   time.",
+    "2. Helper classes and functions defined in a reference (e.g. `CausalConv1d`,",
+    "   `WaveNetBlock`, `DoubleConv`, `PositionalEncoding`, `Down`, `Up`) are NOT",
+    "   available in your plugin's runtime: the plugin loader imports neither",
+    "   `ml_models/models_sandbox.py` nor another plugin, and the template has no",
+    "   slot for class definitions. Do NOT define or reference these helper",
+    "   classes. Inline their logic in `init_body` and `forward_body` with",
+    "   nn.ModuleList, nn.Sequential and the allowed primitives (torch, torch.nn,",
+    "   torch.nn.functional). Referencing a helper name produces `NameError` at",
+    "   smoke-test time.",
     "",
     "3. The `self.config = config` + `self.config.X` access pattern that some",
     "   reference samples use is FORBIDDEN in your plugin. The `config` object",
@@ -68,22 +69,24 @@ def reference_code_section(reference_code: Mapping[str, str], stage: ReferenceSt
     """
     if not reference_code:
         return ""
-    return render_reference_code_section(dict(reference_code), stage)
+    return render_reference_code_section(dict(sorted(reference_code.items())), stage)
 
 
 @prompt_boundary("implementor.reference_code")
 def render_reference_code_section(reference_code: dict[str, str], stage: ReferenceStage) -> str:
     """Render the ancestor-source section natively; identical for every ``stage``.
 
-    ``stage`` names the calling request (reasoning, code or repair) so that a
-    profile can render each one differently. Entries keep the mapping's order;
-    each source is embedded whole in a fenced block under its ``model_type``
-    heading. The result carries no leading or trailing blank line, so each
+    ``stage`` names the calling request (reasoning, code or repair): the native
+    text does not depend on it, but a profile may render each one differently.
+    Entries are rendered in sorted ``model_type`` order, independent of the
+    mapping's insertion order, so prompts with several ancestors are
+    reproducible across processes; each source is embedded whole in a fenced
+    block under its ``model_type`` heading. The result carries no leading or trailing blank line, so each
     prompt builder owns its own separators.
     """
     del stage  # The native rendering is stage-independent by design (#1530).
     lines = list(_REFERENCE_PREAMBLE)
-    for model_type, source in reference_code.items():
+    for model_type, source in sorted(reference_code.items()):
         lines += [
             f"### {model_type} (ancestor source)",
             "```python",
