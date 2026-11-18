@@ -288,11 +288,24 @@ The operator supplies fixed per-role provider/model/effort values separately
 from human advice. A standalone CLI may omit effort or richer fields that the
 Python API supports. Read its limitations before substituting it.
 
-Use native token and run-context recording where provided. Most reasoning
-nodes expose their existing `bridge.set_run_context(...)`; the tuner has
-`set_run_context(...)` before its lazy bridge is created. Literature and Data
-Analysis construct bridges during execution. For a node exposing `bridge`, the
-existing recording call has exactly these keyword arguments:
+Use native token and run-context recording where provided. A bridge writes
+`token_usage.jsonl` rows only after its run context is bound; an unbound bridge
+still calls the provider but records nothing. Bind before `run()`, using the
+binding that matches how the node builds its bridges:
+
+| Node | Bridge construction | Binding before `run()` |
+| --- | --- | --- |
+| Proposer | Eager `bridge` for the `reasoning` route; separately routed stages build their own bridges when first used | `node.set_run_context(...)` |
+| Tuner | `run()` builds its bridge after validating the input | `node.set_run_context(...)`; `run()` applies the stored context to the new bridge |
+| Interpretation, Implementer, Validator | One eager `bridge` built by the constructor | `node.bridge.set_run_context(...)` |
+| Literature review, Data Analysis | `run()` builds the bridges (Literature review: main and optional search bridge) | Construct the node with `bridge_factory=contextual_bridge_factory(...)` |
+
+When a node defines its own `set_run_context`, call that method, not
+`node.bridge.set_run_context`. For the proposer, the bridge call binds only the
+`reasoning` bridge and leaves separately routed stages unrecorded; see the
+[proposer guide](agents/proposer.md#token-recording).
+
+The node and bridge methods take exactly these four keyword arguments:
 
 ```python
 from pathlib import Path
@@ -301,20 +314,44 @@ from pathlib import Path
 # The bridge binds an existing directory; it does not create this directory.
 record_path = Path(record_workspace)
 record_path.mkdir(parents=True, exist_ok=True)
-node.bridge.set_run_context(
+context = dict(workspace=record_path, iter=iteration, run_name=run_name, run_id=run_id)
+
+# Proposer or tuner:
+node.set_run_context(**context)
+# Interpretation, implementer or validator, instead:
+# node.bridge.set_run_context(**context)
+```
+
+The existing helper `workflows.run_context.bind_agent_run_context(node,
+workspace=..., iteration=..., run_name=..., run_id=...)` applies the same
+dispatch and is what the fixed workflow calls. Its keyword is `iteration`, not
+`iter`, and it binds nothing when `run_name` or `run_id` is `None`.
+
+For Literature review and Data Analysis, wrap the bridge factory when
+constructing the node:
+
+```python
+from workflows.run_context import contextual_bridge_factory
+
+factory = contextual_bridge_factory(
+    None,  # or the bridge_factory supplied by the declared environment
     workspace=record_path,
-    iter=iteration,
+    iteration=iteration,
     run_name=run_name,
     run_id=run_id,
 )
+node = MLLiteratureReviewAgent(bridge_factory=factory, root_cache_dir=root_cache_dir)
 ```
 
-For the tuner, call `node.set_run_context(...)` with those same four keywords.
+`None` selects the default `LLMBridge`. Each bridge the node builds inside
+`run()` is bound before its first call. The helper returns the original factory
+unchanged when `run_name` or `run_id` is `None`, so nothing is recorded then.
+
 The bridge requires an existing writable directory, a non-negative `iter`, and
 an unchanged `run_id` once bound. On that bridge, later `iter` values cannot go
 backwards. These are recording preconditions, not new scientific run budgets.
-Neither method accepts `node_name`; do not infer arguments from a method name
-or from `hasattr`. Recording context configures accounting, not task binding.
+None of these methods accepts `node_name`; do not infer arguments from a method
+name or from `hasattr`. Recording context configures accounting, not task binding.
 Do not claim complete token
 accounting from merely calling `run`; preserve actual CLI/provider receipts and
 report missing observations. These documents add no new instrumentation.

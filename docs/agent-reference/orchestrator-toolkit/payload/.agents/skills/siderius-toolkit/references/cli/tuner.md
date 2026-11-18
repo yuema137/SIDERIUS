@@ -3,6 +3,9 @@
 Source inventory at SIDERIUS `1c68bc81d7e44bbdc6e03a445a8422c3f77f45ff`. Argument expressions below are
 copied from the existing parser declarations; evaluate dynamic defaults with
 the selected executable’s `--help`. These are not an orchestrator launch recipe.
+The provider and model rows were re-synced to `5ccb436f` (v1.1.0); a `None`
+model selects `LLMBridge`'s default model for the chosen provider. Options
+added after the inventory can be missing from this table; confirm with `--help`.
 Read the [capability guide](../agents/tuner.md) for Python/CLI differences.
 The time-budget and VRAM-budget help texts were synced by hand to the landed
 parser after that inventory (issues #828, #1044).
@@ -13,8 +16,8 @@ Public module: `nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent`
 | --- | --- | --- | --- | --- | --- |
 | --training_validation_portion | float | False | None | — | Optional task-owned seeded snapshot fraction for per-epoch validation loss only; final scoring scope is unchanged. Requires a composed task with the seeded scope capability. |
 | --training_budget_reserve_fraction | float | False | None | — | Opt in to cooperative epoch allocation; requires both role time budgets and explicit role epoch caps in 1–100. |
-| --provider | str | False | 'gemini' | ['gemini', 'openai'] | 'LLM provider for the planner sub-call (default for reflector when not overridden).' |
-| --model_id | str | False | 'gemini-3.1-flash-lite-preview' | — | 'Model ID for the planner sub-call (default for reflector when not overridden).' |
+| --provider | str | False | DEFAULT_LLM_PROVIDER (= 'openai') | ['gemini', 'openai'] | 'LLM provider for the planner sub-call (default for reflector when not overridden).' |
+| --model_id | str | False | None | — | 'Model ID for the planner sub-call (default for reflector when not overridden).' |
 | --reflect_provider | str | False | None | ['gemini', 'openai'] | 'Optional separate provider for the reflector sub-call. When None, the reflector uses --provider.' |
 | --reflect_model_id | str | False | None | — | 'Optional separate model for the reflector sub-call (e.g., gemini-2.5-flash). When None, the reflector uses --model_id.' |
 | --expert_advice | str | False | 'None' | — | 'Initial advice from a human expert to guide exploration.' |

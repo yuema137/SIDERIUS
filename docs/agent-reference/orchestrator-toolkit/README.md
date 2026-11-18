@@ -31,3 +31,8 @@ added options, and its documented step/batch defaults match `build_parser()`.
 The other five CLI parser files did not change between the original inventory
 and v0.2.9. Nested structures and runtime cross-field rules still require
 inspection of the installed schemas before constructing a request.
+
+A later check at v1.1.0 (`5ccb436f`) updated the constructor signatures, the
+CLI provider and model defaults, and the proposer's stage-routing and
+token-recording guidance. The field and CLI tables were not re-reconciled then,
+so options and fields added after v0.2.9 can be missing from them.

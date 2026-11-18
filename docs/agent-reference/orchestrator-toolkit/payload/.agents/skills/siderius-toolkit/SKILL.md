@@ -58,10 +58,13 @@ and failed attempts; none changes the run's permissions or budget.
 | Code validation | generated candidate and I/O contract → validation verdict and diagnostic evidence | [Validator](references/agents/validator.md) |
 | Tuning and evaluation | validated candidate, task bindings and resource configuration → training/evaluation records and selected results | [Tuner](references/agents/tuner.md) |
 
-The field and CLI tables have been reconciled with SIDERIUS `0b44e405` (v0.2.9);
-older per-page source-revision labels identify the original inventory, not the
-installed runtime pin. At invocation, inspect the exact installed classes and
-`--help` if a version-specific detail matters.
+The field and CLI tables were last fully reconciled with SIDERIUS `0b44e405`
+(v0.2.9) and can omit fields or options added later. Constructor signatures,
+CLI provider/model defaults, proposer stage routing and token-recording
+guidance were re-verified at `5ccb436f` (v1.1.0). Per-page source-revision
+labels identify the inventory, not the installed runtime pin. At invocation,
+inspect the exact installed classes and `--help` if a version-specific detail
+matters.
 
 Each guide links the complete top-level input/output field inventory and the
 existing constructor/CLI options. Nested schema structure is discoverable from

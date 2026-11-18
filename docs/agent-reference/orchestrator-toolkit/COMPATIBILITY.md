@@ -1,6 +1,7 @@
 # Existing interface boundaries
 
-Reference: SIDERIUS `1c68bc81d7e44bbdc6e03a445a8422c3f77f45ff`.
+Reference: SIDERIUS `1c68bc81d7e44bbdc6e03a445a8422c3f77f45ff`. The Model routing
+and Measurement rows were re-verified at `5ccb436f` (v1.1.0).
 This page describes capability, not qualification of any scientific experiment.
 
 | Surface | Supported boundary or limitation |
@@ -13,7 +14,7 @@ This page describes capability, not qualification of any scientific experiment.
 | Persistence | Local storage and typed local protocols; database protocol alternatives remain placeholders |
 | Parallel calls | Caller-controlled scheduling, with real shared filesystem/registry/process/GPU conflicts to account for; no blanket safety guarantee |
 | Model routing | Different constructor/input locations by node; proposer honors stage overrides through its public routing contract; legacy two-call mode uses reasoning routing |
-| Measurement | Native node/provider receipts where available; documentation adds no universal accounting or enforcement |
+| Measurement | Native node/provider receipts where available; run-context binding differs by node, and the proposer and tuner bind through their own `set_run_context`; documentation adds no universal accounting or enforcement |
 | Scientific contract | External task owns data selection, metric, Health, eligibility and deliverables; native defaults are not experiment requirements |
 
 Source field descriptions can contain historical examples and legacy defaults.

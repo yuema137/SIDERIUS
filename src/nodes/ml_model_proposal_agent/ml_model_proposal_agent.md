@@ -33,17 +33,19 @@ valid names are preserved unchanged. Archived schemas remain readable.
 
 The public node module exports immutable `ProposerRoute`, `ProposerRouting`
 and the pure `resolve_proposer_routing(legacy, stage_options)` resolver. A route
-contains provider, model_id, reasoning_effort and max_retries. The agent's
-read-only `routing` property exposes the resolved settings without inspecting
-private modules. This describes configured settings; provider-level model
+contains provider, model_id, reasoning_effort, max_output_tokens and
+max_retries. The agent's read-only `routing` property exposes the resolved
+settings without inspecting private modules. This describes configured settings; provider-level model
 defaults still belong to LLMBridge.
 
 The constructor accepts flat `{stage}_{field}` keyword overrides for
 `comparison`, `reasoning`, and `proposing`, including
 `reasoning_reasoning_effort`. Missing keys inherit the legacy constructor
-settings; explicitly supplied `None` or `0` is preserved. WorkflowLLMConfig
+settings; explicitly supplied `None` or `0` is preserved. Other keyword names
+are ignored without an error. WorkflowLLMConfig
 transports the complete nested configuration into these overrides. Different
-stages may use different reasoning efforts and provider retry limits.
+stages may use different reasoning efforts, output limits and provider retry
+limits.
 
 Comparison calls and vocabulary repairs use comparison routing. Causal reasoning,
 boldness repairs and causal corrections use reasoning routing. Final proposal
@@ -52,10 +54,12 @@ reasoning routing. Legacy two-call mode uses reasoning routing for both calls.
 Prompt rendering, structural retry policy and response validation are unchanged.
 
 `self.bridge` remains the eager reasoning bridge. Other routes are constructed
-lazily when used and reused when all four route fields match. Disabled stages
+lazily when used and reused when all five route fields match. Disabled stages
 do not initialize additional clients. `set_run_context` binds existing bridges
 and retains the same context for later bridges; the workflow calls this agent
-method even though the agent also exposes `bridge`. Context failures propagate
+method even though the agent also exposes `bridge`; calling
+`bridge.set_run_context` directly binds only the reasoning bridge, so calls on
+separately routed stages write no usage rows. Context failures propagate
 before a newly created bridge enters the cache.
 
 Historical reproduction is configured by the experiment consumer: explicitly
