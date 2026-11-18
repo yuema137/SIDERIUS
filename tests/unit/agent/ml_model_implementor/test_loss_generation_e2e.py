@@ -569,8 +569,10 @@ class TestAllRetriesFail:
             BAD_LOSS_CODE_NON_SCALAR,
             BAD_LOSS_CODE_NON_SCALAR,
         ]
-        with pytest.raises(ValueError, match="Loss generation failed after 2 attempts"):
+        with pytest.raises(ValueError, match="Loss generation failed after 2 attempts") as raised:
             agent_with_mocks._generate_loss(inp_loss_only)
+        # #1538: the repair attempt's error survives into the final message.
+        assert "\n\nEarlier attempt errors (oldest first):\n  Attempt 1: " in str(raised.value)
 
     def test_no_registry_entry_on_failure(self, agent_with_mocks, inp_loss_only):
         """A failing run must NOT pollute the registry — the next

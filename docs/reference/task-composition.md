@@ -926,7 +926,8 @@ this contract is not a sandbox.
 The implementor, code validator and proposer share the native training
 appendix boundary. Supported boundaries are `native_training.appendix`, `proposal.template`,
 `interpretation.model_system`, `interpretation.model_user`, `interpretation.score_value`,
-`tuner.execution_provenance`, `tuner.training_dynamics`, `implementor.reference_code`, and the
+`tuner.execution_provenance`, `tuner.training_dynamics`, `implementor.reference_code`,
+`proposal.failure_attempt_history`, and the
 `data_analysis.` stages `skill_selection`, `analysis_plan`,
 `generated_program`, `report_synthesis`, `generated_skill_promotion`,
 and `structured_output_repair`. See the decorated functions for exact typed
@@ -939,6 +940,13 @@ the implementor's reasoning, code and repair user prompts; its `stage` argument
 names the calling request. It is entered only when `reference_code` is nonempty,
 so a profile that does not declare it raises only for a proposal with ancestor
 source. See the [implementor contract](../../src/nodes/ml_model_implementor/ml_model_implementor.md#ancestor-reference-source).
+
+The `proposal.failure_attempt_history` boundary renders the earlier-attempt
+block appended to a final failure message: the implementor's repair-exhaustion
+`ValueError` and the native loop's per-proposal `previous_failures` entry. It is
+entered only when an earlier attempt exists, so a single-attempt failure is
+byte-identical to the pre-#1538 text; a profile that returns `""` restores the
+pre-#1538 text for every failure. See `agent/prompt_templates/attempt_history.py`.
 
 The `tuner.training_dynamics` boundary renders the shared diagnostic line used
 by planner, reflector and interpreter. Native rendering uses shortest round-trip decimal
