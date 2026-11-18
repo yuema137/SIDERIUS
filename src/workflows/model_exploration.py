@@ -179,6 +179,10 @@ from workflows.llm_config import (
     WorkflowLLMConfig,
 )
 from workflows.plugin_staging import stage_native_plugins
+from workflows.proposal_failure_feedback import (
+    exhausted_validation_feedback,
+    implementation_error_feedback,
+)
 from workflows.research_history import (
     acquire_iteration_order as _acquire_iteration_order,  # noqa: F401 — compatibility import
 )
@@ -2471,6 +2475,8 @@ def run_workflow(
             # validation result so a refused candidate cannot leave a stale
             # ``passed`` value that escapes a later retry or exhaustion.
             validation = None
+            # #1538: every rejection of this proposal, in order, for its feedback entry.
+            validation_failures: list[tuple[int, str]] = []
             print(
                 f"  [{iteration}.{attempt}] Proposing new model (attempt {attempt}/{launch.max_proposal_attempts})..."
             )
@@ -2764,6 +2770,7 @@ def run_workflow(
                     previous_validation_failure = (
                         validation.error_message or "Unknown validation error"
                     )
+                    validation_failures.append((impl_attempt, previous_validation_failure))
                     print(f"    Validation FAILED: {previous_validation_failure}")
                     if impl_attempt < launch.max_impl_attempts:
                         print("    Retrying implementation with validator feedback...\n")
@@ -2772,7 +2779,7 @@ def run_workflow(
                     break
 
                 # All impl attempts for this proposal exhausted
-                previous_failures.append(previous_validation_failure or "Unknown error")
+                previous_failures.append(exhausted_validation_feedback(validation_failures))
                 if attempt < launch.max_proposal_attempts:
                     print("    Retrying with a new proposal...\n")
 
@@ -2780,7 +2787,9 @@ def run_workflow(
                 validation = None
                 error_msg = _proposal_attempt_failure(e)
                 print(f"    ERROR: {error_msg}")
-                previous_failures.append(error_msg)
+                previous_failures.append(
+                    implementation_error_feedback(error_msg, validation_failures)
+                )
                 if attempt < launch.max_proposal_attempts:
                     print("    Retrying with failure feedback...\n")
 

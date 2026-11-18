@@ -1988,6 +1988,41 @@ def _compose_task_health(section: dict[str, Any], manifest_dir: str) -> TaskHeal
     return config_path
 
 
+def _optional_blocks_config_ref(raw: dict[str, Any], key: str, manifest_dir: str) -> str | None:
+    """Resolve an optional ``*_blocks`` section to its declaration path, or ``None``.
+
+    One shape for the three prompt-block families, the same rule
+    ``judge_blocks`` already applies (``workflows.judge_task_composition``):
+    an absent section or ``{none: true}`` alone is the named absence;
+    anything else must be exactly ``{config: <ref>}``. ``none`` beside
+    ``config`` is refused rather than letting either side win silently, and
+    an unknown key is refused so a misspelling cannot drop the declaration.
+    """
+    section = raw.get(key)
+    if section is None:
+        return None
+    if not isinstance(section, dict):
+        raise TaskCompositionError(
+            f"section {key!r} must be a mapping; got {type(section).__name__}."
+        )
+    _refuse_unknown_section_keys(section, frozenset({"none", "config"}), key)
+    if "none" in section:
+        if "config" in section:
+            raise TaskCompositionError(
+                f"{key} declares both 'none' and a 'config' path. A task either "
+                f"declares {key} with 'config: <path>' or explicitly declares none "
+                "with 'none: true' alone."
+            )
+        if section["none"] is not True:
+            raise TaskCompositionError(
+                f"{key} 'none' must be true when present; got {section['none']!r}. "
+                "Declare 'none: true' alone, or remove it and declare 'config: <path>'."
+            )
+        return None
+    config_ref = _require(section, "config", f"{key} (without 'none: true')")
+    return _resolve_path(config_ref, manifest_dir)
+
+
 def _compose_implementor_blocks(raw: dict[str, Any], manifest_dir: str) -> tuple[Any, str | None]:
     """Optional by design: an absent declaration renders NOTHING (C7-4).
 
@@ -1997,18 +2032,9 @@ def _compose_implementor_blocks(raw: dict[str, Any], manifest_dir: str) -> tuple
     """
     from agent.prompt_templates.implementor.task_blocks import load_implementor_task_blocks
 
-    section = raw.get("implementor_blocks")
-    if section is None:
+    config_path = _optional_blocks_config_ref(raw, "implementor_blocks", manifest_dir)
+    if config_path is None:
         return None, None
-    if not isinstance(section, dict):
-        raise TaskCompositionError(
-            f"section 'implementor_blocks' must be a mapping; got {type(section).__name__}."
-        )
-    if section.get("none") is True:
-        return None, None
-
-    config_ref = _require(section, "config", "implementor_blocks (without 'none: true')")
-    config_path = _resolve_path(config_ref, manifest_dir)
     try:
         blocks = load_implementor_task_blocks(config_path)
     except Exception as exc:
@@ -2048,18 +2074,9 @@ def _compose_proposal_blocks(raw: dict[str, Any], manifest_dir: str) -> tuple[An
     """
     from agent.prompt_templates.proposal.task_blocks import load_proposal_task_blocks
 
-    section = raw.get("proposal_blocks")
-    if section is None:
+    config_path = _optional_blocks_config_ref(raw, "proposal_blocks", manifest_dir)
+    if config_path is None:
         return None, None
-    if not isinstance(section, dict):
-        raise TaskCompositionError(
-            f"section 'proposal_blocks' must be a mapping; got {type(section).__name__}."
-        )
-    if section.get("none") is True:
-        return None, None
-
-    config_ref = _require(section, "config", "proposal_blocks (without 'none: true')")
-    config_path = _resolve_path(config_ref, manifest_dir)
     try:
         blocks = load_proposal_task_blocks(config_path)
     except Exception as exc:
@@ -2083,18 +2100,9 @@ def _compose_interpretation_blocks(
         load_interpretation_task_blocks,
     )
 
-    section = raw.get("interpretation_blocks")
-    if section is None:
+    config_path = _optional_blocks_config_ref(raw, "interpretation_blocks", manifest_dir)
+    if config_path is None:
         return None, None
-    if not isinstance(section, dict):
-        raise TaskCompositionError(
-            f"section 'interpretation_blocks' must be a mapping; got {type(section).__name__}."
-        )
-    if section.get("none") is True:
-        return None, None
-
-    config_ref = _require(section, "config", "interpretation_blocks (without 'none: true')")
-    config_path = _resolve_path(config_ref, manifest_dir)
     try:
         blocks = load_interpretation_task_blocks(config_path)
     except Exception as exc:
