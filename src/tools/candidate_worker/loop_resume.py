@@ -251,8 +251,8 @@ def launch_continuation(
     if host_grant is not None:
         publish_bytes_write_once(str(control / GRANT_CONTROL_FILE), encode_control(host_grant))
     try:
-        # Inside the try: a prior segment's change to the writer directory (for
-        # example a chmod) publishes a refusal receipt instead of raising.
+        # Inside the try: a host-side change to the writer directory or its lock
+        # (for example a chmod) publishes a refusal receipt instead of raising.
         profile = SandboxProfile(
             workspace=Path(initial.workspace),
             writer_state=loop_writer_state(Path(initial.workspace)),
