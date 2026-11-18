@@ -77,6 +77,8 @@ from nodes.ml_hyperparameter_tune_agent.contracts import (
     RunExitSnapshot,
     TrainingOutcome,
     completes_round,
+    is_infeasible_outcome,
+    next_infeasible_streak,
 )
 from nodes.ml_hyperparameter_tune_agent.feedback import (
     _build_formal_validity_feedback,
@@ -1125,6 +1127,60 @@ def _resume_progress(
     return len(completed_round_indices), max(attempt_suffixes, default=0)
 
 
+def _resume_infeasible_streak(
+    existing_history: list[dict[str, Any]],
+    *,
+    max_rounds: int,
+    attempts_per_round: int,
+    attempts_per_formal_round: int,
+) -> int:
+    """Rebuild the #1527 consecutive measured-infeasible round count from records.
+
+    A resumed run must brake where an uninterrupted one would. Tuner records
+    carry ``memory.round_index`` and ``memory.attempt_in_round``; in history
+    order, a new round starts when the index changes or the attempt number
+    does not increase (a failed round is retried at the same index, and so is
+    a round interrupted by the restart being resumed). Each round then:
+
+    * holds a completing record: advance the streak by that outcome;
+    * reached its attempt budget without one, or ended on a
+      ``skipped_infrastructure_failure`` record (the live loop ends a round
+      early on a terminal pre-phase infrastructure failure): it failed, which
+      resets. An interrupted round that happens to end on such a record is
+      also read as failed; that can only delay the brake, never advance it;
+    * neither: it was interrupted, so the live loop never counted it and the
+      streak is unchanged.
+
+    The budget is ``attempts_per_formal_round`` for round index ``max_rounds``
+    (the formal round) and ``attempts_per_round`` otherwise, as in ``run()``.
+    """
+    rounds: list[list[dict[str, Any]]] = []
+    previous: tuple[int, int] | None = None
+    for record in existing_history:
+        memory = record.get("memory") or {}
+        index, attempt = memory.get("round_index"), memory.get("attempt_in_round")
+        if not isinstance(index, int) or not isinstance(attempt, int):
+            continue
+        if previous is None or index != previous[0] or attempt <= previous[1]:
+            rounds.append([])
+        rounds[-1].append(record)
+        previous = (index, attempt)
+
+    streak = 0
+    for records in rounds:
+        completing = [r for r in records if completes_round(r)]
+        index = records[0]["memory"]["round_index"]
+        budget = attempts_per_formal_round if index == max_rounds else attempts_per_round
+        attempts = max(r["memory"]["attempt_in_round"] for r in records)
+        if completing:
+            streak = next_infeasible_streak(
+                streak, round_infeasible=is_infeasible_outcome(completing[-1])
+            )
+        elif attempts >= budget or records[-1].get("status") == INFRASTRUCTURE_FAILURE_STATUS:
+            streak = next_infeasible_streak(streak, round_infeasible=False)
+    return streak
+
+
 def publish_run_output(output_path: str, agent_output: HyperparamTuningOutput) -> None:
     """Persist ``run_output`` through the storage owner.
 
@@ -1190,6 +1246,7 @@ def finalize_run_output(
     completed_rounds = exit_snapshot.completed_rounds
     total_attempts = exit_snapshot.total_attempts
     consecutive_fails = exit_snapshot.consecutive_fails
+    consecutive_infeasible = exit_snapshot.consecutive_infeasible_rounds
     _scope_violation_reason = exit_snapshot.scope_violation_reason
     _evidence_channel_failure = exit_snapshot.evidence_channel_failure
     _skipped_formal_for_no_valid_winner = exit_snapshot.skipped_formal_for_no_valid_winner
@@ -1208,6 +1265,7 @@ def finalize_run_output(
         max_fail_rounds=max_fail_rounds_setting,
         scope_violation_reason=_scope_violation_reason,
         evidence_channel_failure=_evidence_channel_failure,
+        consecutive_infeasible_rounds=consecutive_infeasible,
     )
     all_records = sandbox.get_summary()
     # F-12d-30 — the RUN's own scientific gate set, not the process default.
@@ -1253,6 +1311,7 @@ def finalize_run_output(
         formal_skipped_for_no_valid_winner=_skipped_formal_for_no_valid_winner,
         healthgate_mode=agent_input.healthgate_mode,
         required_gate_ids=bindings.run_scientific_gate_ids,
+        stopped_by_infeasible_rounds=termination_reason == "aborted_infeasible_rounds",
     )
     if trial_validity_feedback is not None:
         print(
@@ -1348,6 +1407,7 @@ def finalize_run_output(
             model_type=agent_input.model_type,
             healthgate_mode=agent_input.healthgate_mode,
             required_gate_ids=bindings.run_scientific_gate_ids,
+            stopped_by_infeasible_rounds=termination_reason == "aborted_infeasible_rounds",
         ),
         # Phase 6.6 WS-B B.3 — flush per-attempt VRAM-gate rejections.
         # Empty list when every attempt was feasible. Orchestrator
@@ -1471,6 +1531,13 @@ def finalize_run_output(
             f"\nAborted after {consecutive_fails} consecutive fail-rounds "
             f"(max_fail_rounds={max_fail_rounds_setting}); "
             f"{completed_rounds}/{max_rounds} rounds completed across "
+            f"{total_attempts} total attempts."
+        )
+    elif termination_reason == "aborted_infeasible_rounds":
+        print(
+            f"\nAborted after {consecutive_infeasible} consecutive infeasible rounds "
+            f"(max_fail_rounds={max_fail_rounds_setting}): the declared constraints "
+            f"were not met; {completed_rounds}/{max_rounds} rounds completed across "
             f"{total_attempts} total attempts."
         )
     else:

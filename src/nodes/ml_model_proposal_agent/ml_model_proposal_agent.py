@@ -944,6 +944,11 @@ def _format_recent_trial_validity_block(
                 "- the formal round was SKIPPED because no valid trial winner existed "
                 "(not because of the time budget)"
             )
+        if entry.stopped_by_infeasible_rounds:
+            lines.append(
+                "- tuning STOPPED because consecutive rounds broke the declared "
+                "constraints (aborted_infeasible_rounds); the constraints were not reached"
+            )
         for outcome in entry.outcomes:
             bits = [f"status={outcome.status}", f"validity={outcome.health_validity.value}"]
             if outcome.failed_gate_names:

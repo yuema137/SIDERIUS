@@ -62,7 +62,8 @@ There is no mandatory route through the legacy `score_vector` helper.
 The tuner records a scoreability refusal as `error_scoring` with
 `failure_type="not_scoreable"` and `metric_refusal`. A refusal made only by a
 measured feasibility-constraint violation records `failure_type="infeasible"`
-instead and completes the round without a retry (#1527; the
+instead and completes the round without a retry; `max_fail_rounds` such rounds
+in a row stop tuning with `aborted_infeasible_rounds` (#1527; the
 [evaluation contract](../../../src/execute_tools/evaluation-contract.md#feasibility-constraints)
 owns the rule). Successful scoring reaches
 the shared Health boundary; an earlier scoring failure does not establish a

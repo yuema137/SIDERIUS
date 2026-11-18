@@ -16,6 +16,11 @@ def render_formal_failure_feedback(entries: Sequence[FormalValidityFeedback]) ->
             f"{entry.execution_failure_count} execution failures"
             + (f", {entry.infeasible_count} infeasible." if entry.infeasible_count else ".")
         )
+        if entry.stopped_by_infeasible_rounds:
+            lines.append(
+                "Tuning stopped because consecutive rounds broke the declared constraints "
+                "(aborted_infeasible_rounds); the constraints were not reached."
+            )
         for outcome in entry.outcomes:
             lines.append(
                 f"- {outcome.exp_id}: status={outcome.status}; "

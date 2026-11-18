@@ -379,10 +379,14 @@ What works now, and what comes later:
   measured and one of them is broken, the round ends there. The tuner does
   not train the same round again, and the round does not count toward the
   consecutive-failure limit (`max_fail_rounds`). It still uses up one of the
-  run's `max_rounds`, so a threshold that no model meets spends the whole run
-  without a usable result. The next round's planner sees which constraint
-  was broken and by how much; when an iteration ends with no valid result,
-  the next proposer sees it too. A constraint that could not be measured at
+  run's `max_rounds`. If `max_fail_rounds` rounds in a row break a
+  constraint, tuning stops with the reason `aborted_infeasible_rounds`, so a
+  threshold that no model meets costs a few rounds, not the whole run. Any
+  other kind of round in between (a scored round, or a round that failed)
+  starts the count again. The next round's planner sees which constraint
+  was broken and by how much. When an iteration ends with no valid result,
+  the next proposer sees it too, including whether tuning stopped for this
+  reason. A constraint that could not be measured at
   all (for example, a failed latency measurement) is different: that is
   missing evidence, so the tuner retries the round as it does for any other
   scoring failure. Set thresholds that a reasonable model can meet. The

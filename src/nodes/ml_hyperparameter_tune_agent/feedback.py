@@ -205,6 +205,7 @@ def _build_trial_validity_feedback(
     formal_skipped_for_no_valid_winner: bool,
     healthgate_mode: str | None,
     required_gate_ids: frozenset[str] | None = None,
+    stopped_by_infeasible_rounds: bool = False,
 ) -> TrialValidityFeedback | None:
     """Report an iteration whose trials produced no valid candidate.
 
@@ -254,6 +255,7 @@ def _build_trial_validity_feedback(
         unknown_validity_count=tally.unknown,
         execution_failure_count=tally.execution_failures,
         infeasible_count=tally.infeasible,
+        stopped_by_infeasible_rounds=stopped_by_infeasible_rounds,
         outcomes=[InvalidTrialOutcome.model_validate(item.model_dump()) for item in tally.outcomes],
         formal_skipped_for_no_valid_winner=formal_skipped_for_no_valid_winner,
         healthgate_mode=healthgate_mode,
@@ -369,6 +371,7 @@ def _build_formal_validity_feedback(
     model_type: str,
     healthgate_mode: str | None,
     required_gate_ids: frozenset[str] | None = None,
+    stopped_by_infeasible_rounds: bool = False,
 ) -> FormalValidityFeedback | None:
     """Never label Formal evidence as Trial evidence or make it an incumbent."""
     # Match the persisted role contract used by BestTracks: Formal writers
@@ -386,6 +389,7 @@ def _build_formal_validity_feedback(
         unknown_validity_count=tally.unknown,
         execution_failure_count=tally.execution_failures,
         infeasible_count=tally.infeasible,
+        stopped_by_infeasible_rounds=stopped_by_infeasible_rounds,
         outcomes=tally.outcomes[-8:],
         healthgate_mode=healthgate_mode,
         evidence_absent=tally.evidence_absent[-8:],

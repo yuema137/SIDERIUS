@@ -729,6 +729,16 @@ class FormalValidityFeedback(BaseModel):
         exclude_if=lambda value: not value,
         description="#1527: measured-infeasible Formal records. Omitted when 0.",
     )
+    stopped_by_infeasible_rounds: bool = Field(
+        default=False,
+        exclude_if=lambda value: not value,
+        description=(
+            "#1527: tuning stopped with termination_reason="
+            "'aborted_infeasible_rounds' (max_fail_rounds measured-infeasible "
+            "rounds in a row), so the declared constraints were not reached. "
+            "Omitted when false."
+        ),
+    )
     outcomes: list[InvalidCandidateOutcome] = Field(max_length=8)
     healthgate_mode: str | None = None
     evidence_absent: list[str] = Field(default_factory=list, max_length=8)
@@ -775,6 +785,16 @@ class TrialValidityFeedback(BaseModel):
             "constraint (`failure_type='infeasible'`). A judged outcome, not an "
             "execution failure; the violated constraints are on each outcome. "
             "Omitted when 0."
+        ),
+    )
+    stopped_by_infeasible_rounds: bool = Field(
+        default=False,
+        exclude_if=lambda value: not value,
+        description=(
+            "#1527: tuning stopped with termination_reason="
+            "'aborted_infeasible_rounds' (max_fail_rounds measured-infeasible "
+            "rounds in a row), so the declared constraints were not reached. "
+            "Omitted when false."
         ),
     )
     outcomes: list[InvalidTrialOutcome] = Field(

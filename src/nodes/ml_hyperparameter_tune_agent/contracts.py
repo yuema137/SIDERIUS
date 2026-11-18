@@ -336,6 +336,8 @@ class RunExitSnapshot:
     last_plan: Any
     """The most recent validated plan, or ``None`` if none ever validated."""
     environment_admission_refusal: AdmissionDecision | None = None
+    consecutive_infeasible_rounds: int = 0
+    """#1527: trailing measured-infeasible rounds; the infeasible brake reads it."""
 
 
 class AttemptSignal(Enum):
@@ -395,6 +397,20 @@ def completes_round(record: dict[str, Any]) -> bool:
     rule; the live loop reaches the same verdict through :class:`AttemptSignal`.
     """
     return record.get("status") in _COMPLETED_ROUND_STATUSES or is_infeasible_outcome(record)
+
+
+def next_infeasible_streak(streak: int, *, round_infeasible: bool) -> int:
+    """The consecutive measured-infeasible round count after one round ends.
+
+    #1527 infeasible brake: ``max_fail_rounds`` such rounds in a row stop the
+    tuner with ``termination_reason='aborted_infeasible_rounds'``. Any other
+    round outcome (a scored success, a Health-invalid round, a round that
+    exhausted its attempts) resets the streak, mirroring how any completed
+    round resets ``consecutive_fails``. The two counters are independent: each
+    counts its own kind of round in a row, and each kind resets the other.
+    The live loop and resume both advance the streak through this function.
+    """
+    return streak + 1 if round_infeasible else 0
 
 
 @dataclass

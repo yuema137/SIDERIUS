@@ -188,6 +188,25 @@ class TestTheDistinctionsSurvive:
         assert dumped["infeasible_count"] == 1
         assert "constraint_violations" not in dumped["outcomes"][1]
 
+    def test_an_infeasible_brake_stop_reaches_the_proposer(self):
+        """#1527: the proposer must learn tuning stopped on unreached constraints.
+
+        The flag is omitted from the dump when false, so a run without the
+        brake keeps its bytes (the pre-08a golden below pins that case).
+        """
+        infeasible = _trial("infeasible", status="error_scoring", gates=False)
+        infeasible["failure_type"] = "infeasible"
+        stopped = _build_trial_validity_feedback(
+            [infeasible],
+            formal_skipped_for_no_valid_winner=False,
+            healthgate_mode="blocking",
+            required_gate_ids=frozenset(BLOCKING_IDS),
+            stopped_by_infeasible_rounds=True,
+        )
+        assert stopped is not None and stopped.model_dump()["stopped_by_infeasible_rounds"]
+        assert "aborted_infeasible_rounds" in TestTheRenderedBlock._render([stopped])
+        assert "stopped_by_infeasible_rounds" not in _build([infeasible]).model_dump()
+
     def test_validity_unknown_is_not_invalidity(self):
         """Gates that could not judge are not gates that rejected."""
         result = _build([_trial("ungated", gates=False)])

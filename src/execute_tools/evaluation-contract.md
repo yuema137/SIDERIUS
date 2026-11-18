@@ -477,12 +477,67 @@ failure:
   declaration order). Both fields are omitted from serialization when empty, and the
   proposer and Formal renderers mention them only when non-zero.
 
+**Infeasible brake (#1527, operator decision 2026-11-18).** `max_fail_rounds`
+measured-infeasible rounds in a row stop the tuner with
+`termination_reason="aborted_infeasible_rounds"` and run `status="partial"`, the
+same status as `aborted_fail_rounds`. There is no new configuration field: the
+threshold is `max_fail_rounds`. An unreachable threshold therefore costs at most
+`max_fail_rounds` infeasible rounds (each one attempt and one training), not all of
+`max_rounds`.
+
+- Counter: `consecutive_infeasible` in `run()`, advanced once per ended round by
+  `contracts.next_infeasible_streak` (`+1` for a measured-infeasible round, `0` for
+  any other ending) and checked in the round-loop condition beside
+  `consecutive_fails`. `RunExitSnapshot.consecutive_infeasible_rounds` carries it to
+  `policy._compute_termination_state`. The precedence there is
+  `infrastructure_abort` > `scope_violation` > `completed` (`completed_rounds >=
+  max_rounds`) > `aborted_fail_rounds` > `aborted_infeasible_rounds`. An
+  infeasible formal round makes `completed_rounds == max_rounds`, so the brake can
+  only end a run before its formal round.
+- Reset rule: any round that ends otherwise resets the streak. That includes a
+  scored success, a Health-invalid `failed_mode_collapse` round, and a round that
+  exhausted its attempts or was ended early (`END_ROUND`). This mirrors
+  `consecutive_fails`, which every completed round (including an infeasible one)
+  resets. The two counters are independent: each counts its own kind of round in a
+  row, and each kind resets the other, so both cannot reach the threshold at once.
+  Termination stays bounded: infeasible rounds consume `max_rounds`, and at most
+  `max_fail_rounds - 1` failed rounds can separate two completed rounds. A run that
+  alternates failed and infeasible rounds therefore ends after at most
+  `max_rounds * max_fail_rounds` rounds, the same bound as alternating failed and
+  scored rounds.
+- Formal round: a brake before the formal round leaves the loop exactly like
+  `aborted_fail_rounds`. No formal round runs, `skipped_formal_for_no_valid_winner`
+  stays false, and `termination_reason` records why.
+- Resume: `records._resume_infeasible_streak(history, max_rounds,
+  attempts_per_round, attempts_per_formal_round)` rebuilds the streak from the
+  persisted records with the same `next_infeasible_streak` step. History is split
+  into rounds by `memory.round_index` and `memory.attempt_in_round`: a new round
+  starts when the index changes or the attempt number does not increase. Each
+  round is then classified:
+  - a round with a completing record advances the streak by that outcome;
+  - a round that reached its attempt budget, or ended on a
+    `skipped_infrastructure_failure` record, failed and resets the streak;
+  - any other round was interrupted by the restart and is neutral.
+  The budget is `attempts_per_formal_round` for round index `max_rounds`, otherwise
+  `attempts_per_round`. An interrupted round whose last record is an
+  infrastructure-failure skip is read as failed, which can only delay the brake.
+  `consecutive_fails` is still not rebuilt on resume; that predates this change.
+- Feedback: `TrialValidityFeedback` and `FormalValidityFeedback` carry
+  `stopped_by_infeasible_rounds` (omitted when false). The proposer's
+  `[RECENT TRIAL VALIDITY]` block and the Formal renderer add a line naming
+  `aborted_infeasible_rounds` only when it is set. These carriers exist only when
+  the iteration has no valid Trial (respectively Formal) candidate. If a valid trial
+  existed before the infeasible streak, the stop appears only in
+  `HyperparamTuningOutput.termination_reason` (run report, console, loop
+  `TriedBody.stop_reason`).
+
 Every other refusal keeps `failure_type="not_scoreable"` and the scoring-failure
 retry path: an unmeasured, missing or nonfinite constraint value (including a failed
 measurement), a source-primary refusal, a formula term refusal (alone or beside a
 constraint violation), or a payload whose claimed violation the comparison does not
 re-derive. Each retry trains again, and rounds that exhaust their attempts count
-toward the consecutive-failure brake. Infeasible rounds have no separate budget.
+toward the consecutive-failure brake. Infeasible rounds have no separate
+configuration field; their brake reuses `max_fail_rounds` (above).
 
 - `SelectionBinding` is bound when the spec declares formula terms OR constraints.
   `constraints: tuple[ConstraintTerm, ...]` (omitted when empty) carries each

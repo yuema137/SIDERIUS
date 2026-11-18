@@ -437,7 +437,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Consecutive-failure brake (default 3). The outer "
         "loop aborts with termination_reason='aborted_fail_rounds' "
         "after this many consecutive rounds exhaust their inner "
-        "attempt budget.",
+        "attempt budget, and with 'aborted_infeasible_rounds' after "
+        "this many consecutive rounds break a declared constraint.",
     )
     parser.add_argument(
         "--max_epochs",
