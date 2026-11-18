@@ -682,6 +682,16 @@ def _complete_round(completed_rounds: int) -> tuple[bool, int, int]:
     return True, completed_rounds + 1, 0
 
 
+def _round_brake_reached(consecutive_fails: int, consecutive_infeasible: int, limit: int) -> bool:
+    """Whether a round brake stops the loop.
+
+    ``limit`` (``max_fail_rounds``) failed rounds in a row end the run with
+    ``aborted_fail_rounds``; as many measured-infeasible rounds in a row end it
+    with ``aborted_infeasible_rounds`` (#1527). The two counters are independent.
+    """
+    return consecutive_fails >= limit or consecutive_infeasible >= limit
+
+
 class HyperparamTuningAgent:
     """
     Hyperparameter tuning agent — optimizes model configs over N rounds.
@@ -1480,10 +1490,8 @@ class HyperparamTuningAgent:
         )
 
         completed_training_attempts: list[CompletedTrainingAttempt] = []
-        while (
-            completed_rounds < max_rounds
-            and consecutive_fails < max_fail_rounds_setting
-            and consecutive_infeasible < max_fail_rounds_setting
+        while completed_rounds < max_rounds and not _round_brake_reached(
+            consecutive_fails, consecutive_infeasible, max_fail_rounds_setting
         ):
             round_index = completed_rounds + 1
             is_formal_round = completed_rounds == max_rounds - 1
