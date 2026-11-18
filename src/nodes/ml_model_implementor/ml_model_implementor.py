@@ -68,6 +68,13 @@ from nodes.llm_settings import IMPLEMENT, node_bridge_kwargs
 from nodes.ml_model_implementor.reference_code import reference_code_section
 from workflows.task_config import render_forward_contract
 
+__all__ = [
+    "MLModelImplementor",
+    "main",
+]
+# The reference-section renderer is a new private module (#1530), not a moved API.
+_COMPATIBILITY_REEXPORTS: tuple[str, ...] = ()
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
