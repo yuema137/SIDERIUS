@@ -670,6 +670,16 @@ def _load_run_model_description(
     return model_description
 
 
+def _complete_round(completed_rounds: int) -> tuple[bool, int, int]:
+    """``(round_succeeded, completed_rounds, consecutive_fails)`` after a completed round.
+
+    The one owner of the counter update shared by a scored round and a
+    measured-infeasible round (#1527): the round landed, it counts toward
+    ``max_rounds``, and the consecutive-failure brake resets.
+    """
+    return True, completed_rounds + 1, 0
+
+
 class HyperparamTuningAgent:
     """
     Hyperparameter tuning agent — optimizes model configs over N rounds.
@@ -1633,9 +1643,9 @@ class HyperparamTuningAgent:
                         # result. Its record is persisted; the round counts as
                         # completed, like a Health-invalid round, and resets the
                         # consecutive-failure brake. It never becomes a winner.
-                        round_succeeded = True
-                        completed_rounds += 1
-                        consecutive_fails = 0
+                        round_succeeded, completed_rounds, consecutive_fails = _complete_round(
+                            completed_rounds
+                        )
                         print(f"Round {completed_rounds}/{max_rounds} Complete. Infeasible.")
                         break
                     score_results = executed.score_results
@@ -1760,9 +1770,9 @@ class HyperparamTuningAgent:
                     # Phase L — success path: mark the round landed, reset the
                     # consecutive-failure counter, and break out of the inner
                     # attempt loop so the outer while moves on to the next round.
-                    round_succeeded = True
-                    completed_rounds += 1
-                    consecutive_fails = 0
+                    round_succeeded, completed_rounds, consecutive_fails = _complete_round(
+                        completed_rounds
+                    )
                     print(
                         f"Round {completed_rounds}/{max_rounds} Complete. "
                         f"Score: {score_results.get('denoising_score', 'N/A')}"
