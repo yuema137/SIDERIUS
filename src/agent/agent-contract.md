@@ -134,7 +134,7 @@ checkout.
 | immediate raise on 4xx (e.g. HTTP 401) | wrong or revoked API key; the bridge does not retry it |
 | `[LLMBridge.…] N attempts timed out …; raising` | the bounded timeout budget working — raise `request_timeout`, do not loop |
 | `BackgroundWindowRefused` | a visible execution deadline is shorter than the route's completion window; nothing was submitted |
-| `BackgroundWaitExpired` | an accepted background response missed its `max_wait_seconds` / deadline; it was cancelled and its usage recorded — raise the wait or use a shorter window |
+| `BackgroundWaitExpired` (`TimeoutError`) | an accepted background response missed its `max_wait_seconds`; it was cancelled and its usage recorded — raise the wait or use a shorter window. The `BackgroundDeadlineExpired` subclass (also `ExecutionDeadlineExceeded`) means the visible execution deadline ended the wait |
 | schema `ValidationError` after a call | the model's payload failed the node contract; content-level retry policy applies before the node sees it |
 
 ## Files normally edited

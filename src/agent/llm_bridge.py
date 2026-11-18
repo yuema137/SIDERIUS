@@ -2325,7 +2325,9 @@ class StubLLMBridge(LLMBridge):
                          (clearer than ``None`` for "no retries needed").
             max_output_tokens, reflect_max_output_tokens, transport, reflect_transport:
                 Route options a workflow profile may forward; accepted for
-                call-shape parity and ignored, because the stub sends no request.
+                call-shape parity. The stub sends no request, but a background
+                transport still applies its window admission, so a pseudo run
+                catches a deadline shorter than the configured window.
 
         Brake-stress hook (Stage 4 / Commit 4.6): the env var
         ``SIDERIUS_STUB_FORCE_CRASH=1`` flips ``self._force_crash`` to
@@ -2354,6 +2356,12 @@ class StubLLMBridge(LLMBridge):
         # (NoneType attribute access) instead of silently masking a bug.
         self.client = None
         self.reflect_client = None
+        self._stub_background = {
+            "main": transport.background if transport is not None else None,
+            "tuner.reflector": (
+                reflect_transport.background if reflect_transport is not None else None
+            ),
+        }
 
         # --- Run-context state (mirrors LLMBridge.__init__) ---
         self._token_usage_path: Path | None = None
@@ -2434,6 +2442,12 @@ class StubLLMBridge(LLMBridge):
                 f"on label={label!r} for brake-stress (Commit 4.6)."
             )
 
+    def _admit_stub_background(self, label: str) -> None:
+        """Apply the real background window admission; the stub submits nothing."""
+        background = self._stub_background.get(label, self._stub_background["main"])
+        if background is not None:
+            admit_window(background, model_id=f"{self.model_name}")
+
     # ------------------------------------------------------------------
     # Entry-point overrides.
     # ------------------------------------------------------------------
@@ -2458,6 +2472,7 @@ class StubLLMBridge(LLMBridge):
         parity but ignored — synthesis is purely label-driven.
         """
         self._maybe_crash(label)
+        self._admit_stub_background(label)
         if label == self._DEFAULT_LABEL:
             self._warn_default_label("_chat_json")
         return self._synthesise_json(label)
@@ -2472,6 +2487,7 @@ class StubLLMBridge(LLMBridge):
     ) -> str:
         """Bypass HTTP; dispatch to the text synthesiser registered for ``label``."""
         self._maybe_crash(label)
+        self._admit_stub_background(label)
         if label == self._DEFAULT_LABEL:
             self._warn_default_label("generate_text")
         return self._synthesise_text(label)
@@ -2494,6 +2510,7 @@ class StubLLMBridge(LLMBridge):
         dispatch table rather than silently returning a sentinel.
         """
         self._maybe_crash(label)
+        self._admit_stub_background(label)
         raise NotImplementedError(
             f"StubLLMBridge.tool_call() has no synthesiser for label={label!r}. "
             f"No production label routes through tool_call() today. If a new "

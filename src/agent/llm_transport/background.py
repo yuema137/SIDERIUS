@@ -63,11 +63,13 @@ class BackgroundWindowRefused(ExecutionDeadlineExceeded):
     """A visible deadline cannot fit the completion window; nothing was submitted."""
 
 
-class BackgroundWaitExpired(ExecutionDeadlineExceeded):
+class BackgroundWaitExpired(TimeoutError):
     """An accepted background response did not finish within its wait limit.
 
     The response was cancelled (best effort) and its usage row recorded before
-    this was raised. It is not a transport error, so it is never retried.
+    this was raised. It is not a transport error, so it is never retried. When
+    the route's own ``max_wait_seconds`` applied, this is not a deadline verdict;
+    see ``BackgroundDeadlineExpired`` for the execution-deadline case.
     """
 
     def __init__(
@@ -89,6 +91,10 @@ class BackgroundWaitExpired(ExecutionDeadlineExceeded):
             f"(completion window {completion_window}) did not finish after "
             f"{waited_seconds:.1f}s; {limit} reached, response cancelled"
         )
+
+
+class BackgroundDeadlineExpired(BackgroundWaitExpired, ExecutionDeadlineExceeded):
+    """The wait ended because the visible execution deadline came first."""
 
 
 def background_metadata(
@@ -147,8 +153,11 @@ class BackgroundTicket:
         }
 
     def cancel_quietly(self) -> str:
-        """Best-effort cancel for in-process failures; returns the cancel outcome."""
-        return self.client.cancel_background(self)
+        """Best-effort cancel for in-process failures; never masks the original error."""
+        try:
+            return self.client.cancel_background(self)
+        except Exception:  # Best effort: the caller is already propagating a failure.
+            return "cancel_failed"
 
 
 def admit_window(config: OpenAIBackgroundConfig, *, model_id: str) -> None:
@@ -192,27 +201,35 @@ def finish_background(
     """
     if not isinstance(response, BackgroundTicket):
         return response
-    emit_marker(
-        label=f"{label}.background_submitted",
-        extra={
-            "attempt": attempt,
-            "status": "background_submitted",
-            "model": model_name,
-            "provider": provider,
-            **background_metadata(response.config, response.response_id, response.raw),
-        },
-    )
     try:
+        emit_marker(
+            label=f"{label}.background_submitted",
+            extra={
+                "attempt": attempt,
+                "status": "background_submitted",
+                "model": model_name,
+                "provider": provider,
+                **background_metadata(response.config, response.response_id, response.raw),
+            },
+        )
         expires_at, limit = _expiry(response)
-    except ExecutionDeadlineExceeded:
+        # Terminal poll outcomes (completion, refusal, wait expiry) cancel or
+        # finish the job themselves and return normally.
+        completion = response.client.await_background(response, expires_at)
+    except BaseException:
+        # Any in-process failure from the marker through polling (ledger error,
+        # deadline, KeyboardInterrupt, cancellation, a bug) stops the accepted
+        # server-side work rather than leave it billing.
         response.cancel_quietly()
         raise
-    completion = response.client.await_background(response, expires_at)
     if completion.transport_metadata.get("background_status") == WAIT_EXPIRED:
         waited = _now() - response.accepted_at
         completion.transport_metadata["background_waited_seconds"] = round(waited, 3)
         record_usage(response=completion, extra={"attempt": attempt, "status": WAIT_EXPIRED})
-        raise BackgroundWaitExpired(
+        expired = (
+            BackgroundDeadlineExpired if limit == "execution_deadline" else BackgroundWaitExpired
+        )
+        raise expired(
             label=label,
             response_id=response.response_id,
             completion_window=response.config.completion_window,
@@ -228,7 +245,12 @@ def finish_background(
 
 
 def _refused(
-    ticket: BackgroundTicket, raw: dict[str, Any], message: str, status: str
+    ticket: BackgroundTicket,
+    raw: dict[str, Any],
+    message: str,
+    status: str,
+    *,
+    cancel: str | None = None,
 ) -> Completion:
     from agent.llm_transport.runtime import refused_completion
 
@@ -237,6 +259,8 @@ def _refused(
         **ticket.metadata,
         **background_metadata(ticket.config, ticket.response_id, raw, status=status),
     }
+    if cancel is not None:
+        completion.transport_metadata["background_cancel"] = cancel
     return completion
 
 
@@ -274,13 +298,8 @@ async def await_completion(ticket: BackgroundTicket, expires_at: float) -> Compl
         timeout=ticket.client.timeout, event_hooks={"response": [capture]}
     ) as http:
         model = build_model(ticket.client, ticket.model_id, http)
-        try:
-            return await _poll(model, ticket, capture.raw, expires_at)
-        except BaseException:
-            # In-process failure (KeyboardInterrupt, cancellation, a bug): stop
-            # the accepted server-side work rather than leave it billing.
-            await _cancel(model, ticket)
-            raise
+        # In-process failures propagate to finish_background, which cancels once.
+        return await _poll(model, ticket, capture.raw, expires_at)
 
 
 async def _poll(
@@ -305,6 +324,7 @@ async def _poll(
                 raw,
                 f"Background response {ticket.response_id} exceeded its wait limit ({outcome})",
                 WAIT_EXPIRED,
+                cancel=outcome,
             )
         await asyncio.sleep(min(interval, remaining))
         interval = min(interval * 2, POLL_MAX_SECONDS)
@@ -316,16 +336,29 @@ async def _poll(
                 model, ticket, min(ticket.client.timeout, remaining)
             )
         except SuspendedResponseExpired:
+            # The provider no longer has the job (404): nothing left to cancel.
             return _refused(
                 ticket, raw, "Background response is no longer retrievable", "not_retrievable"
             )
         except UnexpectedModelBehavior:
-            return _refused(ticket, raw, "Background response could not be decoded", "undecodable")
+            # Cancel before refusing: the caller may resubmit, and an accepted
+            # job left running would bill twice. Cancel is idempotent.
+            outcome = await _cancel(model, ticket)
+            return _refused(
+                ticket,
+                raw,
+                "Background response could not be decoded",
+                "undecodable",
+                cancel=outcome,
+            )
         except Exception as exc:
             if _is_transient(exc):
                 continue
             if isinstance(exc, ModelAPIError):
-                return _refused(ticket, raw, f"Background response failed: {exc}", "failed")
+                outcome = await _cancel(model, ticket)
+                return _refused(
+                    ticket, raw, f"Background response failed: {exc}", "failed", cancel=outcome
+                )
             raise
         if response.state == "suspended":
             ticket.suspended = response

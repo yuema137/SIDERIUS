@@ -639,10 +639,12 @@ class WorkflowLLMConfig(BaseModel):
                 result["llm_max_output_tokens"] = self.interpret.max_output_tokens
             if self.interpret.reasoning_effort is not None:
                 result["llm_reasoning_effort"] = self.interpret.reasoning_effort
-            if (transport := self.interpret.transport()) is not None:
-                result["llm_transport"] = transport
+            # OpenAI background mode is strictly per configured route: the
+            # interpret fallback never carries interpret's background setting.
             return result
-        if node_name == "data_analysis" and config is None:
+        # The same rule applies to the data-analysis fallback below.
+        inherited_slot = node_name == "data_analysis" and config is None
+        if inherited_slot:
             config = self.interpret
 
         if config is None:
@@ -762,7 +764,7 @@ class WorkflowLLMConfig(BaseModel):
             result["max_output_tokens"] = config.max_output_tokens
         if config.reasoning_effort is not None:
             result["reasoning_effort"] = config.reasoning_effort
-        if (transport := config.transport()) is not None:
+        if not inherited_slot and (transport := config.transport()) is not None:
             result["transport"] = transport
         return result
 

@@ -388,11 +388,13 @@ background=...)`; `WorkflowLLMConfig.get` projects it as `transport` (single
 nodes and the tuner planner), `reflect_transport` (tuner reflector),
 `<stage>_transport` plus `transport` from `reasoning` (proposal stages; all three
 stage keys are emitted when any stage opts in), and `llm_transport` /
-`search_llm_transport` (literature main/search; the interpret fallback forwards
-interpret's carrier as `llm_transport`). Background mode never inherits between
-routes: an omitted reflector, search or stage setting means that route keeps its
-default client, and the bridge or literature helper builds a separate client
-for it. The carrier threads through the same layers as `max_output_tokens`
+`search_llm_transport` (literature main/search). Background mode never inherits
+between routes: an omitted reflector, search or stage setting means that route
+keeps its default client, and the bridge or literature helper builds a separate
+client for it. The slot fallbacks follow the same rule: an omitted
+`data_analysis` slot and an omitted `lit_review` block inherit every other
+`interpret` field as before, but never `openai_background`, so those routes use
+the default client unless their own slot opts in. The carrier threads through the same layers as `max_output_tokens`
 (input schemas `HyperparamTuningInput.transport/reflect_transport` and
 `LiteratureReviewInput.llm_transport/search_llm_transport`, `ProposerRoute.transport`,
 node constructors); future transport options extend `PydanticTransportConfig`

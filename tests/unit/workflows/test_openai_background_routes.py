@@ -144,3 +144,25 @@ def test_background_is_refused_for_non_openai_routes():
                 {"implement": {"openai_background": {**BACKGROUND, "window": "8h"}}}
             ).encode()
         )
+
+
+def test_data_analysis_fallback_borrows_interpret_route_but_not_its_background():
+    """Enabling background on interpret silently gave data analysis multi-hour waits."""
+    config = WorkflowLLMConfig.model_validate(
+        {"interpret": {**payload_with_background("interpret")["interpret"], "max_retries": 2}}
+    )
+    options = config.get("data_analysis")
+    assert options == {"provider": "openai", "model_id": "model-interpret", "max_retries": 2}
+    assert "transport" in config.get("interpret")
+
+
+def test_literature_fallback_borrows_interpret_route_but_not_its_background():
+    """An unconfigured literature main bridge must not inherit interpret's background wait."""
+    config = WorkflowLLMConfig.model_validate(
+        {"interpret": {**payload_with_background("interpret")["interpret"], "max_retries": 2}}
+    )
+    assert config.get("lit_review") == {
+        "llm_provider": "openai",
+        "llm_model_id": "model-interpret",
+        "llm_max_retries": 2,
+    }

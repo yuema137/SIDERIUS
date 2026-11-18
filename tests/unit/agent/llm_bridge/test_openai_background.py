@@ -13,10 +13,14 @@ from openai import APIError
 
 import agent.llm_transport.background as background
 from agent.llm_bridge import LLMBridge
-from agent.llm_transport.background import BackgroundWaitExpired, BackgroundWindowRefused
+from agent.llm_transport.background import (
+    BackgroundDeadlineExpired,
+    BackgroundWaitExpired,
+    BackgroundWindowRefused,
+)
 from agent.llm_transport.client import PydanticClient
 from agent.llm_transport.contracts import OpenAIBackgroundConfig, PydanticTransportConfig
-from core.execution_deadline import execution_deadline
+from core.execution_deadline import ExecutionDeadlineExceeded, execution_deadline
 
 MODEL = "gpt-6.1-terra"
 RESPONSE_ID = "resp_background"
@@ -215,6 +219,9 @@ def test_wait_expiry_cancels_once_records_and_raises(wire, tmp_path, monkeypatch
     with pytest.raises(BackgroundWaitExpired) as caught:
         client.generate_text("S", "U", label="test.bg")
     error = caught.value
+    # Only the deadline-bound case may be read as a deadline verdict by callers.
+    assert isinstance(error, ExecutionDeadlineExceeded) is (deadline is not None)
+    assert isinstance(error, BackgroundDeadlineExpired) is (deadline is not None)
     assert (error.label, error.response_id, error.completion_window, error.limit) == (
         "test.bg",
         RESPONSE_ID,
@@ -241,17 +248,69 @@ def test_visible_deadline_shorter_than_window_refuses_before_submission(wire, tm
     assert requests == []
 
 
-def test_failed_background_response_is_recorded_then_refused(wire, tmp_path):
-    """A failed response must surface as an error, with its receipt, and never be resubmitted."""
+FAILED_BODY = response("failed", error={"code": "server_error", "message": "model crashed"})
+
+
+@pytest.mark.parametrize(
+    ("poll_reply", "status"),
+    [
+        ((200, FAILED_BODY), "failed"),
+        ((400, {"error": {"message": "bad request", "type": "invalid_request_error"}}), "failed"),
+        ((403, {"error": {"message": "forbidden", "type": "permission_error"}}), "failed"),
+        (None, "undecodable"),
+    ],
+    ids=["failed-body", "poll-400", "poll-403", "undecodable"],
+)
+def test_terminal_poll_outcome_cancels_records_and_refuses(
+    wire, tmp_path, monkeypatch, poll_reply, status
+):
+    """Refusing without a cancel left the accepted job billing while the caller resubmitted."""
     requests, responses, _ = wire
-    failed = response("failed", error={"code": "server_error", "message": "model crashed"})
-    responses += [(200, response("queued")), (200, failed)]
-    with pytest.raises(APIError, match="failed"):
+    responses.append((200, response("queued")))
+    if poll_reply is None:
+        from pydantic_ai.exceptions import UnexpectedModelBehavior
+
+        async def undecodable(*_args):
+            raise UnexpectedModelBehavior("adapter could not decode the poll response")
+
+        monkeypatch.setattr("agent.llm_transport.runtime.continue_background", undecodable)
+    else:
+        responses.append(poll_reply)
+    responses.append((200, response("cancelled")))
+    with pytest.raises(APIError):
         bridge(tmp_path, max_retries=5).generate_text("S", "U", label="test.bg")
     assert len(creates(requests)) == 1
+    assert [r.url.path.rsplit("/", 1)[-1] for r in requests][-1] == "cancel"
+    assert sum(r.url.path.endswith("/cancel") for r in requests) == 1
     final = rows(tmp_path)[-1]
     assert final["extra"]["status"] == "invalid_provider_response"
-    assert final["extra"]["background_status"] == "failed"
+    assert final["extra"]["background_status"] == status
+    assert final["extra"]["background_cancel"] == "cancelled"
+
+
+def test_expired_retention_needs_no_cancel(wire, tmp_path):
+    """A 404 means the provider no longer has the job; a cancel would only fail."""
+    requests, responses, _ = wire
+    gone = (404, {"error": {"message": "not found", "type": "invalid_request_error"}})
+    responses += [(200, response("queued")), gone]
+    with pytest.raises(APIError, match="no longer retrievable"):
+        bridge(tmp_path).generate_text("S", "U", label="test.bg")
+    assert not any(r.url.path.endswith("/cancel") for r in requests)
+
+
+def test_ledger_failure_before_polling_cancels_the_accepted_response(wire, tmp_path, monkeypatch):
+    """A failure between acceptance and polling must not orphan a billing job."""
+    requests, responses, _ = wire
+    responses += [(200, response("queued")), (200, response("cancelled"))]
+    client = bridge(tmp_path)
+
+    def broken_marker(**_kwargs):
+        raise OSError("ledger unavailable")
+
+    monkeypatch.setattr(client, "emit_marker", broken_marker)
+    with pytest.raises(OSError, match="ledger unavailable"):
+        client.generate_text("S", "U", label="test.bg")
+    assert [r.url.path.rsplit("/", 1)[-1] for r in requests] == ["responses", "cancel"]
 
 
 def test_in_process_interrupt_cancels_the_accepted_response(wire, tmp_path, monkeypatch):
@@ -298,3 +357,19 @@ def test_background_is_refused_for_other_providers():
                 background=OpenAIBackgroundConfig(completion_window="2h", max_wait_seconds=9000),
             ),
         )
+
+
+def test_pseudo_bridge_applies_background_window_admission():
+    """A pseudo run must surface a deadline shorter than the configured window."""
+    from agent.llm_bridge import StubLLMBridge
+
+    stub = StubLLMBridge(
+        transport=PydanticTransportConfig(
+            protocol="openai-responses",
+            background=OpenAIBackgroundConfig(completion_window="2h", max_wait_seconds=9000),
+        )
+    )
+    with execution_deadline(3600), pytest.raises(BackgroundWindowRefused):
+        stub.generate_text("S", "U", label="proposer.legacy_reasoning")
+    with execution_deadline(3600):
+        stub._admit_stub_background("tuner.reflector")  # the reflector did not opt in

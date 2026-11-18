@@ -154,10 +154,17 @@ an 8-hour window).
 **Budget the total time.** A workflow calls its roles one after another, so
 the waits add up. Some roles run more than once per iteration: the tuning
 planner and reflector run once per tuning round. Three calls on 8-hour windows
-can stretch one iteration to a day or more. Make your outer limits cover that sum: the scheduler's wall time,
-and `candidate_timeout_seconds` in the preparation request. SIDERIUS does not
-check those limits for you; when it sees an internal deadline that is shorter
-than the window, it refuses before sending anything.
+can stretch one iteration to a day or more.
+
+Make your outer limits cover that sum: the scheduler's wall time, and
+`candidate_timeout_seconds` in the preparation request. SIDERIUS does not check
+those limits for you. When it sees an internal deadline that is shorter than
+the window, it refuses before sending anything.
+
+**Only the roles you mark wait.** A role without its own `openai_background`
+never inherits it. This also holds when a role borrows the `interpret` settings
+because its own block is missing (data analysis, literature review): it borrows
+the model, not the background wait.
 
 **Before you start.**
 
@@ -167,6 +174,9 @@ than the window, it refuses before sending anything.
 - Stopping or killing a run does not stop a request that OpenAI has already
   accepted. OpenAI keeps working on it and bills it. Look up the request id
   in the `background_submitted` row to find it in your OpenAI account.
+- If the network drops right after OpenAI accepts a request, SIDERIUS never
+  sees its id and sends the request again. The first one keeps running and
+  has no `background_submitted` row. Normal requests share this risk.
 - Token counts in `token_usage.jsonl` are what OpenAI reported. To price a row,
   use the discounted rate only when it shows `service_tier_served: "default"`
   and the model is eligible.
