@@ -716,12 +716,13 @@ class TestQ097StaysBinding:
     #: Step 12 / PR-12d D8a — F-12d-18 gave the task-owned route its OWN
     #: reason to evaluate secondaries (the tuner cannot reach them once the
     #: deliverable is read by the scoring CHILD), so the NAME-based census
-    #: below now finds three functions, not one. The name predicate cannot
-    #: distinguish "a second independent taxonomy" (the regression this
-    #: guard exists to catch) from "a per-route ADAPTER that delegates to
-    #: the one shared taxonomy" (the fix) — only the TRY/EXCEPT structure
-    #: can. `TAXONOMY_HANDLERS` is that structure, read once from the
-    #: shared owner rather than hardcoded a second time.
+    #: below now finds three functions, not one (four since the scoring
+    #: child composes its secondaries through its own composition entry).
+    #: The name predicate cannot distinguish "a second independent taxonomy"
+    #: (the regression this guard exists to catch) from "a per-route ADAPTER
+    #: that delegates to the one shared taxonomy" (the fix) — only the
+    #: TRY/EXCEPT structure can. `TAXONOMY_HANDLERS` is that structure, read
+    #: once from the shared owner rather than hardcoded a second time.
     TAXONOMY_HANDLERS: ClassVar[tuple[str, ...]] = (
         "NotScoreableError",
         "ScopeViolationError",
@@ -779,6 +780,13 @@ class TestQ097StaysBinding:
             "src/nodes/ml_hyperparameter_tune_agent/execution.py": ["_evaluate_secondary_metrics"],
             "src/execute_tools/denoising_score_single.py": ["_evaluate_task_owned_secondaries"],
             "src/execute_tools/evaluation_metric.py": ["evaluate_declared_secondaries"],
+            # Composes, never evaluates: the scoring child's manifest entry
+            # (`scoring` = the child, not scoring a secondary). It resolves
+            # the declarations through `_compose_secondary_metrics`, the same
+            # composition authority as `compose_run_task_bindings`, without
+            # candidate model/loss plugins; it holds no try/except, so the
+            # owner assertion below still proves it carries no taxonomy.
+            "src/workflows/task_composition.py": ["compose_scoring_secondary_metrics"],
         }, f"the census's own reachable set moved — update BOTH sides deliberately: {offenders}"
         assert owners == {
             "src/execute_tools/evaluation_metric.py": ["evaluate_declared_secondaries"]
