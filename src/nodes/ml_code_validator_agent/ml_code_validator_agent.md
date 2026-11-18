@@ -39,8 +39,8 @@ valid names are preserved unchanged. Archived schemas remain readable.
 | `model_description` | `str` | Yes | — | Plain-English description of the architecture from the proposal. Passed to the LLM reviewer (check #8) so it can assess spec alignment. |
 | `mathematical_definition` | `str` | Yes | — | Precise mathematical/architectural specification from the proposal. Passed to the LLM reviewer to verify the implementation matches the spec. |
 | `segmentation_applicability` | `Literal["temporal", "not_applicable"] \| None` | No | `None` | Immediate implementor echo for declared-input review; omitted from serialized JSON when absent. Does not change deterministic probe policy. |
-| `llm_provider` | `Literal["gemini", "openai", "deepseek"]` | No | `"gemini"` | LLM provider for the code review step (check #8). |
-| `llm_model_id` | `str` | No | `"gemini-3.1-flash-lite-preview"` | Specific model ID passed to the provider for code review. |
+| `llm_provider` | `ProviderName` (`openai` \| `gemini` \| `deepseek` \| `anthropic` \| `moonshot` \| `zai`) | No | `DEFAULT_LLM_PROVIDER` (`"openai"`) | LLM provider for the code review step (check #8). |
+| `llm_model_id` | `str` | No | `default_model_for_provider(llm_provider)` | Specific model ID passed to the provider for code review. Omitted: the default model of `llm_provider`; providers without a default model require an explicit value. |
 | `expert_advice` | `str \| ExpertAdvice` | No | `""` | Structured guidance from upstream agents or orchestrators. Accepts a plain string or a structured `ExpertAdvice` object. Injected into the LLM-review prompt as context. |
 | `human_advice` | `str \| None` | No | `None` | Optional human-provided guidance — **highest priority**, overrides `expert_advice` when present. Injected into the LLM-review prompt as high-priority context. |
 | `inherited_components` | `list[InheritedComponent]` | No | `[]` | Claimed architectural primitives from the `DiscoveryMemo` (carried through from the original `ProposalOutput`). When non-empty, the validator runs check #9 (inheritance regex check) — verifies each claimed component's vocab-seed pattern appears in the plugin source. |
@@ -118,8 +118,8 @@ The CLI takes every required `ValidatorInput` field as an explicit argument — 
 | `--config_fields` | `str` (JSON dict) | required | JSON-encoded `dict[str, Any]` of field name → default value. |
 | `--model_description` | `str` | required | Plain-English description from the proposal. |
 | `--mathematical_definition` | `str` | required | Layer-by-layer spec from the proposal. |
-| `--llm_provider` | `str` (`gemini` \| `openai`) | `gemini` | LLM provider for the code-review call. |
-| `--llm_model_id` | `str` | `gemini-3.1-flash-lite-preview` | Specific model id. |
+| `--llm_provider` | `str` (`gemini` \| `openai`) | `DEFAULT_LLM_PROVIDER` (`openai`) | LLM provider for the code-review call. |
+| `--llm_model_id` | `str` | `None` | Specific model id. `None` selects the provider's default model (`default_model_for_provider`). |
 | `--workspace` | `str` | `./siderius_workspace` | Root directory for the `validation_{run_name}.json` output. |
 | `--run_name` | `str` | `v1` | Filename suffix. |
 | `--run_seed` | `int` in `[0, 2**53 - 1]` | none (generated) | Run seed for the model probes' `validation.probe` stream (issue #983). Omitted: a seed is generated through `core.seeding` and printed as `[seed] run_seed=N source=generated`. |

@@ -156,8 +156,8 @@ The CLI reads `{workspace}/interpretation_{run_name}.json` (the upstream interpr
 |---|---|---|---|
 | `--workspace` | `str` | `./siderius_workspace` | Root directory for reading `interpretation_{run_name}.json` and writing `proposal_{run_name}.json`. |
 | `--run_name` | `str` | `v1` | Filename suffix shared across the chain (interpretation, proposal). |
-| `--provider` | `str` (`gemini` \| `openai`) | `gemini` | LLM provider for both calls (reasoning + commit in legacy; all stages in pipeline). |
-| `--model_id` | `str` | `gemini-3.1-flash-lite-preview` | Specific model id passed to the provider. |
+| `--provider` | `str` (`gemini` \| `openai`) | `DEFAULT_LLM_PROVIDER` (`openai`) | LLM provider for both calls. The CLI supplies no `reasoning_pipeline`, so it always runs legacy two-call mode on this one route. |
+| `--model_id` | `str` | `None` | Specific model id passed to the provider. `None` selects the provider's default model (`default_model_for_provider`). |
 | `--task_composition` | path | required | Task-composition manifest supplying the scientific contract. |
 | `--data_dir` | path | required | Physical data root bound for the selected task composition. |
 
