@@ -13,7 +13,7 @@ prompt text is owned by ``agent/prompt_templates/tuner/rendering.py``; this
 module produces the typed evidence that travels TO those surfaces.
 """
 
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from agent.schemas.constraint_disclosure import ConstraintContext
 from agent.schemas.health_feedback import (
@@ -43,6 +43,7 @@ from execute_tools.health_checks.candidate_eligibility import (
 from execute_tools.health_checks.schemas import (
     CandidateHealthValidity,
 )
+from nodes.ml_hyperparameter_tune_agent.contracts import is_infeasible_outcome
 
 
 def _attempts_that_trained(records: list) -> int:
@@ -245,34 +246,55 @@ def _build_trial_validity_feedback(
     if any(is_valid_candidate(r, required_gate_ids=required_gate_ids) for r in trials):
         return None  # a valid winner exists; nothing to report
 
-    outcomes, invalid, unknown, execution_failures, evidence_absent = _collect_invalid_outcomes(
-        trials, required_gate_ids=required_gate_ids
-    )
+    tally = _collect_invalid_outcomes(trials, required_gate_ids=required_gate_ids)
 
     return TrialValidityFeedback(
         trial_records_considered=len(trials),
-        invalid_count=invalid,
-        unknown_validity_count=unknown,
-        execution_failure_count=execution_failures,
-        outcomes=[InvalidTrialOutcome.model_validate(item.model_dump()) for item in outcomes],
+        invalid_count=tally.invalid,
+        unknown_validity_count=tally.unknown,
+        execution_failure_count=tally.execution_failures,
+        infeasible_count=tally.infeasible,
+        outcomes=[InvalidTrialOutcome.model_validate(item.model_dump()) for item in tally.outcomes],
         formal_skipped_for_no_valid_winner=formal_skipped_for_no_valid_winner,
         healthgate_mode=healthgate_mode,
-        evidence_absent=evidence_absent,
+        evidence_absent=tally.evidence_absent,
     )
+
+
+class _InvalidOutcomeTally(NamedTuple):
+    """Classified failure facts shared by the Trial and Formal feedback carriers."""
+
+    outcomes: list[InvalidCandidateOutcome]
+    invalid: int
+    unknown: int
+    execution_failures: int
+    infeasible: int
+    evidence_absent: list[str]
+
+
+def _violated_constraint_details(record: dict) -> list[str]:
+    """The persisted detail of each violated constraint, in declaration order."""
+    evaluation = record.get("evaluation_result") or {}
+    return [
+        str(c.get("detail"))
+        for c in evaluation.get("constraints") or []
+        if isinstance(c, dict) and c.get("satisfied") is False
+    ]
 
 
 def _collect_invalid_outcomes(
     records: list, *, required_gate_ids: frozenset[str] | None
-) -> tuple[list[InvalidCandidateOutcome], int, int, int, list[str]]:
+) -> _InvalidOutcomeTally:
     """One owner for factual failure classification in both execution stages."""
     outcomes: list[InvalidCandidateOutcome] = []
-    invalid = unknown = execution_failures = 0
+    invalid = unknown = execution_failures = infeasible = 0
     evidence_absent: list[str] = []
 
     for record in records:
         exp_id = record.get("exp_id")
         status = str(record.get("status", "unknown"))
         validity = classify_candidate_health(record, required_gate_ids=required_gate_ids)
+        constraint_violations: list[str] = []
 
         if status == "failed_mode_collapse" and validity is CandidateHealthValidity.INVALID:
             # Health-invalid records use ``failed_mode_collapse`` as their
@@ -280,6 +302,11 @@ def _collect_invalid_outcomes(
             # classifying them as execution failures would erase that fact
             # from the next proposer's feedback.
             invalid += 1
+        elif is_infeasible_outcome(record):
+            # #1527: the evaluation was complete and a declared constraint
+            # rejected it. Judged, not absent, and the reason travels with it.
+            infeasible += 1
+            constraint_violations = _violated_constraint_details(record)
         elif status != "success":
             # The evidence is ABSENT, not negative: nothing was scored, so
             # no gate could have judged it.
@@ -327,10 +354,13 @@ def _collect_invalid_outcomes(
                 failed_gate_names=failed_names,
                 failure_reasons=reasons,
                 key_metrics=metrics,
+                constraint_violations=constraint_violations,
             )
         )
 
-    return outcomes, invalid, unknown, execution_failures, evidence_absent
+    return _InvalidOutcomeTally(
+        outcomes, invalid, unknown, execution_failures, infeasible, evidence_absent
+    )
 
 
 def _build_formal_validity_feedback(
@@ -348,18 +378,17 @@ def _build_formal_validity_feedback(
         is_valid_candidate(r, required_gate_ids=required_gate_ids) for r in formal
     ):
         return None
-    outcomes, invalid, unknown, failures, absent = _collect_invalid_outcomes(
-        formal, required_gate_ids=required_gate_ids
-    )
+    tally = _collect_invalid_outcomes(formal, required_gate_ids=required_gate_ids)
     return FormalValidityFeedback(
         model_type=model_type,
         formal_records_considered=len(formal),
-        invalid_count=invalid,
-        unknown_validity_count=unknown,
-        execution_failure_count=failures,
-        outcomes=outcomes[-8:],
+        invalid_count=tally.invalid,
+        unknown_validity_count=tally.unknown,
+        execution_failure_count=tally.execution_failures,
+        infeasible_count=tally.infeasible,
+        outcomes=tally.outcomes[-8:],
         healthgate_mode=healthgate_mode,
-        evidence_absent=absent[-8:],
+        evidence_absent=tally.evidence_absent[-8:],
     )
 
 

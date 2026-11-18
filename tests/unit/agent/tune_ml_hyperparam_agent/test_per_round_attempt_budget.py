@@ -609,4 +609,126 @@ class TestFormalBudgetDistinctFromTrial:
         ]
 
 
+# ===========================================================================
+# (f) #1527 — a measured-infeasible outcome completes its round
+# ===========================================================================
+
+
+def _constraint_refusal(raw):
+    """The typed refusal the scoring child raises for one ``err <= 5`` constraint.
+
+    ``raw=None`` is an unmeasured value (missing evidence); a finite ``raw``
+    above 5 is a measured violation.
+    """
+    from execute_tools.evaluation_child import EvaluationNotScoreableError
+    from execute_tools.evaluation_metric import (
+        NotScoreableResult,
+        ScoreabilityFailure,
+        ScoreabilityVerdict,
+    )
+    from execute_tools.evaluation_results import ConstraintEvaluation, EvaluationEvidence
+
+    label = "constraint err <= 5.0"
+    detail = f"{label} violated: {raw}" if raw is not None else f"{label} has no finite value: None"
+    failure = ScoreabilityFailure(requirement="constraint:err", detail=detail)
+    evidence = EvaluationEvidence(
+        evaluation_sha256="e" * 64,
+        effective_metric_id="score",
+        failures=(failure,),
+        constraints=(
+            ConstraintEvaluation(
+                component_id="err", op="<=", threshold=5.0, raw=raw, satisfied=False, detail=detail
+            ),
+        ),
+    )
+    refusal = NotScoreableResult(
+        metric_id="score",
+        direction="higher",
+        verdict=ScoreabilityVerdict(contract_id="evaluation_constraints/v1", failures=(failure,)),
+    )
+    return EvaluationNotScoreableError(refusal, evidence)
+
+
+def _scripted_child_scores(refusals):
+    """Raise the scripted refusal per scoring call; ``None`` adopts the real score."""
+    import importlib
+
+    real = importlib.import_module(
+        "nodes.ml_hyperparameter_tune_agent.scoring_transport"
+    ).adopt_child_score
+    script = iter(refusals)
+
+    def adopt(bindings, score, require_success):
+        refusal = next(script)
+        if refusal is not None:
+            raise refusal
+        return real(bindings, score, require_success)
+
+    return patch("nodes.ml_hyperparameter_tune_agent.execution.adopt_child_score", adopt)
+
+
+class TestInfeasibleRoundCompletes:
+    """#1527: the constraint rejected the candidate; that is a result, not a crash."""
+
+    def test_measured_violation_ends_the_round_without_retry_or_brake(
+        self, agent_with_scripted_skill, tmp_path
+    ):
+        """Round 1's only attempt is infeasible; round 2 succeeds.
+
+        Under the old retry semantics round 1 would spend its second attempt
+        (training again), so ``total_attempts`` would be 3, not 2, and the
+        ``max_fail_rounds=1`` brake would stop an all-infeasible round.
+        """
+        agent, saved, _counter, cleanup = _setup(agent_with_scripted_skill, [FAKE_VRAM_OK] * 3)
+        try:
+            with _scripted_child_scores([_constraint_refusal(9.0), None]):
+                output = agent.run(
+                    _make_input(
+                        tmp_path,
+                        max_rounds=2,
+                        attempts_per_round=3,
+                        attempts_per_formal_round=3,
+                        max_fail_rounds=1,
+                    )
+                )
+            planner_memory = agent._bridge_factory.return_value.plan.call_args_list[1].args[0]
+        finally:
+            cleanup()
+
+        assert output.termination_reason == "completed"
+        assert output.completed_rounds == 2
+        assert output.total_attempts == 2
+        assert output.consecutive_fail_rounds_at_exit == 0
+        r1 = _round_records(saved, 1)
+        assert [(r["status"], r.get("failure_type")) for r in r1] == [
+            ("error_scoring", "infeasible")
+        ]
+        # The next round's planner sees the named violation and can adapt.
+        assert "constraint err <= 5.0 violated: 9.0" in planner_memory[-1]["memory"]["conclusion"]
+
+    def test_unmeasured_constraint_is_still_retried_and_reaches_the_brake(
+        self, agent_with_scripted_skill, tmp_path
+    ):
+        """Missing evidence is not infeasibility: retries and the brake stay unchanged."""
+        agent, saved, _counter, cleanup = _setup(agent_with_scripted_skill, [FAKE_VRAM_OK] * 2)
+        try:
+            with _scripted_child_scores([_constraint_refusal(None)] * 2):
+                output = agent.run(
+                    _make_input(
+                        tmp_path,
+                        max_rounds=2,
+                        attempts_per_round=2,
+                        attempts_per_formal_round=2,
+                        max_fail_rounds=1,
+                    )
+                )
+        finally:
+            cleanup()
+
+        assert output.termination_reason == "aborted_fail_rounds"
+        assert output.completed_rounds == 0
+        assert output.total_attempts == 2
+        assert [r.get("failure_type") for r in saved] == ["not_scoreable", "not_scoreable"]
+
+
 pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")

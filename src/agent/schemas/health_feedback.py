@@ -695,6 +695,15 @@ class InvalidCandidateOutcome(BaseModel):
             "workflow layer does not decide which number matters."
         ),
     )
+    constraint_violations: list[str] = Field(
+        default_factory=list,
+        exclude_if=lambda value: not value,
+        description=(
+            "#1527: for a measured-infeasible record, the persisted detail of "
+            "each violated declared constraint (`ConstraintEvaluation.detail`), "
+            "in declaration order. Omitted when empty."
+        ),
+    )
 
 
 class InvalidTrialOutcome(InvalidCandidateOutcome):
@@ -714,6 +723,12 @@ class FormalValidityFeedback(BaseModel):
     invalid_count: int = Field(ge=0)
     unknown_validity_count: int = Field(ge=0)
     execution_failure_count: int = Field(ge=0)
+    infeasible_count: int = Field(
+        default=0,
+        ge=0,
+        exclude_if=lambda value: not value,
+        description="#1527: measured-infeasible Formal records. Omitted when 0.",
+    )
     outcomes: list[InvalidCandidateOutcome] = Field(max_length=8)
     healthgate_mode: str | None = None
     evidence_absent: list[str] = Field(default_factory=list, max_length=8)
@@ -750,6 +765,17 @@ class TrialValidityFeedback(BaseModel):
             "Kept separate from gate invalidity: the evidence is ABSENT here, "
             "not negative."
         )
+    )
+    infeasible_count: int = Field(
+        default=0,
+        ge=0,
+        exclude_if=lambda value: not value,
+        description=(
+            "#1527: trials whose evaluation was complete but violated a declared "
+            "constraint (`failure_type='infeasible'`). A judged outcome, not an "
+            "execution failure; the violated constraints are on each outcome. "
+            "Omitted when 0."
+        ),
     )
     outcomes: list[InvalidTrialOutcome] = Field(
         default_factory=list,

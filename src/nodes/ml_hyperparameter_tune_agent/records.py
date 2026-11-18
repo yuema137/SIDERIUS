@@ -45,6 +45,7 @@ from execute_tools.deliverable_spec import (
     DeliverableNaming,
     default_deliverable_naming,
 )
+from execute_tools.evaluation_aggregation import is_measured_infeasibility
 from execute_tools.evaluation_child import evaluation_record_fields
 from execute_tools.evaluation_metric import (
     NotScoreableError,
@@ -67,6 +68,7 @@ from execute_tools.training_history import (
 # records -> policy, feedback (both leaves); runtime -> records. Still acyclic,
 # and enforced by tests/unit/nodes/test_node_public_boundary.py.
 from nodes.ml_hyperparameter_tune_agent.contracts import (
+    INFEASIBLE_FAILURE_TYPE,
     AdmissionOutcome,
     AttemptExecution,
     AttemptIdentity,
@@ -74,6 +76,7 @@ from nodes.ml_hyperparameter_tune_agent.contracts import (
     RunBindings,
     RunExitSnapshot,
     TrainingOutcome,
+    completes_round,
 )
 from nodes.ml_hyperparameter_tune_agent.feedback import (
     _build_formal_validity_feedback,
@@ -927,7 +930,14 @@ def _build_scoring_failure_record(
     meaning, ``health_feedback.PRE_GATE_ERROR_STATUSES``). They differ in what
     the planner is told: a crash inside the scorer versus a deliverable that
     never reached the scorer, named requirement by requirement.
+
+    #1527: a refusal whose only failures are measured constraint violations
+    (``is_measured_infeasibility``) carries ``failure_type="infeasible"``. It
+    is a judged outcome, so the attempt loop completes the round on it instead
+    of retrying (``AttemptSignal.COMPLETE_ROUND``).
     """
+    evidence = getattr(exc, "evaluation_result", None)
+    infeasible = evidence is not None and is_measured_infeasibility(evidence)
     if isinstance(exc, NotScoreableError):
         failures = exc.result.verdict.failures
         named = "; ".join(
@@ -951,9 +961,11 @@ def _build_scoring_failure_record(
             "satisfy what the metric requires (missing file, channel, attrs or wrong "
             "storage dtype). Inspect the inference/output path before retrying this config."
         )
-        if any(f.requirement.startswith("constraint:") for f in failures):
-            # #1295: a declared task constraint was violated or unmeasurable. The
-            # candidate is infeasible, not broken; it is never selected.
+        failure_type = "not_scoreable"
+        if infeasible:
+            # #1295/#1527: every declared constraint was measured and at least
+            # one was violated. The candidate is infeasible, not broken; it is
+            # never selected, and the round ends on this judged outcome.
             discovery = (
                 "Training, inference and scoring completed, but the result violates "
                 "declared task constraints, so it is infeasible and cannot be selected."
@@ -963,7 +975,21 @@ def _build_scoring_failure_record(
                 "(see the conclusion). Change the configuration toward satisfying "
                 "every constraint before optimizing the objective further."
             )
-        failure_type = "not_scoreable"
+            failure_type = INFEASIBLE_FAILURE_TYPE
+        elif any(f.requirement.startswith("constraint:") for f in failures):
+            # A constraint could not be judged (no finite value, a failed
+            # measurement) or another requirement failed beside it. That is
+            # missing evidence, not infeasibility; the attempt is retried.
+            discovery = (
+                "Training and inference completed, but the evaluation could not judge "
+                "every declared task constraint (see the conclusion), so the result is "
+                "not scoreable and cannot be selected."
+            )
+            memory_update = (
+                "Not-scoreable evaluation — a declared constraint had no finite measured "
+                "value or another evaluation requirement failed. Inspect the measurement "
+                "and evaluation path before retrying this config."
+            )
     else:
         error_msg = f"{type(exc).__name__}: {exc}"
         short_msg = error_msg[-500:] if len(error_msg) > 500 else error_msg
@@ -1003,7 +1029,6 @@ def _build_scoring_failure_record(
     if isinstance(exc, NotScoreableError):
         # Step 06 C4 — the structured refusal, on the record (additive).
         record["metric_refusal"] = exc.result.model_dump(mode="json")
-        evidence = getattr(exc, "evaluation_result", None)
         if evidence is not None:
             record["evaluation_result"] = evidence.model_dump(mode="json")
         measurements = getattr(exc, "measurement_results", ())
@@ -1086,8 +1111,7 @@ def _resume_progress(
     completed_round_indices = {
         (record.get("memory") or {}).get("round_index")
         for record in existing_history
-        if record.get("status") in {"success", "failed_mode_collapse"}
-        and (record.get("memory") or {}).get("round_index") is not None
+        if completes_round(record) and (record.get("memory") or {}).get("round_index") is not None
     }
     attempt_prefix = f"{model_type}_{run_name}_"
     attempt_suffixes: list[int] = []
@@ -1236,7 +1260,12 @@ def finalize_run_output(
             f"{trial_validity_feedback.invalid_count} gate-invalid, "
             f"{trial_validity_feedback.unknown_validity_count} validity-unknown, "
             f"{trial_validity_feedback.execution_failure_count} execution failures "
-            f"of {trial_validity_feedback.trial_records_considered} trial(s). "
+            + (
+                f"and {trial_validity_feedback.infeasible_count} infeasible "
+                if trial_validity_feedback.infeasible_count
+                else ""
+            )
+            + f"of {trial_validity_feedback.trial_records_considered} trial(s). "
             f"Surfacing to next proposer.",
             flush=True,
         )

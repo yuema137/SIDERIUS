@@ -374,12 +374,22 @@ What works now, and what comes later:
   `constraint balanced_accuracy >= 0.9 violated: 0.85`. Such a round is never
   chosen as the best result, the Trial winner or the incumbent, and the
   planner and interpreter see the reason. Trial and Formal rounds follow the
-  same rule. A round that breaks a constraint counts as a failed attempt:
-  the tuner retries it like any other failed round, each retry trains again,
-  and several such rounds in a row stop tuning through the usual
-  consecutive-failure limit. Set thresholds that a reasonable model can meet. The check in step 6 still warns about a constraint that works
-  against the metric's own direction (for example
-  `balanced_accuracy <= 0.99`).
+  same rule.
+- **A broken constraint is a result, not a crash:** when every constraint was
+  measured and one of them is broken, the round ends there. The tuner does
+  not train the same round again, and the round does not count toward the
+  consecutive-failure limit (`max_fail_rounds`). It still uses up one of the
+  run's `max_rounds`, so a threshold that no model meets spends the whole run
+  without a usable result. The next round's planner sees which constraint
+  was broken and by how much; when an iteration ends with no valid result,
+  the next proposer sees it too. A constraint that could not be measured at
+  all (for example, a failed latency measurement) is different: that is
+  missing evidence, so the tuner retries the round as it does for any other
+  scoring failure. Set thresholds that a reasonable model can meet. The
+  check in step 6 still warns about a constraint that works against the
+  metric's own direction (for example `balanced_accuracy <= 0.99`). The
+  exact rules are in the
+  [evaluation contract](../../../src/execute_tools/evaluation-contract.md#feasibility-constraints).
 - **Scoring route:** constraints need the native task-owned scoring step,
   the same one formula selection uses; other scoring routes refuse at launch.
 - **Measurements:** a `kind: measurement` component measures the trained

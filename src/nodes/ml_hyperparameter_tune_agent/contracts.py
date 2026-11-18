@@ -360,6 +360,42 @@ class AttemptSignal(Enum):
     END_ROUND = "end_round"
     """Was ``break``: no further attempt in this round can succeed."""
 
+    COMPLETE_ROUND = "complete_round"
+    """The attempt reached a judged outcome that has no selectable score.
+
+    #1527: a measured constraint violation (``failure_type="infeasible"``)
+    is a scientific result, not a crash. Retrying would train again on a
+    configuration the constraints already rejected, so the round ends as a
+    completed round (like a Health-invalid ``failed_mode_collapse`` round)
+    and does not count toward the consecutive-failure brake.
+    """
+
+
+INFEASIBLE_FAILURE_TYPE = "infeasible"
+"""``failure_type`` of an ``error_scoring`` record whose only refusals are
+measured constraint violations (``evaluation_aggregation.is_measured_infeasibility``)."""
+
+_COMPLETED_ROUND_STATUSES = frozenset({"success", "failed_mode_collapse"})
+
+
+def is_infeasible_outcome(record: dict[str, Any]) -> bool:
+    """Whether a persisted record is a measured-infeasible round outcome (#1527)."""
+    return (
+        record.get("status") == "error_scoring"
+        and record.get("failure_type") == INFEASIBLE_FAILURE_TYPE
+    )
+
+
+def completes_round(record: dict[str, Any]) -> bool:
+    """Whether a persisted record ended its round as a completed round.
+
+    A scored success, a Health-invalid ``failed_mode_collapse`` and a measured
+    infeasible outcome each complete the round; every other record is an
+    attempt the round may retry. Resume rebuilds ``completed_rounds`` with this
+    rule; the live loop reaches the same verdict through :class:`AttemptSignal`.
+    """
+    return record.get("status") in _COMPLETED_ROUND_STATUSES or is_infeasible_outcome(record)
+
 
 @dataclass
 class AttemptStage:
@@ -427,6 +463,10 @@ class _PhaseOutcome:
     @classmethod
     def end_round(cls, **kw: Any):
         return cls(signal=AttemptSignal.END_ROUND, **kw)
+
+    @classmethod
+    def complete_round(cls, **kw: Any):
+        return cls(signal=AttemptSignal.COMPLETE_ROUND, **kw)
 
 
 @dataclass(frozen=True)

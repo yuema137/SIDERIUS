@@ -159,6 +159,35 @@ class TestTheDistinctionsSurvive:
         assert result.invalid_count == 1
         assert result.execution_failure_count == 0
 
+    def test_infeasible_trial_is_judged_and_names_its_violated_constraint(self):
+        """#1527: a constraint rejection is negative evidence, not absent evidence.
+
+        Classified by status alone it would read as an execution failure, and
+        the proposer would never learn which constraint to satisfy.
+        """
+        infeasible = _trial("infeasible", status="error_scoring", gates=False)
+        infeasible["failure_type"] = "infeasible"
+        infeasible["evaluation_result"] = {
+            "constraints": [
+                {"detail": "constraint quality >= 0.5 satisfied: 0.8", "satisfied": True},
+                {"detail": "constraint err <= 5.0 violated: 9.0", "satisfied": False},
+            ]
+        }
+        result = _build([infeasible, _trial("crashed", status="error_scoring")])
+        assert result.infeasible_count == 1
+        assert result.execution_failure_count == 1
+        violations = {o.exp_id: o.constraint_violations for o in result.outcomes}
+        assert violations == {
+            "infeasible": ["constraint err <= 5.0 violated: 9.0"],
+            "crashed": [],
+        }
+        text = TestTheRenderedBlock._render([result])
+        assert "1 execution failure(s), 1 infeasible" in text
+        assert "infeasible=(constraint err <= 5.0 violated: 9.0)" in text
+        dumped = result.model_dump(mode="json")
+        assert dumped["infeasible_count"] == 1
+        assert "constraint_violations" not in dumped["outcomes"][1]
+
     def test_validity_unknown_is_not_invalidity(self):
         """Gates that could not judge are not gates that rejected."""
         result = _build([_trial("ungated", gates=False)])

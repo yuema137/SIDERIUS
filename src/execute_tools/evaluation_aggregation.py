@@ -103,6 +103,11 @@ def _unavailable_reason(
     return None if measured.failure is None else f"measurement failed: {measured.failure}"
 
 
+def _holds(op: str, raw: float, threshold: float) -> bool:
+    """Exact comparison of the decimal representations; no implicit tolerance."""
+    return bool(_OPS[op](Fraction(str(raw)), Fraction(str(threshold))))
+
+
 def evaluate_constraint(
     term: ConstraintTerm, raw: float | None, reason: str | None = None
 ) -> ConstraintEvaluation:
@@ -116,8 +121,7 @@ def evaluate_constraint(
     if raw is None or not math.isfinite(raw):
         satisfied, detail = False, f"{label} has no finite value: {reason or raw}"
     else:
-        value, threshold = Fraction(str(raw)), Fraction(str(constraint.threshold))
-        satisfied = bool(_OPS[constraint.op](value, threshold))
+        satisfied = _holds(constraint.op, raw, constraint.threshold)
         detail = f"{label} {'satisfied' if satisfied else 'violated'}: {raw}"
     return ConstraintEvaluation(
         component_id=constraint.component,
@@ -149,6 +153,36 @@ def evaluate_constraints(
         if not v.satisfied
     ]
     return verdicts, failures
+
+
+def is_measured_infeasibility(evidence: EvaluationEvidence) -> bool:
+    """Whether a refusal is exactly a measured constraint violation (#1527).
+
+    True only when the evaluation is otherwise complete and the constraints
+    alone rejected it: every scoreability failure is a ``constraint:<component>``
+    failure, and every unsatisfied constraint has a finite raw value that the
+    shared comparison re-derives as violated. The refusal list is the child's
+    (the parent accepts it fail-closed), so the re-derivation keeps a malformed
+    or inconsistent payload out of this class.
+
+    False for every other refusal: an unmeasured or nonfinite constraint value,
+    a failed measurement, a source-primary refusal, a formula term refusal, or
+    no failure at all. Those are not judged outcomes, and the tuner keeps
+    retrying them like any other scoring failure.
+    """
+    if not evidence.failures:
+        return False
+    unsatisfied = [c for c in evidence.constraints if not c.satisfied]
+    if len(unsatisfied) != len(evidence.failures):
+        return False
+    if sorted(f.requirement for f in evidence.failures) != sorted(
+        f"constraint:{c.component_id}" for c in unsatisfied
+    ):
+        return False
+    return all(
+        c.raw is not None and math.isfinite(c.raw) and not _holds(c.op, c.raw, c.threshold)
+        for c in unsatisfied
+    )
 
 
 def constrain_primary(

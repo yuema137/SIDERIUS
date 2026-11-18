@@ -448,12 +448,41 @@ single comparison arithmetic, shared by the scoring child and the parent verifie
 and `constrain_primary` (primary selection). Constraints are enforced as declared
 scoreability; no selection site carries a separate feasibility filter.
 
-An infeasible round takes the existing scoring-refusal path: the attempt does not
-succeed, so the tuner's attempt retry and `consecutive_fails` accounting apply
-unchanged (each retry trains again; consecutive infeasible rounds reach the
-consecutive-failure brake). The parent re-derives every constraint verdict on a
-successful evaluation; on a refusal it accepts the child's failure list, which
-fails closed.
+The parent re-derives every constraint verdict on a successful evaluation; on a
+refusal it accepts the child's failure list, which fails closed.
+
+**Round outcome (#1527).** A refusal is *measured-infeasible* when
+`evaluation_aggregation.is_measured_infeasibility(evidence)` holds: every
+scoreability failure is a `constraint:<component>` failure, one per unsatisfied
+`ConstraintEvaluation`, and each unsatisfied constraint has a finite `raw` that the
+shared comparison (`_holds`, also used by `evaluate_constraint`) re-derives as
+violated. Such a round is a judged scientific outcome, not an infrastructure
+failure:
+
+- the record is `status="error_scoring"`, `failure_type="infeasible"`
+  (`contracts.INFEASIBLE_FAILURE_TYPE`), with the same `metric_refusal`,
+  `evaluation_result` and memory prose as before;
+- the attempt returns `AttemptSignal.COMPLETE_ROUND`: the round is not retried, it
+  counts toward `completed_rounds` (bounded by `max_rounds`) and resets
+  `consecutive_fails`, exactly like a Health-invalid `failed_mode_collapse` round;
+  no reflector call runs, and its checkpoint follows the existing unscored-attempt
+  retention rule (`CompletedTrainingAttempt.scored=False`);
+- resume rebuilds `completed_rounds` with `contracts.completes_round(record)`
+  (`success`, `failed_mode_collapse`, or a measured-infeasible record);
+- the next round's planner sees the record (`memory.conclusion` names every
+  violated constraint; the verbatim window also shows `evaluation_result`);
+- `TrialValidityFeedback` / `FormalValidityFeedback` count it in
+  `infeasible_count`, not `execution_failure_count`, and each such outcome carries
+  `constraint_violations` (the unsatisfied `ConstraintEvaluation.detail` strings in
+  declaration order). Both fields are omitted from serialization when empty, and the
+  proposer and Formal renderers mention them only when non-zero.
+
+Every other refusal keeps `failure_type="not_scoreable"` and the scoring-failure
+retry path: an unmeasured, missing or nonfinite constraint value (including a failed
+measurement), a source-primary refusal, a formula term refusal (alone or beside a
+constraint violation), or a payload whose claimed violation the comparison does not
+re-derive. Each retry trains again, and rounds that exhaust their attempts count
+toward the consecutive-failure brake. Infeasible rounds have no separate budget.
 
 - `SelectionBinding` is bound when the spec declares formula terms OR constraints.
   `constraints: tuple[ConstraintTerm, ...]` (omitted when empty) carries each
@@ -484,9 +513,12 @@ fails closed.
   refuses disagreement or a success that contains a violated constraint
   (`EvaluationTransportError`). It also requires the constrained primary scalar to
   equal the source scalar.
-- A refusal becomes the existing `error_scoring` / `failure_type=not_scoreable`
-  record with `metric_refusal` and `evaluation_result`; `memory.conclusion` names
-  every violated constraint and `memory_update` names infeasibility. Every
+- A refusal becomes an `error_scoring` record with `metric_refusal` and
+  `evaluation_result`; `memory.conclusion` names every failed constraint. A
+  measured-infeasible refusal carries `failure_type=infeasible` and a
+  `memory_update` naming infeasibility; any other refusal carries
+  `failure_type=not_scoreable`, and when a constraint failed its `memory_update`
+  names the missing evidence instead (see Round outcome above). Every
   selection site already requires `status == "success"` or a finite
   `denoising_score` (tuner best tracks and Trial winner, skip/bypass gates, chain
   incumbent and `--target_score`, resume folds, loop stops, `MetricAtLeast`,

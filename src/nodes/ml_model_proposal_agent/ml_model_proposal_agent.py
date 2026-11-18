@@ -934,6 +934,7 @@ def _format_recent_trial_validity_block(
             f"{entry.invalid_count} gate-invalid, "
             f"{entry.unknown_validity_count} validity-unknown, "
             f"{entry.execution_failure_count} execution failure(s)"
+            + (f", {entry.infeasible_count} infeasible" if entry.infeasible_count else "")
         )
         if entry.healthgate_mode:
             lines.append(f"- healthgate_mode: {entry.healthgate_mode}")
@@ -951,6 +952,8 @@ def _format_recent_trial_validity_block(
             if outcome.key_metrics:
                 metrics = ", ".join(f"{k}={v}" for k, v in sorted(outcome.key_metrics.items()))
                 bits.append(f"metrics=({metrics})")
+            if outcome.constraint_violations:
+                bits.append(f"infeasible=({'; '.join(outcome.constraint_violations)})")
             lines.append(f"  - {outcome.exp_id or '<unidentified>'}: " + "; ".join(bits))
         for absent in entry.evidence_absent:
             lines.append(f"  - EVIDENCE ABSENT — {absent}")

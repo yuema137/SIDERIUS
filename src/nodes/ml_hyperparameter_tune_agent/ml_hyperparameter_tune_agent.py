@@ -1628,6 +1628,16 @@ class HyperparamTuningAgent:
                         continue
                     if executed.signal is AttemptSignal.END_ROUND:
                         break
+                    if executed.signal is AttemptSignal.COMPLETE_ROUND:
+                        # #1527: a measured-infeasible outcome is a judged
+                        # result. Its record is persisted; the round counts as
+                        # completed, like a Health-invalid round, and resets the
+                        # consecutive-failure brake. It never becomes a winner.
+                        round_succeeded = True
+                        completed_rounds += 1
+                        consecutive_fails = 0
+                        print(f"Round {completed_rounds}/{max_rounds} Complete. Infeasible.")
+                        break
                     score_results = executed.score_results
                     # A completed scorer can still produce no usable scalar
                     # (for example, a Health-invalid collapsed candidate).

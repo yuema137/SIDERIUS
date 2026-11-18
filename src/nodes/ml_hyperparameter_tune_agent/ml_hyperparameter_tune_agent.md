@@ -396,7 +396,7 @@ executes, without distorting what the planner is allowed to decide. See
 | `model_type` | `str` | The architecture that was tuned. |
 | `file_index` | `int` | Validation file index used (formal mode only — ignored under trial). |
 | `status` | `Literal["completed", "partial", "failed"]` | `completed` = reached `max_rounds`. `partial` = hit attempt limit before `max_rounds`. `failed` = unrecoverable error. |
-| `completed_rounds` | `int` | Number of rounds that produced a valid experiment record. |
+| `completed_rounds` | `int` | Number of rounds that ended on a judged outcome: a scored `success`, a Health-invalid `failed_mode_collapse`, or a measured-infeasible `error_scoring` record (`failure_type='infeasible'`, #1527). Resume rebuilds it with `contracts.completes_round`. |
 | `total_attempts` | `int` | Total attempt count across all rounds (includes OOM-skipped + gate-rejected). |
 | `best_exp_id` | `str \| None` | `exp_id` of the experiment with the highest `denoising_score`. |
 | `best_denoising_score` | `float \| None` | Highest `denoising_score` achieved across all completed rounds. |
@@ -1180,7 +1180,7 @@ for the full design rationale.
 
 - **LLM**: two call signatures per round, both via `LLMBridge`:
   - **Planner** — `bridge.plan(...)` (internally a `bridge.generate(...)` against the planner system prompt). One call per attempt; total per run = `total_attempts`.
-  - **Reflector** — `bridge.reflect(...)` (internally a `bridge.generate(...)` against the reflector system prompt). One call per *successful* round; total per run = `completed_rounds`.
+  - **Reflector** — `bridge.reflect(...)` (internally a `bridge.generate(...)` against the reflector system prompt). One call per *successful* round; total per run = `completed_rounds` minus the measured-infeasible rounds (#1527), which complete without reflection.
   - Worst-case total LLM calls per run = `max_rounds × max(attempts_per_round, attempts_per_formal_round) + max_rounds = 50 × 5 + 50 = 300` planner calls + 50 reflector calls under the default budget envelope.
 - **GPU**: **required** for the training and inference skills. The pre-flight `evaluate_vram_skill` uses architectural pattern tagging to estimate VRAM need; rejected configs never reach the GPU. The training subprocess respects `hardware_context.usable_cap_gb` as a hard ceiling.
 - **External services**: none directly. The tuner is the only node that reads the TIDMAD dataset directly (via the training/inference subprocesses); `data_dir` must point at a real TIDMAD root for any GPU run. The `evaluate_time_skill` real-dataset warmup also reads 1 PSD from `data_dir` when set. No network calls outside `LLMBridge`. Filesystem: writes `run_output_{run_name}.json` + intermediate configs + token usage log + per-run plugin dir under the workspace; reads `data_dir` for TIDMAD HDF5s; spawns subprocesses via `TidmadSandbox`.
@@ -1338,7 +1338,7 @@ contract have exactly one source for the whole run.
 | live route (`ANCHOR_NORMALIZED`) | an uncomposed compatibility run with an anchor map and legacy `SampleSet` | `metric_result = sandbox.evaluate_metric(run_metric, sample_set=eval_sample_set, anchor_map=…, s_max=…, denoised_filename_fn=_denoised_fn)`; `file_vector, final_scalar = metric_result.per_sample, metric_result.scalar` — `score_res`, reflector and record unchanged. **HealthGates are no longer part of this branch** (F2, below): they fire once per round for every route |
 | task-owned route (`TASK_OWNED`, **Step 12 / PR-12d**) | scoring subprocess — every composed run with an opaque evaluation scope, including a task that also declares an anchor artifact | the child scores its OWN deliverable through the SAME composed metric and reports `metric_result` (plus declared secondaries) in its JSON output; the tuner ADOPTS them (`_adopt_child_metric_result`, `_adopt_child_secondaries` in `execution.py`) because only the child holds the deliverable and the evaluation scope. A multi-artifact task may return `TaskEvaluationPayload` so scoreability checks every artifact before arithmetic. The JSON output is written with `core.record_encoding` and read through `evaluation_child.read_scoring_output`, so a non-finite scalar, `file_vector` element or secondary reaches the tuner as the float it was, exactly as on the anchor route, not as `null` (#1316; [core contract](../../core/core-contract.md#scoring-child-output-issue-1316)). |
 | order inside the seam | `TidmadSandbox.evaluate_metric` | DataScope `validate_sample_set` (unchanged, first) → `TidmadScoreabilityContract.check({file_index: path})` → `scoring_utils.score_vector(**the same kwargs as before)` |
-| refusal | `NotScoreableError` from the seam → the scoring `except` → `_build_scoring_failure_record` | `status='error_scoring'`, `failure_stage='scoring'`, `failure_type='not_scoreable'`, `metric_refusal=<NotScoreableResult>`, memory prose naming contract + requirement (never "crashed"); round outcome unchanged (next attempt) |
+| refusal | `NotScoreableError` from the seam → the scoring `except` → `_build_scoring_failure_record` | `status='error_scoring'`, `failure_stage='scoring'`, `failure_type='not_scoreable'`, `metric_refusal=<NotScoreableResult>`, memory prose naming contract + requirement (never "crashed"); round outcome unchanged (next attempt). Exception (#1527): a refusal that `evaluation_aggregation.is_measured_infeasibility` classifies as a measured constraint violation carries `failure_type='infeasible'` and returns `AttemptSignal.COMPLETE_ROUND` — the round completes, is not retried and resets `consecutive_fails` ([evaluation contract](../../execute_tools/evaluation-contract.md#feasibility-constraints)) |
 | record | success record | `metric_result` (identity / direction / scalar / references; `per_sample` = pointer to `file_vector`) |
 | what the LLMs see | planner history dump / reflector `actual_results` | NOTHING new. The reflector's `score_results` is unchanged (the payload never enters it); the planner's history serialization (`agent/prompts.py::_truncate_memory_history`) drops `metric_result` / `metric_refusal` from the verbatim window (`_PLANNER_HIDDEN_RECORD_KEYS`), so planner message bytes are identical to pre-Step-06 for the same run. The payload is persisted for Steps 07a / 09, which own agent-facing rendering. No prompt template changed |
 | legacy 2-tuple seam | `TidmadSandbox.score_vector` | still callable; Regime A resolves TIDMAD through the handle; values identical |
@@ -2198,7 +2198,10 @@ return finalize_run_output(bindings, RunExitSnapshot(...))  # records.py
 Each execution phase returns an `AttemptSignal` — `PROCEED`, `NEXT_ATTEMPT`
 (was `continue`) or `END_ROUND` (was `break`) — and **`run()` performs the jump**.
 The translation is 1:1 against the pre-refactor code; retry counts, round
-transitions and phase order are unchanged. `raise` is not translated: exceptions
+transitions and phase order are unchanged. #1527 added `COMPLETE_ROUND`, returned
+only by the scoring phase for a measured-infeasible record: `run()` marks the round
+completed (`completed_rounds += 1`, `consecutive_fails = 0`) and leaves the attempt
+loop without reflection, like the success path minus the scored record. `raise` is not translated: exceptions
 propagate into `run()`'s handler exactly as before.
 
 ### Run-scoped authorities vs. lifecycle state
@@ -2302,7 +2305,7 @@ admission authority and watchdog policy remain independent. See
 
 ### Failed Formal evidence across iterations
 
-When Formal attempts exist but no Health-valid Formal candidate exists, the tuner emits `formal_validity_feedback`: model identity, counts distinguishing execution failure from negative/unknown Health evidence, and the last eight factual outcomes. The classifier is shared with Trial feedback; Formal records are never relabeled Trial. The no-records manifest and typed resume path retain this summary without restoring the model, weights, plugin, score or incumbent. The workflow forwards the most recent three summaries to interpretation and both proposer paths. A cold start with failed Formal evidence means no valid incumbent, not no previous experiment. Existing healthy runs and manifests without this optional field remain supported. No task-specific remedy is inserted.
+When Formal attempts exist but no Health-valid Formal candidate exists, the tuner emits `formal_validity_feedback`: model identity, counts distinguishing execution failure from negative/unknown Health evidence and from measured infeasibility (`infeasible_count`, with each outcome's `constraint_violations`; both omitted when empty, #1527), and the last eight factual outcomes. The classifier is shared with Trial feedback; Formal records are never relabeled Trial. The no-records manifest and typed resume path retain this summary without restoring the model, weights, plugin, score or incumbent. The workflow forwards the most recent three summaries to interpretation and both proposer paths. A cold start with failed Formal evidence means no valid incumbent, not no previous experiment. Existing healthy runs and manifests without this optional field remain supported. No task-specific remedy is inserted.
 
 ### Deployment-owned complete evaluation
 
