@@ -6,8 +6,9 @@ The command appends one ``tasks[]`` entry and writes nothing else:
   ``preparation_timeout_seconds``, ``candidate_timeout_seconds`` and
   ``candidate_network`` from :data:`STARTER_VALUES` unless overridden;
   ``candidate_devices`` from ``--device``, none with ``--no-gpu``, otherwise
-  this host's ``/dev/nvidia<N>`` GPU nodes (detected by the sandbox owner
-  ``tools.workspace_sandbox.gpu.host_gpu_devices``, never asked);
+  this host's GPU device nodes (detected by the sandbox owner
+  ``tools.workspace_sandbox.gpu.host_gpu_devices`` from the ``core.gpu_devices``
+  providers: ``/dev/nvidia<N>``, or ``/dev/dxg`` under WSL2; never asked);
   ``candidate_environment_names`` from the credential requirement owner
   (``candidate_worker.preflight.credential_requirements``) applied to every
   route of the task's resolved LLM profile, plus any ``--env`` names;
@@ -43,6 +44,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from core.gpu_devices import declared_providers, gpu_node_examples
 from tools.candidate_operations.models import OperationFailure
 from tools.workspace_sandbox.gpu import host_gpu_devices
 
@@ -110,13 +112,16 @@ def choose_devices(devices: tuple[str, ...] | None) -> tuple[str, ...]:
         return devices
     nodes = host_gpu_devices()
     if nodes:
+        providers = declared_providers(map(Path, nodes))
         print(
-            "candidate_devices: " + ", ".join(nodes) + " (NVIDIA GPU found on this machine; "
-            "runs also get read-only /sys and the NVIDIA control nodes; pass --no-gpu to "
-            "give runs no GPU)"
+            "candidate_devices: "
+            + ", ".join(nodes)
+            + f" ({' and '.join(item.label for item in providers)} found on this machine; "
+            + f"runs also get {'; '.join(item.passthrough_note for item in providers)}; "
+            + "pass --no-gpu to give runs no GPU)"
         )
         return nodes
-    print("candidate_devices: none (no NVIDIA GPU device node on this machine)")
+    print(f"candidate_devices: none (no GPU device node, {gpu_node_examples()}, on this machine)")
     return ()
 
 
@@ -370,7 +375,10 @@ def parser() -> argparse.ArgumentParser:
         "--device",
         nargs="+",
         metavar="PATH",
-        help="character devices passed to candidate runs (default: this host's /dev/nvidia<N>)",
+        help=(
+            "character devices passed to candidate runs "
+            "(default: this host's /dev/nvidia<N>, or /dev/dxg under WSL2)"
+        ),
     )
     gpu.add_argument(
         "--no-gpu",

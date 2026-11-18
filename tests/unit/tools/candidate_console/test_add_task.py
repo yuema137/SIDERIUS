@@ -17,6 +17,7 @@ from tools.candidate_console.add_task import (
 )
 from tools.candidate_console.settings_models import SETTINGS_SCHEMA, GlobalSettings, LibraryRef
 from tools.candidate_console.workspace import init_workspace
+from tools.workspace_sandbox.gpu import host_gpu_devices
 
 REPO = Path(__file__).resolve().parents[4]
 
@@ -63,7 +64,8 @@ def test_add_task_writes_starter_fields_and_package_mount_and_check_passes(
     )
     assert code == 0, err
     assert "Restart the console to load the new task." in out
-    assert "candidate_devices: none (no NVIDIA GPU" in out  # the detection is printed
+    # The detection is printed, naming every provider's node.
+    assert "candidate_devices: none (no GPU device node, /dev/nvidia<N> or /dev/dxg" in out
     (entry,) = _tasks(config)
     assert entry == {
         "task_id": "quickstart",
@@ -308,6 +310,25 @@ def test_host_gpu_nodes_are_written_without_asking_and_no_gpu_opts_out(
     assert '"candidate_devices": [\n' in out and '"/dev/nvidia0"' not in out
     with pytest.raises(SystemExit):
         _main(monkeypatch, capsys, *argv, "--no-gpu", "--device", "/dev/nvidia1")
+
+
+def test_wsl2_host_writes_dxg_and_names_its_passthrough(workspace, monkeypatch, capsys):
+    """Defect #1524: on WSL2 add-task wrote no device (it knew only /dev/nvidia<N>),
+    so every training run was refused. Node ordering and control-node filtering are
+    owned by core.gpu_devices (tests/unit/core/test_gpu_devices.py). Fails if the
+    detected /dev/dxg is not written, or the printout claims NVIDIA control nodes
+    instead of the WSL driver libraries the sandbox adds."""
+    _, config, manifest = workspace
+    monkeypatch.setattr("tools.workspace_sandbox.gpu.host_gpu_nodes", lambda: (Path("/dev/dxg"),))
+    monkeypatch.setattr("tools.candidate_console.package_mounts.device_problem", lambda _: None)
+    # The real detection: conftest stubs add_task.host_gpu_devices for every other test.
+    monkeypatch.setattr("tools.candidate_console.add_task.host_gpu_devices", host_gpu_devices)
+    plan = plan_task(AddTaskRequest(config=str(config), manifest=str(manifest)))
+    assert plan.entry["candidate_devices"] == ["/dev/dxg"]
+    assert (
+        "candidate_devices: /dev/dxg (WSL2 GPU found on this machine; runs also get "
+        "read-only /sys and the WSL GPU driver libraries (/usr/lib/wsl); pass --no-gpu"
+    ) in capsys.readouterr().out
 
 
 def test_add_task_and_check_never_print_a_credential_value(workspace, monkeypatch, capsys):

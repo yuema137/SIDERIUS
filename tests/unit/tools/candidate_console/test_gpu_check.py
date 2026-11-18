@@ -124,3 +124,34 @@ def test_missing_uvm_node_prints_the_host_side_fix(
     assert ("run nvidia-smi (or nvidia-modprobe -u -c=0) once on the host" in out) is not (
         uvm_present
     )
+
+
+def test_wsl2_task_is_probed_without_the_nvidia_uvm_note(
+    console_config, monkeypatch, tmp_path, capsys
+):
+    """Defect #1524: a task listing /dev/dxg (WSL2) was reported "not probed", and the
+    host-side nvidia-uvm fix does not apply under WSL2. Fails if the /dev/dxg task is
+    not probed or is told to run nvidia-modprobe for a node WSL2 never has."""
+    monkeypatch.setattr(gpu_check, "UVM_NODE", tmp_path)  # absent, as under WSL2
+    monkeypatch.setattr(
+        gpu_check,
+        "task_profile",
+        lambda task, workspace: SandboxProfile.model_construct(
+            workspace=workspace,
+            read_only=(),
+            network=False,
+            devices=(Path("/dev/dxg"),),
+            environment_names=(),
+            timeout_seconds=gpu_check.PROBE_TIMEOUT_SECONDS,
+        ),
+    )
+
+    def fake_run(value, argv):
+        Path(argv[-1]).write_text(json.dumps({"passed": True, "message": "1 CUDA device(s)"}))
+        return ExecutionResult(status="completed", returncode=0, elapsed_seconds=1.0)
+
+    monkeypatch.setattr(gpu_check, "run", fake_run)
+    assert gpu_check.check_gpu(_with_devices(console_config, ("/dev/dxg",))) == 0
+    out = capsys.readouterr().out
+    assert "sandbox passes /dev/dxg" in out and "GPU PASS" in out
+    assert "nvidia-modprobe" not in out

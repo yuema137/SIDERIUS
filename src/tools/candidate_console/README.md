@@ -139,7 +139,7 @@ A successful data command ends with `Data ready in .../data/NAME`.
    | `task_read_only` | the package folder, so the run sandbox can read the plugins and declarations beside the manifest |
    | `preparation_timeout_seconds`, `candidate_timeout_seconds` | starting values 300 and 3600 seconds; change them with `--prepare-timeout` and `--candidate-timeout` |
    | `candidate_network` | `true`; use `--no-network` to run candidates offline |
-   | `candidate_devices` | this machine's NVIDIA GPU nodes (`/dev/nvidia0`, `/dev/nvidia1`, ...), found without asking and printed as `candidate_devices: ...`; none when the machine has no NVIDIA GPU. `--no-gpu` writes none; `--device PATH ...` writes exactly the paths you give. Control nodes such as `/dev/nvidia-uvm` are not written: the run sandbox adds the ones present at launch |
+   | `candidate_devices` | this machine's GPU device nodes (`/dev/nvidia0`, `/dev/nvidia1`, ..., or `/dev/dxg` under Windows WSL2), found without asking and printed as `candidate_devices: ...`; none when the machine has no GPU device node. `--no-gpu` writes none; `--device PATH ...` writes exactly the paths you give. Control nodes such as `/dev/nvidia-uvm` are not written: the run sandbox adds the ones present at launch |
    | `candidate_environment_names` | the API key names your selected model profile needs (for example `OPENAI_API_KEY`), plus names you add with `--env` |
 
    Read the printed entry and edit `console.json` if a starting value does not
@@ -158,8 +158,8 @@ A successful data command ends with `Data ready in .../data/NAME`.
    check as step 3. It ends with `Restart the console to load the new task.`: a
    running console reads `console.json` only when it starts.
 
-   **GPU runs.** List the GPU's device node (for example `/dev/nvidia0`) in the
-   task's `candidate_devices` to give its runs a GPU. Inside the run sandbox,
+   **GPU runs.** List the GPU's device node (for example `/dev/nvidia0`, or
+   `/dev/dxg` under WSL2) in the task's `candidate_devices` to give its runs a GPU. Inside the run sandbox,
    starting each GPU training or inference phase also needs evidence that the GPU
    has enough free memory; the framework's GPU admission handles that, and listing
    the device does not by itself prove it. When a run's device
@@ -167,7 +167,10 @@ A successful data command ends with `Data ready in .../data/NAME`.
    host's `/sys` read-only and passes the NVIDIA control nodes this machine has
    (`/dev/nvidiactl`, `/dev/nvidia-uvm`, `/dev/nvidia-uvm-tools`,
    `/dev/nvidia-modeset`, `/dev/nvidia-caps/*`). CUDA needs that metadata to start
-   (without it, error 304). Tasks without a GPU node get neither; see the
+   (without it, error 304). A `/dev/dxg` node gets read-only `/sys` and the WSL
+   driver libraries `/usr/lib/wsl` instead of NVIDIA control nodes
+   ([Windows (WSL2)](../../../docs/getting-started/installation.md#windows-wsl2)
+   is experimental). Tasks without a GPU node get none of this; see the
    [sandbox README](../workspace_sandbox/README.md#gpu-tasks) for what becomes
    visible. An older entry that lists `"/sys"` in `task_read_only` keeps working.
 
@@ -178,8 +181,8 @@ A successful data command ends with `Data ready in .../data/NAME`.
    .venv/bin/python -m tools.candidate_console check --gpu --config /absolute/project/siderius_workspace/settings/console.json
    ```
 
-   Add `--task <task_id>` to probe one task. For each task that lists a
-   `/dev/nvidia<N>` node it prints what the sandbox passes, then
+   Add `--task <task_id>` to probe one task. For each task that lists a GPU
+   device node it prints what the sandbox passes, then
    `Task <id>: GPU PASS: 1 CUDA device(s), first: <GPU name>` or
    `Task <id>: GPU FAIL: <cause>`; it exits 0 only when every probed task passes.
    Exceptions appear as a fixed error category in this verdict. The diagnostic
@@ -192,12 +195,12 @@ A successful data command ends with `Data ready in .../data/NAME`.
    example one that does not exist on this machine). `check` and `serve` only warn
    about such a path, because some nodes such as `/dev/nvidia-uvm` appear only
    after the first CUDA use, and Run review repeats the warning before you launch.
-   A run given a `/dev/nvidia<N>` node this machine does not have is refused with
-   `GPU device /dev/nvidia<N> is not present on this machine`. When a launch is
+   A run given a GPU node this machine does not have is refused with, for
+   example, `GPU device /dev/nvidia3 is not present on this machine`. When a launch is
    refused for lack of a GPU, the cause line says which of three things is
    missing: no device node was passed; device nodes were passed but `/sys` is not
    mounted (CUDA error 304: the run did not get the automatic passthrough, so check
-   that the task lists a `/dev/nvidia<N>` node and run `check --gpu`); or CUDA
+   that the task lists a GPU device node and run `check --gpu`); or CUDA
    failed to start with both present (check the driver with `nvidia-smi`; if
    `/dev/nvidia-uvm` is missing on the host, run `nvidia-smi` or
    `nvidia-modprobe -u -c=0` once on the host, because the sandbox cannot create
@@ -205,7 +208,7 @@ A successful data command ends with `Data ready in .../data/NAME`.
 
    Older entries that list control nodes such as `/dev/nvidia-uvm` or
    `/dev/nvidiactl` in `candidate_devices` keep working, but a listed node missing
-   at launch refuses the run, so prefer listing only `/dev/nvidia<N>`.
+   at launch refuses the run, so prefer listing only GPU device nodes.
 
    You can also write the task entry yourself. A task needs its `task_id`,
    `label`, `task_manifest`, resource policy and time limits; the

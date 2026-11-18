@@ -36,6 +36,8 @@ see [Try the browser console (experimental)](#try-the-browser-console-experiment
 1. Follow [installation](installation.md): use Python 3.12+ (this checkout pins
    3.12) and uv, run
    `uv sync --group dev --frozen` in this checkout, and use its `.venv/bin/python`.
+   On Windows, work inside WSL2; [Windows (WSL2)](installation.md#windows-wsl2)
+   says what works there today.
 2. Open the checkout in your coding agent. Describe your research question,
    dataset location and an external project directory. You do not need a
    prepared manifest. Agree on the prediction target, splits, score and budgets;
@@ -123,10 +125,10 @@ It records, for one run:
 - `candidate_network`: whether the run may use the network (provider calls
   need it);
 - `candidate_devices`: the GPU device paths the run may use, for example
-  `/dev/nvidia0`. The recipe fills in this machine's GPUs for you, so write the
-  request on the machine that will run it. The list is empty only on a machine
-  without a GPU, and then only a workflow without training can run: a run that
-  trains a model without a GPU is refused;
+  `/dev/nvidia0` (`/dev/dxg` under Windows WSL2). The recipe fills in this
+  machine's GPUs for you, so write the request on the machine that will run it.
+  The list is empty only on a machine without a GPU, and then only a workflow
+  without training can run: a run that trains a model without a GPU is refused;
 - `candidate_environment_names`: the *names* of the provider key variables,
   never the key values.
 
@@ -465,8 +467,8 @@ you own; the console workspace is created inside it) and
    needs this folder.
 
 5. **Register the task and its experiment setup.**
-   `add-task` finds this machine's NVIDIA GPUs (`/dev/nvidia<N>`) and passes
-   them to runs. On a machine without one it passes none: you can still
+   `add-task` finds this machine's NVIDIA GPUs (`/dev/nvidia<N>`, or `/dev/dxg`
+   under WSL2) and passes them to runs. On a machine without one it passes none: you can still
    register, prepare and check the task, but a run that trains is refused
    (SIDERIUS 1.1 has no CPU mode). `--no-gpu` withholds the GPU even when one
    exists, for a workflow that stops before training:

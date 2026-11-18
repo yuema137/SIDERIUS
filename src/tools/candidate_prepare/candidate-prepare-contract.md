@@ -339,9 +339,11 @@ operator choices. Compute the expected source identity and allocate a fresh UUID
 programmatically; do not ask the operator to transcribe or compare digest strings.
 The preparation owner reobserves the source and refuses drift before allocation.
 Select devices with `tools.workspace_sandbox.gpu.host_gpu_devices()`, the one
-detector of this host's `/dev/nvidia<N>` GPU nodes (character devices, symlinks
-excluded, sorted by number; control nodes are never listed because the sandbox
-passes the present ones at launch). It returns `()` on a machine without one.
+detector of this host's GPU device nodes, a thin consumer of the
+`core.gpu_devices` providers (`/dev/nvidia<N>` sorted by number, then WSL2's
+`/dev/dxg`; character devices, symlinks excluded; control nodes are never listed
+because the sandbox passes the present ones at launch). It returns `()` on a
+machine without one.
 Preparation admission validates `candidate_devices` on the preparing host
 (`SandboxProfile.device_paths`) and the worker's launch sandbox revalidates them
 on the launching host, so call it on the machine that will run the candidate. A real run trains only on a CUDA device

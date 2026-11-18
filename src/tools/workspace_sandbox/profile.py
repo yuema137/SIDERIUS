@@ -9,11 +9,11 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from core.gpu_devices import gpu_provider
 from core.layout import checkout_root, package_root
 from core.native_writer.models import WriterRefusal
 from core.native_writer.state import WriterState, state_directory
 from core.runtime_control.process_visibility import PROCESS_VISIBILITY_ENV
-from tools.workspace_sandbox.gpu import GPU_NODE
 
 # These are Linux runtime locations, not scientific or hardware policy.
 SYSTEM_DIRECTORIES = tuple(Path(p) for p in ("/usr", "/bin", "/sbin", "/lib", "/lib64"))
@@ -102,11 +102,12 @@ class SandboxProfile(BaseModel):
     @classmethod
     def device_paths(cls, paths: tuple[Path, ...]) -> tuple[Path, ...]:
         for path in paths:
-            if GPU_NODE.fullmatch(str(path)) and not path.exists():
+            provider = gpu_provider(path)
+            if provider is not None and not path.exists():
                 raise ValueError(
                     f"GPU device {path} is not present on this machine, so the run cannot "
-                    "use that GPU; list only the /dev/nvidia<N> nodes this machine has "
-                    "(ls /dev/nvidia*) or run on the machine that has it"
+                    f"use that GPU; list only the {provider.node_display} nodes this machine "
+                    f"has ({provider.listing_command}) or run on the machine that has it"
                 )
             _canonical_path(path)
             if not path.is_relative_to("/dev") or not path.is_char_device():

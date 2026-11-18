@@ -14,43 +14,42 @@ the same sentence wherever the launch stops. Importing this module never
 probes a device.
 
 When CUDA is unavailable, :func:`observe_gpu_unavailable_cause` names which
-prerequisite is missing from two filesystem facts this process can see (a
-``/dev/nvidia<N>`` character device; ``/sys/bus/pci/devices``), never from
+prerequisite is missing from two filesystem facts this process can see (a GPU
+device node of any ``core.gpu_devices`` provider, ``/dev/nvidia<N>`` or WSL2's
+``/dev/dxg``, as a character device; ``/sys/bus/pci/devices``), never from
 driver message text. The launch guard receives the cause through its
 measurement capability and words the fix for it.
 """
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Literal
 
+from core.gpu_devices import gpu_provider
 from core.hardware_models import HardwareContext
 
 #: Why no CUDA device is usable here, in prerequisite order:
-#: ``no_device_nodes`` no ``/dev/nvidia<N>`` character device is visible;
+#: ``no_device_nodes`` no GPU device node (``core.gpu_devices``) is visible;
 #: ``sys_not_mounted`` device nodes are visible but ``/sys`` is not (CUDA then
 #: fails with error 304, cudaErrorOperatingSystem); ``cuda_init_failed`` both are
 #: visible and CUDA still reports no device (driver or library problem).
 GpuUnavailableCause = Literal["no_device_nodes", "sys_not_mounted", "cuda_init_failed"]
 
-_GPU_NODE = re.compile(r"nvidia[0-9]+")
-
 _FIX: dict[GpuUnavailableCause, str] = {
     "no_device_nodes": (
-        "no NVIDIA device node (/dev/nvidia<N>) was passed into this process. Run on a "
-        "machine with a CUDA GPU; in the console, list its device nodes in the task's "
-        "candidate_devices"
+        "no GPU device node (/dev/nvidia<N>, or /dev/dxg under WSL2) was passed into "
+        "this process. Run on a machine with a CUDA GPU; in the console, list its device "
+        "nodes in the task's candidate_devices"
     ),
     "sys_not_mounted": (
-        "NVIDIA device nodes were passed, but /sys is not mounted here, so CUDA cannot "
+        "GPU device nodes were passed, but /sys is not mounted here, so CUDA cannot "
         "start (CUDA error 304). The console run sandbox mounts /sys read-only by itself "
-        "for a task that lists a /dev/nvidia<N> device node; check that the task lists "
-        "one, then run check --gpu (see GPU runs in the console README)"
+        "for a task that lists a GPU device node; check that the task lists one, then "
+        "run check --gpu (see GPU runs in the console README)"
     ),
     "cuda_init_failed": (
-        "NVIDIA device nodes and /sys are visible, but CUDA failed to initialize. "
+        "GPU device nodes and /sys are visible, but CUDA failed to initialize. "
         "Check the driver on this machine with nvidia-smi. The run sandbox passes the "
         "NVIDIA control nodes present at launch and cannot create one; if "
         "/dev/nvidia-uvm is missing on the host, run nvidia-smi (or "
@@ -70,7 +69,8 @@ def observe_gpu_unavailable_cause(
     """
     try:
         nodes = any(
-            _GPU_NODE.fullmatch(entry.name) and entry.is_char_device() for entry in dev.iterdir()
+            gpu_provider(entry, dev=dev) is not None and entry.is_char_device()
+            for entry in dev.iterdir()
         )
     except OSError:
         nodes = False

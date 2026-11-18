@@ -77,8 +77,8 @@ def command_prefix(profile: SandboxProfile) -> list[str]:
         # NFS/SMB emulate flock with fcntl locks, which need a writable descriptor.
         state, lock = str(profile.writer_state), str(profile.writer_state / "writer.lock")
         args.extend(["--ro-bind", state, state, "--bind", lock, lock])
-    # A declared /dev/nvidia<N> adds read-only /sys and the host's NVIDIA control
-    # nodes (tools.workspace_sandbox.gpu); without one the argv is unchanged.
+    # A declared GPU node adds its provider's read-only runtime paths and present
+    # companion nodes (tools.workspace_sandbox.gpu); without one the argv is unchanged.
     gpu_read_only, gpu_devices = passthrough(profile.devices)
     read_only = set(profile.read_only) | set(gpu_read_only)
     # Freeze declared task/config descendants after the writable project mount.

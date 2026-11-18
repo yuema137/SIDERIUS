@@ -94,7 +94,7 @@ Edit **your external `sandbox.json`**, then run `check` again:
 | `writer_state` | Optional; normally omitted in your own profile. The candidate worker sets it for authored research loops. It must be the prepared private (mode 0700) native writer directory `<workspace parent>/.<workspace name>.siderius-writer` with its `writer.lock` already inside. The sandbox mounts the folder read-only and only `writer.lock` writable, so code in the sandbox can take the writer lock but cannot remove or replace it. Any other path is refused. See the [writer contract](../../core/native_writer/native-writer-contract.md#identity-and-storage). |
 | `read_only` | Existing absolute files/directories to expose without write access. A selected task or experiment inside the workspace can be frozen this way. Paths retain their host names inside the sandbox. |
 | `network` | Required explicit boolean. `false` isolates the network; `true` grants host-network access, including provider access. It does not filter destinations or authorize spending. |
-| `devices` | Explicit character-device paths under `/dev`. No GPU is exposed by default. Listing a `/dev/nvidia<N>` node also mounts read-only `/sys` and the host's NVIDIA control nodes ([GPU tasks](#gpu-tasks)). This is access, not a GPU allocation or VRAM budget. |
+| `devices` | Explicit character-device paths under `/dev`. No GPU is exposed by default. Listing a GPU device node (`/dev/nvidia<N>`, or `/dev/dxg` under Windows WSL2) also mounts what that GPU needs beside it, such as read-only `/sys` ([GPU tasks](#gpu-tasks)). This is access, not a GPU allocation or VRAM budget. |
 | `environment_names` | Names to copy from the launching shell, such as `OPENAI_API_KEY` or a declared calibration setting. Missing/empty variables are reported by name before launch. Never put key values in this file or the command line. |
 | `timeout_seconds` | Required positive finite wall-clock cap for this invocation. Timeout returns status `timed_out` and exit code 124; cleanup may add a short grace period. This does not reset or replace the experiment's shared API/training budgets. |
 
@@ -131,33 +131,42 @@ environment check a model failure.
 
 ### GPU tasks
 
-A `/dev/nvidia<N>` device node alone does not let CUDA start: without host
-`/sys`, PyTorch reports `cudaGetDeviceCount` error 304. So when `devices` lists
-at least one `/dev/nvidia<N>` node, the sandbox adds two things itself
-([`gpu.py`](gpu.py)); you do not configure them:
+A GPU device node alone does not let CUDA start. So when `devices` lists a GPU
+device node, the sandbox adds what that kind of GPU needs beside it
+([`gpu.py`](gpu.py)); you do not configure it. Which nodes count as GPUs, and
+what each kind needs, is decided in one place,
+[`core/gpu_devices.py`](../../core/gpu_devices.py). Two kinds are known:
 
-- **All of host `/sys`, read-only.** The process can read the host's hardware
-  and kernel metadata: PCI devices, CPU and NUMA topology, loaded modules and
-  their parameters, block and network device names, cgroup and power
-  information. It cannot change any of it. Docker mounts sysfs read-only in
-  containers and Apptainer binds host `/sys`; Flatpak binds selected `/sys`
-  subdirectories. On the checked RTX 5090 host a smaller set
-  (the GPU's PCI directory plus `/sys/module/nvidia*`) was also enough. The
-  sandbox mounts all of `/sys` so that other drivers and library versions that
-  read more metadata keep working.
-- **The NVIDIA control nodes present on this host**: `/dev/nvidiactl`,
-  `/dev/nvidia-uvm`, `/dev/nvidia-uvm-tools`, `/dev/nvidia-modeset` and
-  `/dev/nvidia-caps/*` (MIG). Nodes you already listed are not passed twice.
+| Your machine | GPU device node | The sandbox also adds |
+|---|---|---|
+| Linux with the NVIDIA driver | `/dev/nvidia0`, `/dev/nvidia1`, ... (one per GPU) | read-only `/sys`, and the NVIDIA control nodes this machine has: `/dev/nvidiactl`, `/dev/nvidia-uvm`, `/dev/nvidia-uvm-tools`, `/dev/nvidia-modeset`, `/dev/nvidia-caps/*` (MIG) |
+| Windows WSL2 | `/dev/dxg` (one node for all GPUs) | read-only `/sys`, and read-only `/usr/lib/wsl`, where WSL mounts the Windows GPU driver libraries |
 
-A profile without a `/dev/nvidia<N>` node gets neither, so its sandbox command is
-unchanged. A profile that already lists `/sys` (or a `/sys` subdirectory) in
-`read_only` keeps working; `/sys` is mounted once. A declared
-`/dev/nvidia<N>` that this machine does not have is refused before launch with
-`GPU device /dev/nvidia<N> is not present on this machine`.
+Why `/sys`: without host `/sys`, PyTorch reports `cudaGetDeviceCount` error 304
+on Linux. The process can read the host's hardware and kernel metadata (PCI
+devices, CPU and NUMA topology, loaded modules and their parameters, block and
+network device names, cgroup and power information), but it cannot change any
+of it. Docker mounts sysfs read-only in containers and Apptainer binds host
+`/sys`; Flatpak binds selected `/sys` subdirectories. On the checked RTX 5090
+host a smaller set (the GPU's PCI directory plus `/sys/module/nvidia*`) was also
+enough. The sandbox mounts all of `/sys` so that other drivers and library
+versions that read more metadata keep working.
+
+Nodes and folders this machine does not have are skipped, and nodes you already
+listed are not passed twice. A profile without a GPU device node gets none of
+this, so its sandbox command is unchanged. A profile that already lists `/sys`
+(or a `/sys` subdirectory) in `read_only` keeps working; `/sys` is mounted once.
+A declared GPU node that this machine does not have is refused before launch,
+for example with `GPU device /dev/nvidia3 is not present on this machine`.
+
+The WSL2 row follows NVIDIA's CUDA-on-WSL layout but has not been run on a WSL2
+machine yet; see [Windows (WSL2)](../../../docs/getting-started/installation.md#windows-wsl2)
+for what is and is not supported there.
 
 To list just this machine's GPUs, call `host_gpu_devices()` from
-[`gpu.py`](gpu.py). It returns the `/dev/nvidia<N>` nodes (no control nodes,
-since the sandbox adds those), or an empty tuple on a machine without a GPU:
+[`gpu.py`](gpu.py). It returns the `/dev/nvidia<N>` nodes (or `/dev/dxg` under
+WSL2; no control nodes, since the sandbox adds those), or an empty tuple on a
+machine without a GPU:
 
 ```bash
 .venv/bin/python -c "from tools.workspace_sandbox.gpu import host_gpu_devices; print(host_gpu_devices())"

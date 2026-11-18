@@ -320,7 +320,7 @@ request = ReusableCandidatePreparationRequest(
     llm_config_file=str(root / "run-a-inputs/llm.json"),
     preparation_timeout_seconds=120, candidate_timeout_seconds=3600,
     task_read_only=(str(repo),), candidate_network=True,
-    candidate_devices=host_gpu_devices(),  # This machine's /dev/nvidia<N> GPUs.
+    candidate_devices=host_gpu_devices(),  # This machine's GPU device nodes.
     candidate_environment_names=("OPENAI_API_KEY",),
 )
 store = OperationStoreConfig(
