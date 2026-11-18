@@ -31,6 +31,7 @@ from typing import Any
 
 from agent.llm_bridge import LLMBridge
 from agent.llm_settings import DEFAULT_LLM_PROVIDER
+from agent.prompt_templates.attempt_history import earlier_attempts_block
 from agent.prompt_templates.constraints import append_constraint_disclosure
 from agent.prompt_templates.implementor.task_blocks import load_implementor_task_blocks
 from agent.prompt_templates.native_training import render_native_training_appendix
@@ -78,6 +79,35 @@ _COMPATIBILITY_REEXPORTS: tuple[str, ...] = ()
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _repair_exhausted_message(
+    what: str,
+    name: str,
+    final_error: str,
+    error_history: list[tuple[int, str]],
+    *,
+    source_heading: str,
+    source: str,
+) -> str:
+    """The final failure text of a generate-validate-repair loop (#1538).
+
+    The headline keeps the final error in its established position; the
+    earlier attempts' errors follow, then the last assembled source. With no
+    repair attempt the text is identical to the pre-#1538 message.
+    """
+    history = earlier_attempts_block(
+        error_history,
+        final_error,
+        heading="Earlier attempt errors (oldest first):",
+        unit="Attempt",
+    )
+    history_section = f"{history}\n\n" if history else ""
+    return (
+        f"{what} failed after {len(error_history) + 1} attempts for '{name}': {final_error}\n\n"
+        f"{history_section}"
+        f"{source_heading}:\n{source}"
+    )
 
 
 def _class_name(model_name: str) -> str:
@@ -1988,9 +2018,14 @@ class MLModelImplementor:
 
         if error is not None:
             raise ValueError(
-                f"Loss generation failed after {max_retries + 1} attempts for "
-                f"'{loss_name}': {error}\n\n"
-                f"The assembled loss source:\n{plugin_src}"
+                _repair_exhausted_message(
+                    "Loss generation",
+                    loss_name,
+                    error,
+                    error_history,
+                    source_heading="The assembled loss source",
+                    source=plugin_src,
+                )
             )
         if attempt > 0:
             print(f"   ✅ Loss self-correction succeeded on attempt {attempt + 1}.")
@@ -2228,13 +2263,18 @@ class MLModelImplementor:
             code = self._patch_common_mistakes(code)
             error = self._validate_code(code, inp, self._probe_seed)
 
-        # If still failing after retries, raise with the last error
+        # Still failing after retries: raise with the final error AND every
+        # earlier one (#1538), so the proposer's feedback keeps the cause.
         if error is not None:
-            plugin_src = _assemble_plugin(inp, code)
             raise ValueError(
-                f"Code generation failed after {max_retries + 1} attempts "
-                f"for '{inp.model_name}': {error}\n\n"
-                f"The assembled plugin source:\n{plugin_src}"
+                _repair_exhausted_message(
+                    "Code generation",
+                    inp.model_name,
+                    error,
+                    error_history,
+                    source_heading="The assembled plugin source",
+                    source=_assemble_plugin(inp, code),
+                )
             )
 
         if attempt > 0:
