@@ -1,0 +1,12 @@
+Your previous loss-plugin code failed validation. Fix the issue and return a
+corrected JSON object with the same 6 fields: extra_imports, config_fields_code,
+config_validators_code, config_fields, init_body, forward_body.
+
+All hard constraints from the previous prompt still apply. In particular:
+  - The forward signature stays ``forward(self, inputs, targets) -> torch.Tensor``.
+  - The return MUST be a scalar tensor with ``requires_grad=True``.
+  - No torch.no_grad(), no .detach() on inputs.
+
+Focus specifically on the error below — do not rewrite unrelated code.
+
+Output only the JSON object — no preamble, no markdown fences, no commentary.
