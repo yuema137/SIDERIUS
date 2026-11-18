@@ -135,8 +135,8 @@ dummy-tensor check). Does NOT require real training.
 schema (implementor, proposer, validator, interpreter).
 
 **Setup**:
-- Real LLM: `llm_configs/openai_tiered_pro.json` (gpt-5.5 across every
-  role) — see the real-LLM Gate config policy above
+- Real LLM: `configs/llm/openai_tiered_pro.json` (gpt-5.5 for every role
+  except `lit_review`, which uses deepseek-v4-pro) — see the real-LLM Gate config policy above
 - Pseudo training: dummy-tensor check only — no GPU, no real training loop
 - Estimated wall time: ~2-5 min
 - Estimated cost: ~$0.05-0.20
@@ -174,10 +174,11 @@ split — including why there is no force-trial flag.
 #### Canonical command (cold-start, bounded)
 
 ```bash
-bash sdsc_submission_scripts/run_chain.sh \
+bash scripts/launch/run_chain.sh \
     --mode lilab \
     --workspace /tmp/gate2_$(date +%s) \
     --run_name gate2_smoke \
+    --task_composition <task-manifest.yaml> \
     --data_dir <task-data-root> \
     --num_iterations 1 \
     --max_rounds 1 \
@@ -192,8 +193,14 @@ bash sdsc_submission_scripts/run_chain.sh \
     --no-force_formal_round \
     --trial_vram_budget_gb 24 \
     --formal_vram_budget_gb 24 \
-    --llm_config llm_configs/openai_tiered_pro.json
+    --llm_config configs/llm/openai_tiered_pro.json
 ```
+
+`<task-manifest.yaml>` is the task composition under test (for TIDMAD, the
+composition in siderius-exp `tasks/tidmad/compositions/`); `run_chain.sh`
+exits 1 without it, because the framework never selects a task. The
+`--data_scope 4-9` / `--health_gate_files 4,...,9` values are TIDMAD
+partitions; use the task's own partition ids for another task.
 
 No `--seed_paths`: every real-training gate run is cold-start (see
 "Partial-scope rules" below).
