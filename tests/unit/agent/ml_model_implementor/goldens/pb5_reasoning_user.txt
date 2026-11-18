@@ -30,29 +30,34 @@ Prefer small dilation stacks; keep channels <= 128.
 ## Human Guidance (high priority)
 Keep the receptive field under 1000 samples.
 
-## Reference Code (from ancestor models — for ARCHITECTURAL INSPIRATION ONLY)
+## Reference Code (from ancestor models)
 
-⚠ WARNING — read before using the snippets below:
+The proposal builds on the earlier models below. Their complete source is
+repeated in every implementation step because each step is a separate request.
 
-1. Private helper classes (e.g. `CausalConv1d`, `WaveNetBlock`,
-   `DoubleConv`, `PositionalEncoding`, `Down`, `Up`, etc.) shown below
-   are NOT available in your plugin's runtime — they live in
-   `ml_models/models_sandbox.py` which the plugin loader does not import.
-   You MUST inline their logic using only the allowed primitives
-   (torch, torch.nn, torch.nn.functional). Do NOT reference these helper
-   class names in your `init_body` or `forward_body` — that produces
-   `NameError` at smoke-test time.
+How to use it:
 
-2. The `self.config = config` + `self.config.X` access pattern that some
+1. Where the description keeps parts of an ancestor, carry those parts over
+   from this source and change only what the proposal changes. Otherwise use
+   it for architectural ideas (block structure, dilation schedules,
+   skip-connection topology).
+
+2. Names defined in a reference (helper classes and functions such as
+   `CausalConv1d`, `WaveNetBlock`, `DoubleConv` or `PositionalEncoding`) are
+   NOT available in your plugin's runtime: the plugin loader imports neither
+   `ml_models/models_sandbox.py` nor another plugin. Write whatever you carry
+   over into your own code sections using only the allowed primitives
+   (torch, torch.nn, torch.nn.functional). Referencing such a name without
+   writing its logic into your sections produces `NameError` at smoke-test
+   time.
+
+3. The `self.config = config` + `self.config.X` access pattern that some
    reference samples use is FORBIDDEN in your plugin. The `config` object
    is only in scope during `__init__`. Store every value you need as a
    plain attribute on `self` (e.g. `self.channels = config.channels`)
    inside `init_body`, then reference `self.channels` in `forward_body`.
 
-3. Use the references for architectural ideas (block structure, dilation
-   schedules, skip-connection topology) — not as code to copy verbatim.
-
-### step00_fixture_ref (reference implementation — inspiration only)
+### step00_fixture_ref (ancestor source)
 ```python
 # TEST-OWNED reference snippet (design §13.1 — never production source)
 class Step00RefBlock(nn.Module):

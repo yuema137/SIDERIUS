@@ -31,7 +31,9 @@ from nodes.ml_model_implementor.ml_model_implementor import (
     IMPLEMENTOR_LOSS_REPAIR_PROMPT,
     IMPLEMENTOR_REPAIR_PROMPT,
     MLModelImplementor,
+    _build_code_prompt,
     _build_loss_repair_prompt,
+    _build_reasoning_prompt,
     _build_repair_prompt,
 )
 from tests.helpers.constraint_disclosure import without_incomplete_disclosure
@@ -248,3 +250,26 @@ class TestPB5RepairPrompts:
             [(1, "Attempt-1 frozen error: fixture loss returned NaN.")],
         )
         assert_golden(u, GOLDENS / "pb5_loss_repair_user.txt", surface="PB-5 loss repair user")
+
+
+class TestPB5NoReferencePrompts:
+    """Prompts for a proposal without ancestor source stay byte-identical (#1530).
+
+    The goldens were captured at 5ccb436f8, before the code and repair calls
+    gained the ancestor section, from ``fixture_input(reference_code={})``.
+    They fail if supplying the section to more calls adds any byte (an empty
+    heading, a separator) when no ancestor exists, which would move every
+    paper-era implementor prompt.
+    """
+
+    def test_reasoning_code_and_repair_user_prompts(self):
+        inp = fixture_input(reference_code={})
+        rendered = {
+            "pb5_no_reference_reasoning_user.txt": _build_reasoning_prompt(inp),
+            "pb5_no_reference_code_user.txt": _build_code_prompt("FIXTURE REASONING", inp),
+            "pb5_no_reference_repair_user.txt": _build_repair_prompt(
+                _FROZEN_CODE_DICT, _FROZEN_ERROR, inp, [(1, "earlier")]
+            ),
+        }
+        for name, text in rendered.items():
+            assert_golden(text, GOLDENS / name, surface=f"PB-5 no-reference {name}")

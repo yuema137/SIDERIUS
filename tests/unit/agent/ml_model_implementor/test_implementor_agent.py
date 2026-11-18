@@ -795,3 +795,82 @@ def test_constraints_reach_model_generation_and_repair(agent_with_mocks, inp, mo
     for recorded in calls:
         assert '"train_config.lr"' in recorded.args[1]
         assert recorded.args[1].count("[CURRENT RUN EXECUTION CONSTRAINTS]") == 1
+
+
+# ---------------------------------------------------------------------------
+# Ancestor reference source reaches every implementation call (#1530)
+# ---------------------------------------------------------------------------
+
+_ANCESTOR_MARKER = "ANCESTOR-SOURCE-MARKER"
+
+
+def _with_ancestor(inp):
+    inp.reference_code = {
+        "ancestor_model": f"def ancestor_helper(x):\n    return x  # {_ANCESTOR_MARKER}\n"
+    }
+    return inp
+
+
+def test_ancestor_source_reaches_code_and_every_repair_call(agent_with_mocks, inp, monkeypatch):
+    """The code and repair calls are separate requests and must each carry the
+    ancestor source once. Fails on the #1530 defect (only the reasoning call saw
+    it) and if a repair repeats the source per error-history entry."""
+    _with_ancestor(inp)
+    errors = iter(["first repair trigger", "second repair trigger", None])
+    monkeypatch.setattr(agent_with_mocks, "_validate_code", lambda *_: next(errors))
+    agent_with_mocks.run(inp)
+    calls = (
+        agent_with_mocks.bridge.generate_text.call_args_list
+        + agent_with_mocks.bridge.generate.call_args_list
+    )
+    assert [recorded.kwargs["label"] for recorded in calls] == [
+        "implementor.reasoning",
+        "implementor.code",
+        "implementor.repair",
+        "implementor.repair",
+    ]
+    for recorded in calls:
+        assert recorded.args[1].count(_ANCESTOR_MARKER) == 1, recorded.kwargs["label"]
+
+
+def test_reference_boundary_is_profile_renderable_per_stage(inp, tmp_path):
+    """An experiment profile can pin a per-stage rendering of the ancestor
+    section, and a profile that does not declare the boundary is never asked
+    for it when no ancestor exists. Fails if a builder bypasses the boundary,
+    drops ``stage``, or enters it for an empty mapping (which would make every
+    historical paper profile raise on ordinary proposals)."""
+    from agent.prompt_rendering import PromptRenderingProfile, bind_prompt_profile
+    from nodes.ml_model_implementor.ml_model_implementor import (
+        _build_code_prompt,
+        _build_repair_prompt,
+    )
+
+    source = tmp_path / "provider.txt"
+    source.write_text("fixed paper-style provider")
+
+    def builders(value):
+        return (
+            _build_reasoning_prompt(value),
+            _build_code_prompt("reasoning", value),
+            _build_repair_prompt({}, "error", value, [(1, "earlier")]),
+        )
+
+    absent = builders(inp)
+    undeclared = PromptRenderingProfile("paper-style", "1", {}, frozenset(), {"source": source})
+    with bind_prompt_profile(undeclared):
+        assert builders(inp) == absent
+
+    def reasoning_only(reference_code, stage):
+        return "HISTORICAL REFERENCE" if stage == "reasoning" else ""
+
+    pinned = PromptRenderingProfile(
+        "paper-style",
+        "1",
+        {"implementor.reference_code": reasoning_only},
+        frozenset(),
+        {"source": source},
+    )
+    with bind_prompt_profile(pinned):
+        reasoning, code, repair = builders(_with_ancestor(inp))
+    assert "HISTORICAL REFERENCE" in reasoning and _ANCESTOR_MARKER not in reasoning
+    assert (code, repair) == absent[1:]
