@@ -68,13 +68,15 @@ from core.run_seed_lock import run_seed_argument
 from core.training_seeds import SeedContext
 from nodes.llm_settings import IMPLEMENT, node_bridge_kwargs
 from nodes.ml_model_implementor.reference_code import reference_code_section
+from nodes.ml_model_implementor.validator_feedback import validator_feedback_section
 from workflows.task_config import render_forward_contract
 
 __all__ = [
     "MLModelImplementor",
     "main",
 ]
-# The reference-section renderer is a new private module (#1530), not a moved API.
+# The reference-section (#1530) and validator-feedback (#1572) renderers are new
+# private modules, not moved APIs.
 _COMPATIBILITY_REEXPORTS: tuple[str, ...] = ()
 
 # ---------------------------------------------------------------------------
@@ -1429,21 +1431,10 @@ def _build_reasoning_prompt(inp: ImplementorInput) -> str:
     if reference_section:
         lines += ["", reference_section, ""]
 
-    # --- Previous validation failure (retry context) ---
-    if inp.previous_validation_failure:
-        lines += [
-            "",
-            "## ⚠ Previous Implementation Failed Validation — Fix This",
-            "",
-            "Your previous implementation of this same proposal was rejected by the",
-            "validator with the following error. Address it explicitly in your reasoning",
-            "before committing to code:",
-            "",
-            inp.previous_validation_failure,
-            "",
-            "Do NOT reproduce the same mistake. Your reasoning must explain how you will",
-            "fix each issue raised above.",
-        ]
+    # --- Previous validation failure (retry context; #1572: one owner per stage) ---
+    feedback_section = validator_feedback_section(inp.previous_validation_failure, "reasoning")
+    if feedback_section:
+        lines += ["", feedback_section]
 
     probe_block = _probe_contract_prompt(inp)
     if probe_block:
@@ -1459,6 +1450,11 @@ def _build_code_prompt(reasoning: str, inp: ImplementorInput) -> str:
         advice_block = f"\n{probe_block}\n"
     if inp.human_advice:
         advice_block += f"\n## Implement Advice (high priority)\n{inp.human_advice}\n"
+    # #1572: the code call is a separate request; it must see the validator's
+    # rejection itself rather than rely on the reasoning text restating it.
+    feedback_section = validator_feedback_section(inp.previous_validation_failure, "code")
+    if feedback_section:
+        advice_block += f"\n{feedback_section}\n"
     # #1530: the code call is a separate request; it needs its own copy of the
     # ancestor source to carry over inherited components.
     reference_section = reference_code_section(inp.reference_code, "code")
@@ -1506,6 +1502,9 @@ def _build_repair_prompt(
     # only be restored from the ancestor source. Rendered once, never per history entry.
     reference_section = reference_code_section(inp.reference_code, "repair")
     reference_block = f"{reference_section}\n\n" if reference_section else ""
+    # #1572: a repair must not reintroduce the mismatch the validator rejected.
+    feedback_section = validator_feedback_section(inp.previous_validation_failure, "repair")
+    feedback_block = f"{feedback_section}\n\n" if feedback_section else ""
 
     return (
         f"## Previous code (failed)\n\n"
@@ -1517,6 +1516,7 @@ def _build_repair_prompt(
         f"## Model name: `{inp.model_name}`\n"
         f"## Class name: `{_class_name(inp.model_name)}`\n"
         f"## Baseline model_config: {json.dumps(model_cfg)}\n\n"
+        f"{feedback_block}"
         f"{reference_block}"
         "Fix the current error without reintroducing any error from the history. "
         "Output the corrected JSON code sections."

@@ -18,6 +18,13 @@ Config field consistency: init_body references config fields not declared in con
 ## Class name: `Step00FixtureModel`
 ## Baseline model_config: {"channels": 64, "depth": 2}
 
+## ⚠ Previous Implementation Failed Validation — Do Not Reproduce
+
+The validator rejected an earlier implementation of this same proposal
+with the following feedback. The code you output must not reproduce it:
+
+Previous attempt failed: fixture shape mismatch [B, 255, T].
+
 ## Reference Code (from ancestor models)
 
 The proposal builds on the earlier models below. Their complete source is

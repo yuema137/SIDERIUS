@@ -43,7 +43,7 @@ valid names are preserved unchanged. Archived schemas remain readable.
 | `reference_code` | `dict[str, str]` | No | `{}` | Source code of referenced ancestor models, keyed by `model_type`. Supplied by the caller from `inherited_components` (see [Ancestor reference source](#ancestor-reference-source)). Rendered whole into the reasoning, code and every repair prompt so the implementor can carry over claimed components. |
 | `expert_advice` | `str \| ExpertAdvice` | No | `""` | Structured guidance from upstream agents or orchestrators. Accepts a plain string or a structured `ExpertAdvice` object. |
 | `human_advice` | `str \| None` | No | `None` | Optional human-provided guidance — **highest priority**, overrides `expert_advice` when present. Injected into the reasoning prompt as high-priority context. |
-| `previous_validation_failure` | `str \| None` | No | `None` | Validator rejection feedback for this same proposal, rendered verbatim in the reasoning prompt's `## ⚠ Previous Implementation Failed Validation` block. The native workflow sets it from `workflows.proposal_failure_feedback.next_attempt_validation_feedback`: the latest rejection leads, followed (from the third attempt on) by an `Earlier implementation attempts for this proposal failed validation (oldest first):` block listing every earlier rejection (#1553; block owned by `agent.prompt_templates.attempt_history`, boundary `proposal.failure_attempt_history`). The candidate worker passes `None` (no implementation retry loop). |
+| `previous_validation_failure` | `str \| None` | No | `None` | Validator rejection feedback for this same proposal, rendered verbatim in the reasoning, code and every repair prompt (see [Validator rejection feedback](#validator-rejection-feedback)). The native workflow sets it from `workflows.proposal_failure_feedback.next_attempt_validation_feedback`: the latest rejection leads, followed (from the third attempt on) by an `Earlier implementation attempts for this proposal failed validation (oldest first):` block listing every earlier rejection (#1553; block owned by `agent.prompt_templates.attempt_history`, boundary `proposal.failure_attempt_history`). The candidate worker passes `None` (no implementation retry loop). |
 
 ### Workflow-populated fields
 
@@ -268,6 +268,18 @@ Owner: `src/nodes/ml_model_implementor/reference_code.py`. Issue #1530.
 - **Absence.** An empty mapping renders no bytes in any prompt and never enters the prompt boundary, so prompts for proposals without ancestors are byte-identical to the pre-#1530 renderers (pinned by the `pb5_no_reference_*` goldens).
 - **Prompt boundary.** `render_reference_code_section(reference_code, stage)` is the published `implementor.reference_code` boundary. A bound prompt profile that does not declare it raises only when an ancestor source is present; an experiment-owned profile reproduces an older rendering by returning per-stage text (for example the pre-#1530 reasoning-only block, and `""` for `"code"` and `"repair"`).
 
+## Validator rejection feedback
+
+Owner: `src/nodes/ml_model_implementor/validator_feedback.py`. Issue #1572.
+
+- **Input.** `ImplementorInput.previous_validation_failure`: the latest validator rejection of an earlier implementation of the same proposal, followed (since #1553) by every earlier rejection. Set by the native workflow; `None` on the first attempt and in the candidate worker.
+- **Where it is rendered.** `validator_feedback_section(feedback, stage)` is the single renderer for all three calls, which are separate, stateless requests:
+  - `"reasoning"` (`_build_reasoning_prompt`, between the ancestor section and the probe contract): the established `## ⚠ Previous Implementation Failed Validation — Fix This` block, rendered natively and not through a prompt boundary. Its bytes are unchanged since before #1572, so historical profiles need no new declaration for it.
+  - `"code"` (`_build_code_prompt`, after the implement advice and before the ancestor section) and `"repair"` (`_build_repair_prompt`, after the baseline `model_config` and before the ancestor section, on every repair attempt): `## ⚠ Previous Implementation Failed Validation — Do Not Reproduce`, a one-line instruction, then the feedback verbatim. Rendered through the published boundary `implementor.validator_feedback(feedback, stage)`; the native text is identical for both stages.
+- **Size.** Each call carries the feedback exactly once; it is not repeated per repair error-history entry. Its length is bounded by its producer (`workflows.proposal_failure_feedback`: one line per distinct rejection, at most `max_impl_attempts - 1` rejections).
+- **Absence.** `None` or `""` renders no bytes in any prompt and never enters the boundary (pinned by the `pb5_no_rejection_*` goldens).
+- **Prompt boundary.** A bound profile that does not declare `implementor.validator_feedback` raises when a code or repair prompt is built for an implementation attempt after a rejection. An experiment-owned profile restores the pre-#1572 prompts by returning `""` (proven against the 5ccb436f8 goldens by `TestPB5NoReferencePrompts` and `TestPB5PreFix1530ProfilePin`).
+
 ## Dependencies
 
 - **LLM**: 2–4 call sites per run, all via `LLMBridge`:
@@ -312,7 +324,7 @@ persists a reconstruction-bound transform. It defaults to `none`.
 
 ## Explicit rendering profiles
 
-The reasoning and code system messages obtain the native-training appendix through `native_training.appendix`. The reasoning, code and repair user messages obtain the ancestor section through `implementor.reference_code` only when a source is supplied (see [Ancestor reference source](#ancestor-reference-source)). A repair-exhaustion message obtains its earlier-attempt block through `proposal.failure_attempt_history` only when at least one repair ran. An explicit run-scoped rendering profile may replace any of these; native behavior is unchanged when none is bound. Proposal inputs, code generation, response validation and implementation checks retain their existing owners.
+The reasoning and code system messages obtain the native-training appendix through `native_training.appendix`. The reasoning, code and repair user messages obtain the ancestor section through `implementor.reference_code` only when a source is supplied (see [Ancestor reference source](#ancestor-reference-source)). A repair-exhaustion message obtains its earlier-attempt block through `proposal.failure_attempt_history` only when at least one repair ran. The code and repair user messages obtain the validator-rejection section through `implementor.validator_feedback` only when `previous_validation_failure` is set; the reasoning block is rendered natively. An explicit run-scoped rendering profile may replace any of these; native behavior is unchanged when none is bound. Proposal inputs, code generation, response validation and implementation checks retain their existing owners.
 
 Composition declares the optional `prompt_renderer` and pins its identity.
 See the [task-composition contract](../../../docs/reference/task-composition.md#explicit-prompt-rendering-providers)

@@ -927,7 +927,7 @@ The implementor, code validator and proposer share the native training
 appendix boundary. Supported boundaries are `native_training.appendix`, `proposal.template`,
 `interpretation.model_system`, `interpretation.model_user`, `interpretation.score_value`,
 `tuner.execution_provenance`, `tuner.training_dynamics`, `implementor.reference_code`,
-`proposal.failure_attempt_history`, and the
+`implementor.validator_feedback`, `proposal.failure_attempt_history`, and the
 `data_analysis.` stages `skill_selection`, `analysis_plan`,
 `generated_program`, `report_synthesis`, `generated_skill_promotion`,
 and `structured_output_repair`. See the decorated functions for exact typed
@@ -940,6 +940,14 @@ the implementor's reasoning, code and repair user prompts; its `stage` argument
 names the calling request. It is entered only when `reference_code` is nonempty,
 so a profile that does not declare it raises only for a proposal with ancestor
 source. See the [implementor contract](../../src/nodes/ml_model_implementor/ml_model_implementor.md#ancestor-reference-source).
+
+The `implementor.validator_feedback` boundary renders the validator-rejection
+section of the implementor's code and repair user prompts; its `stage` argument
+(`"code"` or `"repair"`) names the calling request. It is entered only when
+`previous_validation_failure` is set, so first-attempt prompts never reach it; a
+profile that returns `""` restores the pre-#1572 prompts. The reasoning prompt's
+rejection block is rendered natively and is not part of this boundary. See the
+[implementor contract](../../src/nodes/ml_model_implementor/ml_model_implementor.md#validator-rejection-feedback).
 
 The `proposal.failure_attempt_history` boundary renders the earlier-attempt
 block appended after the latest error in two kinds of text. Final failure
