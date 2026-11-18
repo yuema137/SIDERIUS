@@ -66,6 +66,12 @@ numbers and recorded outputs described in this section and in
 "Isolated composition-cell execution" below belong to the earlier notebook,
 retrievable with `git show 4fc0aefce:examples/quickstart/quickstart.ipynb`.
 That record is unchanged; the rewritten notebook carries no live-run evidence.
+Its code cells are executed offline, in order, in a temporary workspace by
+`tests/unit/examples/test_quickstart_notebook.py`, which checks each cell's
+"Expected:" facts (including fenced expected blocks verbatim) and refuses
+network connections and the provider key. `quickstart.html` has no generator;
+`tests/unit/examples/test_quickstart_pack.py::test_html_code_cells_equal_the_notebook_code_cells`
+requires its code cells to equal the notebook's, in order.
 
 Every executed cell output in `quickstart.ipynb` was produced by running the
 cell's own source on the landed post-PR-12d integration source (CPU only, no
