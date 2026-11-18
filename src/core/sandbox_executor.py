@@ -797,8 +797,8 @@ class TidmadSandbox:
             "configs": os.path.join(self.base_dir, "configs", run_name),
             "models": sandbox_models_dir(self.base_dir),
             "records": sandbox_records_dir(self.base_dir),
-            # Step 11 C4 — the run's BOUND root when composed; the legacy
-            # import-time constant otherwise (R-11-8: legacy-only).
+            # Step 11 C4 — the run's BOUND root; an unbound sandbox raises
+            # DatasetDirectoryUnavailable (there is no default root).
             "data": resolve_physical_data_root(),
         }
         for key, d in self.dirs.items():

@@ -3155,18 +3155,13 @@ class CompositionNotBoundError(RuntimeError):
 class CompositionDataRootMissing(RuntimeError):
     """A composed run did not declare where its data physically lives.
 
-    Step 11 C4 / R-11-8. Before Step 11 every child fell back to the
-    import-time ``TIDMAD_DATA_DIR``, so a composed run read TIDMAD's data
-    no matter what it had declared and looked entirely normal doing it.
-    After Step 11 that fallback is **legacy-only** and must never be
-    consulted for a composed run — so a composition with no root is a
-    refusal at the binding edge, before any LLM call or GPU minute.
-
-    Removing the import-time fallback itself is deliberately NOT Step-11
-    scope (R-11-8): CI resolves the root from the tracked template and
-    creates no real config, so removing it would break collection
-    repo-wide. Stopping the composed path from DEPENDING on it comes
-    first; retiring it comes second.
+    The physical data root is caller-owned run provenance: the entrypoint's
+    ``--data_dir`` (or a programmatic caller's ``physical_data_root``). The
+    framework has no default root, and the task manifest carries none,
+    because a host path is not part of the task's semantic identity
+    (R-11-7). A composition with no root is therefore refused at the
+    binding edge, before any LLM call or GPU minute; a supplied root is
+    validated by ``bind_physical_data_root``.
     """
 
 
@@ -3220,10 +3215,10 @@ def bind_run_task_composition(
 
     if not physical_data_root:
         raise CompositionDataRootMissing(
-            "a composed run must declare where its data physically lives. "
-            "Supply --data_dir <path>. Without it every subprocess child "
-            "falls back to the import-time TIDMAD_DATA_DIR, so the run reads "
-            "TIDMAD's data whatever it composed — silently (Step 11 R-11-8)."
+            "a composed run must declare where its data physically lives: pass "
+            "--data_dir <existing-directory> (programmatic callers pass "
+            "physical_data_root). There is no default data root, and the task "
+            "manifest does not carry one."
         )
 
     with ExitStack() as stack:
@@ -3338,8 +3333,8 @@ def verify_composition_is_bound(composition: RunTaskComposition | None) -> None:
         unbound.append("task_data_path")
     # Step 11 C4 — the root is not ON the composition (a host path is
     # execution provenance, never fingerprint material — R-11-7), so what
-    # is checked is that ONE is bound at all. Unbound means every child
-    # would silently resolve TIDMAD's import-time constant.
+    # is checked is that ONE is bound at all. Unbound means no child could
+    # be given a data root, because the framework has no default one.
     if active_physical_data_root() is None:
         unbound.append("physical_data_root")
     try:
