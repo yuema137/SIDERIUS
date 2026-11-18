@@ -3,7 +3,10 @@
 Reference: SIDERIUS `1c68bc81d7e44bbdc6e03a445a8422c3f77f45ff`. The Model routing
 and Measurement rows, all constructor signatures, the CLI provider/model
 defaults and the tuner/validator provider/model schema rows were re-verified at
-`5ccb436f` (v1.1.0). The payload field and CLI tables were last fully
+`5ccb436f` (v1.1.0); #1533 later added the optional `transport` keyword to the
+Interpretation, Implementer, Validator, Proposer and Data Analysis constructors
+(and `transport` / `reflect_transport` / `llm_transport` / `search_llm_transport`
+input fields for the tuner and literature review). The payload field and CLI tables were last fully
 reconciled at `0b44e405` (v0.2.9) and can omit fields or options added later.
 This page describes capability, not qualification of any scientific experiment.
 

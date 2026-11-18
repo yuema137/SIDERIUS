@@ -37,10 +37,12 @@ proof that the candidate passed. Inspect the returned status and diagnostics.
 ## Existing entrypoints and parameters
 
 Python import: `nodes.ml_code_validator_agent.ml_code_validator_agent.MLCodeValidatorAgent`.
-Native constructor at revision `5ccb436f` (v1.1.0):
+Native constructor at revision `5ccb436f` (v1.1.0), plus the optional
+`transport` route carrier added by #1533 (OpenAI background mode; see the
+workflow `openai_background` setting):
 
 ```text
-MLCodeValidatorAgent(provider: str='openai', model_id: str | None=None, max_retries: int | None=None, reasoning_effort: str | None=None, bridge_factory=None, max_output_tokens: int | None=None, probe_seed: SeedContext | None=None, **kwargs)
+MLCodeValidatorAgent(provider: str='openai', model_id: str | None=None, max_retries: int | None=None, reasoning_effort: str | None=None, bridge_factory=None, max_output_tokens: int | None=None, transport: PydanticTransportConfig | None=None, probe_seed: SeedContext | None=None, **kwargs)
 ```
 
 `bridge_factory` is existing dependency injection, not a model-provider choice.
