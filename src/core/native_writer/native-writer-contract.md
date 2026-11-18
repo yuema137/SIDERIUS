@@ -16,13 +16,13 @@ bounded to 4096 bytes. The stable `writer.lock` inode is never removed or replac
 Aliases resolving to the same workspace share the lock; different workspaces do
 not. This is not protection against a malicious actor with the same user identity.
 
-On the candidate-worker loop route the state directory is bound writable into the
-sandbox, so sandboxed candidate code can unlink, recreate or chmod `writer.lock`
-there. That defeats exclusion only for its own run, and host `inspect_writer` may
-then report `unregistered`. This falls under the same-uid trust boundary above.
-Hardening (host pre-creates `writer.lock`, `--ro-bind` of the directory, and
-`open_lock(create=False)` with `O_RDONLY`) is a tracked follow-up, not current
-behavior.
+`WriterState.open_lock` opens `writer.lock` with `O_RDWR | O_NOFOLLOW` (plus
+`O_CREAT` when creating) for every caller, including the `SIDERIUS_NATIVE_WRITER`
+transport FD. On local filesystems an exclusive `flock` would also work on a
+read-only descriptor, but NFS (Linux 2.6.12 and later) and SMB/CIFS emulate `flock`
+with an `fcntl` whole-file lock, and an exclusive `fcntl` lock requires a descriptor
+open for writing (otherwise `EBADF`). Native workspaces, such as a home directory on
+a cluster, can live on such filesystems. The lock file has no content.
 
 Managed native operations create the owner inside the existing sandbox. Their
 scientific workspace is `envelope/workspace`; the sibling control directory lies
@@ -32,12 +32,35 @@ When the sandbox's writable root is the workspace itself, its parent is read-onl
 inside the sandbox. The candidate worker's authored-loop route (fresh launch and
 continuation segment) is this case: its sandboxed child holds `iteration_owner`.
 The unsandboxed worker therefore calls `state.prepare_state_directory(workspace)`,
-which creates or reopens the directory with the same no-follow 0700/owner checks
-and takes no lock, and passes it as `SandboxProfile.writer_state`. The sandbox binds
-exactly that directory writable at its host path; the profile accepts only the
-path derived by `state.state_directory(workspace)` and only when it already passes
-the private-directory checks. The child still acquires the flock itself, on the
-host inode, so host `inspect_writer` observes `active`. No FD crosses the sandbox.
+which creates or reopens the directory and creates or reopens `writer.lock`, with
+the same no-follow 0700/0600, owner and single-link checks, takes no lock, and
+passes the directory as `SandboxProfile.writer_state`. The sandbox binds exactly
+that directory read-only (`--ro-bind <dir> <dir>`) at its host path and then binds
+only `<dir>/writer.lock` writable on top of it (`--bind <lock> <lock>`); the profile
+accepts only the path derived by `state.state_directory(workspace)` and only when
+the directory and its `writer.lock` already pass the private checks, so a missing,
+symlinked or hard-linked lock refuses before any spawn. The child still acquires
+the flock itself, on the host inode, so host `inspect_writer` observes `active`.
+No FD crosses the sandbox.
+
+The sandboxed child writes no record: its `acquire(workspace)` carries no capture
+digest, so its lease has no claim and it never publishes or removes a record, and
+a registered workspace refuses it (`registered_owner_required`). It needs write
+access only to open the lock `O_RDWR` (above).
+
+What the binds protect: the directory and the workspace parent are read-only, so
+sandboxed candidate code cannot unlink, rename or replace `writer.lock`, chmod the
+directory, or create files in it; such attempts fail (`EROFS`, `EBUSY` for the
+bind-mounted lock, or `EXDEV` for a rename from another mount). Writer exclusion
+and host `inspect_writer` therefore keep seeing the one lock inode. What they do
+not protect: sandboxed code can write to the empty lock file or chmod it. That
+stays within the same-uid trust boundary above; a chmod only makes a later
+`WriterState` use refuse with `unsafe_writer_state` for that run. The directory's
+records remain readable inside the sandbox; they carry no secret. Bubblewrap
+resolves the bind sources by path at spawn time, after `SandboxProfile` validation,
+so a same-uid host process could swap `writer.lock` between validation and spawn;
+that race is inside the same-uid trust boundary above (binding the whole directory
+had the same race).
 
 ## Supported ownership
 
