@@ -546,3 +546,23 @@ class EvaluationPhaseEvidence:
     secondary_refusals: list[NotScoreableResult]
     secondary_errors: dict[str, str]
     external_evaluation: CandidateEvaluationResult | None = None
+
+
+def complete_round_counters(completed_rounds: int) -> tuple[bool, int, int]:
+    """``(round_succeeded, completed_rounds, consecutive_fails)`` after a completed round.
+
+    The one owner of the counter update shared by a scored round and a
+    measured-infeasible round (#1527): the round landed, it counts toward
+    ``max_rounds``, and the consecutive-failure brake resets.
+    """
+    return True, completed_rounds + 1, 0
+
+
+def round_brake_reached(consecutive_fails: int, consecutive_infeasible: int, limit: int) -> bool:
+    """Whether a round brake stops the loop.
+
+    ``limit`` (``max_fail_rounds``) failed rounds in a row end the run with
+    ``aborted_fail_rounds``; as many measured-infeasible rounds in a row end it
+    with ``aborted_infeasible_rounds`` (#1527). The two counters are independent.
+    """
+    return consecutive_fails >= limit or consecutive_infeasible >= limit

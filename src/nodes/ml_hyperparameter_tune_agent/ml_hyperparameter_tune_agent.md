@@ -2200,7 +2200,7 @@ Each execution phase returns an `AttemptSignal` — `PROCEED`, `NEXT_ATTEMPT`
 The translation is 1:1 against the pre-refactor code; retry counts, round
 transitions and phase order are unchanged. #1527 added `COMPLETE_ROUND`, returned
 only by the scoring phase for a measured-infeasible record: `run()` marks the round
-completed through `_complete_round` (shared with the success path) and leaves the
+completed through `complete_round_counters` (shared with the success path) and leaves the
 attempt loop without reflection. After every round, `contracts.next_infeasible_streak`
 advances `consecutive_infeasible` (+1 for an infeasible round, 0 otherwise); the round
 loop also stops when it reaches `max_fail_rounds` (`aborted_infeasible_rounds`), and

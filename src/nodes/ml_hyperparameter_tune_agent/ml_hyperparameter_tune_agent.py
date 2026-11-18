@@ -101,7 +101,9 @@ from nodes.ml_hyperparameter_tune_agent.contracts import (
     AttemptStage,
     RunBindings,
     RunExitSnapshot,
+    complete_round_counters,
     next_infeasible_streak,
+    round_brake_reached,
 )
 from nodes.ml_hyperparameter_tune_agent.execution import (
     _emit_attempt_record,
@@ -670,26 +672,6 @@ def _load_run_model_description(
         print(f"No model description found for '{model_type_setting}': {e}")
 
     return model_description
-
-
-def _complete_round(completed_rounds: int) -> tuple[bool, int, int]:
-    """``(round_succeeded, completed_rounds, consecutive_fails)`` after a completed round.
-
-    The one owner of the counter update shared by a scored round and a
-    measured-infeasible round (#1527): the round landed, it counts toward
-    ``max_rounds``, and the consecutive-failure brake resets.
-    """
-    return True, completed_rounds + 1, 0
-
-
-def _round_brake_reached(consecutive_fails: int, consecutive_infeasible: int, limit: int) -> bool:
-    """Whether a round brake stops the loop.
-
-    ``limit`` (``max_fail_rounds``) failed rounds in a row end the run with
-    ``aborted_fail_rounds``; as many measured-infeasible rounds in a row end it
-    with ``aborted_infeasible_rounds`` (#1527). The two counters are independent.
-    """
-    return consecutive_fails >= limit or consecutive_infeasible >= limit
 
 
 class HyperparamTuningAgent:
@@ -1490,7 +1472,7 @@ class HyperparamTuningAgent:
         )
 
         completed_training_attempts: list[CompletedTrainingAttempt] = []
-        while completed_rounds < max_rounds and not _round_brake_reached(
+        while completed_rounds < max_rounds and not round_brake_reached(
             consecutive_fails, consecutive_infeasible, max_fail_rounds_setting
         ):
             round_index = completed_rounds + 1
@@ -1660,12 +1642,10 @@ class HyperparamTuningAgent:
                     if executed.signal is AttemptSignal.END_ROUND:
                         break
                     if executed.signal is AttemptSignal.COMPLETE_ROUND:
-                        # #1527: a measured-infeasible outcome is a judged
-                        # result. Its record is persisted; the round counts as
-                        # completed, like a Health-invalid round, and resets the
-                        # consecutive-failure brake. It never becomes a winner.
-                        round_succeeded, completed_rounds, consecutive_fails = _complete_round(
-                            completed_rounds
+                        # #1527: a measured-infeasible outcome is a judged result;
+                        # the round completes like a Health-invalid one, never a winner.
+                        round_succeeded, completed_rounds, consecutive_fails = (
+                            complete_round_counters(completed_rounds)
                         )
                         round_infeasible = True
                         print(f"Round {completed_rounds}/{max_rounds} Complete. Infeasible.")
@@ -1792,7 +1772,7 @@ class HyperparamTuningAgent:
                     # Phase L — success path: mark the round landed, reset the
                     # consecutive-failure counter, and break out of the inner
                     # attempt loop so the outer while moves on to the next round.
-                    round_succeeded, completed_rounds, consecutive_fails = _complete_round(
+                    round_succeeded, completed_rounds, consecutive_fails = complete_round_counters(
                         completed_rounds
                     )
                     print(
