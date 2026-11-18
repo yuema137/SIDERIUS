@@ -44,8 +44,11 @@ The constructor's `provider`, `model_id`, `reasoning_effort`,
 five names: for example `comparison_model_id`, `reasoning_reasoning_effort` or
 `proposing_max_retries`. `resolve_proposer_routing` applies them once at
 construction. A key that is absent inherits the legacy constructor value. A
-supplied value replaces it, including `None` and `0`; each resolved route is
-validated as a `ProposerRoute`. Keyword names outside this pattern are ignored
+supplied value replaces it, including `None` or `0` where the field allows it
+(for example `proposing_model_id=None` or `comparison_max_retries=0`). Each
+resolved route is validated as a `ProposerRoute`, so an invalid value such as
+`proposing_provider=None` or `proposing_max_output_tokens=0` raises a
+`ValidationError` at construction. Keyword names outside this pattern are ignored
 without an error, so a misspelled key leaves that stage on the legacy
 constructor route. After construction, read the immutable `node.routing`
 (`ProposerRouting` with `comparison`, `reasoning` and `proposing` routes) to
@@ -56,7 +59,7 @@ Stages use their routes as follows:
 | Route | Calls |
 | --- | --- |
 | `comparison` | Comparison stage, including its vocabulary corrections |
-| `reasoning` | `causal_reasoning` stage with its boldness retries and corrections; any other listed stage; both calls of legacy two-call mode |
+| `reasoning` | `causal_reasoning` stage with its boldness retries and corrections; any other stage in `reasoning_pipeline.stages`; both calls of legacy two-call mode |
 | `proposing` | Final proposing stage, including its structural retries |
 
 `node.bridge` is the eager bridge for the `reasoning` route. A stage whose
@@ -113,13 +116,13 @@ from agent.schemas.proposal import ProposalInput, ProposalOutput
 from nodes.ml_model_proposal_agent.ml_model_proposal_agent import MLModelProposalAgent
 
 
-def invoke(request: ProposalInput, result_path, *, provider, model_id, reasoning_effort=None,
-           stage_routes=None, run_context=None):
+def invoke(request: ProposalInput, result_path, *, routing, run_context=None):
     if not isinstance(request, ProposalInput):
         raise TypeError("Assemble or restore the native request before invocation")
-    # stage_routes: declared flat {stage}_{field} keys, e.g. {"proposing_model_id": ...}.
-    node = MLModelProposalAgent(provider=provider, model_id=model_id,
-        reasoning_effort=reasoning_effort, **(stage_routes or {}))
+    # routing: the complete constructor routing keywords, either
+    # WorkflowLLMConfig.from_json(profile_path).get("propose") or the declared
+    # {"provider": ..., "model_id": ..., "proposing_model_id": ..., ...} values.
+    node = MLModelProposalAgent(**routing)
     if run_context is not None:
         # The four keywords workspace/iter/run_name/run_id; binds every stage bridge.
         node.set_run_context(**run_context)

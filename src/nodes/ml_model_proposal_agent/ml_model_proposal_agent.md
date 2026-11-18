@@ -35,8 +35,8 @@ The public node module exports immutable `ProposerRoute`, `ProposerRouting`
 and the pure `resolve_proposer_routing(legacy, stage_options)` resolver. A route
 contains provider, model_id, reasoning_effort, max_output_tokens and
 max_retries. The agent's read-only `routing` property exposes the resolved
-settings without inspecting private modules. This describes configured settings; provider-level model
-defaults still belong to LLMBridge.
+settings without inspecting private modules. This describes configured
+settings; provider-level model defaults still belong to LLMBridge.
 
 The constructor accepts flat `{stage}_{field}` keyword overrides for
 `comparison`, `reasoning`, and `proposing`, including

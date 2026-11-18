@@ -60,15 +60,18 @@ and failed attempts; none changes the run's permissions or budget.
 
 The field and CLI tables were last fully reconciled with SIDERIUS `0b44e405`
 (v0.2.9) and can omit fields or options added later. Constructor signatures,
-CLI provider/model defaults, proposer stage routing and token-recording
-guidance were re-verified at `5ccb436f` (v1.1.0). Per-page source-revision
-labels identify the inventory, not the installed runtime pin. At invocation,
-inspect the exact installed classes and `--help` if a version-specific detail
-matters.
+CLI provider/model defaults, the tuner/validator provider/model schema rows,
+proposer stage routing and token-recording guidance were re-verified at
+`5ccb436f` (v1.1.0). Per-page source-revision labels identify the inventory,
+not the installed runtime pin. At invocation, inspect the exact installed
+classes and `--help` if a version-specific detail matters.
 
-Each guide links the complete top-level input/output field inventory and the
-existing constructor/CLI options. Nested schema structure is discoverable from
-the native classes using the inspection examples. Never invent an argument,
+Each guide links the top-level input/output field inventory (v0.2.9, with
+the rows re-verified above) and the existing constructor/CLI options. Confirm
+fields and options against the installed classes and `--help`: a field present
+in the installed class is real even when a table omits it. Nested schema
+structure is discoverable from the native classes using the inspection
+examples. Never invent an argument that the installed class or parser lacks,
 assume a CLI accepts the full Python input, or substitute a generic API default
 for a frozen experiment value. Prefer existing typed protocols for handoffs;
 the [handoff map](references/handoffs.md) describes their actual projections.

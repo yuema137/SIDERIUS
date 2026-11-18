@@ -325,10 +325,12 @@ node.set_run_context(**context)
 The existing helper `workflows.run_context.bind_agent_run_context(node,
 workspace=..., iteration=..., run_name=..., run_id=...)` applies the same
 dispatch and is what the fixed workflow calls. Its keyword is `iteration`, not
-`iter`, and it binds nothing when `run_name` or `run_id` is `None`.
+`iter`, and it binds nothing when `run_name` or `run_id` is `None`. Before
+`run()`, Literature review and Data Analysis have neither `set_run_context` nor
+a `bridge`, so this helper binds nothing for them either.
 
 For Literature review and Data Analysis, wrap the bridge factory when
-constructing the node:
+constructing the node instead:
 
 ```python
 from workflows.run_context import contextual_bridge_factory

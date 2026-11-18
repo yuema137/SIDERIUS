@@ -28,8 +28,8 @@ In a workflow's LLM JSON file, `propose.comparison`, `propose.reasoning` and
 `propose.proposing` select the model for each pipeline stage. Each selection
 includes `provider`, `model_id`, `reasoning_effort`, `max_output_tokens` and
 `max_retries`. A correction request uses the same selection as the stage being
-corrected. You can use one
-model for all three stages or give each stage a different model.
+corrected. You can use one model for all three stages or give each stage a
+different model.
 
 Earlier releases silently used the reasoning selection for every stage. To
 preserve that behavior for an existing experiment, copy its actual historical
