@@ -64,7 +64,12 @@ from agent.llm_settings import (
 )
 from agent.llm_transport.background import BackgroundTicket, admit_window, finish_background
 from agent.llm_transport.client import PydanticClient
-from agent.llm_transport.contracts import Completion, PydanticTransportConfig, validate_completion
+from agent.llm_transport.contracts import (
+    Completion,
+    PydanticTransportConfig,
+    take_measured_failure,
+    validate_completion,
+)
 from agent.llm_transport.selection import optional_client, validate_output_limit
 from agent.llm_transport.tool_admission import admit_tool_response
 from agent.planner_strategy import resolve_planner_strategy
@@ -1466,14 +1471,28 @@ class LLMBridge:
         *,
         retry_policy: RetryPolicy | None = None,
         on_late_response: Callable[[Any], None] | None = None,
+        on_failed_response: Callable[[Completion], None] | None = None,
     ):
-        """Retry transport failures; preserve a late response's usage before refusal.
+        """Retry transport failures; preserve measured usage of late and failed attempts.
 
-        The optional callback runs only after a response has returned successfully
+        ``on_late_response`` runs only after a response has returned successfully
         but exceeded the continuing deadline. It cannot admit the late result.
-        Ordinary response recording stays with the caller's content classification.
+        ``on_failed_response`` runs once for each failed transport attempt whose
+        error carries usage the provider measured (``take_measured_failure``),
+        before that attempt is retried or raised. The receipt names the error class
+        (``provider_error``) and the 1-based ``transport_attempt``; its refusal
+        makes the row's status ``invalid_provider_response``. Ordinary response recording stays with the
+        caller's content classification.
         """
-        from openai import APIConnectionError, APIStatusError, APITimeoutError
+        from openai import APIConnectionError, APIError, APIStatusError, APITimeoutError
+
+        def account_failure(exc: BaseException) -> None:
+            measured = take_measured_failure(exc)
+            if measured is not None and on_failed_response is not None:
+                measured.transport_metadata.update(
+                    provider_error=type(exc).__name__, transport_attempt=attempt + 1
+                )
+                on_failed_response(measured)
 
         max_retries = self.max_retries if retry_policy is None else retry_policy.max_retries
         last_exc = None
@@ -1486,9 +1505,11 @@ class LLMBridge:
                 remaining_seconds(label)
                 result = fn()
             except (APIConnectionError, APITimeoutError) as e:
+                account_failure(e)
                 last_exc = e
                 timed_out = True
             except APIStatusError as e:
+                account_failure(e)
                 if e.status_code != 429 and not (500 <= e.status_code < 600):
                     raise
                 last_exc = e
@@ -1499,6 +1520,9 @@ class LLMBridge:
                     suggested = self._parse_retry_delay(e)
                     if suggested is not None:
                         wait = suggested
+            except APIError as e:
+                account_failure(e)
+                raise
             else:
                 # A returned response has finished transport. Recording a late
                 # receipt must never re-enter transport retries, even if logging
@@ -1881,6 +1905,9 @@ class LLMBridge:
                 on_late_response=lambda response, attempt=attempt: record_usage(
                     response=response, extra={"attempt": attempt, "status": "deadline_exceeded"}
                 ),
+                on_failed_response=lambda response, attempt=attempt: record_usage(
+                    response=response, extra={"attempt": attempt}
+                ),
                 **retry_options,
             )
             response = finish_background(
@@ -2084,6 +2111,9 @@ class LLMBridge:
             on_late_response=lambda response: record_usage(
                 response=response, extra={"attempt": 0, "status": "deadline_exceeded"}
             ),
+            on_failed_response=lambda response: record_usage(
+                response=response, extra={"attempt": 0}
+            ),
         )
         response = finish_background(
             response,
@@ -2176,6 +2206,9 @@ class LLMBridge:
             label="tool_call",
             on_late_response=lambda response: record_usage(
                 response=response, extra={"attempt": 0, "status": "deadline_exceeded"}
+            ),
+            on_failed_response=lambda response: record_usage(
+                response=response, extra={"attempt": 0}
             ),
         )
         response = finish_background(

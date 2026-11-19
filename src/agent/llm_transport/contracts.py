@@ -83,6 +83,24 @@ class Completion(BaseModel):
     transport_metadata: dict[str, str | int | float | None] = Field(default_factory=dict)
 
 
+#: Attribute on a translated transport exception holding that attempt's measured receipt.
+_MEASURED_FAILURE = "siderius_measured_completion"
+
+
+def attach_measured_failure(exc: BaseException, completion: Completion) -> None:
+    """Carry the usage a provider measured before failing on the raised exception."""
+    setattr(exc, _MEASURED_FAILURE, completion)
+
+
+def take_measured_failure(exc: BaseException) -> Completion | None:
+    """Return and clear an exception's measured receipt, so it is accounted once."""
+    completion = getattr(exc, _MEASURED_FAILURE, None)
+    if completion is None:
+        return None
+    delattr(exc, _MEASURED_FAILURE)
+    return completion if isinstance(completion, Completion) else None
+
+
 def validate_completion(response: object) -> None:
     """Called after usage accounting, never inside the transport retry loop."""
     if isinstance(response, Completion) and response.failure:
