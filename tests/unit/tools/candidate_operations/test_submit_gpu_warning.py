@@ -7,12 +7,15 @@ from uuid import uuid4
 
 import pytest
 
-from tests.unit.tools.candidate_prepare import test_gpu_warning as preparation
+from tests.helpers.training_request import without_training, write_training_request
 from tools.candidate_operations import __main__ as cli
 from tools.candidate_operations.models import CandidateOperation, OperationStoreConfig
 
-#: The shipped four-stage example written with no GPU device (shared fixture).
-training_request = preparation.training_request
+
+@pytest.fixture
+def training_request(tmp_path, monkeypatch):
+    """The shipped four-stage example's worker request, written with no GPU device."""
+    return write_training_request(tmp_path, monkeypatch)
 
 
 def _submit(tmp_path, monkeypatch, request) -> object:
@@ -59,6 +62,6 @@ def test_gpu_node_or_no_training_stays_silent(
     if case == "gpu_node":
         request = request.model_copy(update={"devices": ("/dev/nvidia0",)})
     else:
-        request = preparation._without_training(request)
+        request = without_training(request)
     _submit(tmp_path, monkeypatch, request)
     assert capsys.readouterr().err == ""

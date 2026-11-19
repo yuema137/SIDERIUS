@@ -57,7 +57,10 @@ runs. The operation checks that the selected capture and native inputs still agr
    ```
 
    Save the returned `operation_id`. Exit zero means the request was admitted
-   or already exists; it does not mean the run succeeded.
+   or already exists; it does not mean the run succeeded. If the workflow trains
+   but the request lists no GPU device, `submit` also prints a `Warning` on
+   stderr: the run is still admitted, but it will be refused when it reaches
+   training, so prepare a new request on the machine with the GPU.
 
 Follow it with the [status and log commands](#read-status-and-logs) below. If the
 response is lost, resubmit the saved file unchanged: the same operation is
