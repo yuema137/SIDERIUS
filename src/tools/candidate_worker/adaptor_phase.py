@@ -285,8 +285,12 @@ def execute_adaptor(
     """Decide, publish outputs then the record (write-once), and close the trace slot.
 
     Any exception is an uncertain failure: the slot fails without a record and
-    the caller stops later effects, as for a native node. A skipped input without
-    a skip record is a contract gap, never a run outcome, so it propagates.
+    the caller stops later effects, as for a native node. Its reason comes from
+    the native-node classifier (``graph.failure_reason``): a stop by the worker's
+    own deadline closes the adaptor ``deadline_exceeded`` (#1603, #1601 item 1)
+    and a prompt-profile integrity stop ``prompt_profile_integrity``; anything
+    else stays ``native_failure``. A skipped input without a skip record is a
+    contract gap, never a run outcome, so it propagates.
     """
     try:
         outcome, record = decide(adaptor, entries, iteration=iteration, skips=skips, judge=judge)
@@ -310,10 +314,12 @@ def execute_adaptor(
         )
     except SkippedAdaptorInputError:
         raise
-    except Exception:
+    except Exception as error:
+        from .graph import failure_reason  # graph imports this module
+
         traceback.print_exc()
         failed = slot.model_copy(
-            update={"state": "failed", "reason": "native_failure", "record_path": None}
+            update={"state": "failed", "reason": failure_reason(error), "record_path": None}
         )
         return failed, None
     return closed, outcome

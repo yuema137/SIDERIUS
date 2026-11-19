@@ -475,17 +475,28 @@ spent. Such a stop is reported as running out of time, like the kill (issue #159
   `deadline_exceeded`; remaining nodes are blocked and the body status follows
   `body_outcome` unchanged (`failed`). `graph_evidence` accepts
   `native_failure`, `prompt_profile_integrity` and `deadline_exceeded` for a
-  failed node without a record. Adaptors keep `native_failure`; judge calls keep
-  recording `timed_out` evidence.
+  failed node without a record. An adaptor that raises takes the same classifier
+  (`adaptor_phase.execute_adaptor` calls `graph.failure_reason`, #1603 / #1601
+  item 1): a worker-deadline stop closes it `failed`/`deadline_exceeded`, a
+  prompt-profile integrity stop `failed`/`prompt_profile_integrity`, anything else
+  `failed`/`native_failure`; `graph_evidence._check_adaptor_entry` accepts the
+  same three reasons for a record-less adaptor and `verify_adaptors` skips it.
+  Judge calls keep recording `timed_out` evidence.
 - **Tuner.** The tuner's attempt handler re-raises a deadline refusal
   (`raise_if_deadline_exceeded`) instead of recording an attempt failure, so a
   stop during training reaches the classification above (see the tuner node
   contract).
 
 The bridge's content-repair loop does not catch `ExecutionDeadlineExceeded`.
-Other node-level resilience handlers that catch `Exception` around an LLM call
-see each later call fail at its first deadline check, so they end promptly
-rather than retry. Compatibility: `GraphReason` and `NodeUnitResult.failure` gain
+Node-level resilience handlers that catch `Exception` around an LLM call re-raise
+a deadline refusal instead of degrading (#1603), so a stop reaches the
+classification above even when the swallowed call was the last deadline-checked
+one: the literature review's search-decision, compression and synthesis
+boundaries, the interpreter's degraded path and the proposer's causal-reasoning
+retry (`raise_if_deadline_exceeded`), and the interpreter's analysis brief, which
+re-raises only a refusal by the enclosing deadline (`stopped_by` against
+`active_deadline()`) and otherwise keeps its own `timed_out` record. With no
+deadline bound, as in `run_one_iteration`, none of these can see a refusal. Compatibility: `GraphReason` and `NodeUnitResult.failure` gain
 one value each; `failure` stays omitted when unset, so earlier records parse and
 results without it keep their bytes.
 

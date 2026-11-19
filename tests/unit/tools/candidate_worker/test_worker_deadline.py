@@ -27,6 +27,7 @@ from tools.candidate_worker.unit_transport import decode_transport
 
 from .test_native import Provider
 from .test_native import native_runner as native_runner
+from .test_training import training_runner as training_runner
 
 
 def _observe_deadlines(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, float | None]]:
@@ -161,3 +162,38 @@ def test_graph_unit_deadline_stop_closes_node_deadline_exceeded(
     reasons = {(item.state, item.reason) for item in receipt.graph_trace.nodes}
     assert ("failed", "deadline_exceeded") in reasons, reasons
     assert ("failed", "native_failure") not in reasons, reasons
+
+
+@pytest.mark.parametrize(
+    ("raised", "reason"),
+    [(_worker_deadline_refusal, "deadline_exceeded"), (None, "native_failure")],
+    ids=["worker-stop", "ordinary-failure"],
+)
+def test_adaptor_stop_closes_deadline_exceeded_and_verifies(
+    prepared, native_runner, training_runner, monkeypatch, raised, reason
+):
+    """Defect #1603 (Refs #1601 item 1): an adaptor stopped by the worker's budget
+    closed `failed`/`native_failure`, indistinguishable from a broken adaptor. It now
+    takes the native-node classifier's `deadline_exceeded`; any other exception stays
+    `native_failure`. The verifier must accept either closure. Fails if the reasons
+    are not distinct or the parent refuses the trace."""
+    from tests.helpers.candidate_fanout import selection_request
+    from tools.candidate_worker.graph_evidence import verify_graph_trace
+
+    from .test_graph import initial
+
+    def decide(*_args, **_kwargs):
+        if raised is not None:
+            raised()
+        raise RuntimeError("adaptor implementation is broken")
+
+    monkeypatch.setattr(
+        importlib.import_module("tools.candidate_worker.adaptor_phase"), "decide", decide
+    )
+    request = selection_request(prepared)
+    receipt = launch_candidate(request)
+    assert receipt.graph_trace is not None, receipt.error
+    (adaptor,) = receipt.graph_trace.adaptors
+    assert (adaptor.state, adaptor.reason, adaptor.record_path) == ("failed", reason, None)
+    parent = initial(request).model_copy(update={"run_id": receipt.run_id})
+    verify_graph_trace(request, parent, receipt)
