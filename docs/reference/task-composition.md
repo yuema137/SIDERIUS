@@ -963,9 +963,11 @@ The `constraints.disclosure` boundary renders the
 `[CURRENT RUN EXECUTION CONSTRAINTS]` block that
 `agent.prompt_templates.constraints.append_constraint_disclosure` appends to
 proposer, implementor, validator, interpreter, literature-review and data-analysis
-user prompts. It is entered on every such request, including when `context` is
-`None` (the block then reports every section as missing), so a profile that
-covers those nodes must declare it or name it native.
+user prompts, and to the tuner's planner and reflector user prompts
+(`agent/llm_bridge.py`, labels `tuner.planner` and `tuner.reflector`). It is
+entered on every such request, including when `context` is `None` (the block
+then reports every section as missing), so a profile that covers any of those
+calls, tuner calls included, must declare it or name it native.
 
 The `evaluation.spec` boundary renders the `[TASK EVALUATION]` section appended
 after the constraint disclosure. `append_evaluation_spec` enters it only while an

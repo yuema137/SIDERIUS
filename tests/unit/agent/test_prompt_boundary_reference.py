@@ -7,9 +7,10 @@ the owner functions and the callback signatures from
 fell five boundaries behind source (#1539).
 
 The census is read from the AST, without importing anything: every function
-decorated with ``prompt_boundary("<name>", ...)`` under ``src/``. A decorator
-spelt any other way (an alias, ``module.prompt_boundary``) is not seen; the
-rendering module defines the decorator once and every owner imports it by name.
+decorated with ``@prompt_boundary("<literal>")`` under ``src/``. It fails
+closed: any other spelling that could declare a boundary invisibly (an
+aliased import, ``module.prompt_boundary``, a call that is not a function
+decorator, a non-literal name) is refused rather than skipped.
 """
 
 from __future__ import annotations
@@ -22,46 +23,70 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 SRC = REPO_ROOT / "src"
 REFERENCE = REPO_ROOT / "docs" / "reference" / "task-composition.md"
 _ENTRY = re.compile(r"^- `([a-z_]+\.[a-z_]+)`: `(src/[^`]+)`$", re.MULTILINE)
+_DECLARE = 'declare boundaries as @prompt_boundary("<literal>")'
+
+
+def _is_boundary_call(node: ast.AST) -> bool:
+    return isinstance(node, ast.Call) and getattr(node.func, "id", None) == "prompt_boundary"
+
+
+def _boundaries_in(path: Path, tree: ast.Module) -> dict[str, str]:
+    """Boundary name -> ``src/<path>::<function>(<args>) -> <return>`` for one module."""
+    rel = path.relative_to(REPO_ROOT)
+    decorators: set[int] = set()
+    found: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for decorator in node.decorator_list:
+            if not (isinstance(decorator, ast.Call) and _is_boundary_call(decorator)):
+                continue
+            decorators.add(id(decorator))
+            name = decorator.args[0] if decorator.args else None
+            assert isinstance(name, ast.Constant) and isinstance(name.value, str), (
+                f"{rel}:{node.lineno}: non-literal boundary name; {_DECLARE}"
+            )
+            assert name.value not in found, f"{rel}:{node.lineno}: {name.value!r} declared twice"
+            returns = ast.unparse(node.returns) if node.returns else "None"
+            found[name.value] = f"{rel}::{node.name}({ast.unparse(node.args)}) -> {returns}"
+    for node in ast.walk(tree):
+        where = f"{rel}:{getattr(node, 'lineno', '?')}"
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                assert not (alias.name == "prompt_boundary" and alias.asname), (
+                    f"{where}: prompt_boundary imported as {alias.asname!r}; {_DECLARE}"
+                )
+        elif isinstance(node, ast.Attribute) and node.attr == "prompt_boundary":
+            raise AssertionError(f"{where}: prompt_boundary used as an attribute; {_DECLARE}")
+        elif _is_boundary_call(node) and id(node) not in decorators:
+            raise AssertionError(f"{where}: prompt_boundary called outside a decorator; {_DECLARE}")
+    return found
 
 
 def _decorated_boundaries() -> dict[str, str]:
-    """Boundary name -> ``src/<path>::<function>(<args>) -> <return>``."""
     found: dict[str, str] = {}
     for path in sorted(SRC.rglob("*.py")):
         text = path.read_text(encoding="utf-8")
-        if "prompt_boundary(" not in text:  # cheap pre-filter; the AST decides
+        # Cheap pre-filter on the bare word; the AST checks decide.
+        if "prompt_boundary" not in text:
             continue
-        tree = ast.parse(text, filename=str(path))
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            for decorator in node.decorator_list:
-                if not (
-                    isinstance(decorator, ast.Call)
-                    and getattr(decorator.func, "id", None) == "prompt_boundary"
-                ):
-                    continue
-                name = decorator.args[0] if decorator.args else None
-                where = f"{path.relative_to(REPO_ROOT)}:{node.lineno}"
-                assert isinstance(name, ast.Constant) and isinstance(name.value, str), (
-                    f"{where}: prompt_boundary needs a literal name so it can be documented"
-                )
-                assert name.value not in found, f"{where}: boundary {name.value!r} declared twice"
-                returns = ast.unparse(node.returns) if node.returns else "None"
-                found[name.value] = (
-                    f"{path.relative_to(REPO_ROOT)}::{node.name}({ast.unparse(node.args)}) -> {returns}"
-                )
+        for name, owner in _boundaries_in(path, ast.parse(text, filename=str(path))).items():
+            assert name not in found, f"{owner}: boundary {name!r} also declared at {found[name]}"
+            found[name] = owner
     return found
 
 
 def test_the_reference_lists_every_prompt_boundary_with_its_owner_and_signature() -> None:
     """Defects caught (#1539): a boundary added, renamed, moved to another
-    function or re-typed in source without the reference list following,
-    and a documented boundary that no longer exists. The failure prints the
-    exact list entries to paste."""
+    function or re-typed in source without the reference list following; a
+    documented boundary that no longer exists; a duplicated list line; and a
+    boundary declared in a spelling the census cannot see. The failure prints
+    the exact list entries to paste."""
     source = _decorated_boundaries()
     assert source, "no prompt_boundary declarations found; the census is broken"
-    documented = dict(_ENTRY.findall(REFERENCE.read_text(encoding="utf-8")))
+    entries = _ENTRY.findall(REFERENCE.read_text(encoding="utf-8"))
+    documented = dict(entries)
+    assert len(entries) == len(documented), "the reference lists a prompt boundary twice"
     expected = "\n".join(f"- `{name}`: `{owner}`" for name, owner in sorted(source.items()))
     assert documented == source, (
         "docs/reference/task-composition.md prompt-boundary list differs from source; "
