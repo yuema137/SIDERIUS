@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+from workflows.definition import workflow_trains
+
 from .models import RECEIPT_IDENTITY_FIELDS, CandidateRunReceipt, CandidateRunRequest
 
 
@@ -53,7 +55,7 @@ def verify_candidate_records(
             raise ValueError("fixed candidate receipt cannot contain graph evidence")
         if receipt.status in {"stopped", "paused"}:
             raise ValueError("fixed candidate receipt cannot claim loop Stop or Pause")
-        if any(node.capability == "tuning" for node in saved.preview.document.definition.nodes):
+        if workflow_trains(saved.preview.document.definition):
             if (
                 receipt.status == "completed"
                 or receipt.training_output is not None

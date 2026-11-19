@@ -59,6 +59,7 @@ from .models import (
     WorkflowDocument,
     inspect_declaration,
     revalidate_document,
+    workflow_trains,
 )
 from .source import (
     SourceDiagnostic,
@@ -128,4 +129,5 @@ __all__ = [
     "parse_workflow_source",
     "render_workflow_source",
     "revalidate_document",
+    "workflow_trains",
 ]

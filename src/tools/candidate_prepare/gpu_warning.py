@@ -14,9 +14,10 @@ from __future__ import annotations
 
 from core.gpu_requirement import training_gpu_warning
 from tools.candidate_worker.models import CandidateRunRequest
+from workflows.definition import workflow_trains
 
 
 def prepared_gpu_warning(request: CandidateRunRequest) -> str | None:
     """The advisory for ``request``, or None when it does not train or has a GPU node."""
-    trains = any(node.capability == "tuning" for node in request.preview.document.definition.nodes)
+    trains = workflow_trains(request.preview.document.definition)
     return training_gpu_warning(trains=trains, devices=request.devices)

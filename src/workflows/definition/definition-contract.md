@@ -578,6 +578,10 @@ supplies sparse `training_settings` and exactly one managed
 `native-training.settings` external. Tuning consumes the same proposal and
 validation results through `validated-candidate-to-tuning`. Old declarations
 remain three-stage and retain their canonical bytes and semantic identities.
+`workflows.definition.workflow_trains(definition)` is the one predicate for
+"this workflow trains" (it declares a `tuning` node), used by this validation,
+the candidate worker's training admission, terminal reconciliation and receipt
+checks, and the preparation GPU advisory.
 
 Only `training_settings` accepts JSON-shaped dict/list literals. Keys must be
 literal unique strings; expansion, comprehensions, computed expressions,
