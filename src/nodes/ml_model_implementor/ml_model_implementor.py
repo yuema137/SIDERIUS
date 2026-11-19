@@ -67,7 +67,10 @@ from core.record_encoding import decode_record, record_json
 from core.run_seed_lock import run_seed_argument
 from core.training_seeds import SeedContext
 from nodes.llm_settings import IMPLEMENT, node_bridge_kwargs
-from nodes.ml_model_implementor.reference_code import reference_code_section
+from nodes.ml_model_implementor.reference_code import (
+    inherited_components_section,
+    reference_code_section,
+)
 from nodes.ml_model_implementor.repair_prompt import render_repair_system_prompt
 from nodes.ml_model_implementor.validator_feedback import validator_feedback_section
 from workflows.task_config import render_forward_contract
@@ -1413,6 +1416,12 @@ def _build_reasoning_prompt(inp: ImplementorInput) -> str:
         ]
 
     # --- Reference code from ancestor models (#1530: one renderer for every call) ---
+    # --- Inherited components, next to the ancestor source (#1540) ---
+    inherited_section = inherited_components_section(
+        inp.inherited_components, inp.reference_code, "reasoning"
+    )
+    if inherited_section:
+        lines += ["", inherited_section]
     reference_section = reference_code_section(inp.reference_code, "reasoning")
     if reference_section:
         lines += ["", reference_section, ""]
@@ -1443,6 +1452,12 @@ def _build_code_prompt(reasoning: str, inp: ImplementorInput) -> str:
         advice_block += f"\n{feedback_section}\n"
     # #1530: the code call is a separate request; it needs its own copy of the
     # ancestor source to carry over inherited components.
+    # #1540: the code call must know which ancestor parts the proposal keeps.
+    inherited_section = inherited_components_section(
+        inp.inherited_components, inp.reference_code, "code"
+    )
+    if inherited_section:
+        advice_block += f"\n{inherited_section}\n"
     reference_section = reference_code_section(inp.reference_code, "code")
     if reference_section:
         advice_block += f"\n{reference_section}\n"
@@ -1486,6 +1501,11 @@ def _build_repair_prompt(
         history_section = "\n".join(history_lines) + "\n\n"
     # #1530: each repair is a separate request; a missing inherited helper can
     # only be restored from the ancestor source. Rendered once, never per history entry.
+    # #1540: a repair must not drop a component the proposal keeps.
+    inherited_section = inherited_components_section(
+        inp.inherited_components, inp.reference_code, "repair"
+    )
+    inherited_block = f"{inherited_section}\n\n" if inherited_section else ""
     reference_section = reference_code_section(inp.reference_code, "repair")
     reference_block = f"{reference_section}\n\n" if reference_section else ""
     # #1572: a repair must not reintroduce the mismatch the validator rejected.
@@ -1503,6 +1523,7 @@ def _build_repair_prompt(
         f"## Class name: `{_class_name(inp.model_name)}`\n"
         f"## Baseline model_config: {json.dumps(model_cfg)}\n\n"
         f"{feedback_block}"
+        f"{inherited_block}"
         f"{reference_block}"
         "Fix the current error without reintroducing any error from the history. "
         "Output the corrected JSON code sections."
