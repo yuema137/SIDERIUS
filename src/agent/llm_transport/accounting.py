@@ -26,15 +26,15 @@ class AccountingCapture:
             self.raw.setdefault("usage", {}).update(body["usage"])
 
     async def __call__(self, response: httpx2.Response) -> None:
-        if not response.is_success:
-            return
         content_type = response.headers.get("content-type", "")
         if "application/json" in content_type:
+            # Error bodies are read too: usage a provider reports on a failed
+            # response is still consumption (the runtime attaches it to the error).
             await response.aread()
             # The model adapter owns malformed-response refusal.
             with suppress(ValueError):
                 self.absorb(response.json())
-        elif "text/event-stream" in content_type:
+        elif response.is_success and "text/event-stream" in content_type:
             # The bridge's API is one-shot. Keep SDK-internal streams readable
             # while retaining provider evidence rather than default zero usage.
             await response.aread()
