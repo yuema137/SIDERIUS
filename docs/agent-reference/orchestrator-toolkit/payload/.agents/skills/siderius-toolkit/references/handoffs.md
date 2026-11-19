@@ -12,7 +12,7 @@ candidates with no native upstream output or fields the protocol does not carry.
 | Module and function | Input → result | Caller responsibility |
 | --- | --- | --- |
 | `ml_result_interp_to_ml_model_propose.local_full_context` | InterpretationOutput + storage + optional context → ProposalInput | Populate the task/forward contract, routing and constraints that the projection does not supply |
-| `ml_model_propose_to_ml_model_impl.local_full_spec` | ProposalOutput + storage + optional task reference → ImplementorInput | Supply task I/O context and disjoint attempt paths; preserves candidate identity, output type and custom loss |
+| `ml_model_propose_to_ml_model_impl.local_full_spec` | ProposalOutput + storage + optional task reference → ImplementorInput | Supply task I/O context and disjoint attempt paths; preserves candidate identity, output type, custom loss and inherited components |
 | `ml_model_impl_to_ml_model_valid.local_all_fields` | ImplementorOutput + storage + provider/model → ValidatorInput | Preserves immediate upstream candidate and I/O contract; populate additional enabled context explicitly |
 | `ml_model_valid_to_ml_model_tune.local_validated_model` | ValidatorOutput + ProposalOutput + storage + explicit tuning context → HyperparamTuningInput | Check `passed` before calling; preserve candidate linkage and supply real task/resource/Health bindings |
 | `ml_model_tune_to_ml_result_interp.local_all_records` | HyperparamTuningOutput + storage → InterpretationInput | Uses native record/metric reconciliation; carry additional task interpretation context |

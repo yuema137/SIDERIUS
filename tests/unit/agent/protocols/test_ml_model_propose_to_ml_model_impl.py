@@ -119,7 +119,14 @@ class TestLocalFullSpec:
             contribution_evidence="Best recovery on low-frequency files.",
         )
         proposal = proposal_output.model_copy(update={"inherited_components": [claimed]})
-        assert local_full_spec(proposal, storage).inherited_components == [claimed]
+        mapped = local_full_spec(proposal, storage)
+        assert mapped.inherited_components == [claimed]
+        assert "inherited_components" in mapped.model_dump_json()
+        # An input without claims serializes exactly as before the field existed.
+        assert (
+            "inherited_components"
+            not in local_full_spec(proposal_output, storage).model_dump_json()
+        )
 
     def test_custom_loss_spec_none_forwards_as_none(self, proposal_output, storage):
         """The fixture proposal_output has no custom_loss_spec (defaults to

@@ -392,6 +392,7 @@ class ImplementorInput(BaseModel):
     )
     inherited_components: list[InheritedComponent] = Field(
         default_factory=list,
+        exclude_if=lambda value: not value,
         description="The proposal's inherited_components, mapped field-to-field by the "
         "propose->impl protocol (issue #1540): which component the new model carries over, "
         "from which source (experiment model_type, external agent or human directive) and "
