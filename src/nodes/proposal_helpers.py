@@ -176,9 +176,17 @@ def _guess_source(model_type: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def load_model_source(model_type: str) -> str | None:
+def load_model_source(model_type: str, *, baseline_isolation: bool) -> str | None:
     """
     Load the source code for a model.
+
+    Under ``baseline_isolation`` (arXiv U3, #260) a bundled built-in model
+    type yields ``None`` before any lookup (#1541): the WITHOUT arm must not
+    receive shipped baseline source, neither as an ancestor's reference code
+    nor as a candidate's source. The bundled set is the loader's own authority
+    (``ml_models.model_descriptions.BUNDLED_MODEL_TYPES``), the same one that
+    refuses bundled descriptions and bundled proposals. The keyword is required
+    so every caller states its isolation mode.
 
     Searches:
       1. Agent-generated plugins, resolved generated-library first (arXiv
@@ -191,9 +199,13 @@ def load_model_source(model_type: str) -> str | None:
          ``ml_models/models_sandbox.py`` by finding the class name
          associated with the model_type in MODEL_REGISTRY-style patterns.
 
-    Returns the source code as a string, or None if not found.
+    Returns the source code as a string, or None if not found or excluded.
     """
     from core.generated_library import generated_library_is_workspace_bound, generated_models_dir
+    from ml_models.model_descriptions import is_bundled_model_type
+
+    if baseline_isolation and is_bundled_model_type(model_type):
+        return None
 
     # Try agent-generated plugin first (more specific).
     model_dirs = [generated_models_dir()]
@@ -258,18 +270,21 @@ def load_model_source(model_type: str) -> str | None:
     return "\n\n".join(extracted) if extracted else None
 
 
-def enrich_candidates_with_source(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def enrich_candidates_with_source(
+    candidates: list[dict[str, Any]], *, baseline_isolation: bool
+) -> list[dict[str, Any]]:
     """
     Add source code to each candidate model summary.
 
     Loads the model's source code (from built-in or agent-generated) and
     adds it as a ``source_code`` field. Models without available source
-    get ``source_code: None``.
+    get ``source_code: None``; under ``baseline_isolation`` that includes
+    every bundled built-in (#1541).
     """
     for candidate in candidates:
         mt = candidate.get("model_type")
         if mt:
-            source = load_model_source(mt)
+            source = load_model_source(mt, baseline_isolation=baseline_isolation)
             candidate["source_code"] = source
             if source:
                 candidate["source_code_lines"] = len(source.split("\n"))

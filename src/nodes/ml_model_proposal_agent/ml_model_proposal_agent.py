@@ -1844,7 +1844,9 @@ class MLModelProposalAgent:
         # B.10 — pre-filter models
         candidates = select_candidate_models(evidence, pipeline.model_selection)
         # Enrich with source code + descriptions for the comparison stage
-        candidates = enrich_candidates_with_source(candidates)
+        candidates = enrich_candidates_with_source(
+            candidates, baseline_isolation=inp.baseline_isolation
+        )
         source_counts = sum(1 for c in candidates if c.get("source_code"))
 
         # Build lightweight summaries for models excluded by the pre-filter.

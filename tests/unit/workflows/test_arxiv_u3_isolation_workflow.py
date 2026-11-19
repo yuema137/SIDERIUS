@@ -313,3 +313,70 @@ class TestWorkflowReachabilityAndThreading:
         assert captured["tune_input"].baseline_isolation is False
         lock = json.loads((tmp_path / "plain" / RUN_INVARIANTS_BASENAME).read_text())
         assert "baseline_isolation" not in lock
+
+
+class TestIsolatedAncestorSourceIsWithheld:
+    """#1541 reproduction through the production loop: a proposal under
+    isolation that claims an experiment ancestor named like a bundled baseline
+    must not hand that baseline's source to the implementor."""
+
+    def _ancestor_proposal(self):
+        from agent.schemas.proposal import InheritedComponent
+
+        return _make_proposal_output(model_name="fresh_tcn").model_copy(
+            update={
+                "inherited_components": [
+                    InheritedComponent(
+                        component="dilated_causal_conv",
+                        source_type="experiment",
+                        source_id="wavenet",
+                        contribution_evidence="Claimed carry-over from the bundled baseline.",
+                    )
+                ]
+            }
+        )
+
+    def _implementor_reference_code(self, tmp_path, *, isolation):
+        workspace = str(tmp_path / f"ws_{isolation}")
+        os.makedirs(workspace)
+        composition = compose_run_task_bindings(str(QUICKSTART))
+        with (
+            bind_run_task_composition(composition, physical_data_root=workspace),
+            patch("workflows.model_exploration.ResultInterpretationAgent") as interp,
+            patch("workflows.model_exploration.MLModelProposalAgent") as proposer,
+            patch("workflows.model_exploration.MLModelImplementor") as implementor,
+            patch("workflows.model_exploration.MLCodeValidatorAgent") as validator,
+            patch("workflows.model_exploration.HyperparamTuningAgent") as tuner,
+        ):
+            interp.return_value.run.return_value = _make_interpretation_output()
+            proposer.return_value.run.return_value = self._ancestor_proposal()
+            implementor.return_value.run.return_value = _make_implementor_output(
+                model_type="fresh_tcn"
+            )
+            validator.return_value.run.return_value = _make_validator_output(passed=True)
+            tuner.return_value.run.return_value = _make_tuning_output(
+                model_type="fresh_tcn", fingerprint=composition.semantic_fingerprint
+            ).model_copy(update={"metric_spec": composition.metric.spec})
+            run_workflow(
+                launch=WorkflowLaunchConfig(
+                    source_paths=[],
+                    max_iterations=1,
+                    start_iteration=1,
+                    baseline_isolation=isolation,
+                    data_dir=workspace,
+                ),
+                workspace=workspace,
+                run_name="u3_ancestor",
+                llm_config=_llm_config_pseudo(),
+                task_composition=composition,
+            )
+            return implementor.return_value.run.call_args.args[0].reference_code
+
+    def test_isolated_run_withholds_bundled_ancestor_source(self, tmp_path):
+        """Fails before #1541: the ancestor loader fell back to models_sandbox
+        and put the bundled WaveNet source into the implementor's prompts."""
+        assert "wavenet" not in self._implementor_reference_code(tmp_path, isolation=True)
+
+    def test_non_isolated_run_still_receives_the_ancestor_source(self, tmp_path):
+        reference = self._implementor_reference_code(tmp_path, isolation=False)
+        assert "class CausalConv1d" in reference["wavenet"]

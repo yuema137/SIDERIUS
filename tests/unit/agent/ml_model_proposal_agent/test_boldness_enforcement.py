@@ -313,3 +313,32 @@ class TestBoldnessEnforcement:
 
 
 pytestmark = pytest.mark.usefixtures("synthetic_dataset_profile")
+
+
+@pytest.mark.parametrize("isolation", [False, True])
+def test_candidate_source_loading_receives_the_isolation_flag(tmp_path, isolation):
+    """#1541: the proposer loads candidate source through the isolation-aware
+    owner and must pass its own flag; a hard-coded or dropped flag would let a
+    bundled candidate's source reach the comparison prompt of an isolated run."""
+    from unittest.mock import patch
+
+    import nodes.proposal_helpers as helpers
+
+    seen = []
+    real = helpers.enrich_candidates_with_source
+
+    def recording(candidates, *, baseline_isolation):
+        seen.append(baseline_isolation)
+        return real(candidates, baseline_isolation=baseline_isolation)
+
+    agent, _ = _make_agent(
+        [
+            _make_comparison_output(),
+            _make_reasoning_output(current=5.5, predicted=6.5),
+            _make_proposing_output(),
+        ]
+    )
+    inp = _make_pipeline_input(tmp_path).model_copy(update={"baseline_isolation": isolation})
+    with patch.object(helpers, "enrich_candidates_with_source", recording):
+        agent.run(inp)
+    assert seen == [isolation]
