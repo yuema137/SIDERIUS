@@ -924,16 +924,70 @@ decision through this interface. Installed plugins are trusted Python code;
 this contract is not a sandbox.
 
 The implementor, code validator and proposer share the native training
-appendix boundary. Supported boundaries are `native_training.appendix`, `proposal.template`,
-`interpretation.model_system`, `interpretation.model_user`, `interpretation.score_value`,
-`tuner.execution_provenance`, `tuner.training_dynamics`, `implementor.reference_code`,
-`implementor.validator_feedback`, `implementor.repair_system`, `proposal.failure_attempt_history`, and the
-`data_analysis.` stages `skill_selection`, `analysis_plan`,
-`generated_program`, `report_synthesis`, `generated_skill_promotion`,
-and `structured_output_repair`. See the decorated functions for exact typed
-input signatures. An undeclared boundary raises when reached; it never silently
-uses another historical profile. These boundaries are not a universal replacement
-for every message produced by every node.
+appendix boundary. The supported boundaries are exactly the functions decorated
+with `agent.prompt_rendering.prompt_boundary` under `src/`. Each entry below gives
+the boundary name, its owner function and the typed signature whose arguments a
+renderer callback receives as keywords (defaults applied). Pair boundaries
+(`data_analysis.*`) return a `(system, user)` tuple; every other boundary returns
+one string. `tests/unit/agent/test_prompt_boundary_reference.py` requires this
+list to equal the decorated functions in source, so a new, renamed or re-typed
+boundary fails until this list is updated.
+
+- `constraints.disclosure`: `src/agent/prompt_templates/constraints.py::render_constraint_disclosure(context: ConstraintContext | None) -> str`
+- `data_analysis.analysis_plan`: `src/agent/prompt_templates/data_analysis.py::render_analysis_plan_prompt(analysis_input: DataAnalysisInput, discovery: DiscoverySnapshot, selected: tuple[DiscoveredAnalysisSkill, ...], interfaces: dict[str, ResolvedSkillInterface], generated_programs: tuple[tuple[GeneratedAnalysisProgram, GeneratedProgramIdentity], ...]=()) -> tuple[str, str]`
+- `data_analysis.generated_program`: `src/agent/prompt_templates/data_analysis.py::render_generated_program_prompt(analysis_input: DataAnalysisInput, *, question_ids: tuple[str, ...], output_schema: dict) -> tuple[str, str]`
+- `data_analysis.generated_skill_promotion`: `src/agent/prompt_templates/data_analysis.py::render_generated_skill_promotion_prompt(analysis_input: DataAnalysisInput, *, completed_programs: list[dict], output_schema: dict) -> tuple[str, str]`
+- `data_analysis.report_synthesis`: `src/agent/prompt_templates/data_analysis.py::render_report_synthesis_prompt(analysis_input: DataAnalysisInput, results: tuple[SkillResult, ...], *, output_schema: dict) -> tuple[str, str]`
+- `data_analysis.skill_selection`: `src/agent/prompt_templates/data_analysis.py::render_skill_selection_prompt(analysis_input: DataAnalysisInput, candidates: tuple[DiscoveredAnalysisSkill, ...], *, output_schema: dict) -> tuple[str, str]`
+- `data_analysis.structured_output_repair`: `src/agent/prompt_templates/data_analysis.py::render_structured_output_repair_prompt(*, stage: str, output_schema: dict, original_output: object, validation_errors: list[dict]) -> tuple[str, str]`
+- `evaluation.spec`: `src/agent/prompt_templates/evaluation.py::render_evaluation_spec(context: EvaluationPromptContext | None) -> str`
+- `implementor.reference_code`: `src/nodes/ml_model_implementor/reference_code.py::render_reference_code_section(reference_code: dict[str, str], stage: ReferenceStage) -> str`
+- `implementor.repair_system`: `src/nodes/ml_model_implementor/repair_prompt.py::render_repair_system_prompt(kind: RepairKind, code_contract: str) -> str`
+- `implementor.validator_feedback`: `src/nodes/ml_model_implementor/validator_feedback.py::render_validator_feedback_section(feedback: str, stage: LaterStage) -> str`
+- `interpretation.model_system`: `src/agent/prompt_templates/interpretation/rendering.py::_build_per_model_system_prompt(inp: 'InterpretationInput') -> str`
+- `interpretation.model_user`: `src/agent/prompt_templates/interpretation/rendering.py::_build_per_model_prompt(summary: ModelRunSummary, description: str | None, expert_advice_str: str='', human_advice: str | None=None, *, structured_health_feedback: bool=False, order: MetricOrder | None=None) -> str`
+- `interpretation.score_value`: `src/agent/prompt_templates/interpretation/rendering.py::format_interpretation_score(score: float | None) -> str`
+- `native_training.appendix`: `src/agent/prompt_templates/native_training.py::render_native_training_appendix() -> str`
+- `proposal.failure_attempt_history`: `src/agent/prompt_templates/attempt_history.py::render_earlier_attempts(earlier: list[tuple[int, str]], final_error: str, *, heading: str, unit: str) -> str`
+- `proposal.template`: `src/agent/prompt_templates/proposal/__init__.py::load_prompt(filename: str) -> str`
+- `proposal.time_budget_context`: `src/agent/prompt_templates/proposal/budget_context.py::render_proposer_time_budget_context(inp: ProposalInput) -> str`
+- `proposer.parameter_rules`: `src/nodes/ml_model_proposal_agent/parameter_rules.py::render_proposal_parameter_rules(composition_ref: TaskCompositionRef | None, workflow_rules: ParameterRules | None) -> str`
+- `tuner.execution_provenance`: `src/agent/prompt_templates/tuner/rendering.py::render_execution_provenance_block(provenance: Any) -> str`
+- `tuner.training_dynamics`: `src/agent/prompt_templates/tuner/rendering.py::render_training_dynamics_line(diagnosis: Any, objective_kind: str | None=None) -> str`
+- `validator.input_contract`: `src/nodes/ml_code_validator_agent/input_contract.py::render_input_contract(model_io_contract: ModelIOContract | None, segmentation_applicability: Literal['temporal', 'not_applicable'] | None=None) -> str`
+
+An undeclared boundary raises when reached; it never silently uses another
+historical profile. These boundaries are not a universal replacement for every
+message produced by every node.
+
+The `constraints.disclosure` boundary renders the
+`[CURRENT RUN EXECUTION CONSTRAINTS]` block that
+`agent.prompt_templates.constraints.append_constraint_disclosure` appends to
+proposer, implementor, validator, interpreter, literature-review and data-analysis
+user prompts, and to the tuner's planner and reflector user prompts
+(`agent/llm_bridge.py`, labels `tuner.planner` and `tuner.reflector`). It is
+entered on every such request, including when `context` is `None` (the block
+then reports every section as missing), so a profile that covers any of those
+calls, tuner calls included, must declare it or name it native.
+
+The `evaluation.spec` boundary renders the `[TASK EVALUATION]` section appended
+after the constraint disclosure. `append_evaluation_spec` enters it only while an
+evaluation prompt context is bound (the manifest declares `evaluation`), so a
+task without an `evaluation` section never reaches it.
+
+The `proposal.time_budget_context` boundary renders the proposer's
+`## Configured time budgets` block from `ProposalInput.trial_time_budget_minutes`
+and `formal_time_budget_minutes`. It is entered on every proposer request.
+
+The `proposer.parameter_rules` boundary renders the proposer's machine-enforced
+candidate parameter rules from the task's `parameter_rules` (via
+`TaskCompositionRef`) and the workflow's rules. It is entered on every proposer
+request; with no rules it returns the shared generated-model-config guidance.
+
+The `validator.input_contract` boundary renders the code validator's
+`## Declared Input Contract` section from the task's `model_io_contract` and
+`segmentation_applicability`. It is entered on every validator request and returns
+`""` when both are undeclared.
 
 The `implementor.reference_code` boundary renders the ancestor-source section of
 the implementor's reasoning, code and repair user prompts; its `stage` argument
@@ -951,8 +1005,8 @@ rejection block is rendered natively and is not part of this boundary. See the
 
 The `implementor.repair_system` boundary renders the system prompt of every
 implementor repair call (`kind` is `"model"` or `"loss"`; `code_contract` is the
-sibling code call's contract text). Unlike the boundaries above it is entered on
-every repair, so a historical profile must declare it whenever a run may repair;
+sibling code call's contract text). Unlike `implementor.reference_code` and
+`implementor.validator_feedback`, it is entered on every repair, so a historical profile must declare it whenever a run may repair;
 returning the pre-#1574 constant for each `kind` restores the old repair system
 prompts. See the
 [implementor contract](../../src/nodes/ml_model_implementor/ml_model_implementor.md#repair-system-prompt).
