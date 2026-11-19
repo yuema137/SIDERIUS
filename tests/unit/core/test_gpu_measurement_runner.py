@@ -476,7 +476,7 @@ class TestAWorkerThatLeavesNoReport:
         run = _run(
             tmp_path,
             "journal('phase_start', 'setup')\njournal('phase_end', 'setup')\n"
-            "journal('phase_start', 'training')\ntime.sleep(600)\n",
+            f"journal('phase_start', 'training')\ntime.sleep({CHILD_PROCESS_BOUND_SECONDS:g})\n",
             [1000],
             elapsed_clock=elapsed_since_training,
             spec={

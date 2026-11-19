@@ -429,7 +429,11 @@ def test_blocked_worker_read_is_stopped_by_parent_cpu_deadline(tmp_path):
             "from core.runtime_control import checkpoint_identity_worker_main as worker\n"
             "def blocked(*args, **kwargs):\n"
             f"    Path({str(entered)!r}).touch()\n"
-            + ("    time.sleep(600)\n" if block else "    os._exit(0)\n")
+            + (
+                f"    time.sleep({CHILD_PROCESS_BOUND_SECONDS:g})\n"
+                if block
+                else "    os._exit(0)\n"
+            )
             + "worker.stream_file_identity=blocked\n"
             f"worker.main([{str(request_path)!r}])\n"
         )
