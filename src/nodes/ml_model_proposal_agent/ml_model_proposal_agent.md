@@ -43,8 +43,12 @@ settings; provider-level model defaults still belong to LLMBridge.
 The constructor accepts flat `{stage}_{field}` keyword overrides for
 `comparison`, `reasoning`, and `proposing`, including
 `reasoning_reasoning_effort`. Missing keys inherit the legacy constructor
-settings; explicitly supplied `None` or `0` is preserved. Other keyword names
-are ignored without an error. WorkflowLLMConfig
+settings; explicitly supplied `None` or `0` is preserved. The options are
+validated by `nodes.proposer_routing.ProposerStageOptions` (extra keys
+forbidden): any other keyword name raises `UnknownProposerStageOption`, a
+`TypeError` naming the unknown keys and listing the accepted ones, before any
+bridge is constructed (#1536). An invalid value still raises `ValidationError`.
+WorkflowLLMConfig
 transports the complete nested configuration into these overrides. Different
 stages may use different reasoning efforts, output limits and provider retry
 limits.

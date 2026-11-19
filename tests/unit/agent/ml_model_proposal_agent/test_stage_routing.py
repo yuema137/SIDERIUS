@@ -166,6 +166,48 @@ def test_explicit_none_or_zero_changes_complete_bridge_identity(tmp_path, overri
     assert agent._bridge_for_stage("proposing") is agent.bridge
 
 
+@pytest.mark.parametrize("misspelled", ["proposng_provider", "comparison_model", "reasoning"])
+def test_unknown_stage_option_is_refused_by_name(tmp_path, misspelled):
+    """#1536: a misspelled stage key was dropped, so that stage silently stayed on
+    the legacy route. Fails if the constructor accepts it, if no bridge-free typed
+    refusal names the key, or if the refusal does not list the accepted keys."""
+    from nodes.proposer_routing import UnknownProposerStageOption
+
+    factory, bridges, _ = factory_with({"same": []})
+    with pytest.raises(UnknownProposerStageOption) as caught:
+        MLModelProposalAgent(
+            provider="openai",
+            model_id="same",
+            bridge_factory=factory,
+            capability_index_path=str(tmp_path / "index.json"),
+            **{misspelled: "openai"},
+        )
+    assert caught.value.unknown == (misspelled,)
+    assert misspelled in str(caught.value) and "proposing_provider" in str(caught.value)
+    assert isinstance(caught.value, TypeError)
+    assert bridges == []
+
+
+def test_workflow_profile_keys_are_all_accepted(tmp_path):
+    """Every key a strict propose profile flattens to must stay accepted, or the
+    refusal above would break workflow launches. Fails if a flattened key is
+    refused or the stage routes differ from the profile."""
+    factory, _bridges, _ = factory_with({"comparison": [], "reasoning": [], "proposing": []})
+    config = distinct_config()
+    agent = MLModelProposalAgent(
+        **config.get("propose"),
+        bridge_factory=factory,
+        capability_index_path=str(tmp_path / "index.json"),
+    )
+    assert {
+        stage: agent.routing.for_stage(stage).model_id for stage in agent.routing.model_fields
+    } == {
+        "comparison": "comparison",
+        "reasoning": "reasoning",
+        "proposing": "proposing",
+    }
+
+
 def test_failed_context_binding_does_not_cache_new_stage(tmp_path):
     factory, _bridges, _ = factory_with({"reasoning": [], "comparison": []})
     agent = MLModelProposalAgent(
