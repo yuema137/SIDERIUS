@@ -6,7 +6,11 @@ from types import SimpleNamespace
 import pytest
 
 from agent.schemas.hyperparam_tuning import ExperimentRecord
-from execute_tools.evaluation_aggregation import aggregate_evaluation, constrain_primary
+from execute_tools.evaluation_aggregation import (
+    aggregate_evaluation,
+    constrain_primary,
+    is_measured_infeasibility,
+)
 from execute_tools.evaluation_child import (
     EvaluationNotScoreableError,
     aggregate_child_outcome,
@@ -21,7 +25,10 @@ from execute_tools.evaluation_metric import (
 from execute_tools.evaluation_results import EvaluationTransportError
 from execute_tools.metric_order import MetricOrder
 from nodes.ml_hyperparameter_tune_agent.policy import _best_trial_winner, _select_best_records
-from nodes.ml_hyperparameter_tune_agent.records import _build_scoring_failure_record
+from nodes.ml_hyperparameter_tune_agent.records import (
+    _build_scoring_failure_record,
+    _resume_progress,
+)
 from workflows.evaluation_composition import compose_evaluation
 from workflows.evaluation_selection import selection_binding
 
@@ -143,6 +150,95 @@ def test_parent_rederives_constraint_verdicts_instead_of_trusting_the_child():
         validate_child_evaluation(payload, carrier)
 
 
+def _evidence(constraints, primary, secondaries, *, formula=False):
+    evaluation = composed(constraints, formula=formula)
+    if formula:
+        outcome, evidence = aggregate_evaluation(evaluation, PRIMARY, primary, secondaries)
+    else:
+        outcome, evidence = constrain_primary(evaluation, PRIMARY, primary, secondaries)
+    assert isinstance(outcome, NotScoreableResult) and evidence is not None
+    return outcome, evidence
+
+
+def _tampered(evidence):
+    """A refusal that claims a violation the shared comparison does not re-derive."""
+    satisfied_value = evidence.constraints[0].model_copy(update={"raw": 2.0})
+    return evidence.model_copy(update={"constraints": (satisfied_value,)})
+
+
+ERR_AT_MOST_5 = [{"component": "err", "op": "<=", "threshold": 5.0}]
+
+
+@pytest.mark.parametrize(
+    ("label", "build", "expected"),
+    [
+        ("measured violation", lambda: _evidence(ERR_AT_MOST_5, accuracy(0.9), [error(9.0)]), True),
+        (
+            "measured violation under formula selection",
+            lambda: _evidence(ERR_AT_MOST_5, accuracy(0.9), [error(9.0)], formula=True),
+            True,
+        ),
+        ("unmeasured constraint", lambda: _evidence(ERR_AT_MOST_5, accuracy(0.9), []), False),
+        (
+            "nonfinite constraint value",
+            lambda: _evidence(ERR_AT_MOST_5, accuracy(0.9), [error(math.nan)]),
+            False,
+        ),
+        (
+            "formula term refused beside a measured violation",
+            lambda: _evidence(ERR_AT_MOST_5, accuracy(1.5), [error(9.0)], formula=True),
+            False,
+        ),
+        (
+            "claimed violation the comparison does not re-derive",
+            lambda: (None, _tampered(_evidence(ERR_AT_MOST_5, accuracy(0.9), [error(9.0)])[1])),
+            False,
+        ),
+    ],
+)
+def test_only_a_complete_evaluation_rejected_by_constraints_is_infeasible(label, build, expected):
+    """#1527: only this class ends a tuner round; every other refusal stays retried.
+
+    A predicate keyed on the ``constraint:`` prefix alone would wrongly end the
+    round for an unmeasured or nonfinite value (missing evidence) and for a
+    mixed term refusal; one that trusted the child's ``satisfied`` flag would
+    accept the tampered payload.
+    """
+    _, evidence = build()
+    assert is_measured_infeasibility(evidence) is expected, label
+
+
+def _refusal_record(outcome, evidence, *, round_index=1):
+    return _build_scoring_failure_record(
+        EvaluationNotScoreableError(outcome, evidence),
+        exp_id=f"m_r_{round_index:03d}",
+        model_type="m",
+        file_index=0,
+        record_params={},
+        timing={"train_time_s": 1.0, "inference_time_s": 1.0, "scoring_time_s": 1.0},
+        expert_advice_str="",
+        hypothesis="",
+        round_index=round_index,
+        attempt_in_round=1,
+    )
+
+
+def test_infeasible_record_completes_its_round_on_resume_and_unmeasured_does_not():
+    """The record carries the class, and resume rebuilds ``completed_rounds`` from it.
+
+    Without the record's ``failure_type="infeasible"`` a resumed run would
+    re-run a round the live loop had already completed; an unmeasured
+    constraint keeps ``not_scoreable`` and its retry semantics.
+    """
+    infeasible = _refusal_record(*_evidence(ERR_AT_MOST_5, accuracy(0.9), [error(9.0)]))
+    unmeasured = _refusal_record(*_evidence(ERR_AT_MOST_5, accuracy(0.9), []), round_index=2)
+    assert (infeasible["status"], infeasible["failure_type"]) == ("error_scoring", "infeasible")
+    assert (unmeasured["status"], unmeasured["failure_type"]) == ("error_scoring", "not_scoreable")
+    assert "infeasible" not in unmeasured["memory"]["memory_update"].lower()
+    ExperimentRecord.model_validate(unmeasured)
+    assert _resume_progress([infeasible, unmeasured], model_type="m", run_name="r") == (1, 2)
+
+
 def _success(exp_id, score, *, is_trial):
     record = {
         "exp_id": exp_id,
@@ -176,6 +272,7 @@ def test_infeasible_candidate_is_excluded_from_tuner_selection(is_trial):
     if is_trial:
         infeasible["is_trial"] = True
     ExperimentRecord.model_validate(infeasible)  # the persisted shape is a valid record
+    assert infeasible["failure_type"] == "infeasible"
     assert "violated: 9.0" in infeasible["memory"]["conclusion"]
     assert "Infeasible" in infeasible["memory"]["memory_update"]
     feasible = _success("feasible", 0.7, is_trial=is_trial)

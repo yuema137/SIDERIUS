@@ -330,7 +330,9 @@ def local_validated_model(
         cross-architecture comparable measurement. The outer loop aborts
         with ``termination_reason='aborted_fail_rounds'`` after
         ``max_fail_rounds`` consecutive rounds exhaust their inner
-        budget. See docs/resource_estimator_implement.md §11.
+        budget, and with ``'aborted_infeasible_rounds'`` after that many
+        consecutive measured-infeasible rounds (#1527). See
+        docs/resource_estimator_implement.md §11.
     """
     # Prepend planner-visible warnings to expert_advice so the tuner's planner
     # knows up front about (a) implementation deviating from the spec and

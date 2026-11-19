@@ -920,7 +920,10 @@ class ExperimentRecord(RecordModel):
         description=(
             "Step 06 — the structured not-scoreable result when the produced "
             "deliverable failed the metric's scoreability contract BEFORE any scorer "
-            "arithmetic ran (``status='error_scoring'``, ``failure_type='not_scoreable'``): "
+            "arithmetic ran (``status='error_scoring'``, ``failure_type='not_scoreable'``), "
+            "or when declared feasibility constraints refused the evaluation "
+            "(``failure_type='infeasible'`` for a measured violation, #1527; "
+            "``'not_scoreable'`` for an unmeasured constraint): "
             "which contract, which requirement, which input identity. None otherwise. "
             "Never set together with ``metric_result``."
         ),
@@ -1918,7 +1921,9 @@ class HyperparamTuningInput(BaseModel):
             "a row exhaust their attempt budget without a success, the tuner "
             "exits with termination_reason='aborted_fail_rounds' and (if the "
             "burst was gate-dominated) populates gate_exhaustion via Trigger "
-            "B for the next-iteration proposer."
+            "B for the next-iteration proposer. The same threshold is the "
+            "infeasible brake (#1527): this many measured-infeasible rounds in "
+            "a row exit with termination_reason='aborted_infeasible_rounds'."
         ),
     )
 
@@ -4106,6 +4111,7 @@ class HyperparamTuningOutput(RecordModel):
     termination_reason: Literal[
         "completed",
         "aborted_fail_rounds",
+        "aborted_infeasible_rounds",
         "aborted_by_gate",
         "scope_violation",
         "infrastructure_abort",
@@ -4114,7 +4120,10 @@ class HyperparamTuningOutput(RecordModel):
         description=(
             "Why the loop exited. 'completed' = reached max_rounds successful "
             "rounds; 'aborted_fail_rounds' = max_fail_rounds consecutive "
-            "rounds exhausted their attempt budgets; 'aborted_by_gate' = "
+            "rounds exhausted their attempt budgets; "
+            "'aborted_infeasible_rounds' = max_fail_rounds consecutive rounds "
+            "ended measured-infeasible (a declared feasibility constraint was "
+            "violated, #1527; status='partial'); 'aborted_by_gate' = "
             "HISTORICAL (records predating the F-SCANC-1 retirement of the "
             "SKIP_ITER gate action; the Literal member stays so those "
             "records deserialize, and no current code path produces it — "
