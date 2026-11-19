@@ -87,8 +87,13 @@ advisory is reported instead:
   `ReusableCaptureReview.nodes`/`devices` (`#capture-compute-warning`, issue
   #1136, `compute-requirement.js`; see the
   [console contract](../candidate_console/console-contract.md)), and Launch stays
-  enabled. Python callers of `prepare_candidate` / `prepare_reusable_candidate`
-  call `prepared_gpu_warning` themselves; the library functions print nothing.
+  enabled. `python -m tools.candidate_operations submit` prints the same
+  `Warning: <text>` on stderr after it admits a `candidate` submission (#1587; see
+  the [operations contract](../candidate_operations/candidate-operations-contract.md)),
+  so a request prepared through the detached `prepare_reusable` operation or the
+  Python functions is warned before its run starts. Python callers of
+  `prepare_candidate` / `prepare_reusable_candidate` / `submit_operation` call
+  `prepared_gpu_warning` themselves; the library functions print nothing.
 - Not recorded: receipts, bindings and the candidate request carry no advisory
   field, so their schemas, bytes and integrity digests are unchanged.
 - Routes: the single-candidate route (`--request`) prepares the fixed
