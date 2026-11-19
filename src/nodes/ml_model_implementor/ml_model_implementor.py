@@ -68,6 +68,7 @@ from core.run_seed_lock import run_seed_argument
 from core.training_seeds import SeedContext
 from nodes.llm_settings import IMPLEMENT, node_bridge_kwargs
 from nodes.ml_model_implementor.reference_code import reference_code_section
+from nodes.ml_model_implementor.repair_prompt import render_repair_system_prompt
 from nodes.ml_model_implementor.validator_feedback import validator_feedback_section
 from workflows.task_config import render_forward_contract
 
@@ -75,8 +76,8 @@ __all__ = [
     "MLModelImplementor",
     "main",
 ]
-# The reference-section (#1530) and validator-feedback (#1572) renderers are new
-# private modules, not moved APIs.
+# The reference-section (#1530), validator-feedback (#1572) and repair-system (#1574)
+# renderers are new private modules, not moved APIs.
 _COMPATIBILITY_REEXPORTS: tuple[str, ...] = ()
 
 # ---------------------------------------------------------------------------
@@ -800,10 +801,16 @@ Think step by step. Be concrete about tensor shapes at each stage.
 Do not write final Python code yet — that is the next step."""
 
 
-IMPLEMENTOR_CODE_PROMPT = """\
+_IMPLEMENTOR_CODE_INTRO = """\
 You are a senior PyTorch engineer. You have just reasoned through a PyTorch implementation.
 Now commit to the actual code sections.
 
+"""
+
+# #1574: the output contract and hard constraints are ONE text shared by the
+# code call and every repair call (both are stateless requests). Placeholder:
+# {OUTPUT_SHAPE}, substituted by ``_code_contract``.
+IMPLEMENTOR_CODE_CONTRACT = """\
 Output a JSON object with exactly these fields:
 
 {
@@ -849,16 +856,7 @@ Hard constraints — violating any of these makes the code invalid:
 
 Output only the JSON object — no preamble, no markdown fences, no commentary."""
 
-
-IMPLEMENTOR_REPAIR_PROMPT = """\
-Your previous code attempt failed validation. Fix the issue and return a corrected
-JSON object with the same 5 fields: extra_imports, config_fields_code, config_fields,
-init_body, forward_body.
-
-All the hard constraints from the previous prompt still apply.
-Focus specifically on the error described below — do not rewrite unrelated code.
-
-Output only the JSON object — no preamble, no markdown fences, no commentary."""
+IMPLEMENTOR_CODE_PROMPT = _IMPLEMENTOR_CODE_INTRO + IMPLEMENTOR_CODE_CONTRACT
 
 
 # ---------------------------------------------------------------------------
@@ -1010,10 +1008,14 @@ Think step by step. Be concrete about tensor shapes at each stage.
 Do not write final Python code yet — that is the next step."""
 
 
-IMPLEMENTOR_LOSS_CODE_PROMPT = """\
+_IMPLEMENTOR_LOSS_CODE_INTRO = """\
 You are a senior PyTorch engineer. You have just reasoned through a loss implementation.
 Now commit to the actual code sections.
 
+"""
+
+# #1574: shared by the loss code call and every loss repair call.
+IMPLEMENTOR_LOSS_CODE_CONTRACT = """\
 Output a JSON object with exactly these fields:
 
 {
@@ -1042,20 +1044,7 @@ Hard constraints — violating any of these makes the code invalid:
 
 Output only the JSON object — no preamble, no markdown fences, no commentary."""
 
-
-IMPLEMENTOR_LOSS_REPAIR_PROMPT = """\
-Your previous loss-plugin code failed validation. Fix the issue and return a
-corrected JSON object with the same 6 fields: extra_imports, config_fields_code,
-config_validators_code, config_fields, init_body, forward_body.
-
-All hard constraints from the previous prompt still apply. In particular:
-  - The forward signature stays ``forward(self, inputs, targets) -> torch.Tensor``.
-  - The return MUST be a scalar tensor with ``requires_grad=True``.
-  - No torch.no_grad(), no .detach() on inputs.
-
-Focus specifically on the error below — do not rewrite unrelated code.
-
-Output only the JSON object — no preamble, no markdown fences, no commentary."""
+IMPLEMENTOR_LOSS_CODE_PROMPT = _IMPLEMENTOR_LOSS_CODE_INTRO + IMPLEMENTOR_LOSS_CODE_CONTRACT
 
 
 def _loss_class_name(loss_name: str) -> str:
@@ -1343,19 +1332,45 @@ def _build_reasoning_system_prompt(inp: ImplementorInput) -> str:
     ) + render_native_training_appendix()
 
 
-def _build_code_system_prompt(inp: ImplementorInput) -> str:
-    """Substitute the ``{OUTPUT_SHAPE}`` placeholder in
-    ``IMPLEMENTOR_CODE_PROMPT`` from ``inp.forward_contract.output_shape``.
+def _code_contract(inp: ImplementorInput) -> str:
+    """The output contract and hard constraints shared by the code and repair calls.
 
-    Falls back to a generic ``[B, C, T] float32`` only when the contract is
-    empty (test fixtures); production callers always provide a concrete
-    output shape via ``load_task_config()``.
+    Substitutes ``{OUTPUT_SHAPE}`` from ``inp.forward_contract.output_shape``
+    and appends the native-training appendix. Falls back to a generic
+    ``[B, C, T] float32`` only when the contract is empty (test fixtures);
+    production callers always provide a concrete output shape via
+    ``load_task_config()``.
     """
     output_shape = inp.forward_contract.output_shape or "[B, C, T] float32"
     return (
-        IMPLEMENTOR_CODE_PROMPT.replace("{OUTPUT_SHAPE}", output_shape)
+        IMPLEMENTOR_CODE_CONTRACT.replace("{OUTPUT_SHAPE}", output_shape)
         + render_native_training_appendix()
     )
+
+
+def _build_code_system_prompt(inp: ImplementorInput) -> str:
+    """The code call's system prompt: its introduction plus ``_code_contract``."""
+    return _IMPLEMENTOR_CODE_INTRO + _code_contract(inp)
+
+
+def _build_repair_system_prompt(inp: ImplementorInput) -> str:
+    """Every model repair call's system prompt (#1574).
+
+    The repair request is stateless, so it carries the same contract, output
+    shape, import allow-list, helper-class ban and native-training appendix
+    as the code call; the appendix states the execution facts that govern the
+    code sections a repair rewrites, exactly as they govern the first commit.
+    """
+    return render_repair_system_prompt("model", _code_contract(inp))
+
+
+def _build_loss_repair_system_prompt() -> str:
+    """Every loss repair call's system prompt (#1574): the loss code contract.
+
+    The loss code call receives no native-training appendix, so neither does
+    its repair.
+    """
+    return render_repair_system_prompt("loss", IMPLEMENTOR_LOSS_CODE_CONTRACT)
 
 
 def _probe_contract_prompt(inp: ImplementorInput) -> str:
@@ -1888,7 +1903,7 @@ class MLModelImplementor:
              ``_assemble_loss_plugin``.
           3. **Dummy-tensor validate → repair loop** — up to
              ``inp.max_retries`` repair attempts, each feeding the validator
-             error back into ``IMPLEMENTOR_LOSS_REPAIR_PROMPT``.
+             error back into the loss repair request (``_build_loss_repair_system_prompt``).
           4. **Write** the assembled source to
              ``{inp.loss_dir}/{spec.loss_name}.py``.
           5. Return ``LossProvenance(action="generated", …)``. The caller
@@ -2005,7 +2020,7 @@ class MLModelImplementor:
             repair_prompt = _build_loss_repair_prompt(code, error, spec, error_history)
             error_history.append((attempt, error))
             code = self.bridge.generate(
-                IMPLEMENTOR_LOSS_REPAIR_PROMPT,
+                _build_loss_repair_system_prompt(),
                 append_constraint_disclosure(repair_prompt, inp.constraint_context),
                 label="implementor.loss.repair",
             )
@@ -2259,7 +2274,7 @@ class MLModelImplementor:
             repair_prompt = _build_repair_prompt(code, error, inp, error_history)
             error_history.append((attempt, error))
             code = self.bridge.generate(
-                IMPLEMENTOR_REPAIR_PROMPT,
+                _build_repair_system_prompt(inp),
                 append_constraint_disclosure(repair_prompt, inp.constraint_context),
                 label="implementor.repair",
             )

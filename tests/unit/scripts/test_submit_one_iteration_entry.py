@@ -8,6 +8,8 @@ import venv
 from dataclasses import dataclass
 from pathlib import Path
 
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
+
 REPO = Path(__file__).resolve().parents[3]
 WRAPPER = REPO / "scripts/slurm/submit_one_iteration.slurm"
 
@@ -95,7 +97,7 @@ def _run(
         text=True,
         capture_output=True,
         check=False,
-        timeout=30,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
     return WrapperResult(result, capture, probe_tmp)
 

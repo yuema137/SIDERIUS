@@ -336,6 +336,8 @@ class RunExitSnapshot:
     last_plan: Any
     """The most recent validated plan, or ``None`` if none ever validated."""
     environment_admission_refusal: AdmissionDecision | None = None
+    consecutive_infeasible_rounds: int = 0
+    """#1527: trailing measured-infeasible rounds; the infeasible brake reads it."""
 
 
 class AttemptSignal(Enum):
@@ -359,6 +361,56 @@ class AttemptSignal(Enum):
 
     END_ROUND = "end_round"
     """Was ``break``: no further attempt in this round can succeed."""
+
+    COMPLETE_ROUND = "complete_round"
+    """The attempt reached a judged outcome that has no selectable score.
+
+    #1527: a measured constraint violation (``failure_type="infeasible"``)
+    is a scientific result, not a crash. Retrying would train again on a
+    configuration the constraints already rejected, so the round ends as a
+    completed round (like a Health-invalid ``failed_mode_collapse`` round)
+    and does not count toward the consecutive-failure brake.
+    """
+
+
+INFEASIBLE_FAILURE_TYPE = "infeasible"
+"""``failure_type`` of an ``error_scoring`` record whose only refusals are
+measured constraint violations (``evaluation_aggregation.is_measured_infeasibility``)."""
+
+_COMPLETED_ROUND_STATUSES = frozenset({"success", "failed_mode_collapse"})
+
+
+def is_infeasible_outcome(record: dict[str, Any]) -> bool:
+    """Whether a persisted record is a measured-infeasible round outcome (#1527)."""
+    return (
+        record.get("status") == "error_scoring"
+        and record.get("failure_type") == INFEASIBLE_FAILURE_TYPE
+    )
+
+
+def completes_round(record: dict[str, Any]) -> bool:
+    """Whether a persisted record ended its round as a completed round.
+
+    A scored success, a Health-invalid ``failed_mode_collapse`` and a measured
+    infeasible outcome each complete the round; every other record is an
+    attempt the round may retry. Resume rebuilds ``completed_rounds`` with this
+    rule; the live loop reaches the same verdict through :class:`AttemptSignal`.
+    """
+    return record.get("status") in _COMPLETED_ROUND_STATUSES or is_infeasible_outcome(record)
+
+
+def next_infeasible_streak(streak: int, *, round_infeasible: bool) -> int:
+    """The consecutive measured-infeasible round count after one round ends.
+
+    #1527 infeasible brake: ``max_fail_rounds`` such rounds in a row stop the
+    tuner with ``termination_reason='aborted_infeasible_rounds'``. Any other
+    round outcome (a scored success, a Health-invalid round, a round that
+    exhausted its attempts) resets the streak, mirroring how any completed
+    round resets ``consecutive_fails``. The two counters are independent: each
+    counts its own kind of round in a row, and each kind resets the other.
+    The live loop and resume both advance the streak through this function.
+    """
+    return streak + 1 if round_infeasible else 0
 
 
 @dataclass
@@ -428,6 +480,10 @@ class _PhaseOutcome:
     def end_round(cls, **kw: Any):
         return cls(signal=AttemptSignal.END_ROUND, **kw)
 
+    @classmethod
+    def complete_round(cls, **kw: Any):
+        return cls(signal=AttemptSignal.COMPLETE_ROUND, **kw)
+
 
 @dataclass(frozen=True)
 class AdmissionOutcome(_PhaseOutcome):
@@ -490,3 +546,23 @@ class EvaluationPhaseEvidence:
     secondary_refusals: list[NotScoreableResult]
     secondary_errors: dict[str, str]
     external_evaluation: CandidateEvaluationResult | None = None
+
+
+def complete_round_counters(completed_rounds: int) -> tuple[bool, int, int]:
+    """``(round_succeeded, completed_rounds, consecutive_fails)`` after a completed round.
+
+    The one owner of the counter update shared by a scored round and a
+    measured-infeasible round (#1527): the round landed, it counts toward
+    ``max_rounds``, and the consecutive-failure brake resets.
+    """
+    return True, completed_rounds + 1, 0
+
+
+def round_brake_reached(consecutive_fails: int, consecutive_infeasible: int, limit: int) -> bool:
+    """Whether a round brake stops the loop.
+
+    ``limit`` (``max_fail_rounds``) failed rounds in a row end the run with
+    ``aborted_fail_rounds``; as many measured-infeasible rounds in a row end it
+    with ``aborted_infeasible_rounds`` (#1527). The two counters are independent.
+    """
+    return consecutive_fails >= limit or consecutive_infeasible >= limit

@@ -942,6 +942,7 @@ boundary fails until this list is updated.
 - `data_analysis.structured_output_repair`: `src/agent/prompt_templates/data_analysis.py::render_structured_output_repair_prompt(*, stage: str, output_schema: dict, original_output: object, validation_errors: list[dict]) -> tuple[str, str]`
 - `evaluation.spec`: `src/agent/prompt_templates/evaluation.py::render_evaluation_spec(context: EvaluationPromptContext | None) -> str`
 - `implementor.reference_code`: `src/nodes/ml_model_implementor/reference_code.py::render_reference_code_section(reference_code: dict[str, str], stage: ReferenceStage) -> str`
+- `implementor.repair_system`: `src/nodes/ml_model_implementor/repair_prompt.py::render_repair_system_prompt(kind: RepairKind, code_contract: str) -> str`
 - `implementor.validator_feedback`: `src/nodes/ml_model_implementor/validator_feedback.py::render_validator_feedback_section(feedback: str, stage: LaterStage) -> str`
 - `interpretation.model_system`: `src/agent/prompt_templates/interpretation/rendering.py::_build_per_model_system_prompt(inp: 'InterpretationInput') -> str`
 - `interpretation.model_user`: `src/agent/prompt_templates/interpretation/rendering.py::_build_per_model_prompt(summary: ModelRunSummary, description: str | None, expert_advice_str: str='', human_advice: str | None=None, *, structured_health_feedback: bool=False, order: MetricOrder | None=None) -> str`
@@ -1001,6 +1002,14 @@ section of the implementor's code and repair user prompts; its `stage` argument
 profile that returns `""` restores the pre-#1572 prompts. The reasoning prompt's
 rejection block is rendered natively and is not part of this boundary. See the
 [implementor contract](../../src/nodes/ml_model_implementor/ml_model_implementor.md#validator-rejection-feedback).
+
+The `implementor.repair_system` boundary renders the system prompt of every
+implementor repair call (`kind` is `"model"` or `"loss"`; `code_contract` is the
+sibling code call's contract text). Unlike `implementor.reference_code` and
+`implementor.validator_feedback`, it is entered on every repair, so a historical profile must declare it whenever a run may repair;
+returning the pre-#1574 constant for each `kind` restores the old repair system
+prompts. See the
+[implementor contract](../../src/nodes/ml_model_implementor/ml_model_implementor.md#repair-system-prompt).
 
 The `proposal.failure_attempt_history` boundary renders the earlier-attempt
 block appended after the latest error in two kinds of text. Final failure

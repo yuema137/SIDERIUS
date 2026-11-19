@@ -18,6 +18,7 @@ from agent.schemas.data_analysis.common import (
 from agent.schemas.data_analysis.skills import QuantitativeResult
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from core.record_encoding import ENCODING_VERSION, decode_record
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 
 
 class _Payload(FrozenModel):
@@ -194,7 +195,7 @@ def test_skill_worker_parameter_transport_and_digest_preserve_nonfinite(tmp_path
     skill = discover_skills((_make_pack(tmp_path / "pack", source),)).skills[0]
     assert isinstance(skill, DiscoveredSkill)
     interface = resolve_skill_interface(
-        skill, control_directory=tmp_path / "interface", timeout_s=10.0
+        skill, control_directory=tmp_path / "interface", timeout_s=CHILD_PROCESS_BOUND_SECONDS
     )
     digests = []
     for index, value in enumerate((float("inf"), float("-inf"), float("nan"), None, 0.5)):
@@ -203,7 +204,7 @@ def test_skill_worker_parameter_transport_and_digest_preserve_nonfinite(tmp_path
             interface,
             {"max_items": value},
             control_directory=tmp_path / f"validate-{index}",
-            timeout_s=10.0,
+            timeout_s=CHILD_PROCESS_BOUND_SECONDS,
         )
         restored = validated.parameters["max_items"]
         if isinstance(value, float) and math.isnan(value):

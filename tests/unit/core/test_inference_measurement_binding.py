@@ -16,6 +16,7 @@ from core.runtime_control.inference_measurement_binding import (
     measurement_sources,
     verify_measurement_sources,
 )
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tests.unit.core.test_gpu_measurement_runner import DEVICE, _run, _spec
 
 
@@ -127,7 +128,7 @@ assert 'torch' not in sys.modules
         check=True,
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
 
 

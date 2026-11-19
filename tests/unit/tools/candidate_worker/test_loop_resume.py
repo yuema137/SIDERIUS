@@ -13,6 +13,7 @@ import pytest
 
 from core.native_writer.state import state_directory
 from core.runtime_control.process_group import GroupCleanup, GroupObservation
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tools.candidate_operations import (
     CandidateLoopResumeOperation,
     CandidateLoopResumeRequest,
@@ -1009,7 +1010,7 @@ def test_budgeted_resume_reaches_its_segment_placed_or_queued(
     if holder is not None:
         import time
 
-        deadline = time.monotonic() + 30
+        deadline = time.monotonic() + CHILD_PROCESS_BOUND_SECONDS
         while read_operation(config, next_id).process.reason == "missing_identity":
             assert time.monotonic() < deadline, "waiting child never published itself"
             time.sleep(0.05)

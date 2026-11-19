@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from agent.schemas.proposal import ProposalInput
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tools.candidate_prepare import (
     ReusableCandidatePreparationRequest,
     preflight_reusable_candidate,
@@ -149,7 +150,7 @@ def reusable_graph_request(request):
             run_id=uuid4(),
             run_name=request.run_name,
             llm_config_file=str(project / "llm.json"),
-            preparation_timeout_seconds=30.0,
+            preparation_timeout_seconds=CHILD_PROCESS_BOUND_SECONDS,
             candidate_timeout_seconds=request.timeout_seconds,
             task_read_only=(),
             candidate_network=request.network,
@@ -274,7 +275,9 @@ def test_saved_reusable_interpretation_profile_reaches_same_native_five_node_pat
     reusable, source_path, authored = reusable_graph_request(concrete)
 
     def direct_child(profile, argv):
-        completed = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+        completed = subprocess.run(
+            argv, capture_output=True, text=True, timeout=CHILD_PROCESS_BOUND_SECONDS
+        )
         if completed.returncode:
             raise AssertionError(
                 completed.stderr

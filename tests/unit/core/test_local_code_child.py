@@ -11,6 +11,7 @@ from core.local_code import LocalCodeError, bind_code_package
 from core.local_code.child import prepare_child
 from core.local_code.failure import REFUSAL_EXIT
 from core.subprocess_env import subprocess_env
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tests.unit.core.test_local_code_failure import package_and_env
 
 
@@ -21,7 +22,7 @@ def execute(invocation, tmp_path):
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
 
 
@@ -77,7 +78,7 @@ def test_nested_pool_bootstrap_reports_original_failure_to_framework_parent(tmp_
         " with ProcessPoolExecutor(max_workers=1, mp_context=get_context('spawn'),\n"
         "     initializer=bootstrap_code_package, initargs=(os.environ['SIDERIUS_TASK_CODE_MANIFEST'],\n"
         "     os.environ['SIDERIUS_TASK_CODE_SHA256'])) as pool:\n"
-        "  pool.submit(int, '3').result(timeout=30)\n"
+        f"  pool.submit(int, '3').result(timeout={CHILD_PROCESS_BOUND_SECONDS})\n"
     )
     with bind_code_package(package):
         invocation = prepare_child([sys.executable, str(target)], subprocess_env())

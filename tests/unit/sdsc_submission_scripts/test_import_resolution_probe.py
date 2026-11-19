@@ -13,6 +13,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PROBE = REPO_ROOT / "scripts" / "launch" / "_import_resolution_probe.py"
 
@@ -32,7 +34,7 @@ def _run(tmp_path: Path, intended: Path, pin: Path | None) -> subprocess.Complet
         env=env,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
 
 

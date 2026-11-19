@@ -10,6 +10,7 @@ import pytest
 
 from core.native_writer.models import WriterRefusal
 from core.native_writer.ownership import TRANSPORT_ENV, acquire, inherit, inspect_writer
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 
 DIGEST = "a" * 64
 
@@ -19,7 +20,7 @@ def python(command, *args, **kwargs):
         [sys.executable, "-c", command, *map(str, args)],
         text=True,
         capture_output=True,
-        timeout=10,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
         **kwargs,
     )
 

@@ -18,6 +18,7 @@ import pytest
 
 from core.runtime_control.pair_admission import ResolvedGpuCeiling
 from core.runtime_control.scheduling import GpuHardwareClass, GpuSlot, HostBudget
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tests.unit.tools.candidate_worker.conftest import prepared
 from tools.candidate_operations import CandidateOperation, OperationStoreConfig, submit_operation
 from tools.candidate_operations.child import sandbox_observer
@@ -559,7 +560,7 @@ def test_cancel_removes_a_queued_operation_without_running_it(
     worker = threading.Thread(target=lambda: codes.append(execute(path)), daemon=True)
     worker.start()
     try:
-        deadline = time.monotonic() + 10
+        deadline = time.monotonic() + CHILD_PROCESS_BOUND_SECONDS
         while not (path / "process.json").exists():
             assert time.monotonic() < deadline, "operation child never published itself"
             time.sleep(0.02)
@@ -571,7 +572,7 @@ def test_cancel_removes_a_queued_operation_without_running_it(
         )
         request_cancel(store_b, waiting.request_id)
     finally:
-        worker.join(timeout=10)
+        worker.join(timeout=CHILD_PROCESS_BOUND_SECONDS)
     assert codes == [1]
     snapshot = read_operation(store_b, waiting.request_id)
     assert (snapshot.state, snapshot.reason, snapshot.cancel_requested) == (

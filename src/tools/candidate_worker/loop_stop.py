@@ -159,7 +159,13 @@ class TriedBody(StopModel):
     metric_id: str
     direction: MetricDirection
     stop_reason: (
-        Literal["aborted_fail_rounds", "aborted_by_gate", "scope_violation", "infrastructure_abort"]
+        Literal[
+            "aborted_fail_rounds",
+            "aborted_infeasible_rounds",
+            "aborted_by_gate",
+            "scope_violation",
+            "infrastructure_abort",
+        ]
         | None
     ) = None
 

@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tools.candidate_worker import CandidateTokenReadRequest, read_candidate_tokens
 from tools.candidate_worker.models import CandidateRunReceipt
 from tools.candidate_worker.token_models import CandidateTokenQuality
@@ -180,7 +181,7 @@ def test_missing_native_publication_and_read_has_no_effects(prepared, tmp_path):
             "import sys; from tools.candidate_worker import read_candidate_tokens; assert not any(k.startswith(('openai', 'google.genai', 'nodes.ml_', 'ml_models.', 'workflows.task_composition', 'tools.candidate_operations')) for k in sys.modules)",
         ],
         check=True,
-        timeout=20,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
 
 

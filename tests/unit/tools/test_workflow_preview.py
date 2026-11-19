@@ -11,6 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 from core.layout import checkout_root
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tools.workflow_preview import WorkflowPreviewRequest, preview_workflow
 from workflows.definition import (
     ArgumentBinding,
@@ -424,7 +425,7 @@ print("observation only")
         text=True,
         capture_output=True,
         cwd=project,
-        timeout=20,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "observation only"

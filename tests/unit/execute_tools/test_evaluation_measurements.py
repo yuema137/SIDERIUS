@@ -27,6 +27,7 @@ from execute_tools.measurement_results import (
     measurement_value,
     record_measurements,
 )
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from workflows.evaluation_composition import compose_evaluation, require_evaluation_runtime
 from workflows.evaluation_selection import selection_binding
 
@@ -408,7 +409,7 @@ class Model(nn.Linear):
         denoising_score_single._emit_outcome = poison
         Path(os.environ["FORWARD_MARKER"]).write_text(str(os.getpid()))
         if self.hang:
-            time.sleep(60)
+            time.sleep(float(os.environ["HANG_SECONDS"]))
         return super().forward(value)
 PLUGIN_MODEL_TYPE = "hostile"
 PLUGIN_CONFIG_CLASS = Config
@@ -429,9 +430,12 @@ PLUGIN_OUTPUT_TYPE = "regressor"
     env = subprocess_env(plugin_dir=str(plugin_dir), cuda_visible_devices="")
     env["FORWARD_MARKER"] = str(marker)
     kwargs = {"env": env, "preexec_fn": None, "rss_limit_bytes": 8 * 1024**3}
+    baseline_started = time.monotonic()
     results = candidate_measurement.run_measurement_worker(
         request, components, directory=str(tmp_path), **kwargs
     )
+    # The same worker start + plugin import + checkpoint load, timed on this host now.
+    baseline_seconds = time.monotonic() - baseline_started
     assert results[0].failure is None
     assert int(marker.read_text()) != os.getpid()
     argv = TidmadSandbox._measurement_results_argv(results, str(tmp_path))
@@ -480,15 +484,20 @@ assert not any(name.startswith("siderius_plugin_") for name in sys.modules)
         check=True,
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
     payload = json.loads(output.read_text())
     expected = (1.0 + max(0.0, 1.0 - results[0].value / 10.0)) / 2
     assert payload["denoising_score"] == pytest.approx(expected)
 
     # Reach an actual blocked forward, rather than timing out interpreter startup.
+    # The load allowance scales with the measured successful run above, so a slow
+    # host cannot make the deadline fire during startup (#1578); the forward hang
+    # outlasts any such deadline, so only the kill can end the worker in time.
     marker.unlink()
-    monkeypatch.setattr(candidate_measurement, "MEASUREMENT_LOAD_ALLOWANCE_SECONDS", 5.0)
+    allowance = max(5.0, 4 * baseline_seconds)
+    monkeypatch.setattr(candidate_measurement, "MEASUREMENT_LOAD_ALLOWANCE_SECONDS", allowance)
+    env["HANG_SECONDS"] = str(allowance + 120)
     components = [
         MeasurementComponent.model_validate(
             latency_component(warmup=1, repeats=1, timeout_seconds=0.1)
@@ -504,7 +513,8 @@ assert not any(name.startswith("siderius_plugin_") for name in sys.modules)
             **kwargs,
         )
     assert marker.exists(), "deadline must interrupt model forward, not startup"
-    assert time.monotonic() - started < 20
+    # Killed at the deadline (plus grace and reap), long before the hang would end.
+    assert time.monotonic() - started < allowance + 60
     assert lifecycles[-1].child_reaped
     assert lifecycles[-1].group_cleanup.final.status == "absent"
     assert "deadline" in failures[0].failure
@@ -656,7 +666,7 @@ def test_worker_output_cannot_block_or_flood_the_parent(monkeypatch, tmp_path):
         [sys.executable, "-c", script, str(log)],
         env=subprocess_env(),
         capture_output=True,
-        timeout=30,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
         check=True,
     )
     assert completed.stdout == b"" and completed.stderr == b""

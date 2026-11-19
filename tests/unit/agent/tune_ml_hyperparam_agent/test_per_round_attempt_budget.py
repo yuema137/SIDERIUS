@@ -609,4 +609,226 @@ class TestFormalBudgetDistinctFromTrial:
         ]
 
 
+# ===========================================================================
+# (f) #1527 — a measured-infeasible outcome completes its round
+# ===========================================================================
+
+
+def _constraint_refusal(raw):
+    """The typed refusal the scoring child raises for one ``err <= 5`` constraint.
+
+    ``raw=None`` is an unmeasured value (missing evidence); a finite ``raw``
+    above 5 is a measured violation.
+    """
+    from execute_tools.evaluation_child import EvaluationNotScoreableError
+    from execute_tools.evaluation_metric import (
+        NotScoreableResult,
+        ScoreabilityFailure,
+        ScoreabilityVerdict,
+    )
+    from execute_tools.evaluation_results import ConstraintEvaluation, EvaluationEvidence
+
+    label = "constraint err <= 5.0"
+    detail = f"{label} violated: {raw}" if raw is not None else f"{label} has no finite value: None"
+    failure = ScoreabilityFailure(requirement="constraint:err", detail=detail)
+    evidence = EvaluationEvidence(
+        evaluation_sha256="e" * 64,
+        effective_metric_id="score",
+        failures=(failure,),
+        constraints=(
+            ConstraintEvaluation(
+                component_id="err", op="<=", threshold=5.0, raw=raw, satisfied=False, detail=detail
+            ),
+        ),
+    )
+    refusal = NotScoreableResult(
+        metric_id="score",
+        direction="higher",
+        verdict=ScoreabilityVerdict(contract_id="evaluation_constraints/v1", failures=(failure,)),
+    )
+    return EvaluationNotScoreableError(refusal, evidence)
+
+
+def _scripted_child_scores(refusals):
+    """Raise the scripted refusal per scoring call; ``None`` adopts the real score."""
+    import importlib
+
+    real = importlib.import_module(
+        "nodes.ml_hyperparameter_tune_agent.scoring_transport"
+    ).adopt_child_score
+    script = iter(refusals)
+
+    def adopt(bindings, score, require_success):
+        refusal = next(script)
+        if refusal is not None:
+            raise refusal
+        return real(bindings, score, require_success)
+
+    return patch("nodes.ml_hyperparameter_tune_agent.execution.adopt_child_score", adopt)
+
+
+class TestInfeasibleRoundCompletes:
+    """#1527: the constraint rejected the candidate; that is a result, not a crash."""
+
+    def test_measured_violation_ends_the_round_without_retry_or_brake(
+        self, agent_with_scripted_skill, tmp_path
+    ):
+        """Round 1's only attempt is infeasible; round 2 succeeds.
+
+        Under the old retry semantics round 1 would spend its second attempt
+        (training again), so ``total_attempts`` would be 3, not 2.
+        """
+        agent, saved, _counter, cleanup = _setup(agent_with_scripted_skill, [FAKE_VRAM_OK] * 3)
+        try:
+            with _scripted_child_scores([_constraint_refusal(9.0), None]):
+                output = agent.run(
+                    _make_input(
+                        tmp_path,
+                        max_rounds=2,
+                        attempts_per_round=3,
+                        attempts_per_formal_round=3,
+                        max_fail_rounds=2,
+                    )
+                )
+            planner_memory = agent._bridge_factory.return_value.plan.call_args_list[1].args[0]
+        finally:
+            cleanup()
+
+        assert output.termination_reason == "completed"
+        assert output.completed_rounds == 2
+        assert output.total_attempts == 2
+        assert output.consecutive_fail_rounds_at_exit == 0
+        r1 = _round_records(saved, 1)
+        assert [(r["status"], r.get("failure_type")) for r in r1] == [
+            ("error_scoring", "infeasible")
+        ]
+        # The next round's planner sees the named violation and can adapt.
+        assert "constraint err <= 5.0 violated: 9.0" in planner_memory[-1]["memory"]["conclusion"]
+
+    def test_unmeasured_constraint_is_still_retried_and_reaches_the_brake(
+        self, agent_with_scripted_skill, tmp_path
+    ):
+        """Missing evidence is not infeasibility: retries and the brake stay unchanged."""
+        agent, saved, _counter, cleanup = _setup(agent_with_scripted_skill, [FAKE_VRAM_OK] * 2)
+        try:
+            with _scripted_child_scores([_constraint_refusal(None)] * 2):
+                output = agent.run(
+                    _make_input(
+                        tmp_path,
+                        max_rounds=2,
+                        attempts_per_round=2,
+                        attempts_per_formal_round=2,
+                        max_fail_rounds=1,
+                    )
+                )
+        finally:
+            cleanup()
+
+        assert output.termination_reason == "aborted_fail_rounds"
+        assert output.completed_rounds == 0
+        assert output.total_attempts == 2
+        assert [r.get("failure_type") for r in saved] == ["not_scoreable", "not_scoreable"]
+
+
+INFEASIBLE = _constraint_refusal(9.0)
+
+
+def _run_brake_case(make, tmp_path, *, vram, scores, seed_history=(), max_rounds=6):
+    """Run with ``attempts_per_round=1`` and ``max_fail_rounds=2``; return output, saved, counter."""
+    agent, saved, counter, cleanup = _setup(make, vram)
+    saved.extend(seed_history)
+    try:
+        with _scripted_child_scores(scores):
+            output = agent.run(
+                _make_input(
+                    tmp_path,
+                    max_rounds=max_rounds,
+                    attempts_per_round=1,
+                    attempts_per_formal_round=1,
+                    max_fail_rounds=2,
+                )
+            )
+    finally:
+        cleanup()
+    return output, saved, counter
+
+
+class TestInfeasibleBrake:
+    """#1527 operator decision: ``max_fail_rounds`` infeasible rounds in a row stop tuning.
+
+    Each case is told apart from its mutation by ``total_attempts`` (one
+    training per attempt here): a missing brake runs all six rounds, a streak
+    that is not reset stops one round early, and a streak not rebuilt on
+    resume stops one round late.
+    """
+
+    def test_streak_reaches_the_threshold_and_skips_the_formal_round(
+        self, agent_with_scripted_skill, tmp_path
+    ):
+        output, saved, counter = _run_brake_case(
+            agent_with_scripted_skill, tmp_path, vram=[FAKE_VRAM_OK] * 6, scores=[INFEASIBLE] * 6
+        )
+        assert (output.status, output.termination_reason) == (
+            "partial",
+            "aborted_infeasible_rounds",
+        )
+        assert output.total_attempts == counter["i"] == 2  # exactly max_fail_rounds trainings
+        assert output.completed_rounds == 2
+        assert output.consecutive_fail_rounds_at_exit == 0
+        assert {r["memory"]["round_index"] for r in saved} == {1, 2}  # formal round 6 never ran
+        feedback = output.formal_validity_feedback  # legacy non-trial records are Formal-role
+        assert feedback is not None and feedback.stopped_by_infeasible_rounds
+        assert feedback.infeasible_count == 2
+
+    def test_a_scored_round_resets_the_streak(self, agent_with_scripted_skill, tmp_path):
+        output, _saved, _counter = _run_brake_case(
+            agent_with_scripted_skill,
+            tmp_path,
+            vram=[FAKE_VRAM_OK] * 6,
+            scores=[INFEASIBLE, None, INFEASIBLE, INFEASIBLE, INFEASIBLE],
+        )
+        assert output.termination_reason == "aborted_infeasible_rounds"
+        assert output.total_attempts == 4  # I, S, I, I — 3 if the success did not reset
+
+    def test_a_failed_round_resets_the_streak(self, agent_with_scripted_skill, tmp_path):
+        output, _saved, _counter = _run_brake_case(
+            agent_with_scripted_skill,
+            tmp_path,
+            vram=[FAKE_VRAM_OK, FAKE_VRAM_OOM, FAKE_VRAM_OK, FAKE_VRAM_OK, FAKE_VRAM_OK],
+            scores=[INFEASIBLE] * 4,
+        )
+        assert output.termination_reason == "aborted_infeasible_rounds"
+        assert output.total_attempts == 4  # I, F, I, I — 3 if the failed round did not reset
+        assert output.completed_rounds == 3
+
+    def test_resume_mid_streak_brakes_at_the_same_round(self, agent_with_scripted_skill, tmp_path):
+        """One infeasible round before the restart; the first resumed round completes the streak."""
+        from execute_tools.evaluation_child import EvaluationNotScoreableError
+        from nodes.ml_hyperparameter_tune_agent.records import _build_scoring_failure_record
+
+        assert isinstance(INFEASIBLE, EvaluationNotScoreableError)
+        prior = _build_scoring_failure_record(
+            INFEASIBLE,
+            exp_id="punet_test_run_001",
+            model_type="punet",
+            file_index=6,
+            record_params={},
+            timing={"train_time_s": 1.0, "inference_time_s": 1.0, "scoring_time_s": 1.0},
+            expert_advice_str="",
+            hypothesis="h",
+            round_index=1,
+            attempt_in_round=1,
+        )
+        output, _saved, counter = _run_brake_case(
+            agent_with_scripted_skill,
+            tmp_path,
+            vram=[FAKE_VRAM_OK] * 5,
+            scores=[INFEASIBLE] * 5,
+            seed_history=[prior],
+        )
+        assert output.termination_reason == "aborted_infeasible_rounds"
+        assert counter["i"] == 1  # an uninterrupted run would also stop after round 2
+        assert (output.completed_rounds, output.total_attempts) == (2, 2)
+
+
 pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")

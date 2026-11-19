@@ -21,6 +21,7 @@ from core.local_code import (
 )
 from core.local_code.transport import DIGEST_ENV, MANIFEST_ENV
 from core.subprocess_env import subprocess_env
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 
 
 def captured_fixture(tmp_path: Path):
@@ -117,7 +118,7 @@ print('PINNED')
         env=env,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
     assert result.returncode == (0 if case == "success" else 23), result.stdout + result.stderr
     assert marker.exists() is (case == "success")
@@ -154,5 +155,7 @@ def test_spawn_pool_initializer_installs_names_before_unpickling(tmp_path, monke
             initializer=bootstrap_code_package,
             initargs=(env[MANIFEST_ENV], env[DIGEST_ENV]),
         ) as pool:
-            assert pool.submit(helper.calculate, 5).result(timeout=60) == 12
+            assert (
+                pool.submit(helper.calculate, 5).result(timeout=CHILD_PROCESS_BOUND_SECONDS) == 12
+            )
     assert not marker.exists(), "initializer must install names, not execute unrelated entries"
