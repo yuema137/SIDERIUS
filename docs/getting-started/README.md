@@ -172,6 +172,12 @@ will run; later edits to `workflow.py` only affect future runs. A request that
 cannot be prepared exits non-zero, and the error (or the receipt's `error`
 field) names the problem.
 
+One warning can appear even when preparation succeeds. If your workflow trains
+but `candidate_devices` lists no GPU, the command prints a line starting with
+`Warning:`. Such a run would be refused when it reaches training, after it has
+already paid for its earlier LLM steps. Write a fresh request on the machine
+that will run it (the recipe fills in its GPUs) and prepare again.
+
 ### 4. Launch it
 
 First save `store.json`. It tells the operations tool where prepared runs may

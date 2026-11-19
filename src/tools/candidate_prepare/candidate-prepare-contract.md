@@ -56,6 +56,50 @@ token, credential, store and output roots.
 Sandbox device/environment-name and mount rules apply before ownership claim;
 preparation does not require values for future environment names.
 
+### Training-without-GPU advisory
+
+Issue #1562; warn only, never refuse. Preparation cannot know where the run will
+launch, and a workflow without training needs no GPU, so device admission
+(`SandboxProfile.device_paths`) checks only that each listed path is usable.
+When the prepared worker request trains but names no GPU device node, an
+advisory is reported instead:
+
+- Owner of the wording: `core.gpu_requirement.training_gpu_warning(*, trains,
+  devices) -> str | None`. It returns None unless `trains` is true and
+  `core.gpu_devices.declared_providers(devices)` is empty, so a node of any
+  provider counts (`/dev/nvidia<N>`, WSL2's `/dev/dxg`). The text names the
+  consequence (the run will be refused when it reaches training, after its earlier
+  steps have already called the LLM) and the fix
+  (`tools.workspace_sandbox.gpu.host_gpu_devices()` on the machine that will run
+  it; console `add-task` fills it in). It reads its arguments only.
+- Preparation-side reading: `tools.candidate_prepare.prepared_gpu_warning(request:
+  CandidateRunRequest) -> str | None` (module `gpu_warning`). `trains` is "the
+  prepared `preview.document.definition.nodes` contain a `tuning` node", the same
+  test the worker uses for its training receipt reconciliation; `devices` are the
+  request's `devices`.
+- Surfaces: the CLI (`python -m tools.candidate_prepare`, both `--request` and
+  `--reusable-request`) reads the prepared `candidate_request_path` after a
+  `prepared` receipt and prints `Warning: <text>` on stderr. Stdout stays the
+  receipt JSON alone and the exit status is unchanged (0 for `prepared`); the
+  CLI's `finish(receipt) -> int` owns this. The console needs no server-side
+  copy: its Run review already shows the same condition from
+  `ReusableCaptureReview.nodes`/`devices` (`#capture-compute-warning`, issue
+  #1136, `compute-requirement.js`; see the
+  [console contract](../candidate_console/console-contract.md)), and Launch stays
+  enabled. Python callers of `prepare_candidate` / `prepare_reusable_candidate`
+  call `prepared_gpu_warning` themselves; the library functions print nothing.
+- Not recorded: receipts, bindings and the candidate request carry no advisory
+  field, so their schemas, bytes and integrity digests are unchanged.
+- Routes: the single-candidate route (`--request`) prepares the fixed
+  propose/implement/validate declaration (`declaration.candidate_document`), which
+  has no `tuning` node, so it is always silent. Reusable workflows warn exactly
+  when they declare a `tuning` node.
+- No pseudo/offline exemption: a candidate worker's training admission always
+  sets `require_probe_runner=True` (`candidate_worker.training_admission`), so
+  pseudo LLM routes still train on a real GPU, and preparation has no launch mode
+  to consult. The detached preparation operation (`candidate_operations`) reports
+  no advisory; its later launch review in the console does.
+
 `admission` reads original manifest/profile bytes, validates the profile using
 `workflow_preview.config.parse_config`, and makes no writes. The parent claims
 output with exclusive mkdir; losing callers write nothing. After claim, errors
@@ -348,8 +392,10 @@ Preparation admission validates `candidate_devices` on the preparing host
 (`SandboxProfile.device_paths`) and the worker's launch sandbox revalidates them
 on the launching host, so call it on the machine that will run the candidate. A real run trains only on a CUDA device
 (`core.gpu_requirement`; there is no CPU execution mode), so `()` suits only a
-workflow without training; a training workflow prepared with `()` is refused at
-launch. Do not hard-code a node list or add control nodes. For example, in the
+workflow without training; a training workflow prepared with `()` still prepares,
+with the [training-without-GPU advisory](#training-without-gpu-advisory), and is
+refused when the run reaches training. Do not hard-code a node list or add
+control nodes. For example, in the
 selected checkout's frozen environment:
 
 ```python

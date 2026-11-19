@@ -19,14 +19,19 @@ device node of any ``core.gpu_devices`` provider, ``/dev/nvidia<N>`` or WSL2's
 ``/dev/dxg``, as a character device; ``/sys/bus/pci/devices``), never from
 driver message text. The launch guard receives the cause through its
 measurement capability and words the fix for it.
+
+Before any launch, :func:`training_gpu_warning` words the same requirement as an
+advisory for a prepared run that trains but was given no GPU device node
+(issue #1562). It never refuses: preparation reports it and succeeds.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Literal
 
-from core.gpu_devices import gpu_provider
+from core.gpu_devices import declared_providers, gpu_node_examples, gpu_provider
 from core.hardware_models import HardwareContext
 
 #: Why no CUDA device is usable here, in prerequisite order:
@@ -93,6 +98,26 @@ def gpu_required_message(detail: str, cause: GpuUnavailableCause | None = None) 
         "SIDERIUS real training needs an NVIDIA GPU with CUDA, and none is "
         f"visible here ({detail}). Run on a machine with a CUDA GPU; in the "
         "console, the task's candidate_devices must include the GPU device nodes."
+    )
+
+
+def training_gpu_warning(*, trains: bool, devices: Iterable[str]) -> str | None:
+    """The advisory for a run that trains but was given no GPU device node, else None.
+
+    ``trains`` is the caller's reading of the prepared declaration (a ``tuning``
+    node); ``devices`` are the run's device paths. A node of any
+    ``core.gpu_devices`` provider counts (``/dev/nvidia<N>``, WSL2's ``/dev/dxg``).
+    Reads its arguments only; never probes the host.
+    """
+    if not trains or declared_providers(Path(device) for device in devices):
+        return None
+    return (
+        "This workflow trains (it has a tuning node), but candidate_devices lists no "
+        f"GPU device node ({gpu_node_examples()}). SIDERIUS trains only on a CUDA GPU, "
+        "so the run will be refused when it reaches training, after its earlier steps "
+        "have already called the LLM. Prepare a new request on the machine that will "
+        "run it, with candidate_devices from "
+        "tools.workspace_sandbox.gpu.host_gpu_devices() (console add-task fills it in)."
     )
 
 
