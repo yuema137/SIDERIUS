@@ -10,7 +10,7 @@ import os
 import sys
 import traceback
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from core.generated_library import generated_library_is_workspace_bound, verified_chain_workspace
 
@@ -22,6 +22,7 @@ SAFE_PATH_ENV = "PYTHONSAFEPATH"
 SAFE_PATH_ADDED_ENV = "SIDERIUS_UNIT_SAFE_PATH_ADDED"
 
 if TYPE_CHECKING:
+    from core.execution_deadline import ExecutionDeadline
     from workflows.task_composition import RunTaskComposition
 
     from .budget import WorkerBudget
@@ -135,6 +136,21 @@ def _unit_budget(invocation: "NodeInvocation") -> "WorkerBudget | None":
     return None if seconds is None else WorkerBudget.start(seconds)
 
 
+def _raised_failure(
+    error: BaseException, deadline: "ExecutionDeadline | None"
+) -> Literal["prompt_profile_integrity", "deadline_exceeded"] | None:
+    """The classified cause of a raising unit: a prompt-profile integrity stop
+    (#1542), a stop by the worker budget bound in this unit (#1590), or None."""
+    from agent.prompt_rendering import prompt_profile_failure
+    from core.execution_deadline import stopped_by
+
+    if prompt_profile_failure(error) is not None:
+        return "prompt_profile_integrity"
+    if deadline is not None and stopped_by(error, deadline):
+        return "deadline_exceeded"
+    return None
+
+
 def run_invocation_file(path: Path) -> None:
     """Execute the invocation at `path` and publish its write-once result beside it."""
     from contextlib import nullcontext
@@ -157,6 +173,7 @@ def run_invocation_file(path: Path) -> None:
         return NodeUnitResult(node_id=invocation.node_id, phase=invocation.unit.phase, **values)
 
     lifecycles: list[ProcessLifecycle] = []
+    deadline: ExecutionDeadline | None = None
     with observe_process_lifecycle(lifecycles.append):
         try:
             composition = compose_run_task_bindings(invocation.manifest_path)
@@ -168,7 +185,7 @@ def run_invocation_file(path: Path) -> None:
                 ),
                 bind_token_unit(invocation.node_id) if invocation.parallel else nullcontext(),
                 # The worker's remaining wall budget, seen by LLMBridge (#1548).
-                budget.deadline_scope() if budget is not None else nullcontext(),
+                budget.deadline_scope() if budget is not None else nullcontext() as deadline,
             ):
                 output, record = execute_unit(invocation, composition, budget)
             result = finished(
@@ -177,13 +194,8 @@ def run_invocation_file(path: Path) -> None:
                 record_path=str(record),
             )
         except Exception as error:
-            from agent.prompt_rendering import prompt_profile_failure
-
             traceback.print_exc()
-            integrity = prompt_profile_failure(error) is not None
-            result = finished(
-                outcome="raised", failure="prompt_profile_integrity" if integrity else None
-            )
+            result = finished(outcome="raised", failure=_raised_failure(error, deadline))
         except SystemExit as error:
             code = error.code
             result = finished(

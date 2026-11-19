@@ -444,14 +444,50 @@ clipped timeout). Effects, all owned by the bridge and transport:
 Because each anchor is taken after its launch, this deadline expires no earlier
 than the sandbox kill: in-flight work is still ended by the kill and the receipt
 stays `timed_out`. The deadline acts earlier only where an operation cannot fit
-(a retry wait, a background window). That `ExecutionDeadlineExceeded` (a
-`TimeoutError`) follows the existing failure paths: in a graph unit it is an
-ordinary raised exception (`NodeUnitRaised`, node `failed` with reason
-`native_failure`, traceback in `worker.log`); in the fixed path it ends the child
-non-zero and the receipt is `failed` (`worker exit 1`); the bridge's content-repair
-loop does not catch it. Node-level resilience handlers that catch `Exception`
-around an LLM call see each later call fail at its first deadline check, so they
-end promptly rather than retry. The bridge source is unchanged by this binding.
+(a retry wait, a background window) or where a check runs after the remainder is
+spent. Such a stop is reported as running out of time, like the kill (issue #1590):
+
+- **Which stops count.** `core.execution_deadline.ExecutionDeadlineExceeded`
+  records `expires_at`, the expiry of the allocation that refused (the active one
+  where it is created, so `BackgroundWindowRefused` and `BackgroundDeadlineExpired`
+  carry it too). `stopped_by(error, deadline)` follows the explicit `__cause__`
+  chain and matches that expiry. A nested allocation clamped to the worker
+  deadline shares its expiry and counts; a shorter nested allocation (a Data
+  Analysis wall-time budget) or any other deadline does not, and keeps its
+  ordinary failure.
+- **Fixed path and whole-body stops.** `budget.run_within` runs `execute_native`
+  inside `deadline_scope()` for `child.execute` and
+  `loop_resume.execute_continuation`. A matching stop that escapes
+  `execute_native` becomes `initial` with `status="timed_out"` and
+  `error="worker_deadline_exceeded: <message>"` (traceback in `worker.log`); the
+  child publishes it and exits 0. Every other exception propagates as before
+  (`failed`, `worker exit 1`). `launch.reconcile` admits a fixed-path `timed_out`
+  child only when it equals the launch receipt apart from `status`/`error` and the
+  error carries that prefix, so it claims no native output, exactly like a kill.
+  For graph and loop requests the receipt has no trace, which
+  `verify_graph_trace` / `verify_loop` already accept for `timed_out`; completed
+  loop bodies are not indexed, as after a kill.
+- **Graph units.** A unit stopped by its bound remainder sets
+  `NodeUnitResult.failure="deadline_exceeded"` (`unit_child._raised_failure`; the
+  prompt-profile classification takes precedence). `graph.failure_reason` maps it,
+  or an in-process raise matching the active deadline (the worker's own once
+  nested allocations have closed), to node `failed` with reason
+  `deadline_exceeded`; remaining nodes are blocked and the body status follows
+  `body_outcome` unchanged (`failed`). `graph_evidence` accepts
+  `native_failure`, `prompt_profile_integrity` and `deadline_exceeded` for a
+  failed node without a record. Adaptors keep `native_failure`; judge calls keep
+  recording `timed_out` evidence.
+- **Tuner.** The tuner's attempt handler re-raises a deadline refusal
+  (`raise_if_deadline_exceeded`) instead of recording an attempt failure, so a
+  stop during training reaches the classification above (see the tuner node
+  contract).
+
+The bridge's content-repair loop does not catch `ExecutionDeadlineExceeded`.
+Other node-level resilience handlers that catch `Exception` around an LLM call
+see each later call fail at its first deadline check, so they end promptly
+rather than retry. Compatibility: `GraphReason` and `NodeUnitResult.failure` gain
+one value each; `failure` stays omitted when unset, so earlier records parse and
+results without it keep their bytes.
 
 The optional `training_output` receipt field contains the model name and native
 output SHA-256. It is omitted entirely for legacy receipts. Reconcile and later
@@ -627,8 +663,10 @@ logged by the child) becomes `failed`/`native_failure` with remaining nodes
 blocked, except that a raised (or explicitly wrapped) prompt-profile integrity
 error sets `NodeUnitResult.failure="prompt_profile_integrity"` and the node closes
 `failed`/`prompt_profile_integrity` (#1542; `graph.failure_reason`, also for an
-in-process raise; `graph_evidence` accepts both reasons for a failed node without
-a record); `exited` re-raises `SystemExit(exit_code)` and `interrupted`
+in-process raise), and a stop by the worker deadline sets
+`failure="deadline_exceeded"` and closes the node `failed`/`deadline_exceeded`
+(#1590, above; `graph_evidence` accepts all three reasons for a failed node
+without a record); `exited` re-raises `SystemExit(exit_code)` and `interrupted`
 re-raises `KeyboardInterrupt` in the worker, as the in-process call propagated
 them. A unit process that exits nonzero without a result (crash, kill) is also
 `failed`/`native_failure` after the worker logs the supervision error; an

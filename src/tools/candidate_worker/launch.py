@@ -23,6 +23,7 @@ from tools.workspace_sandbox.runner import (
 )
 
 from .admission import admit_input_paths
+from .budget import WORKER_DEADLINE_ERROR
 from .layout import candidate_proposal_dir
 from .models import RECEIPT_IDENTITY_FIELDS, CandidateRunReceipt, CandidateRunRequest
 from .parallel_models import GRANT_CONTROL_FILE, HostGrant, admitted_run_budget
@@ -74,6 +75,14 @@ def reconcile(
             return child
         if child.graph_trace is not None or child.loop_trace is not None:
             raise ValueError("fixed candidate receipt cannot contain graph evidence")
+        if child.status == "timed_out":
+            # The worker's own deadline stopped it (#1590, ``budget.run_within``):
+            # exactly the launch receipt with a status and error, no native output.
+            if child.model_copy(update={"status": initial.status, "error": initial.error}) != (
+                initial
+            ) or not (child.error or "").startswith(WORKER_DEADLINE_ERROR):
+                raise ValueError("timed-out child receipt must claim no native output")
+            return child
         has_training_output = training and child.status in {"completed", "failed"}
         allowed = {"rejected", "completed", "failed"} if training else {"accepted", "rejected"}
         if child.status not in allowed:
