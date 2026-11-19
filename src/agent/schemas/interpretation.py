@@ -706,6 +706,12 @@ class InterpretationInput(BaseModel):
         default_factory=list,
         max_length=3,
         exclude_if=lambda value: not value,
+        description="Up to the three most recent Formal-failure summaries "
+        "(newest last) forwarded by the workflow: facts from tuner iterations "
+        "whose Formal attempts produced no valid candidate. Empty when none. "
+        "A cold-start interpretation reports them in key_findings and the "
+        "analysis brief may cite them; they are evidence for reasoning, never "
+        "a valid candidate or incumbent.",
     )
     analysis_brief_requested: bool = Field(
         default=False,

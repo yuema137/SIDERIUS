@@ -210,7 +210,7 @@ def local_validated_model(
     max_fail_rounds: int = 3,
     # --- Runtime-control operator surface (RT5/RT6, runtime design §4/§5) ---
     # Defaults mirror the schema (guardrails disabled, watchdog off); the
-    # chain/CLI layers supply the §5 provisional operational values.
+    # chain/CLI layers also default the guardrails to disabled (0 -> None).
     max_steps_per_attempt: int | None = None,
     min_formal_batch_size: int | None = None,
     allow_extreme_steps: bool = False,
