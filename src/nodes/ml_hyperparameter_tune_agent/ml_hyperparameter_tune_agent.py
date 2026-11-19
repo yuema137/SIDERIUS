@@ -101,6 +101,9 @@ from nodes.ml_hyperparameter_tune_agent.contracts import (
     AttemptStage,
     RunBindings,
     RunExitSnapshot,
+    complete_round_counters,
+    next_infeasible_streak,
+    round_brake_reached,
 )
 from nodes.ml_hyperparameter_tune_agent.execution import (
     _emit_attempt_record,
@@ -183,6 +186,7 @@ from nodes.ml_hyperparameter_tune_agent.records import (
     _is_cuda_oom,
     _may_advise_resource_reduction,
     _oom_memory_wording,
+    _resume_infeasible_streak,
     _resume_progress,
     _validate_history_and_lock,
     build_attempt_record,
@@ -1390,6 +1394,13 @@ class HyperparamTuningAgent:
         attempts_per_round_setting = agent_input.attempts_per_round
         attempts_per_formal_round_setting = agent_input.attempts_per_formal_round
         max_fail_rounds_setting = agent_input.max_fail_rounds
+        # #1527 infeasible brake, rebuilt from the same records on resume.
+        consecutive_infeasible = _resume_infeasible_streak(
+            existing_history,
+            max_rounds=max_rounds,
+            attempts_per_round=attempts_per_round_setting,
+            attempts_per_formal_round=attempts_per_formal_round_setting,
+        )
         # Pre-initialise so finalisation can safely read `plan` for the
         # gate-exhaustion mode lookup even if the loop never assigns it
         # (e.g. max_rounds=0 or an early-exit path).
@@ -1461,11 +1472,13 @@ class HyperparamTuningAgent:
         )
 
         completed_training_attempts: list[CompletedTrainingAttempt] = []
-        while completed_rounds < max_rounds and consecutive_fails < max_fail_rounds_setting:
+        while completed_rounds < max_rounds and not round_brake_reached(
+            consecutive_fails, consecutive_infeasible, max_fail_rounds_setting
+        ):
             round_index = completed_rounds + 1
             is_formal_round = completed_rounds == max_rounds - 1
             N = attempts_per_formal_round_setting if is_formal_round else attempts_per_round_setting
-            round_succeeded = False
+            round_succeeded = round_infeasible = False
             # F-SCANC-1: the per-round `resolved_action` local that used to
             # be declared here (with the 07b OD-S7-6 hazard note) is
             # RETIRED — see the closure note at the module's 07b comment.
@@ -1628,6 +1641,15 @@ class HyperparamTuningAgent:
                         continue
                     if executed.signal is AttemptSignal.END_ROUND:
                         break
+                    if executed.signal is AttemptSignal.COMPLETE_ROUND:
+                        # #1527: a measured-infeasible outcome is a judged result;
+                        # the round completes like a Health-invalid one, never a winner.
+                        round_succeeded, completed_rounds, consecutive_fails = (
+                            complete_round_counters(completed_rounds)
+                        )
+                        round_infeasible = True
+                        print(f"Round {completed_rounds}/{max_rounds} Complete. Infeasible.")
+                        break
                     score_results = executed.score_results
                     # A completed scorer can still produce no usable scalar
                     # (for example, a Health-invalid collapsed candidate).
@@ -1750,9 +1772,9 @@ class HyperparamTuningAgent:
                     # Phase L — success path: mark the round landed, reset the
                     # consecutive-failure counter, and break out of the inner
                     # attempt loop so the outer while moves on to the next round.
-                    round_succeeded = True
-                    completed_rounds += 1
-                    consecutive_fails = 0
+                    round_succeeded, completed_rounds, consecutive_fails = complete_round_counters(
+                        completed_rounds
+                    )
                     print(
                         f"Round {completed_rounds}/{max_rounds} Complete. "
                         f"Score: {score_results.get('denoising_score', 'N/A')}"
@@ -1893,6 +1915,9 @@ class HyperparamTuningAgent:
                     f"(consecutive_fail_rounds={consecutive_fails}/"
                     f"{max_fail_rounds_setting})."
                 )
+            consecutive_infeasible = next_infeasible_streak(
+                consecutive_infeasible, round_infeasible=round_infeasible
+            )
 
             # Phase 6.8 §2 Layer C (Commit 4) — per-round cleanup. Drop
             # local refs to the largest per-round transients before the
@@ -1929,6 +1954,7 @@ class HyperparamTuningAgent:
                 physical_rejections_buffer=physical_rejections_buffer,
                 last_plan=plan,
                 environment_admission_refusal=environment_admission_refusal,
+                consecutive_infeasible_rounds=consecutive_infeasible,
             ),
         )
         finalize_run_checkpoints(

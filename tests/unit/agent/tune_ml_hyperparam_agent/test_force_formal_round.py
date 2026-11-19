@@ -30,6 +30,7 @@ from execute_tools.metric_order import MetricOrder
 from nodes.ml_hyperparameter_tune_agent import (
     _apply_mode_override_chain,
     _best_trial_winner,
+    _resume_infeasible_streak,
     _resume_progress,
 )
 from tests.helpers.metric_fixtures import shipped_spec
@@ -258,6 +259,84 @@ def test_resume_progress_ignores_baseline_timestamp_suffix():
         model_type="wavenet",
         run_name="diagnostic_baseline_pre_v17",
     ) == (2, 5)
+
+
+def _attempt(round_index, attempt, status="error_training", failure_type=None):
+    record = {"status": status, "memory": {"round_index": round_index, "attempt_in_round": attempt}}
+    if failure_type is not None:
+        record["failure_type"] = failure_type
+    return record
+
+
+INFEASIBLE_RECORD = {"status": "error_scoring", "failure_type": "infeasible"}
+
+
+@pytest.mark.parametrize(
+    ("label", "history", "expected"),
+    [
+        (
+            "two infeasible rounds",
+            [_attempt(1, 1, **INFEASIBLE_RECORD), _attempt(2, 2, **INFEASIBLE_RECORD)],
+            2,
+        ),
+        (
+            "a scored round resets",
+            [
+                _attempt(1, 1, **INFEASIBLE_RECORD),
+                _attempt(2, 1, "success"),
+                _attempt(3, 1, **INFEASIBLE_RECORD),
+            ],
+            1,
+        ),
+        (
+            "a round that exhausted its budget resets",
+            [
+                _attempt(1, 1, **INFEASIBLE_RECORD),
+                _attempt(2, 1),
+                _attempt(2, 2),
+                _attempt(2, 1, **INFEASIBLE_RECORD),
+            ],
+            1,
+        ),
+        (
+            "a round ended early on a terminal infrastructure failure resets",
+            [_attempt(1, 1, **INFEASIBLE_RECORD), _attempt(2, 1, "skipped_infrastructure_failure")],
+            0,
+        ),
+        (
+            "an interrupted round is neutral",
+            [
+                _attempt(1, 1, **INFEASIBLE_RECORD),
+                _attempt(2, 1),
+                _attempt(2, 1, **INFEASIBLE_RECORD),
+            ],
+            2,
+        ),
+        (
+            "the formal round uses the formal budget",
+            [
+                _attempt(1, 1, "success"),
+                _attempt(2, 1, **INFEASIBLE_RECORD),
+                _attempt(3, 1),
+                _attempt(3, 2),
+            ],
+            1,
+        ),
+    ],
+)
+def test_resume_rebuilds_the_infeasible_streak_like_the_live_loop(label, history, expected):
+    """#1527: each witness is a distinct round-ending class on resume.
+
+    Reading every incomplete round as failed would break the interrupted case
+    (the resumed run would brake later than an uninterrupted one); reading it
+    as neutral would break the exhausted and infrastructure cases (earlier).
+    """
+    assert (
+        _resume_infeasible_streak(
+            history, max_rounds=3, attempts_per_round=2, attempts_per_formal_round=3
+        )
+        == expected
+    ), label
 
 
 def test_strategy_legacy_inherit_best_trial_aliases_to_full_clone():

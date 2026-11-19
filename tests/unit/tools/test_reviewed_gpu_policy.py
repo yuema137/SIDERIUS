@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tests.unit.tools.test_reviewed_standard_launch import reviewed
 from tests.unit.tools.test_setup_environment import setup as setup
 from tools.setup_review.semantic_packet import build_packet
@@ -58,7 +59,7 @@ with pytest.MonkeyPatch.context() as patch:
         cwd=Path(__file__).resolve().parents[3],
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 

@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
+
 ROOT = Path(__file__).resolve().parents[4]
 
 PLUGIN = """
@@ -135,7 +137,7 @@ def test_native_run_registers_staged_seed_before_planning(tmp_path, broken_impor
         env=env,
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "FRESH_SEED_HANDOFF_PASS" in result.stdout

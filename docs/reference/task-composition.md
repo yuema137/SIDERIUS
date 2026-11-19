@@ -927,7 +927,7 @@ The implementor, code validator and proposer share the native training
 appendix boundary. Supported boundaries are `native_training.appendix`, `proposal.template`,
 `interpretation.model_system`, `interpretation.model_user`, `interpretation.score_value`,
 `tuner.execution_provenance`, `tuner.training_dynamics`, `implementor.reference_code`,
-`implementor.validator_feedback`, `proposal.failure_attempt_history`, and the
+`implementor.validator_feedback`, `implementor.repair_system`, `proposal.failure_attempt_history`, and the
 `data_analysis.` stages `skill_selection`, `analysis_plan`,
 `generated_program`, `report_synthesis`, `generated_skill_promotion`,
 and `structured_output_repair`. See the decorated functions for exact typed
@@ -948,6 +948,14 @@ section of the implementor's code and repair user prompts; its `stage` argument
 profile that returns `""` restores the pre-#1572 prompts. The reasoning prompt's
 rejection block is rendered natively and is not part of this boundary. See the
 [implementor contract](../../src/nodes/ml_model_implementor/ml_model_implementor.md#validator-rejection-feedback).
+
+The `implementor.repair_system` boundary renders the system prompt of every
+implementor repair call (`kind` is `"model"` or `"loss"`; `code_contract` is the
+sibling code call's contract text). Unlike the boundaries above it is entered on
+every repair, so a historical profile must declare it whenever a run may repair;
+returning the pre-#1574 constant for each `kind` restores the old repair system
+prompts. See the
+[implementor contract](../../src/nodes/ml_model_implementor/ml_model_implementor.md#repair-system-prompt).
 
 The `proposal.failure_attempt_history` boundary renders the earlier-attempt
 block appended after the latest error in two kinds of text. Final failure

@@ -19,6 +19,7 @@ import pytest
 import requests
 
 from agent.skills.paper_resolver_skill import wrapper
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -880,7 +881,7 @@ class TestStandaloneCredentials:
             env={},
             text=True,
             capture_output=True,
-            timeout=20,
+            timeout=CHILD_PROCESS_BOUND_SECONDS,
         )
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == "standalone request verified"

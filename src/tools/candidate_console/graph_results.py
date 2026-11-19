@@ -117,6 +117,9 @@ def tuner_outcome(summary: GraphRunSummary) -> str:
     endings = {
         "completed": "",
         "aborted_fail_rounds": "Consecutive tuning rounds reached the failure limit.",
+        "aborted_infeasible_rounds": (
+            "Consecutive tuning rounds broke a declared constraint, reaching the failure limit."
+        ),
         "aborted_by_gate": "A validity gate stopped tuning.",
         "scope_violation": "A data scope violation stopped tuning.",
         "infrastructure_abort": "An infrastructure or environment check stopped tuning.",

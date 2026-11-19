@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
+
 ROOT = Path(__file__).resolve().parents[4]
 
 # Default ``extra="ignore"``: without the check, ``segmentaton_size`` is dropped.
@@ -111,7 +113,7 @@ def test_fixed_model_refuses_impossible_model_rule_before_any_attempt(
         env=env,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert expected in result.stdout, result.stdout[-2000:] + result.stderr[-2000:]

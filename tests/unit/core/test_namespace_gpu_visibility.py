@@ -36,6 +36,7 @@ from core.runtime_control.measurement_validity import (
 from core.runtime_control.probe import ContentionSnapshot, capture_contention_snapshot
 from core.runtime_control.process_visibility import PROCESS_VISIBILITY_ENV
 from tests.helpers.gpu_requirement import ended_worker_ownership
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 
 DEVICE = DeviceIdentity(uuid="GPU-synthetic-633", physical_index=0)
 ROOT = Path(__file__).resolve().parents[3]
@@ -168,7 +169,7 @@ def test_launcher_declaration_survives_real_child_environment(tmp_path, monkeypa
         text=True,
         capture_output=True,
         check=True,
-        timeout=10,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
     assert result.stdout.strip() == "namespace_limited"
     with pytest.raises(ValueError, match="reserved"):

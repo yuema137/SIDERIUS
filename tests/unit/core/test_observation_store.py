@@ -37,6 +37,7 @@ from core.runtime_control.records import (
     RuntimePrediction,
 )
 from core.runtime_control.workload import ResolvedPhaseWorkload
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 
 # These fixtures use local, timezone-naive timestamps, which the store supports.
 # Lookup time is explicit so unrelated assertions cannot age out with the calendar.
@@ -426,7 +427,7 @@ print(json.dumps(results))
         capture_output=True,
         env={**os.environ, "TZ": zone},
         check=True,
-        timeout=30,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
     expected = [0.0, ["valid", "valid", "stale"] * 2]
     assert json.loads(result.stdout) == [expected] * 5

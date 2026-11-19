@@ -14,6 +14,7 @@ from agent.schemas.custom_loss_contract import (
 )
 from agent.schemas.model_io_contract import Dimension, TensorAxis, TensorContract
 from ml_models.models_format_sandbox import DtypeAdmissibility
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 
 
 @pytest.fixture(autouse=True)
@@ -294,7 +295,7 @@ assert LOSS_CONTRACT_REGISTRY["transport_loss"] == snapshot
         env=env,
         text=True,
         capture_output=True,
-        timeout=30,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
         check=False,
     )
     assert completed.returncode == 0, completed.stderr

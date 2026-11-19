@@ -13,6 +13,7 @@ import pytest
 from agent.llm_settings import KNOWN_PROVIDERS
 from core.hardware_context import GpuRuntimeFacts, HardwareContext
 from execute_tools.data_paths import DatasetDirectoryUnavailable
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tools.setup_review.composition_models import CompositionResult, TaskCompositionSummary
 from tools.setup_review.environment_models import EnvironmentPreviewRequest
 from tools.setup_review.environment_settings import inspect_environment
@@ -282,7 +283,7 @@ raise SystemExit(main(sys.argv[2:]))
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
     assert result.returncode == 0, result.stderr
     assert (operation.output / "index.html").is_file()

@@ -37,7 +37,10 @@ from agent.schemas.proposer_data_analysis_evidence import (
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
 from nodes.data_analysis_agent import DataAnalysisAgent
-from tests.helpers.data_analysis_resources import REAL_WORKER_TIMEOUT_SECONDS
+from tests.helpers.data_analysis_resources import (
+    REAL_PIPELINE_BUDGET_SECONDS,
+    REAL_WORKER_TIMEOUT_SECONDS,
+)
 
 FixtureKind = Literal["regular_periodic_drift", "irregular_periodic"]
 BudgetName = Literal["exhausted", "low", "medium", "high"]
@@ -91,13 +94,15 @@ PRIMARY_CASES = (
 _BUDGETS: dict[BudgetName, tuple[float, float]] = {
     # This matrix owns advice/trajectory behavior, not clock-boundary enforcement.
     # Whole-node accounting now includes interface/parameter worker startup.
-    # Leave loaded-CI headroom; precise deadline regressions use synthetic clocks.
+    # Only the order low < medium < high reaches the trajectory; the absolute
+    # values leave loaded-CI headroom (#1578: 60 s expired at synthesis under
+    # host load), and precise deadline regressions use synthetic clocks.
     # The exhausted case still requests the entire allocation as its minimum
     # remaining threshold, so it starts no scientific invocation.
-    "exhausted": (60.0, REAL_WORKER_TIMEOUT_SECONDS),
-    "low": (60.0, REAL_WORKER_TIMEOUT_SECONDS),
-    "medium": (120.0, REAL_WORKER_TIMEOUT_SECONDS),
-    "high": (240.0, REAL_WORKER_TIMEOUT_SECONDS),
+    "exhausted": (REAL_PIPELINE_BUDGET_SECONDS, REAL_WORKER_TIMEOUT_SECONDS),
+    "low": (REAL_PIPELINE_BUDGET_SECONDS, REAL_WORKER_TIMEOUT_SECONDS),
+    "medium": (2 * REAL_PIPELINE_BUDGET_SECONDS, REAL_WORKER_TIMEOUT_SECONDS),
+    "high": (4 * REAL_PIPELINE_BUDGET_SECONDS, REAL_WORKER_TIMEOUT_SECONDS),
 }
 
 

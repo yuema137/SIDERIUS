@@ -30,6 +30,7 @@ from execute_tools.task_data_path import ScopeBuildRequest
 from execute_tools.task_registration_scope import run_registration_scope
 from ml_models.loss_models_sandbox import register_loss_in_memory
 from ml_models.plugin_loader import register_model_in_memory
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tests.unit.core.test_local_code_transport import bind_workspace
 from tests.unit.core.test_step11_c8_invariants_resume import _invariants
 from tests.unit.examples.test_synthetic_masked_regression_pack import _restore_health_plugin_globals
@@ -348,7 +349,7 @@ def test_public_composition_reaches_cold_family_loaders_and_refuses_helper_tampe
                     cwd=tmp_path,
                     capture_output=True,
                     text=True,
-                    timeout=60,
+                    timeout=CHILD_PROCESS_BOUND_SECONDS,
                 )
                 print(f"cold public example tampered={tampered}: {time.monotonic() - started:.3f}s")
                 if tampered:

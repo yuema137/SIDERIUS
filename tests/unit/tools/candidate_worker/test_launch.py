@@ -9,6 +9,7 @@ from threading import Barrier
 
 import pytest
 
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tools.candidate_worker import launch_candidate
 from tools.candidate_worker.models import CandidateRunReceipt
 from tools.workspace_sandbox.runner import ExecutionResult
@@ -19,7 +20,7 @@ launch_module = importlib.import_module("tools.candidate_worker.launch")
 def test_parent_import_does_not_discover_native_nodes():
     """Fails if public Python/CLI imports can discover plugins before child binding."""
     code = "import sys; import tools.candidate_worker; assert not any(k.startswith(('ml_models.', 'nodes.ml_', 'workflows.task_composition')) for k in sys.modules)"
-    subprocess.run([sys.executable, "-c", code], check=True, timeout=20)
+    subprocess.run([sys.executable, "-c", code], check=True, timeout=CHILD_PROCESS_BOUND_SECONDS)
 
 
 @pytest.mark.parametrize("change", ["bytes", "declaration", "routes"])
@@ -47,7 +48,7 @@ def test_competing_launches_have_one_writer(prepared, monkeypatch):
 
     def together(request):
         result = real_preview(request)
-        barrier.wait(timeout=10)
+        barrier.wait(timeout=CHILD_PROCESS_BOUND_SECONDS)
         return result
 
     monkeypatch.setattr(preflight, "preview_workflow", together)
@@ -200,7 +201,7 @@ else:
             env=env,
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=CHILD_PROCESS_BOUND_SECONDS,
         )
         assert checked.returncode == 0, checked.stderr
         assert (profile.workspace / "candidate_run/import-order-observed").exists()

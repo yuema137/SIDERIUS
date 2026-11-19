@@ -74,6 +74,7 @@ from nodes.ml_hyperparameter_tune_agent.contracts import (
     PreparedAttempt,
     RunBindings,
     TrainingOutcome,
+    is_infeasible_outcome,
 )
 from nodes.ml_hyperparameter_tune_agent.external_evaluation import run_external_evaluation
 from nodes.ml_hyperparameter_tune_agent.output_retention import finalize_attempt_outputs
@@ -142,6 +143,19 @@ _runtime = _import_module("nodes.ml_hyperparameter_tune_agent.runtime")
 
 class ScoringSkillExecutionError(RuntimeError):
     """The scoring subprocess did not complete successfully."""
+
+
+def _scoring_failure_outcome(record: dict[str, Any]) -> AttemptExecution:
+    """What the attempt loop does after a persisted scoring-phase failure record.
+
+    #1527: a measured-infeasible outcome is a judged result, so the round is
+    complete; retrying would train again on a configuration the declared
+    constraints already rejected. Every other scoring failure (a scorer
+    crash, an unscoreable deliverable, an unmeasured constraint) is retried.
+    """
+    if is_infeasible_outcome(record):
+        return AttemptExecution.complete_round()
+    return AttemptExecution.next_attempt()
 
 
 def _require_successful_scoring_result(score_result: Mapping[str, Any]) -> None:
@@ -1488,7 +1502,7 @@ def _run_local_evaluation_phase(
             attempt_role=observed_attempt_role(prepared.plan.is_trial),
         )
         print(f"  Saved error record: {error_record['status']}")
-        return AttemptExecution.next_attempt()
+        return _scoring_failure_outcome(error_record)
     scoring_time = round(time.time() - t0, 1)
     probe_memory(
         iter_idx=round_index,
@@ -1578,7 +1592,7 @@ def _run_evaluation_phase(
             ordering=prepared.ordering,
             attempt_role=observed_attempt_role(prepared.plan.is_trial),
         )
-        return AttemptExecution.next_attempt()
+        return _scoring_failure_outcome(record)
 
 
 def run_inference_scoring_health(

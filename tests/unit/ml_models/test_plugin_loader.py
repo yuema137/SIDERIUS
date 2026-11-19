@@ -23,6 +23,7 @@ from ml_models.plugin_loader import (
     _resolve_plugin_dirs,
     extend_registries,
 )
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 
 # ---------------------------------------------------------------------------
 # Shared plugin source used across tests
@@ -507,7 +508,7 @@ class TestNoBareModuleIdentity:
             env=env,
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=CHILD_PROCESS_BOUND_SECONDS,
         )
         assert result.returncode == 0, (
             f"subprocess failed (returncode={result.returncode})\n"

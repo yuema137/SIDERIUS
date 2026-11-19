@@ -4,6 +4,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
@@ -40,7 +42,7 @@ print("legacy constructed; optional route refused with installation guidance")
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
