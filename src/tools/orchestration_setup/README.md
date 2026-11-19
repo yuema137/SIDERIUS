@@ -126,6 +126,21 @@ source tree was dirty. It is not a complete environment lock or a stale-review
 gate. Changing your own files after installation is expected. Keep experiment
 version pins and run provenance in the experiment and resulting records.
 
+## Keep the reference tables current
+
+The installed instructions include tables of each capability's input fields,
+command-line options and constructor. They are generated from this checkout's
+code. After changing a node schema, CLI or agent constructor, regenerate them:
+
+```bash
+.venv/bin/python -m tools.orchestration_setup.reference_tables --write
+```
+
+`--check` instead of `--write` changes nothing and exits 1 if a table is out of
+date; the unit test `tests/unit/tools/test_orchestration_reference_tables.py`
+runs the same check. Only the marked table regions are rewritten; the prose
+around them is yours to edit.
+
 ## Professional and Assistant routes
 
 Both routes recommend a coding agent. Professional users lead caller design and

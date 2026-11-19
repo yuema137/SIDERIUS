@@ -17,11 +17,13 @@ Supply typed interpretation evidence, task description, storage and run name; se
 ## Existing entrypoints and parameters
 
 Python import: `nodes.ml_literature_review.ml_literature_review.MLLiteratureReviewAgent`.
-Native constructor at revision `5ccb436f` (v1.1.0):
+Native constructor, generated from the class source:
 
+<!-- generated: constructor nodes.ml_literature_review.ml_literature_review.MLLiteratureReviewAgent -->
 ```text
 MLLiteratureReviewAgent(bridge_factory=None, *, root_cache_dir: str)
 ```
+<!-- end generated -->
 
 `bridge_factory` is existing dependency injection, not a model-provider choice.
 Use production defaults unless the declared execution environment supplies one.

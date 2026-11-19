@@ -132,8 +132,8 @@ VRAM_PROBE_STEP_TIMEOUT_SECONDS=180  # one training-mode/inference footprint for
 VRAM_PREFLIGHT_TOTAL_TIMEOUT_SECONDS=900 # complete isolated preflight worker
 VRAM_PREFLIGHT_HOST_MEMORY_LIMIT_GB="" # optional complete isolated process-tree RSS
 # §3.2 — Runtime-control operator surface (RT6, runtime design §4/§5).
-# Defaults synced to run_one_iteration.py (§5 provisional operational
-# values); 0 disables a numeric guardrail; booleans forwarded when 1.
+# Defaults match run_one_iteration.py: both numeric guardrails default to 0,
+# which disables them (mapped to None); booleans forwarded when 1.
 MAX_STEPS_PER_ATTEMPT=0             # Disabled: time budgets govern runtime
 MIN_FORMAL_BATCH_SIZE=0              # §3.2: matches disabled Python default
 ALLOW_EXTREME_STEPS=0

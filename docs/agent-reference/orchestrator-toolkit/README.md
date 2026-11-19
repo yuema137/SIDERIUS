@@ -18,19 +18,10 @@ See the [initial verification](VERIFICATION.md) and subsequent
 [discovery qualification](QUALIFICATION.md), plus the
 [multi-task checks](MULTITASK-QUALIFICATION.md) and
 [evidence integrity checks](INTEGRITY-QUALIFICATION.md), for evidence and
-its limits. Original native interface inventory:
-`1c68bc81d7e44bbdc6e03a445a8422c3f77f45ff`. The payload field and CLI
-tables were reconciled against `0b44e40505b99fd752526c1ff9e9fc97c219dde2`
-(v0.2.9) for the O-Full deployment qualification; the original source labels
-remain provenance, not a runtime version requirement.
+its limits.
 
-Compatibility check at v0.2.9: the 14 documented input/output tables have
-exact top-level Pydantic field-name parity with the installed classes. The
-tuner CLI page lists all 65 primary long options, including the two newly
-added options, and its documented step/batch defaults match `build_parser()`.
-The other five CLI parser files did not change between the original inventory
-and v0.2.9. Nested structures and runtime cross-field rules still require
-inspection of the installed schemas before constructing a request.
-
-Fields and options added after v0.2.9 can be missing from the tables; the
-[interface limitations](COMPATIBILITY.md) page records what was re-checked at v1.1.0.
+The field, option and constructor tables in the payload are generated from the
+code in this checkout, so they always describe the version you install. Nested
+structures and cross-field rules are not in the tables; check the installed
+schemas before building a request. The [interface limitations](COMPATIBILITY.md)
+page explains how the tables are generated and checked.
