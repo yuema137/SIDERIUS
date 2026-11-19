@@ -93,7 +93,8 @@ def prepared(console_config, monkeypatch):
     record = load_record(console_config.operation_store, selection.operation_id)
 
     def offline(profile, argv):
-        result = subprocess.run(argv, capture_output=True, text=True, timeout=45)
+        # Bounds a real offline preparation child; only a failing run waits for it (#1578).
+        result = subprocess.run(argv, capture_output=True, text=True, timeout=300)
         assert result.returncode == 0, result.stderr
         return ExecutionResult(status="completed", returncode=0, elapsed_seconds=0.0)
 

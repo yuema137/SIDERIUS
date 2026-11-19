@@ -7,6 +7,10 @@ import pytest
 from tools.candidate_prepare import CandidatePreparationRequest
 
 REPO = Path(__file__).resolve().parents[4]
+#: Preparation allocation for real offline preparation children; only a failing
+#: run waits for it. 30 s expired under host load (#1578), which turned the
+#: receipt into ``failed`` before the fixture's assertions ran.
+PREPARATION_TIMEOUT_SECONDS = 300.0
 
 
 @pytest.fixture
@@ -22,7 +26,7 @@ def selection(tmp_path):
         output_dir=str(tmp_path / "bundle"),
         candidate_workspace=str(tmp_path / "candidate"),
         run_name="candidate",
-        preparation_timeout_seconds=30.0,
+        preparation_timeout_seconds=PREPARATION_TIMEOUT_SECONDS,
         candidate_timeout_seconds=60.0,
         task_read_only=(),
         candidate_network=False,

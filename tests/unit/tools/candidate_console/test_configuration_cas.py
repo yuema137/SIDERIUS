@@ -98,11 +98,14 @@ else:
                 text=True,
             )
             assert process.stdout is not None
-            ready, _, _ = select.select([process.stdout], [], [], 15)
+            # Readiness is event-based (the child announces flock); the bound only
+            # stops a broken run. 15 s expired under host load (#1578) while the
+            # child was still importing add_task.
+            ready, _, _ = select.select([process.stdout], [], [], 300)
             assert ready, "writer never reached lock acquisition"
             assert process.stdout.readline().strip() == "locking"
             _publish_private(path, b"winning write")
-        output, error = process.communicate(timeout=15)
+        output, error = process.communicate(timeout=300)
         assert process.returncode == 0, error
         assert output.strip() == "stale"
         assert path.read_bytes() == b"winning write"

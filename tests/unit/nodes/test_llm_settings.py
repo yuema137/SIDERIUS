@@ -34,7 +34,9 @@ assert ProposerRoute is proposer_routing.ProposerRoute
         text=True,
         capture_output=True,
         check=False,
-        timeout=30,
+        # Only bounds a hung import; the verdict is the module set, not speed. 30 s
+        # expired under host load (#1578: 55 s wall for 10 s CPU).
+        timeout=300,
     )
     assert result.returncode == 0, result.stderr
 

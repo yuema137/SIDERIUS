@@ -61,7 +61,7 @@ def test_process_failure_dominates_and_future_options_are_not_applied(
     def run(profile, argv):
         assert not profile.network and profile.devices == () and profile.environment_names == ()
         assert Path(selection.data_root) in profile.read_only
-        assert profile.timeout_seconds == 30.0
+        assert profile.timeout_seconds == selection.preparation_timeout_seconds
         assert argv[-2] == "tools.candidate_prepare.child"
         (profile.workspace / "preparation/child.json").write_text("{}")
         return ExecutionResult(status=status, returncode=1, elapsed_seconds=0.0)
