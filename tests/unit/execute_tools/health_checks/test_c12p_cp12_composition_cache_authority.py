@@ -20,6 +20,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
 _PROBE = r"""
@@ -122,7 +124,7 @@ def _run(scenario, configs):
         env=env,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
     assert result.returncode == 0, result.stderr
     lines = [

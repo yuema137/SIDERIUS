@@ -21,6 +21,7 @@ from pathlib import Path as _Path
 
 import pytest
 
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from workflows.run_one_iteration import (
     build_parser as _roi_build_parser,
 )
@@ -473,7 +474,7 @@ def _run_dry(
         str(workspace.parent),
         *extra_args,
     ]
-    proc = _subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    proc = _subprocess.run(cmd, capture_output=True, text=True, timeout=CHILD_PROCESS_BOUND_SECONDS)
     return proc.returncode, proc.stdout, proc.stderr
 
 

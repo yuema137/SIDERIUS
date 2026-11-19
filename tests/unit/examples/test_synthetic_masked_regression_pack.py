@@ -22,6 +22,7 @@ from execute_tools.task_data_path import (
     ScopeBuildRequest,
 )
 from execute_tools.task_registration_scope import run_registration_scope
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -729,7 +730,7 @@ def test_package_identity_is_checkout_portable_and_edits_refuse_resume(tmp_path:
             capture_output=True,
             text=True,
             cwd=manifest.parents[2],
-            timeout=60,
+            timeout=CHILD_PROCESS_BOUND_SECONDS,
         )
 
     def fingerprint(result: subprocess.CompletedProcess[str]) -> str:

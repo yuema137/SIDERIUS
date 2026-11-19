@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tools.candidate_prepare import CandidatePreparationRequest
 
 REPO = Path(__file__).resolve().parents[4]
-#: Preparation allocation for real offline preparation children; only a failing
-#: run waits for it. 30 s expired under host load (#1578), which turned the
-#: receipt into ``failed`` before the fixture's assertions ran.
-PREPARATION_TIMEOUT_SECONDS = 300.0
+#: Preparation allocation for real offline preparation children: the shared child
+#: bound (30 s expired under host load and turned the receipt into ``failed``).
+PREPARATION_TIMEOUT_SECONDS = CHILD_PROCESS_BOUND_SECONDS
 
 
 @pytest.fixture

@@ -10,6 +10,7 @@ from unittest.mock import Mock
 import pytest
 
 from nodes.llm_settings import literature_bridge_arguments
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from workflows.llm_config import WorkflowLLMConfig, resolve_standard_tuner_llm_options
 
 
@@ -34,9 +35,8 @@ assert ProposerRoute is proposer_routing.ProposerRoute
         text=True,
         capture_output=True,
         check=False,
-        # Only bounds a hung import; the verdict is the module set, not speed. 30 s
-        # expired under host load (#1578: 55 s wall for 10 s CPU).
-        timeout=300,
+        # Only bounds a hung import; the verdict is the module set, not speed.
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
     assert result.returncode == 0, result.stderr
 

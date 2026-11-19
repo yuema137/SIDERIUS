@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tools.candidate_prepare import prepare_candidate
 from tools.workspace_sandbox.runner import ExecutionResult
 
@@ -114,7 +115,9 @@ def test_successful_child_requires_complete_unchanged_reconciliation(
     import subprocess
 
     def child_then_change(profile, argv):
-        child = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+        child = subprocess.run(
+            argv, capture_output=True, text=True, timeout=CHILD_PROCESS_BOUND_SECONDS
+        )
         assert child.returncode == 0, child.stderr
         output = profile.workspace
         index_path = output / "preparation/child.json"
@@ -154,7 +157,7 @@ def test_competing_preparers_have_one_claim(selection, monkeypatch):
 
     def together(request):
         result = original(request)
-        barrier.wait(timeout=10)
+        barrier.wait(timeout=CHILD_PROCESS_BOUND_SECONDS)
         return result
 
     monkeypatch.setattr(launch, "admit", together)

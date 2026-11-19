@@ -48,6 +48,7 @@ from core.runtime_control.gpu_measurement_runner import (
 )
 from core.runtime_control.gpu_measurement_spec import GpuMeasurementSpec
 from core.runtime_control.gpu_requirement import CandidateMeasurementRequest
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 
 UUID = "GPU-abc"
 DEVICE = DeviceIdentity(uuid=UUID, physical_index=0)
@@ -64,7 +65,7 @@ def _spec(tmp_path, **over) -> GpuMeasurementSpec:
             request_id="req-01234567",
             device_uuid=UUID,
             phase="training",
-            deadline_seconds=20.0,
+            deadline_seconds=CHILD_PROCESS_BOUND_SECONDS,
             sampling_interval_seconds=0.01,
         ),
         device="cuda",
@@ -206,13 +207,15 @@ def hung_worker(tmp_path: Path) -> Iterator[tuple[str, Callable[[], float]]]:
         if ready_at is None:
             # This witness times an established group, not interpreter startup.
             if not ready_file.exists() or not ready_file.read_text():
-                assert now - setup_started < 5, "worker did not publish child readiness"
+                assert now - setup_started < CHILD_PROCESS_BOUND_SECONDS, (
+                    "worker did not publish child readiness"
+                )
                 return 0.0
             child_pid = int(ready_file.read_text())
             assert os.getpgid(child_pid) == int(pgid_file.read_text())
             ready_at = now
         # Keep time advancing during TERM grace as well as the deadline loop.
-        assert now - ready_at < 30, "measurement runner did not stop"
+        assert now - ready_at < CHILD_PROCESS_BOUND_SECONDS, "measurement runner did not stop"
         return now - ready_at
 
     try:
@@ -369,7 +372,7 @@ class TestTheRawEvidenceSurvives:
                     request_id="req-01234567",
                     device_uuid=UUID,
                     phase="training",
-                    deadline_seconds=20.0,
+                    deadline_seconds=CHILD_PROCESS_BOUND_SECONDS,
                     sampling_interval_seconds=30.0,
                 )
             },
@@ -456,11 +459,26 @@ class TestAWorkerThatLeavesNoReport:
     def test_the_journal_names_the_phase_that_was_in_flight(self, tmp_path):
         """The difference between telling an operator "it died during
         training" and "something failed"."""
+        journal = Path(_spec(tmp_path).journal_path)
+        training_seen: list[float] = []
+
+        def elapsed_since_training() -> float:
+            # The deadline counts only once the worker has journaled training,
+            # so a slow interpreter start cannot end the run in an earlier
+            # phase (#1578); the worker then sleeps far past the deadline.
+            now = time.monotonic()
+            if not training_seen:
+                if not (journal.exists() and '"training"' in journal.read_text()):
+                    return 0.0
+                training_seen.append(now)
+            return now - training_seen[0]
+
         run = _run(
             tmp_path,
             "journal('phase_start', 'setup')\njournal('phase_end', 'setup')\n"
-            "journal('phase_start', 'training')\ntime.sleep(60)\n",
+            "journal('phase_start', 'training')\ntime.sleep(600)\n",
             [1000],
+            elapsed_clock=elapsed_since_training,
             spec={
                 "request": CandidateMeasurementRequest(
                     model_type="punet",
@@ -482,7 +500,7 @@ class TestAWorkerThatLeavesNoReport:
         assert run.report_present is False
         assert run.process.exit_code == 3
         assert run.deadline.reached_deadline is False, (
-            "a crash at 0.1 s is not a timeout against a 20 s budget"
+            "a crash right after start is not a timeout against the run's budget"
         )
 
     def test_a_malformed_report_is_no_report(self, tmp_path):
@@ -556,7 +574,7 @@ def test_the_runner_measures_whichever_phase_it_was_asked_for(tmp_path, phase):
                 request_id="req-01234567",
                 device_uuid=UUID,
                 phase=phase,
-                deadline_seconds=20.0,
+                deadline_seconds=CHILD_PROCESS_BOUND_SECONDS,
                 sampling_interval_seconds=0.01,
             ),
             # Required for an inference measurement: the training batch is

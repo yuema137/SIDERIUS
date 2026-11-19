@@ -28,6 +28,7 @@ from core.runtime_control.measurement_allowance import MeasurementAllowance
 from core.runtime_control.observed_subprocess import supervise_process
 from core.training_seeds import SeedContext
 from tests.helpers.inference_startup import OFFLINE_IO_BUDGET_SECONDS, startup_fixture
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tests.unit.core.test_checkpoint_inference_measurement import bound_spec
 from tests.unit.core.test_gpu_runtime_protection import Clock, policy
 
@@ -958,7 +959,7 @@ def test_native_inference_waits_for_observation_after_consumption(
     actual_check = InferenceStartup.check
 
     def delayed_loop(observer, child_pid):
-        if not consumed.wait(5.0):
+        if not consumed.wait(CHILD_PROCESS_BOUND_SECONDS):
             observer.abort_control("test never observed inference consumption")
             return
         actual_loop(observer, child_pid)

@@ -44,6 +44,7 @@ from agent.skills.evaluate_vram_skill.isolated_probe import (
     run_isolated_preflight,
 )
 from core.preflight_estimation import active_preflight_identity
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 MIB = 1024**2
@@ -144,7 +145,7 @@ class TestHostMemoryBound:
         started = time.monotonic()
         result = run_isolated_preflight(
             _spec(tmp_path, limit_mib=512),
-            deadline_seconds=60.0,
+            deadline_seconds=CHILD_PROCESS_BOUND_SECONDS,
             command=_worker(tmp_path, GROWS_FOREVER),
         )
         elapsed = time.monotonic() - started
@@ -159,7 +160,7 @@ class TestHostMemoryBound:
         """The whole point: the controller must outlive the candidate."""
         run_isolated_preflight(
             _spec(tmp_path, limit_mib=512),
-            deadline_seconds=60.0,
+            deadline_seconds=CHILD_PROCESS_BOUND_SECONDS,
             command=_worker(tmp_path, GROWS_FOREVER),
         )
         assert os.getpid() > 0  # reached at all == the parent was not killed
@@ -167,7 +168,7 @@ class TestHostMemoryBound:
     def test_no_descendant_survives(self, tmp_path):
         result = run_isolated_preflight(
             _spec(tmp_path, limit_mib=512),
-            deadline_seconds=60.0,
+            deadline_seconds=CHILD_PROCESS_BOUND_SECONDS,
             command=_worker(tmp_path, GROWS_FOREVER),
         )
         assert result.orphans_remaining is False
@@ -178,7 +179,7 @@ class TestHostMemoryBound:
     def test_host_memory_evidence_is_recorded_even_when_fine(self, tmp_path):
         result = run_isolated_preflight(
             _spec(tmp_path),
-            deadline_seconds=30.0,
+            deadline_seconds=CHILD_PROCESS_BOUND_SECONDS,
             command=_worker(tmp_path, _completion_script(tmp_path)),
         )
         assert result.host_memory is not None
@@ -214,7 +215,7 @@ class TestResultClassification:
     def test_a_completed_measurement_is_passed_through(self, tmp_path):
         result = run_isolated_preflight(
             _spec(tmp_path),
-            deadline_seconds=30.0,
+            deadline_seconds=CHILD_PROCESS_BOUND_SECONDS,
             command=_worker(tmp_path, _completion_script(tmp_path)),
         )
         assert result.outcome == "COMPLETED_MEASUREMENT"
@@ -226,7 +227,7 @@ class TestResultClassification:
     def test_a_reported_cuda_oom_stays_a_cuda_oom(self, tmp_path):
         result = run_isolated_preflight(
             _spec(tmp_path),
-            deadline_seconds=30.0,
+            deadline_seconds=CHILD_PROCESS_BOUND_SECONDS,
             command=_worker(tmp_path, REPORTS_CUDA_OOM.format(result=tmp_path / "result.json")),
         )
         assert result.outcome == "MEASURED_CUDA_OOM"
@@ -236,7 +237,7 @@ class TestResultClassification:
     def test_a_corrupt_result_is_infrastructure_not_a_measurement(self, tmp_path):
         result = run_isolated_preflight(
             _spec(tmp_path),
-            deadline_seconds=30.0,
+            deadline_seconds=CHILD_PROCESS_BOUND_SECONDS,
             command=_worker(tmp_path, CORRUPT_RESULT.format(result=tmp_path / "result.json")),
         )
         assert result.outcome == "PROBE_INFRASTRUCTURE_FAILURE"
@@ -246,7 +247,7 @@ class TestResultClassification:
         """Exit 137 with no evidence must not be dressed up as measured."""
         result = run_isolated_preflight(
             _spec(tmp_path, limit_mib=4096),
-            deadline_seconds=30.0,
+            deadline_seconds=CHILD_PROCESS_BOUND_SECONDS,
             command=_worker(tmp_path, DIES_SILENTLY),
         )
         assert result.outcome == "PROBE_INFRASTRUCTURE_FAILURE"
@@ -394,7 +395,9 @@ class TestIpcBounds:
             "    print('noise %d' % i)\n" + _completion_script(tmp_path, structural=False)
         )
         result = run_isolated_preflight(
-            _spec(tmp_path), deadline_seconds=60.0, command=_worker(tmp_path, body)
+            _spec(tmp_path),
+            deadline_seconds=CHILD_PROCESS_BOUND_SECONDS,
+            command=_worker(tmp_path, body),
         )
         assert result.outcome == "COMPLETED_MEASUREMENT"
         assert result.static_preflight_bypass is not None
@@ -514,7 +517,7 @@ class TestRssIsAuthoritativeNotAddressSpace:
         )
         result = run_isolated_preflight(
             _spec(tmp_path, limit_mib=4096),  # ceiling BELOW the reservation
-            deadline_seconds=60.0,
+            deadline_seconds=CHILD_PROCESS_BOUND_SECONDS,
             command=_worker(tmp_path, body),
         )
         assert result.outcome == "COMPLETED_MEASUREMENT", (
@@ -527,7 +530,7 @@ class TestRssIsAuthoritativeNotAddressSpace:
     def test_the_enforcement_field_names_the_rss_monitor(self, tmp_path):
         result = run_isolated_preflight(
             _spec(tmp_path, limit_mib=512),
-            deadline_seconds=60.0,
+            deadline_seconds=CHILD_PROCESS_BOUND_SECONDS,
             command=_worker(tmp_path, GROWS_FOREVER),
         )
         assert result.outcome == "MEASURED_HOST_MEMORY_EXCEEDED"
@@ -546,7 +549,9 @@ class TestHostAllocationFailureIsCandidateLevel:
             f"  'phase': 'host_allocation'}}, open(r'{tmp_path / 'result.json'}', 'w'))\n"
         )
         result = run_isolated_preflight(
-            _spec(tmp_path), deadline_seconds=30.0, command=_worker(tmp_path, body)
+            _spec(tmp_path),
+            deadline_seconds=CHILD_PROCESS_BOUND_SECONDS,
+            command=_worker(tmp_path, body),
         )
         assert result.outcome == "HOST_MEMORY_ALLOCATION_FAILURE"
         assert result.outcome != "PROBE_INFRASTRUCTURE_FAILURE"
@@ -749,7 +754,7 @@ class TestThirdValidationOutcomesUnchanged:
     def test_rss_enforcement_is_unaffected(self, tmp_path):
         result = run_isolated_preflight(
             _spec(tmp_path, limit_mib=512),
-            deadline_seconds=60.0,
+            deadline_seconds=CHILD_PROCESS_BOUND_SECONDS,
             command=_worker(tmp_path, GROWS_FOREVER),
         )
         assert result.outcome == "MEASURED_HOST_MEMORY_EXCEEDED"
@@ -759,7 +764,7 @@ class TestThirdValidationOutcomesUnchanged:
     def test_corrupt_ipc_remains_infrastructure(self, tmp_path):
         result = run_isolated_preflight(
             _spec(tmp_path),
-            deadline_seconds=30.0,
+            deadline_seconds=CHILD_PROCESS_BOUND_SECONDS,
             command=_worker(tmp_path, CORRUPT_RESULT.format(result=tmp_path / "result.json")),
         )
         assert result.outcome == "PROBE_INFRASTRUCTURE_FAILURE"

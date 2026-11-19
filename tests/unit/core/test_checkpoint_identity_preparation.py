@@ -33,11 +33,11 @@ from core.runtime_control.process_group import (
     SignalObservation,
 )
 from core.sandbox_layout import training_checkpoint_path
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 
-#: Allocation for a real worker process expected to succeed (or refuse on its own);
-#: only a failing run waits for it. Fixed 5 s / 10 s allocations expired under host
-#: load (#1578). Logical-clock witnesses keep the small default below.
-_REAL_WORKER_SECONDS = 120.0
+#: Allocation for a real worker process expected to succeed (or refuse on its own):
+#: the shared child bound. Logical-clock witnesses keep the small default below.
+_REAL_WORKER_SECONDS = CHILD_PROCESS_BOUND_SECONDS
 
 
 def fixture(tmp_path, *, seconds=5):

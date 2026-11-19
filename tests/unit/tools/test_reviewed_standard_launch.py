@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tests.unit.tools.test_setup_environment import hardware, runtime
 from tests.unit.tools.test_setup_environment import setup as setup
 from tools.setup_review.environment_settings import inspect_environment
@@ -327,7 +328,7 @@ def _exercise_real_standard_main(
         manifest_sha256=manifest_digest(str(manifest)),
         planner_strategy="native-timing-v1",
         scratch=str(tmp_path / "scratch"),
-        settings=TaskCheckSettings(timeout_seconds=10),
+        settings=TaskCheckSettings(timeout_seconds=CHILD_PROCESS_BOUND_SECONDS),
         task_settings=project_task_settings(
             args, declaration, WorkflowLLMConfig.model_validate(declaration.declared_llm_config)
         ),
@@ -469,7 +470,7 @@ def test_real_cli_missing_report_has_actionable_safe_error_without_receipt(tmp_p
         cwd=tmp_path,
         text=True,
         capture_output=True,
-        timeout=30,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
     assert result.returncode == 2
     assert "report/receipt paths" in result.stdout
@@ -596,7 +597,7 @@ with pytest.MonkeyPatch.context() as patch:
         cwd=Path(__file__).resolve().parents[3],
         text=True,
         capture_output=True,
-        timeout=30,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 

@@ -10,6 +10,7 @@ from unittest.mock import Mock
 import pytest
 
 from agent.llm_settings import resolve_main_transport, resolve_reflect_transport
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 
 
 def test_fresh_process_can_resolve_without_importing_effectful_modules(tmp_path: Path) -> None:
@@ -36,7 +37,7 @@ assert not reflect.reuse_main_client
         cwd=tmp_path,
         text=True,
         capture_output=True,
-        timeout=20,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
         check=False,
     )
     assert result.returncode == 0, result.stderr

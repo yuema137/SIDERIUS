@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tools.candidate_worker import launch_candidate
 from workflows.definition import WorkflowDocument
 
@@ -432,7 +433,12 @@ def test_after_process_operation_read_reaches_terminal_verifier(
         str(submission.request_id),
     ]
     fresh = subprocess.run(
-        command, cwd=tmp_path, capture_output=True, text=True, timeout=60, check=True
+        command,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
+        check=True,
     )
     assert json.loads(fresh.stdout)["receipt"]["status"] == "completed"
     if tamper == "missing":
@@ -464,7 +470,12 @@ def test_after_process_operation_read_reaches_terminal_verifier(
         native_path.write_text(json.dumps(modified))
     assert read_operation(config, submission.request_id).reason == "integrity_failure"
     fresh = subprocess.run(
-        command, cwd=tmp_path, capture_output=True, text=True, timeout=60, check=True
+        command,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
+        check=True,
     )
     assert json.loads(fresh.stdout)["reason"] == "integrity_failure"
 
@@ -610,7 +621,7 @@ def test_public_example_writes_portable_matching_inputs(tmp_path):
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
     assert result.returncode == 0, result.stderr
     request = CandidateRunRequest.model_validate_json(
@@ -684,7 +695,10 @@ assert (request.trial_time_budget_minutes, request.formal_time_budget_minutes) =
 
     def child(profile, argv):
         result = subprocess.run(
-            [sys.executable, "-c", program, argv[-1]], capture_output=True, text=True, timeout=60
+            [sys.executable, "-c", program, argv[-1]],
+            capture_output=True,
+            text=True,
+            timeout=CHILD_PROCESS_BOUND_SECONDS,
         )
         assert result.returncode == 0, result.stdout + result.stderr
         return ExecutionResult(status="completed", returncode=0, elapsed_seconds=0.0)

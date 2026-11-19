@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pytest
 
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tests.unit.tools.candidate_prepare.conftest import selection
 from tools.candidate_console import CandidateConsole, ConsoleConfig, PrepareSelection, TaskChoice
 from tools.candidate_operations import OperationStoreConfig
@@ -93,8 +94,9 @@ def prepared(console_config, monkeypatch):
     record = load_record(console_config.operation_store, selection.operation_id)
 
     def offline(profile, argv):
-        # Bounds a real offline preparation child; only a failing run waits for it (#1578).
-        result = subprocess.run(argv, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(
+            argv, capture_output=True, text=True, timeout=CHILD_PROCESS_BOUND_SECONDS
+        )
         assert result.returncode == 0, result.stderr
         return ExecutionResult(status="completed", returncode=0, elapsed_seconds=0.0)
 

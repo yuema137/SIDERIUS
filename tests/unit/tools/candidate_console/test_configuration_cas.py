@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tests.unit.tools.candidate_console.test_settings_page import _client, _load, workspace
 from tools.candidate_console.add_task import TaskPlan, publish_task
 from tools.candidate_console.settings_service import _publish_private
@@ -23,7 +24,7 @@ except BlockingIOError:
 """
     result = subprocess.run(
         [sys.executable, "-c", probe, str(path.with_name("." + path.name + ".lock"))],
-        timeout=15,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
         check=False,
     )
     assert result.returncode == 73, "another process entered the CAS-to-replace window"
@@ -101,18 +102,18 @@ else:
             # Readiness is event-based (the child announces flock); the bound only
             # stops a broken run. 15 s expired under host load (#1578) while the
             # child was still importing add_task.
-            ready, _, _ = select.select([process.stdout], [], [], 300)
+            ready, _, _ = select.select([process.stdout], [], [], CHILD_PROCESS_BOUND_SECONDS)
             assert ready, "writer never reached lock acquisition"
             assert process.stdout.readline().strip() == "locking"
             _publish_private(path, b"winning write")
-        output, error = process.communicate(timeout=300)
+        output, error = process.communicate(timeout=CHILD_PROCESS_BOUND_SECONDS)
         assert process.returncode == 0, error
         assert output.strip() == "stale"
         assert path.read_bytes() == b"winning write"
     finally:
         if process is not None and process.poll() is None:
             process.kill()
-            process.communicate(timeout=15)
+            process.communicate(timeout=CHILD_PROCESS_BOUND_SECONDS)
 
 
 @pytest.mark.parametrize("kind", ["symlink", "fifo", "public", "hardlink"])

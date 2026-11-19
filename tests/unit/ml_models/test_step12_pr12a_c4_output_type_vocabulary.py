@@ -50,6 +50,7 @@ from ml_models.plugin_loader import (
     UnknownOutputContractError,
     _load_plugin,
 )
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -197,7 +198,7 @@ assert Path(plugin_loader.__file__).resolve() == Path(sys.argv[2]).resolve()
             cwd=tmp_path,
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=CHILD_PROCESS_BOUND_SECONDS,
         )
         assert result.returncode == 0, result.stdout + result.stderr
 

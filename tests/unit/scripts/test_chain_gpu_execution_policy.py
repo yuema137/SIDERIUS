@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
+
 ROOT = Path(__file__).resolve().parents[3]
 FLAG = "--gpu_execution_policy_json"
 
@@ -36,7 +38,7 @@ def dry_chain(tmp_path: Path, mode: str, *extra: str) -> subprocess.CompletedPro
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
 
 

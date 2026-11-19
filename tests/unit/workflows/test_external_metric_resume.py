@@ -50,6 +50,9 @@ def active_spec():
 
 
 def test_written_scored_output_is_consumable_by_next_process(tmp_path):
+    # Imported here: a child process re-runs this module without the tests package.
+    from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
+
     output = HyperparamTuningOutput(
         run_name="iter_001",
         model_type="synthetic_model",
@@ -103,7 +106,7 @@ print('next-iteration-input-ready')
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "next-iteration-input-ready" in result.stdout

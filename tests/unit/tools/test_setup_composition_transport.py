@@ -8,6 +8,7 @@ import sys
 
 import pytest
 
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tools.setup_review.composition_models import (
     CHILD_RESULT_NAME,
     CompositionJob,
@@ -93,7 +94,7 @@ else:
 """
     result = subprocess.run(
         [sys.executable, "-c", code, job.model_dump_json()],
-        timeout=5,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
         capture_output=True,
         text=True,
     )

@@ -48,6 +48,7 @@ from agent.schemas.data_analysis.time import FixedTimePrecisionRequirement
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from core.execution_deadline import execution_deadline
 from tests.helpers.data_analysis_resources import REAL_WORKER_TIMEOUT_SECONDS
+from tests.helpers.process_bounds import host_time_unit
 
 
 def _skill_source(
@@ -675,23 +676,25 @@ def test_timed_out_disposition_survives_an_unreaped_descendant(
 
 
 @pytest.mark.allow_real_subprocess
-@pytest.mark.parametrize(("ignores_sigterm", "bound_s"), [(False, 0.75), (True, 1.75)])
+@pytest.mark.parametrize(("ignores_sigterm", "bound_units"), [(False, 1.5), (True, 3.5)])
 def test_worker_stops_at_the_continuing_allocation_within_the_termination_bound(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     ignores_sigterm: bool,
-    bound_s: float,
+    bound_units: float,
 ) -> None:
     """#1425: request publication and SIGTERM reaping are charged to the allocation.
 
-    A 1.0 s publication stall stands in for the multi-second fsync stalls
-    measured under I/O load. The bound is measured from the later of expiry
-    and the end of that uninterruptible publication. Granting the full
-    remaining time after publication, or waiting out the grace on a zombie
-    leader, overruns by about 2 s; enforcement leaves only the poll interval,
-    or the 1 s SIGTERM grace for a child that ignores SIGTERM.
+    In units ``u`` (``host_time_unit``, 0.5 s on an idle host, so the idle-host
+    test is unchanged): a 2 u publication stall stands in for the multi-second
+    fsync stalls measured under I/O load. The bound is measured from the later
+    of expiry and the end of that uninterruptible publication. Granting the
+    full remaining time after publication, or waiting out the 2 u grace on a
+    zombie leader, overruns by about 4 u; enforcement leaves only the poll
+    interval (bound 1.5 u), or the grace for a child that ignores SIGTERM
+    (bound 3.5 u).
     """
-    from agent.data_analysis import executor
+    from agent.data_analysis import executor, process_termination
 
     pack_ref = _make_pack(tmp_path / "pack", _skill_source(), skill_id="bounded_skill")
     skill = discover_skills((pack_ref,)).skills[0]
@@ -711,21 +714,44 @@ def test_worker_stops_at_the_continuing_allocation_within_the_termination_bound(
         else [sleep_executable, "60"]
     )
 
+    def pre_publication_seconds() -> float:
+        """The same path to the published request, without the stall, timed now."""
+        published: list[float] = []
+
+        def timed_publish(path: str, payload: bytes) -> None:
+            publish(path, payload)
+            published.append(time.monotonic())
+
+        with monkeypatch.context() as patch:
+            patch.setattr(executor, "publish_bytes_write_once", timed_publish)
+            patch.setattr(executor, "_worker_command", lambda _request, _response: child)
+            started = time.monotonic()
+            with pytest.raises(SkillExecutorError, match="timed_out"):
+                resolve_skill_interface(
+                    skill, control_directory=tmp_path / "baseline", timeout_s=0.5
+                )
+        return published[0] - started
+
+    # ``u`` also covers four times that path, so a loaded host cannot spend the
+    # 3 u allocation before the request is published (#1578).
+    unit = max(host_time_unit(), 4 * pre_publication_seconds())
+    monkeypatch.setattr(process_termination, "TERMINATION_GRACE_S", 2 * unit)
     published_at: list[float] = []
 
     def stalled_publish(path: str, payload: bytes) -> None:
         publish(path, payload)
-        time.sleep(1.0)
+        time.sleep(2 * unit)
         published_at.append(time.monotonic())
 
     monkeypatch.setattr(executor, "publish_bytes_write_once", stalled_publish)
     monkeypatch.setattr(executor, "_worker_command", lambda _request, _response: child)
-    with execution_deadline(1.5) as allocation:
+    with execution_deadline(3 * unit) as allocation:
         with pytest.raises(SkillExecutorError, match="timed_out"):
             resolve_skill_interface(skill, control_directory=tmp_path / "control", timeout_s=30.0)
+        assert published_at, "the allocation expired before the request was published"
         overrun_s = time.monotonic() - max(allocation.expires_at, *published_at)
 
-    assert overrun_s < bound_s
+    assert overrun_s < bound_units * unit
 
 
 @pytest.mark.allow_real_subprocess

@@ -12,17 +12,13 @@ import pytest
 
 from core.native_writer import WriterRefusal, inspect_writer
 from core.native_writer.ownership import acquire
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 
 ROOT = Path(__file__).resolve().parents[4]
-#: Bounds a real process event that should happen promptly (readiness, exit after
-#: a signal, a chain of two native entries). A passing run never waits for it;
-#: fixed 5-30 s bounds failed under host load (#1578). A wrapper that swallows a
-#: signal or blocks still fails, only later.
-_PROCESS_BOUND_SECONDS = 300.0
 
 
 def _wait_json(path, process):
-    deadline = time.monotonic() + _PROCESS_BOUND_SECONDS
+    deadline = time.monotonic() + CHILD_PROCESS_BOUND_SECONDS
     while time.monotonic() < deadline:
         if path.exists():
             return json.loads(path.read_text())
@@ -84,9 +80,9 @@ def test_killed_native_parent_leaves_claim_after_all_lock_holders_die(tmp_path):
         with pytest.raises(WriterRefusal, match="writer_active"):
             acquire(workspace)
         owner.kill()
-        owner.wait(timeout=_PROCESS_BOUND_SECONDS)
+        owner.wait(timeout=CHILD_PROCESS_BOUND_SECONDS)
         os.kill(participant, signal.SIGKILL)
-        deadline = time.monotonic() + _PROCESS_BOUND_SECONDS
+        deadline = time.monotonic() + CHILD_PROCESS_BOUND_SECONDS
         while inspect_writer(workspace).status == "active" and time.monotonic() < deadline:
             time.sleep(0.02)
         assert inspect_writer(workspace).status == "unresolved"
@@ -103,7 +99,7 @@ def test_killed_native_parent_leaves_claim_after_all_lock_holders_die(tmp_path):
                     pass
         if owner.poll() is None:
             owner.kill()
-        owner.wait(timeout=_PROCESS_BOUND_SECONDS)
+        owner.wait(timeout=CHILD_PROCESS_BOUND_SECONDS)
         if owner.stderr:
             owner.stderr.close()
 
@@ -151,7 +147,7 @@ def test_slurm_first_job_enters_native_before_submission_finishes(tmp_path):
         env=env,
         text=True,
         capture_output=True,
-        timeout=_PROCESS_BOUND_SECONDS,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
     jobs = [json.loads(line) for line in evidence.read_text().splitlines()]
@@ -191,11 +187,11 @@ def test_owner_forwards_signal_in_same_session_and_releases_clean_child(tmp_path
     try:
         assert _wait_json(ready, owner) == os.getsid(0)
         owner.send_signal(signal.SIGTERM)
-        assert owner.wait(timeout=_PROCESS_BOUND_SECONDS) == 7
+        assert owner.wait(timeout=CHILD_PROCESS_BOUND_SECONDS) == 7
         assert inspect_writer(workspace).status == "registered_idle"
     finally:
         if owner.poll() is None:
             owner.kill()
-        owner.wait(timeout=_PROCESS_BOUND_SECONDS)
+        owner.wait(timeout=CHILD_PROCESS_BOUND_SECONDS)
         if owner.stderr:
             owner.stderr.close()

@@ -27,12 +27,9 @@ from execute_tools.measurement_results import (
     measurement_value,
     record_measurements,
 )
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from workflows.evaluation_composition import compose_evaluation, require_evaluation_runtime
 from workflows.evaluation_selection import selection_binding
-
-#: Bounds a real child that should finish promptly; only a failing run waits for it
-#: (#1578: fixed 30 s bounds expired under host load).
-_PROCESS_BOUND_SECONDS = 600.0
 
 PRIMARY = MetricSpec(
     id="accuracy",
@@ -487,7 +484,7 @@ assert not any(name.startswith("siderius_plugin_") for name in sys.modules)
         check=True,
         capture_output=True,
         text=True,
-        timeout=_PROCESS_BOUND_SECONDS,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
     payload = json.loads(output.read_text())
     expected = (1.0 + max(0.0, 1.0 - results[0].value / 10.0)) / 2
@@ -669,7 +666,7 @@ def test_worker_output_cannot_block_or_flood_the_parent(monkeypatch, tmp_path):
         [sys.executable, "-c", script, str(log)],
         env=subprocess_env(),
         capture_output=True,
-        timeout=_PROCESS_BOUND_SECONDS,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
         check=True,
     )
     assert completed.stdout == b"" and completed.stderr == b""
