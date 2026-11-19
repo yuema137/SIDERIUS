@@ -1,7 +1,11 @@
 # data-analysis: native schema field inventory
 
-Reference snapshot: SIDERIUS `1c68bc81d7e44bbdc6e03a445a8422c3f77f45ff`. Derived from the actual
-Pydantic `model_fields`; the installed classes remain the execution authority.
+The tables below list each class's Pydantic `model_fields`.
+Generated from source by
+`python -m tools.orchestration_setup.reference_tables --write`;
+`tests/unit/tools/test_orchestration_reference_tables.py` fails when a table no
+longer matches the installed code.
+The installed classes remain the execution authority.
 Defaults below describe the generic API, not permission to override the
 frozen task, information treatment, budget, or candidate-selection contract.
 Custom validators can impose cross-field requirements not expressible by a
@@ -13,8 +17,10 @@ Return to the [capability guide](../agents/data-analysis.md).
 
 Import: `agent.schemas.data_analysis.DataAnalysisInput`.
 
+<!-- generated: schema agent.schemas.data_analysis.DataAnalysisInput -->
 | Field | Python type | Required / default | Constraints | Meaning |
 | --- | --- | --- | --- | --- |
+| constraint_context | agent.schemas.constraint_disclosure.ConstraintContext \| None | None | [] |  |
 | schema_version | Literal[1] | 1 | [] |  |
 | request_id | str | required | [StringConstraints(strip_whitespace=True, to_upper=None, to_lower=None, strict=None, min_length=1, max_length=None, pattern=None)] |  |
 | task_context | agent.schemas.data_analysis.context.AnalysisTaskContext | required | [] |  |
@@ -25,6 +31,7 @@ Import: `agent.schemas.data_analysis.DataAnalysisInput`.
 | literature_evidence | agent.schemas.data_analysis.context.DataAnalysisLiteratureEvidence \| None | None | [] | Optional source-backed hypotheses and caveats supplied by a workflow edge. Reasoning context only; it cannot grant assets, information or operations. |
 | access_policy | agent.schemas.data_analysis.access.AnalysisAccessPolicy | required | [] |  |
 | resource_envelope | agent.schemas.data_analysis.resources.AnalysisResourceEnvelope | required | [] |  |
+| recovery_policy | agent.schemas.data_analysis.recovery.AnalysisRecoveryPolicy \| None | None | [] |  |
 | allowed_skill_packs | tuple[agent.schemas.data_analysis.context.SkillPackRef, ...] | required | [] |  |
 | generated_skill_registry | agent.schemas.data_analysis.generated_skill.GeneratedExperimentSkillRegistryRef \| None | None | [] |  |
 | allow_generated_skill_promotion | bool | False | [] |  |
@@ -33,6 +40,7 @@ Import: `agent.schemas.data_analysis.DataAnalysisInput`.
 | retain_model_outputs | bool | False | [Strict(strict=True)] | Retain per-sample historical predictions after their analysis action. False retires exact output bytes; neither value changes source authorization. |
 | storage | agent.schemas.storage.StorageConfig | required | [] |  |
 | caller | agent.schemas.data_analysis.common.CallerIdentity | required | [] |  |
+<!-- end generated -->
 
 Read the complete nested JSON Schema from the same public class:
 
@@ -49,6 +57,7 @@ agent or call a model provider. It does not grant access to a dataset.
 
 Import: `agent.schemas.data_analysis.DataAnalysisReport`.
 
+<!-- generated: schema agent.schemas.data_analysis.DataAnalysisReport -->
 | Field | Python type | Required / default | Constraints | Meaning |
 | --- | --- | --- | --- | --- |
 | schema_version | Literal[1] | 1 | [] |  |
@@ -70,6 +79,7 @@ Import: `agent.schemas.data_analysis.DataAnalysisReport`.
 | unresolved_questions | tuple[Annotated[str, StringConstraints(strip_whitespace=True, to_upper=None, to_lower=None, strict=None, min_length=1, max_length=None, pattern=None)], ...] | () | [] |  |
 | resource_usage | agent.schemas.data_analysis.report.AnalysisResourceSummary | required | [] |  |
 | provenance | agent.schemas.data_analysis.report.DataAnalysisReportProvenance | required | [] |  |
+<!-- end generated -->
 
 Read the complete nested JSON Schema from the same public class:
 

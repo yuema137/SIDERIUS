@@ -73,6 +73,11 @@ implementation, validation, proposal = (
 def implement(*args, **kwargs):
     if CONFIG["fail"] == "raise":
         raise RuntimeError("uncertain native failure")
+    if CONFIG["fail"] == "profile":
+        from agent.prompt_rendering import PromptProfileIntegrityError
+        raise ValueError("wrapped by the node") from PromptProfileIntegrityError(
+            "paper-x", "implementor.validator_feedback", "synthetic", "undeclared"
+        )
     if CONFIG["fail"] == "crash":
         os._exit(9)
     models_sandbox.MODEL_REGISTRY[{probe!r}] = object
@@ -285,6 +290,25 @@ def test_failed_or_crashed_unit_keeps_the_serial_failure_stop(
     assert trace_sha256(receipt) == UNROUTED_TRACE_SHA256["failed"]
     # No sibling dispatch after the failure: proposal and the first implementation only.
     assert len([row for row in rows if row["kind"] == "unit"]) == 2
+    verify_graph_trace(
+        request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt
+    )
+
+
+def test_prompt_profile_integrity_stop_is_identifiable_in_the_trace(
+    prepared, native_runner, monkeypatch, tmp_path
+):
+    """#1542: a unit whose phase raised (even wrapped) a prompt-profile integrity
+    error closes its node `failed`/`prompt_profile_integrity`, not the generic
+    `native_failure`, and the body still stops and verifies. Fails if the child
+    drops the classification or the parent ignores it."""
+    request = fanout_request(prepared)
+    receipt, _rows, _ = run_real_units(request, monkeypatch, tmp_path, "profile")
+    assert receipt.status == "failed"
+    failed = [item for item in receipt.graph_trace.nodes if item.state == "failed"]
+    assert [(item.capability, item.reason) for item in failed] == [
+        ("implementation", "prompt_profile_integrity")
+    ]
     verify_graph_trace(
         request, initial(request).model_copy(update={"run_id": receipt.run_id}), receipt
     )

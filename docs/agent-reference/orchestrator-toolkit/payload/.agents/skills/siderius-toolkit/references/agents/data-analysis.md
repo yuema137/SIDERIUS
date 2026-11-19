@@ -17,13 +17,15 @@ Supply request identity, assets, access policy, analysis envelope, questions and
 ## Existing entrypoints and parameters
 
 Python import: `nodes.data_analysis_agent.data_analysis_agent.DataAnalysisAgent`.
-Native constructor at revision `5ccb436f` (v1.1.0), plus the optional
-`transport` route carrier added by #1533 (OpenAI background mode; see the
-workflow `openai_background` setting):
+Native constructor, generated from the class source (a computed default shows
+its value in parentheses). `transport` is the optional OpenAI background-mode
+route carrier (see the workflow `openai_background` setting):
 
+<!-- generated: constructor nodes.data_analysis_agent.data_analysis_agent.DataAnalysisAgent -->
 ```text
-DataAnalysisAgent(*, task_analysis_capability: TaskAnalysisCapability, provider: str='openai', model_id: str | None=None, max_retries: int | None=None, reasoning_effort: str | None=None, bridge_factory: Callable[..., object] | None=None, max_output_tokens: int | None=None, transport: PydanticTransportConfig | None=None, historical_model_inference_capability: HistoricalModelInferenceCapability | None=None, run_seed: int | None=None, analysis_iteration: int | None=None)
+DataAnalysisAgent(*, task_analysis_capability: TaskAnalysisCapability, provider: str=ANALYZE.provider (= 'openai'), model_id: str | None=ANALYZE.model_id (= None), max_retries: int | None=ANALYZE.max_retries (= None), reasoning_effort: str | None=ANALYZE.reasoning_effort (= None), bridge_factory: Callable[..., object] | None=None, max_output_tokens: int | None=None, transport: PydanticTransportConfig | None=None, historical_model_inference_capability: HistoricalModelInferenceCapability | None=None, run_seed: int | None=None, analysis_iteration: int | None=None)
 ```
+<!-- end generated -->
 
 `bridge_factory` is existing dependency injection, not a model-provider choice.
 Use production defaults unless the declared execution environment supplies one.

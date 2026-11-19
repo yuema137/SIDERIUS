@@ -40,11 +40,13 @@ of an earlier experiment's model. Declare any historical reuse separately.
 ## Existing entrypoints and parameters
 
 Python import: `nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent.HyperparamTuningAgent`.
-Native constructor at revision `5ccb436f` (v1.1.0):
+Native constructor, generated from the class source:
 
+<!-- generated: constructor nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent.HyperparamTuningAgent -->
 ```text
 HyperparamTuningAgent(bridge_factory=None, sandbox_factory=None, capability_index_path: str | None=None)
 ```
+<!-- end generated -->
 
 `bridge_factory` is existing dependency injection, not a model-provider choice.
 Use production defaults unless the declared execution environment supplies one.

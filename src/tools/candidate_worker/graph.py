@@ -36,7 +36,7 @@ from .adaptor_phase import (
 from .budget import WorkerBudget
 from .fanout_inputs import materialize_fanout
 from .graph_evidence import expected_nodes, record_digest
-from .graph_models import GraphNodeEvidence, GraphRouteEvidence, GraphTrace
+from .graph_models import GraphNodeEvidence, GraphReason, GraphRouteEvidence, GraphTrace
 from .inputs import NativeInputs
 from .loop_models import ResumeAdvice
 from .models import CandidateRunReceipt, CandidateRunRequest
@@ -80,6 +80,20 @@ def execute_fanout(
 
     dispatch_parallel(body, host_budget)
     return body.terminal(scheduling="parallel-v1")
+
+
+def failure_reason(error: BaseException) -> GraphReason:
+    """The graph reason of a node that raised: a prompt-profile integrity stop
+    (#1542), whether raised in-process or reported by its unit child, or an
+    ordinary native failure."""
+    from agent.prompt_rendering import prompt_profile_failure
+
+    reported = isinstance(error, unit_runner.NodeUnitRaised) and (
+        error.failure == "prompt_profile_integrity"
+    )
+    if reported or prompt_profile_failure(error) is not None:
+        return "prompt_profile_integrity"
+    return "native_failure"
 
 
 def dispatch_serial(body: "GraphBody") -> None:
@@ -326,7 +340,7 @@ class GraphBody:
             traceback.print_exception(error)  # a raising unit already logged its own
         self.aborted = True
         self.evidence[node_id] = item.model_copy(
-            update={"state": "failed", "reason": "native_failure"}
+            update={"state": "failed", "reason": failure_reason(error)}
         )
 
     def decide_routes(self, node_id: str) -> None:

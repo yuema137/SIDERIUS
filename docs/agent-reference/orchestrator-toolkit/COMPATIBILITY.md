@@ -1,13 +1,12 @@
 # Existing interface boundaries
 
-Reference: SIDERIUS `1c68bc81d7e44bbdc6e03a445a8422c3f77f45ff`. The Model routing
-and Measurement rows, all constructor signatures, the CLI provider/model
-defaults and the tuner/validator provider/model schema rows were re-verified at
-`5ccb436f` (v1.1.0); #1533 later added the optional `transport` keyword to the
-Interpretation, Implementer, Validator, Proposer and Data Analysis constructors
-(and `transport` / `reflect_transport` / `llm_transport` / `search_llm_transport`
-input fields for the tuner and literature review). The payload field and CLI tables were last fully
-reconciled at `0b44e405` (v0.2.9) and can omit fields or options added later.
+Reference: SIDERIUS `1c68bc81d7e44bbdc6e03a445a8422c3f77f45ff`; the Model routing
+and Measurement rows were re-verified at `5ccb436f` (v1.1.0). The payload's
+schema field tables, CLI option tables and constructor signatures are generated
+from the installed code by `python -m tools.orchestration_setup.reference_tables`
+and checked by `tests/unit/tools/test_orchestration_reference_tables.py`, so they
+match the checkout that ships them. Nested structures and runtime cross-field
+rules still require inspection of the installed schemas.
 This page describes capability, not qualification of any scientific experiment.
 
 | Surface | Supported boundary or limitation |

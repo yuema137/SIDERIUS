@@ -861,9 +861,13 @@ class BaselineIsolationViolation(ValueError):
 
 def _proposal_attempt_failure(exc: Exception) -> str:
     """Render recoverable proposal-node failures; re-raise integrity defects."""
+    from agent.prompt_rendering import raise_if_prompt_profile_failure
     from core.local_code.failure import raise_if_code_package_failure
 
     raise_if_code_package_failure(exc)
+    # #1542: a bound prompt profile that cannot render must stop the run, never
+    # become proposer feedback (that would silently change the next prompt).
+    raise_if_prompt_profile_failure(exc)
     from agent.schemas.custom_loss_validation import CustomLossProbeSetupError
     from agent.schemas.model_probe import ModelProbeSetupError
 

@@ -1069,6 +1069,29 @@ These numbers are an explicit caller example, not a historical framework
 default. See the [data-analysis contract](../../src/nodes/data_analysis_agent/data_analysis_agent.md#caller-selected-preparation-recovery)
 for counting, deadlines, validation and identity semantics.
 
+### Prompt-profile integrity failures
+
+Every integrity failure of a bound profile raises one typed, run-fatal error,
+`agent.prompt_rendering.PromptProfileIntegrityError` (a `RuntimeError`, not a
+`ValueError`), whose message names the profile and the boundary. The failures
+are: a reached boundary the profile neither renders nor marks native, provider
+sources that changed during the run, a renderer that raises (the original
+exception is the `__cause__`), a renderer that returns something other than the
+boundary's text type, and a provider identity that differs from the one pinned
+at composition. Handlers that would otherwise turn a failure into recoverable
+feedback re-raise it through `raise_if_prompt_profile_failure` (#1542): the
+native loop's proposal-attempt handler (no `previous_failures` entry is
+written), the proposer's boldness retry, the interpreter's degraded path, the
+tuner's round-failure path and the literature review's resilience boundaries.
+The run stops instead of continuing with different prompts. The error's
+`kind` selects the remedy in its message: `undeclared` (declare the boundary in
+the profile and requalify it, or run without the profile), `source_drift` and
+`identity_drift` (restore or requalify the provider source), `renderer_failure`
+(fix the renderer). In the candidate worker a raising node fails its body, which
+already ends the loop; the node's graph evidence records
+`failed`/`prompt_profile_integrity` instead of `native_failure`, including when
+the error was raised in a unit child process.
+
 ## Structural preflight estimation
 
 The optional `preflight_estimator` selects arithmetic through the installed

@@ -1,12 +1,11 @@
 # implementer: native schema field inventory
 
-Reference snapshot: SIDERIUS `1c68bc81d7e44bbdc6e03a445a8422c3f77f45ff`. Derived from the actual
-Pydantic `model_fields`; the installed classes remain the execution authority.
-The `vram_budget_gb` row was synced by hand to the landed annotation after that
-snapshot (issue #1044).
-The `reference_code` row was synced by hand (#1530).
-The `previous_validation_failure` row was synced by hand (#1553, #1572).
-The `inherited_components` row was added by hand (#1540).
+The tables below list each class's Pydantic `model_fields`.
+Generated from source by
+`python -m tools.orchestration_setup.reference_tables --write`;
+`tests/unit/tools/test_orchestration_reference_tables.py` fails when a table no
+longer matches the installed code.
+The installed classes remain the execution authority.
 Defaults below describe the generic API, not permission to override the
 frozen task, information treatment, budget, or candidate-selection contract.
 Custom validators can impose cross-field requirements not expressible by a
@@ -18,8 +17,12 @@ Return to the [capability guide](../agents/implementer.md).
 
 Import: `agent.schemas.implementor.ImplementorInput`.
 
+<!-- generated: schema agent.schemas.implementor.ImplementorInput -->
 | Field | Python type | Required / default | Constraints | Meaning |
 | --- | --- | --- | --- | --- |
+| consumed_input_sha256 | str \| None | None | [] | Worker-stamped digest of the proposal and seed a judged branch's implementation runs on (inputs.consumed_input_sha256; native-proposal-judged/v1 only). The node echoes it into the output record. Absent elsewhere. |
+| consumed_input_encoding | Optional[Literal['siderius.nonfinite/v1']] | None | [] | Encoding of consumed_input_sha256's pre-image, stamped with it and echoed into the output record. Absent on historical stamps. |
+| constraint_context | agent.schemas.constraint_disclosure.ConstraintContext \| None | None | [] |  |
 | candidate_id | str \| None | None | [] | V21 PR E — carried verbatim from ''ProposalOutput.candidate_id'' by the propose->impl protocol. Observational join identity only (O-E-5); None = pre-PR-E or non-proposer candidate. |
 | task_composition_ref | agent.schemas.hyperparam_tuning.TaskCompositionRef \| None | None | [] | Frozen task projection; None preserves the uncomposed legacy route. |
 | model_name | str | required | [] | snake_case model type key. Used as the filename and PLUGIN_MODEL_TYPE constant. |
@@ -30,8 +33,8 @@ Import: `agent.schemas.implementor.ImplementorInput`.
 | task_description | str | '' | [] | Plain-English description of the research task, sourced from ''configs/task_config.yaml''. Injected into the ''{TASK_DESCRIPTION}'' placeholder in the implementor system prompt at call time. Default empty string is for test fixtures only; production callers (workflow) always populate via ''get_task_description(load_task_config())'' which rejects empty values upstream. |
 | forward_contract | agent.schemas.task_config.ForwardContract | factory: ForwardContract | [] | Typed forward-pass contract from ''configs/task_config.yaml''. Rendered into the ''{TASK_BACKGROUND}'' placeholder in the implementor system prompt and the user-prompt contract section. Default ''ForwardContract()'' (all fields empty) is for test fixtures only; production callers always populate via ''ForwardContract(**load_task_config()["forward_contract"])''. |
 | implementor_blocks | agent.schemas.implementor.ImplementorTaskBlocks \| None | None | [] | Step 12 / PR-12a C7-4 — the run's task-owned IMPLEMENTOR science, or None. Additive and default-None by contract: every existing caller constructs this input without it. The CALLER supplies it — the workflow's bounded Regime-A adapter on an un-composed run, the composition's own declaration on a composed one. A composed run that declares NOTHING renders no science rather than inheriting TIDMAD's. |
-| hardware_context | core.hardware_context.HardwareContext \| None | None | [] | Live hardware manifest from ''core.hardware_context'', populated by the workflow via ''get_or_create''. ''None'' for CPU-only hosts, test fixtures and standalone invocations that bypass the workflow; the capacity bullet then renders its defined magnitude-free form rather than a stale ceiling. |
-| vram_budget_gb | float \| None | None | [Gt(gt=0.0), AllowInfNan(allow_inf_nan=False)] | Active operator-defined VRAM ceiling (GB) for this iteration, threaded from the workflow exactly as for the proposer. Combined with ''hardware_context'' through ''HardwareContext.effective_cap_gb'', which is the single rule both nodes quote — so their prompts cannot name different caps. |
+| hardware_context | core.hardware_models.HardwareContext \| None | None | [] | Live hardware manifest from ''core.hardware_context'', populated by the workflow via ''get_or_create''. ''None'' for CPU-only hosts, test fixtures and standalone invocations that bypass the workflow; the capacity bullet then renders its defined magnitude-free form rather than a stale ceiling. |
+| vram_budget_gb | Optional[Annotated[float, FieldInfo(annotation=NoneType, required=True, metadata=[Gt(gt=0.0), _PydanticGeneralMetadata(allow_inf_nan=False)])]] | None | [] | Active operator-defined VRAM ceiling (GB) for this iteration, threaded from the workflow exactly as for the proposer. Combined with ''hardware_context'' through ''HardwareContext.effective_cap_gb'', which is the single rule both nodes quote — so their prompts cannot name different caps. |
 | plugin_dir | str | '' | [] | Directory where the model plugin file will be written. An omitted value resolves below storage.local.workspace; an explicit value is preserved for orchestrators that own a narrower attempt layout. |
 | test_dir | str | '' | [] | Directory where the generated test file will be written. An omitted value resolves below storage.local.workspace; an explicit value is preserved for orchestrators that own a narrower attempt layout. |
 | loss_dir | str | '' | [] | Directory where agent-generated loss plugin files will be written when ''custom_loss_spec'' is set. Mirrors ''plugin_dir'' for model plugins. An omitted value resolves below ''storage.local.workspace''; the workflow overrides this with a per-attempt path so retries do not clobber each other's plugins. The executor resolves loss plugins from the directories listed in ''SIDERIUS_LOSS_DIRS'' (set by the sandbox executor), so writing to ''loss_dir'' is sufficient to make the new loss visible to training. See ''docs/design/enable_loss_inventory.md'' § Commit L3. |
@@ -42,7 +45,8 @@ Import: `agent.schemas.implementor.ImplementorInput`.
 | expert_advice | str \| agent.schemas.hyperparam_tuning.ExpertAdvice | '' | [] | Structured guidance from upstream agents or orchestrators. Accepts a plain string or a structured ExpertAdvice object. |
 | human_advice | str \| None | None | [] | Optional human-provided guidance (highest priority — overrides expert_advice). When present, injected into the LLM prompt as high-priority context. |
 | previous_validation_failure | str \| None | None | [] | Validator rejection feedback for this same proposal. The latest rejection leads; when earlier implementation attempts were also rejected, an 'Earlier implementation attempts for this proposal failed validation' block follows (issue #1553). Rendered in the reasoning, code and every repair prompt (issue #1572) so no call reintroduces a rejected mistake. None on the first attempt. |
-| storage | agent.schemas.storage.StorageConfig | factory: ImplementorInput.<lambda> | [] | Where this node reads its inputs and writes its own output record (e.g. implementor_output_{run_name}.json). Omitted generated-code destinations are derived from this local workspace. |
+| storage | agent.schemas.storage.StorageConfig | factory: StorageConfig(backend='local', local=LocalStorageConfig(workspace='./siderius_workspace', run_name='v1')) | [] | Where this node reads its inputs and writes its own output record (e.g. implementor_output_{run_name}.json). Omitted generated-code destinations are derived from this local workspace. |
+<!-- end generated -->
 
 Read the complete nested JSON Schema from the same public class:
 
@@ -59,9 +63,12 @@ agent or call a model provider. It does not grant access to a dataset.
 
 Import: `agent.schemas.implementor.ImplementorOutput`.
 
+<!-- generated: schema agent.schemas.implementor.ImplementorOutput -->
 | Field | Python type | Required / default | Constraints | Meaning |
 | --- | --- | --- | --- | --- |
 | candidate_id | str \| None | None | [] | V21 PR E — echoed verbatim from ImplementorInput. Observational join identity only (O-E-5); None = pre-PR-E or non-proposer candidate. |
+| consumed_input_sha256 | str \| None | None | [] | Worker-stamped digest of the proposal and seed this implementation consumed (canonical JSON of the proposal and ProposalInput). Judged-branch replay compares it with the adaptor-selected value and its owner seed; absent for other records. |
+| consumed_input_encoding | Optional[Literal['siderius.nonfinite/v1']] | None | [] | Echoed from ImplementorInput: the encoding replay uses to recompute consumed_input_sha256. Absent on historical records, which replay their JSON-mode projection. |
 | model_type | str | required | [] | The PLUGIN_MODEL_TYPE key written into the plugin file. Same as the input model_name. |
 | description_file_path | str | required | [] | Absolute path to the written description.md (e.g. .../agent_generated/models/attn_unet/description.md). Used by result_interpretation_agent to load the model description when interpreting results from this agent-generated model. |
 | model_file_path | str | required | [] | Absolute path to the written plugin file (e.g. .../agent_generated/models/attn_unet.py). |
@@ -71,9 +78,12 @@ Import: `agent.schemas.implementor.ImplementorOutput`.
 | mathematical_definition | str | required | [] | Precise mathematical/architectural specification from the proposal, passed through from ImplementorInput. Used by ml_code_validator_agent to verify implementation matches spec. |
 | baseline_config_adjustments | dict[str, agent.schemas.implementor.ConfigAdjustment] | factory: dict | [] | Audit trail of field-level adjustments the implementor made to the proposer's baseline_config['model_config'] in order to satisfy its own pydantic schema. Empty dict (default) means the schema accepted the baseline as-is. Keys are field names; values describe the original value, the adjusted value, and the reason. Consumed by the proposal_to_hyperparam_seeded protocol to override the baseline before tuner-time, and by the interpretation agent to flag any falsifiable_prediction whose target config was mutated. See docs/improving_validation_awareness.md Phase B.1. |
 | loss_provenance | agent.schemas.implementor.LossProvenance \| None | None | [] | Audit trail for custom-loss usage. ''None'' when the proposer used a built-in loss type (focal, focal_cw, ce, smooth_l1). Populated when ''baseline_config['loss_config']['loss_type'] == "custom"'' — records whether the loss was reused from a prior iteration or newly generated this iteration, the source iteration's ''run_name'', the absolute path to the plugin file, and whether the dummy-tensor forward pass validated. See ''docs/design/enable_loss_inventory.md'' § Commit L3. |
+| model_probe_context | agent.schemas.model_probe.ModelProbeContext \| None | None | [] | Task-owned validation input identity, transported without reinterpretation. |
+| segmentation_applicability | Optional[Literal['temporal', 'not_applicable']] | None | [] | Task-owned segmentation applicability echoed with the candidate; it does not establish additional valid input dimensions. |
 | model_io_contract | agent.schemas.model_io_contract.ModelIOContract \| None | None | [] | The normalized Model-I/O contract this candidate was generated against — Step 03's semantic authority, echoed verbatim from ''ImplementorInput.forward_contract.model_io'' (Step 04a). It is carried on the OUTPUT rather than re-read downstream so the validator probes the candidate against the declaration the implementor ACTUALLY used, not against a second read of the task config that may have moved. ''None'' = the legacy prose-only compatibility path, where no normalized contract was supplied; consumers must preserve their pre-Step-04a behaviour for it and must NOT treat absence as an error. |
 | capability_metadata | core.capability_registry.CapabilityMetadata \| None | None | [] | Registry metadata for a newly-generated model plugin, handed back to the workflow so registration happens ONLY after the validator passes. Mirrors the #92 fix for losses on the model surface: previously the implementor wrote this entry to ''_capability_index.json'' immediately after generating the plugin, before the validator ran — validation failures then left phantom entries in the index that future proposers advertised as Branch B reuse candidates (v16 iter_015 ''gated_dilated_tcn'' failure mode). ''None'' on Branch A (built-in) and Branch B (reuse) paths where no new plugin was generated. See ''feat/v16-fixes'' commit history and ''reports/v16_20260630.md'' §9.10. |
 | loss_capability_metadata | core.capability_registry.CapabilityMetadata \| None | None | [] | Registry metadata for a newly-generated loss plugin. The implementor returns this payload without mutating the capability index; the workflow commits it only after the complete candidate passes validation and construction admission. ''None'' means the candidate uses a built-in or already-registered loss. |
+<!-- end generated -->
 
 Read the complete nested JSON Schema from the same public class:
 

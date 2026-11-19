@@ -53,7 +53,11 @@ def test_prompt_profile_enters_identity_binding_and_drift_guard(tmp_path, monkey
     """A declared renderer must reach real prompt assembly and pin its code."""
     import yaml
 
-    from agent.prompt_rendering import PromptRenderingProfile, bind_prompt_profile
+    from agent.prompt_rendering import (
+        PromptProfileIntegrityError,
+        PromptRenderingProfile,
+        bind_prompt_profile,
+    )
     from agent.prompt_templates.native_training import render_native_training_appendix
     from workflows import task_composition as composition
 
@@ -82,7 +86,7 @@ def test_prompt_profile_enters_identity_binding_and_drift_guard(tmp_path, monkey
         with bind_prompt_profile(None), pytest.raises(composition.CompositionNotBoundError):
             composition.verify_composition_is_bound(explicit)
     source.write_text("provider v2")
-    with pytest.raises(ValueError, match="changed after composition"):
+    with pytest.raises(PromptProfileIntegrityError, match="changed after composition"):
         with composition.bind_run_task_composition(explicit, physical_data_root=str(tmp_path)):
             pytest.fail("stale provider must not bind")
 

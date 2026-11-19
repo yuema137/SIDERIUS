@@ -37,13 +37,15 @@ proof that the candidate passed. Inspect the returned status and diagnostics.
 ## Existing entrypoints and parameters
 
 Python import: `nodes.ml_code_validator_agent.ml_code_validator_agent.MLCodeValidatorAgent`.
-Native constructor at revision `5ccb436f` (v1.1.0), plus the optional
-`transport` route carrier added by #1533 (OpenAI background mode; see the
-workflow `openai_background` setting):
+Native constructor, generated from the class source (a computed default shows
+its value in parentheses). `transport` is the optional OpenAI background-mode
+route carrier (see the workflow `openai_background` setting):
 
+<!-- generated: constructor nodes.ml_code_validator_agent.ml_code_validator_agent.MLCodeValidatorAgent -->
 ```text
-MLCodeValidatorAgent(provider: str='openai', model_id: str | None=None, max_retries: int | None=None, reasoning_effort: str | None=None, bridge_factory=None, max_output_tokens: int | None=None, transport: PydanticTransportConfig | None=None, probe_seed: SeedContext | None=None, **kwargs)
+MLCodeValidatorAgent(provider: str=VALIDATE.provider (= 'openai'), model_id: str | None=VALIDATE.model_id (= None), max_retries: int | None=VALIDATE.max_retries (= None), reasoning_effort: str | None=VALIDATE.reasoning_effort (= None), bridge_factory=None, max_output_tokens: int | None=None, transport: PydanticTransportConfig | None=None, probe_seed: SeedContext | None=None, **kwargs)
 ```
+<!-- end generated -->
 
 `bridge_factory` is existing dependency injection, not a model-provider choice.
 Use production defaults unless the declared execution environment supplies one.

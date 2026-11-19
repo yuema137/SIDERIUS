@@ -17,13 +17,15 @@ Use cold_start=True only when there is no prior experimental evidence. Otherwise
 ## Existing entrypoints and parameters
 
 Python import: `nodes.result_interpretation_agent.result_interpretation_agent.ResultInterpretationAgent`.
-Native constructor at revision `5ccb436f` (v1.1.0), plus the optional
-`transport` route carrier added by #1533 (OpenAI background mode; see the
-workflow `openai_background` setting):
+Native constructor, generated from the class source (a computed default shows
+its value in parentheses). `transport` is the optional OpenAI background-mode
+route carrier (see the workflow `openai_background` setting):
 
+<!-- generated: constructor nodes.result_interpretation_agent.result_interpretation_agent.ResultInterpretationAgent -->
 ```text
-ResultInterpretationAgent(provider: str='openai', model_id: str | None=None, max_retries: int | None=None, reasoning_effort: str | None=None, bridge_factory=None, max_output_tokens: int | None=None, transport: PydanticTransportConfig | None=None, **kwargs)
+ResultInterpretationAgent(provider: str=INTERPRET.provider (= 'openai'), model_id: str | None=INTERPRET.model_id (= None), max_retries: int | None=INTERPRET.max_retries (= None), reasoning_effort: str | None=INTERPRET.reasoning_effort (= None), bridge_factory=None, max_output_tokens: int | None=None, transport: PydanticTransportConfig | None=None, **kwargs)
 ```
+<!-- end generated -->
 
 `bridge_factory` is existing dependency injection, not a model-provider choice.
 Use production defaults unless the declared execution environment supplies one.
