@@ -337,13 +337,19 @@ def test_every_shell_script_the_standard_names_exists(standard_text):
     """#1560. The standard cited `launch_prior_baseline_experiment.sh` for a
     year after that script left the framework (b8d1ffb2a).
 
-    Fails when: the standard names a `*.sh` file that is neither at the
-    given repository path nor under `scripts/launch/`.
+    Fails when: the standard names a `*.sh` file that is not in this
+    checkout. A name with a directory part must exist at that repository
+    path (so a stale `sdsc_submission_scripts/run_chain.sh` fails even
+    though `scripts/launch/run_chain.sh` exists); only a bare file name may
+    resolve under `scripts/launch/`.
     """
+
+    def exists(name: str) -> bool:
+        if "/" in name:
+            return (REPO_ROOT / name).is_file()
+        return (REPO_ROOT / "scripts" / "launch" / name).is_file()
+
     missing = sorted(
-        name
-        for name in set(re.findall(r"[\w./-]+\.sh\b", standard_text))
-        if not (REPO_ROOT / name).is_file()
-        and not (REPO_ROOT / "scripts" / "launch" / Path(name).name).is_file()
+        name for name in set(re.findall(r"[\w./-]+\.sh\b", standard_text)) if not exists(name)
     )
     assert not missing, f"the gate standard names shell scripts this checkout lacks: {missing}"
