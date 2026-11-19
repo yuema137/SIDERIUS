@@ -30,7 +30,8 @@ def local_full_spec(
     Map ProposalOutput -> ImplementorInput in-memory.
 
     Passes model_name, model_description, mathematical_definition,
-    baseline_config, and custom_loss_spec directly from the proposal.
+    baseline_config, custom_loss_spec and inherited_components directly from
+    the proposal.
     plugin_dir, test_dir, and loss_dir use their workspace-derived
     ImplementorInput defaults. The workflow replaces them with narrower
     per-attempt paths before invoking the implementor so retries do not
@@ -60,6 +61,9 @@ def local_full_spec(
         mathematical_definition=output.mathematical_definition,
         baseline_config=output.baseline_config,
         custom_loss_spec=output.custom_loss_spec,
+        # #1540: the implementor must know which ancestor parts the proposal
+        # keeps; without this it guessed from prose next to the full sources.
+        inherited_components=output.inherited_components,
         storage=storage,
     )
 

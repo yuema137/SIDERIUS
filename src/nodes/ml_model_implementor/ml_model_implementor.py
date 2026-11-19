@@ -32,7 +32,7 @@ from typing import Any
 from agent.llm_bridge import LLMBridge
 from agent.llm_settings import DEFAULT_LLM_PROVIDER
 from agent.llm_transport.contracts import PydanticTransportConfig
-from agent.prompt_templates.attempt_history import earlier_attempts_block
+from agent.prompt_templates.attempt_history import RepairExhaustedError
 from agent.prompt_templates.constraints import append_constraint_disclosure
 from agent.prompt_templates.implementor.task_blocks import load_implementor_task_blocks
 from agent.prompt_templates.native_training import render_native_training_appendix
@@ -67,7 +67,10 @@ from core.record_encoding import decode_record, record_json
 from core.run_seed_lock import run_seed_argument
 from core.training_seeds import SeedContext
 from nodes.llm_settings import IMPLEMENT, node_bridge_kwargs
-from nodes.ml_model_implementor.reference_code import reference_code_section
+from nodes.ml_model_implementor.reference_code import (
+    inherited_components_section,
+    reference_code_section,
+)
 from nodes.ml_model_implementor.repair_prompt import render_repair_system_prompt
 from nodes.ml_model_implementor.validator_feedback import validator_feedback_section
 from workflows.task_config import render_forward_contract
@@ -83,35 +86,6 @@ _COMPATIBILITY_REEXPORTS: tuple[str, ...] = ()
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _repair_exhausted_message(
-    what: str,
-    name: str,
-    final_error: str,
-    error_history: list[tuple[int, str]],
-    *,
-    source_heading: str,
-    source: str,
-) -> str:
-    """The final failure text of a generate-validate-repair loop (#1538).
-
-    The headline keeps the final error in its established position; the
-    earlier attempts' errors follow, then the last assembled source. With no
-    repair attempt the text is identical to the pre-#1538 message.
-    """
-    history = earlier_attempts_block(
-        error_history,
-        final_error,
-        heading="Earlier attempt errors (oldest first):",
-        unit="Attempt",
-    )
-    history_section = f"{history}\n\n" if history else ""
-    return (
-        f"{what} failed after {len(error_history) + 1} attempts for '{name}': {final_error}\n\n"
-        f"{history_section}"
-        f"{source_heading}:\n{source}"
-    )
 
 
 def _class_name(model_name: str) -> str:
@@ -1442,6 +1416,12 @@ def _build_reasoning_prompt(inp: ImplementorInput) -> str:
         ]
 
     # --- Reference code from ancestor models (#1530: one renderer for every call) ---
+    # --- Inherited components, next to the ancestor source (#1540) ---
+    inherited_section = inherited_components_section(
+        inp.inherited_components, inp.reference_code, "reasoning"
+    )
+    if inherited_section:
+        lines += ["", inherited_section]
     reference_section = reference_code_section(inp.reference_code, "reasoning")
     if reference_section:
         lines += ["", reference_section, ""]
@@ -1472,6 +1452,12 @@ def _build_code_prompt(reasoning: str, inp: ImplementorInput) -> str:
         advice_block += f"\n{feedback_section}\n"
     # #1530: the code call is a separate request; it needs its own copy of the
     # ancestor source to carry over inherited components.
+    # #1540: the code call must know which ancestor parts the proposal keeps.
+    inherited_section = inherited_components_section(
+        inp.inherited_components, inp.reference_code, "code"
+    )
+    if inherited_section:
+        advice_block += f"\n{inherited_section}\n"
     reference_section = reference_code_section(inp.reference_code, "code")
     if reference_section:
         advice_block += f"\n{reference_section}\n"
@@ -1515,6 +1501,11 @@ def _build_repair_prompt(
         history_section = "\n".join(history_lines) + "\n\n"
     # #1530: each repair is a separate request; a missing inherited helper can
     # only be restored from the ancestor source. Rendered once, never per history entry.
+    # #1540: a repair must not drop a component the proposal keeps.
+    inherited_section = inherited_components_section(
+        inp.inherited_components, inp.reference_code, "repair"
+    )
+    inherited_block = f"{inherited_section}\n\n" if inherited_section else ""
     reference_section = reference_code_section(inp.reference_code, "repair")
     reference_block = f"{reference_section}\n\n" if reference_section else ""
     # #1572: a repair must not reintroduce the mismatch the validator rejected.
@@ -1532,6 +1523,7 @@ def _build_repair_prompt(
         f"## Class name: `{_class_name(inp.model_name)}`\n"
         f"## Baseline model_config: {json.dumps(model_cfg)}\n\n"
         f"{feedback_block}"
+        f"{inherited_block}"
         f"{reference_block}"
         "Fix the current error without reintroducing any error from the history. "
         "Output the corrected JSON code sections."
@@ -2035,15 +2027,13 @@ class MLModelImplementor:
             )
 
         if error is not None:
-            raise ValueError(
-                _repair_exhausted_message(
-                    "Loss generation",
-                    loss_name,
-                    error,
-                    error_history,
-                    source_heading="The assembled loss source",
-                    source=plugin_src,
-                )
+            raise RepairExhaustedError(
+                "Loss generation",
+                loss_name,
+                error,
+                error_history,
+                source_heading="The assembled loss source",
+                source=plugin_src,
             )
         if attempt > 0:
             print(f"   ✅ Loss self-correction succeeded on attempt {attempt + 1}.")
@@ -2284,15 +2274,13 @@ class MLModelImplementor:
         # Still failing after retries: raise with the final error AND every
         # earlier one (#1538), so the proposer's feedback keeps the cause.
         if error is not None:
-            raise ValueError(
-                _repair_exhausted_message(
-                    "Code generation",
-                    inp.model_name,
-                    error,
-                    error_history,
-                    source_heading="The assembled plugin source",
-                    source=_assemble_plugin(inp, code),
-                )
+            raise RepairExhaustedError(
+                "Code generation",
+                inp.model_name,
+                error,
+                error_history,
+                source_heading="The assembled plugin source",
+                source=_assemble_plugin(inp, code),
             )
 
         if attempt > 0:

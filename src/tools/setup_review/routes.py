@@ -205,7 +205,9 @@ def _proposer_routes(config: WorkflowLLMConfig, state: RouteApplicability) -> li
             max_output_tokens=options.get("max_output_tokens"),
             transport=options.get("transport"),
         ),
-        options,
+        # As in ``MLModelProposalAgent(**options)``: the route fields bind to the
+        # legacy parameters above, every other key is a stage option.
+        {key: value for key, value in options.items() if key not in ProposerRoute.model_fields},
     )
     shared_proposer_routes = [(routing.reasoning, "propose.reasoning")]
     for stage in type(routing).model_fields:

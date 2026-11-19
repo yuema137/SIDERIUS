@@ -13,13 +13,21 @@ records them and calls these helpers.
 The earlier-attempt block, its bound and its prompt boundary are owned by
 ``agent.prompt_templates.attempt_history``. With at most one recorded
 rejection both texts are exactly the pre-#1538 / pre-#1553 strings.
+
+An implementor that runs out of repairs raises ``RepairExhaustedError``; its
+entry keeps the cause and drops the assembled source (#1554, see
+:func:`repair_exhausted_entry`).
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 
-from agent.prompt_templates.attempt_history import earlier_attempts_block
+from agent.prompt_templates.attempt_history import (
+    RepairExhaustedError,
+    earlier_attempts_block,
+    render_repair_failure_cause,
+)
 
 _HEADING = "Earlier implementation attempts for this proposal failed validation (oldest first):"
 _UNIT = "Implementation attempt"
@@ -67,3 +75,16 @@ def implementation_error_feedback(
     """
     block = earlier_attempts_block(validation_failures, error_message, heading=_HEADING, unit=_UNIT)
     return f"{error_message}\n\n{block}" if block else error_message
+
+
+def repair_exhausted_entry(exc: RepairExhaustedError) -> str:
+    """The ``previous_failures`` entry for an implementor that ran out of repairs.
+
+    The label stays ``Node error: ValueError:``, the type this failure has always
+    reported, so only the rendered cause differs from the pre-#1554 entry: the
+    headline and earlier-attempt block, plus the source lines the final error
+    names, through the ``proposal.failure_cause`` boundary. The full source
+    stays in ``str(exc)`` for logs.
+    """
+    cause = render_repair_failure_cause(exc.cause, exc.final_error, exc.source_heading, exc.source)
+    return f"Node error: ValueError: {cause}"

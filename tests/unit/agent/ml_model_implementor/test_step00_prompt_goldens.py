@@ -440,3 +440,74 @@ def test_ancestor_order_does_not_change_prompt_bytes():
         assert build(fixture_input(reference_code=first)) == build(
             fixture_input(reference_code=second)
         )
+
+
+def _inherited_fixture():
+    from agent.schemas.proposal import InheritedComponent
+
+    return [
+        InheritedComponent(
+            component="dilated_causal_conv",
+            source_type="experiment",
+            source_id="step00_fixture_ref",
+            from_run="iter_003",
+            contribution_evidence="Fixture: best recovery on low-frequency files.",
+        ),
+        InheritedComponent(
+            component="receptive_field",
+            source_type="external_agent",
+            source_id="arxiv:1609.03499",
+            contribution_evidence="Fixture: long context addresses the drift bottleneck.",
+        ),
+        InheritedComponent(
+            component="gating",
+            source_type="experiment",
+            source_id="fixture_model_without_source",
+            contribution_evidence="Fixture: stabilized training.",
+        ),
+    ]
+
+
+class TestPB5InheritedComponents:
+    """#1540: the inherited-components section (code prompt) and its exp pin."""
+
+    def test_code_user_prompt_with_inherited_components(self):
+        """Pins the section text, its placement before the ancestor source and
+        the per-component source markers (below / not available)."""
+        inp = fixture_input(inherited_components=_inherited_fixture())
+        assert_golden(
+            _build_code_prompt("FIXTURE REASONING", inp),
+            GOLDENS / "pb5_inherited_code_user.txt",
+            surface="PB-5 code user (inherited components)",
+        )
+
+    def test_empty_renderer_restores_pre_1540_prompts(self, tmp_path):
+        """The siderius-exp pin: with ``implementor.inherited_components``
+        rendering ``""``, every prompt of a proposal WITH inherited components
+        equals the prompt without them (the pre-#1540 bytes, since pre-#1540
+        prompts never carried the claims). Fails if a builder adds separators
+        around an empty section or bypasses the boundary."""
+        from agent.prompt_rendering import PromptRenderingProfile, bind_prompt_profile
+
+        source = tmp_path / "provider.txt"
+        source.write_text("pre-1540 inherited-components renderer")
+        profile = PromptRenderingProfile(
+            "pre-1540",
+            "1",
+            {"implementor.inherited_components": lambda **_: ""},
+            frozenset({"implementor.reference_code", "implementor.validator_feedback"}),
+            {"source": source},
+        )
+        plain = fixture_input()
+        claiming = fixture_input(inherited_components=_inherited_fixture())
+
+        def render(inp):
+            return (
+                _build_reasoning_prompt(inp),
+                _build_code_prompt("R", inp),
+                _build_repair_prompt(_FROZEN_CODE_DICT, _FROZEN_ERROR, inp, [(1, "e")]),
+            )
+
+        expected = render(plain)
+        with bind_prompt_profile(profile):
+            assert render(claiming) == expected

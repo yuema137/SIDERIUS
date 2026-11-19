@@ -38,7 +38,10 @@ class TestLoadModelSourceLibraryLookup:
         loadable, because the only global dir searched was the checkout."""
         lib_models, _ = library_and_legacy
         (lib_models / "promoted_model.py").write_text("# promoted plugin source\n")
-        assert load_model_source("promoted_model") == "# promoted plugin source\n"
+        assert (
+            load_model_source("promoted_model", baseline_isolation=False)
+            == "# promoted plugin source\n"
+        )
 
     def test_legacy_checkout_plugin_source_still_found(self, library_and_legacy):
         """Matrix F — compatibility READ. Defect caught: dropping the legacy
@@ -46,7 +49,9 @@ class TestLoadModelSourceLibraryLookup:
         promoted before the migration."""
         _, legacy_models = library_and_legacy
         (legacy_models / "old_model.py").write_text("# legacy plugin source\n")
-        assert load_model_source("old_model") == "# legacy plugin source\n"
+        assert (
+            load_model_source("old_model", baseline_isolation=False) == "# legacy plugin source\n"
+        )
 
     def test_resolved_library_wins_over_legacy_same_name(self, library_and_legacy):
         """Defect caught: candidate ordering flipped — a stale pre-migration
@@ -54,4 +59,63 @@ class TestLoadModelSourceLibraryLookup:
         lib_models, legacy_models = library_and_legacy
         (lib_models / "shadowed_model.py").write_text("# resolved copy\n")
         (legacy_models / "shadowed_model.py").write_text("# legacy copy\n")
-        assert load_model_source("shadowed_model") == "# resolved copy\n"
+        assert load_model_source("shadowed_model", baseline_isolation=False) == "# resolved copy\n"
+
+
+class TestBaselineIsolationExcludesBundledSource:
+    """#1541: under baseline isolation no bundled built-in source leaves the loader."""
+
+    @pytest.mark.parametrize(
+        "model_type", ["fcnet", "gated_fno", "punet", "rnn", "transformer", "wavenet"]
+    )
+    def test_bundled_source_is_withheld_only_under_isolation(self, model_type):
+        """Fails if an isolated run can read a shipped baseline's source (the
+        models_sandbox fallback), or if a non-isolated run loses it."""
+        assert load_model_source(model_type, baseline_isolation=False)
+        assert load_model_source(model_type, baseline_isolation=True) is None
+
+    def test_bundled_name_is_withheld_even_if_a_plugin_shadows_it(self, library_and_legacy):
+        """Fail-closed: isolation excludes the bundled NAME before any lookup,
+        so a plugin file named like a baseline cannot reintroduce it."""
+        lib_models, _ = library_and_legacy
+        (lib_models / "wavenet.py").write_text("# plugin named like a baseline\n")
+        assert load_model_source("wavenet", baseline_isolation=True) is None
+
+    def test_generated_plugins_still_load_under_isolation(self, library_and_legacy):
+        lib_models, _ = library_and_legacy
+        (lib_models / "promoted_model.py").write_text("# promoted plugin source\n")
+        assert load_model_source("promoted_model", baseline_isolation=True) == (
+            "# promoted plugin source\n"
+        )
+
+    def test_candidate_enrichment_withholds_bundled_source_under_isolation(self):
+        """The proposer's candidate source block uses the same owner."""
+        from nodes.proposal_helpers import enrich_candidates_with_source
+
+        isolated = enrich_candidates_with_source([{"model_type": "punet"}], baseline_isolation=True)
+        assert isolated[0]["source_code"] is None
+        plain = enrich_candidates_with_source([{"model_type": "punet"}], baseline_isolation=False)
+        assert "class PositionalUNet" in plain[0]["source_code"]
+
+
+class TestBundledSourceGuardDoesNotDependOnOneAuthority:
+    """#1541 defence in depth: the models_sandbox extraction can only return
+    bundled baseline source, so isolation must not rely on BUNDLED_MODEL_TYPES
+    (a description.md scan) staying equal to the extraction's class map."""
+
+    def test_every_extractable_type_is_a_declared_bundled_baseline(self):
+        """Fails when a built-in class family is added to the extraction map
+        without a bundled description, i.e. without the authority that the
+        description, proposal and source guards all key on."""
+        from ml_models.model_descriptions import BUNDLED_MODEL_TYPES
+
+        assert set(proposal_helpers._MODEL_CLASS_MAP) <= set(BUNDLED_MODEL_TYPES)
+
+    def test_sandbox_extraction_is_unreachable_under_isolation(self, monkeypatch):
+        """Even if the bundled authority missed a type, an isolated run gets no
+        models_sandbox source. Fails if the extraction step runs under isolation."""
+        import ml_models.model_descriptions as descriptions
+
+        monkeypatch.setattr(descriptions, "is_bundled_model_type", lambda name: False)
+        assert load_model_source("wavenet", baseline_isolation=True) is None
+        assert load_model_source("wavenet", baseline_isolation=False)

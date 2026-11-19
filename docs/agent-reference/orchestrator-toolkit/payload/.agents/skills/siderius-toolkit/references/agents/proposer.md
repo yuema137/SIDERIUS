@@ -52,9 +52,13 @@ supplied value replaces it, including `None` or `0` where the field allows it
 (for example `proposing_model_id=None` or `comparison_max_retries=0`). Each
 resolved route is validated as a `ProposerRoute`, so an invalid value such as
 `proposing_provider=None` or `proposing_max_output_tokens=0` raises a
-`ValidationError` at construction. Keyword names outside this pattern are ignored
-without an error, so a misspelled key leaves that stage on the legacy
-constructor route. After construction, read the immutable `node.routing`
+`ValidationError` at construction. Keyword names outside this pattern are
+refused at construction: the flat options are validated against
+`nodes.proposer_routing.ProposerStageOptions` (one optional field per
+`{stage}_{field}`, extra keys forbidden), and an unknown key raises
+`UnknownProposerStageOption` (a `TypeError`) whose `unknown` attribute and
+message name the key and list every accepted option. No bridge is constructed
+before the refusal. After construction, read the immutable `node.routing`
 (`ProposerRouting` with `comparison`, `reasoning` and `proposing` routes) to
 confirm what will be used.
 
