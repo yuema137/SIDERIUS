@@ -31,7 +31,13 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Literal
 
-from core.gpu_devices import declared_providers, gpu_node_examples, gpu_provider
+from core.gpu_devices import (
+    PROVIDERS,
+    GpuDeviceProvider,
+    declared_providers,
+    gpu_node_examples,
+    gpu_provider,
+)
 from core.hardware_models import HardwareContext
 
 #: Why no CUDA device is usable here, in prerequisite order:
@@ -53,15 +59,43 @@ _FIX: dict[GpuUnavailableCause, str] = {
         "for a task that lists a GPU device node; check that the task lists one, then "
         "run check --gpu (see GPU runs in the console README)"
     ),
-    "cuda_init_failed": (
-        "GPU device nodes and /sys are visible, but CUDA failed to initialize. "
-        "Check the driver on this machine with nvidia-smi. The run sandbox passes the "
-        "NVIDIA control nodes present at launch and cannot create one; if "
-        "/dev/nvidia-uvm is missing on the host, run nvidia-smi (or "
-        "nvidia-modprobe -u -c=0) once on the host, then relaunch. Make sure "
-        "CUDA_VISIBLE_DEVICES is not set to an empty value"
-    ),
+    # Completed by _fix: the remedy of each provider whose GPU nodes are visible.
+    "cuda_init_failed": "GPU device nodes and /sys are visible, but CUDA failed to initialize.",
 }
+_EMPTY_VISIBLE_DEVICES = "Make sure CUDA_VISIBLE_DEVICES is not set to an empty value"
+
+
+def _fix(cause: GpuUnavailableCause, dev: Path) -> str:
+    """The operator-facing remedy for ``cause``; never recorded (issue #1577).
+
+    ``cuda_init_failed`` names the driver checks of the providers whose GPU nodes
+    this process sees under ``dev`` (one provider: its remedy alone, so the native
+    NVIDIA text is unchanged; none or several: every candidate, labelled).
+    """
+    if cause != "cuda_init_failed":
+        return _FIX[cause]
+    providers = visible_providers(dev) or PROVIDERS
+    if len(providers) == 1:
+        remedies = providers[0].driver_remedy
+    else:
+        remedies = " ".join(f"{item.label}: {item.driver_remedy}" for item in providers)
+    return f"{_FIX[cause]} {remedies} {_EMPTY_VISIBLE_DEVICES}"
+
+
+def visible_providers(dev: Path = Path("/dev")) -> tuple[GpuDeviceProvider, ...]:
+    """Providers with a GPU device node visible to this process as a character device.
+
+    The device-node fact of :func:`observe_gpu_unavailable_cause`, per provider.
+    """
+    try:
+        found = {
+            provider
+            for entry in dev.iterdir()
+            if (provider := gpu_provider(entry, dev=dev)) is not None and entry.is_char_device()
+        }
+    except OSError:
+        return ()
+    return tuple(item for item in PROVIDERS if item in found)
 
 
 def observe_gpu_unavailable_cause(
@@ -72,28 +106,28 @@ def observe_gpu_unavailable_cause(
     Call only after PyTorch reported no CUDA device. Reads two filesystem facts
     and never touches the driver.
     """
-    try:
-        nodes = any(
-            gpu_provider(entry, dev=dev) is not None and entry.is_char_device()
-            for entry in dev.iterdir()
-        )
-    except OSError:
-        nodes = False
-    if not nodes:
+    if not visible_providers(dev):
         return "no_device_nodes"
     if not (sys_root / "bus" / "pci" / "devices").is_dir():
         return "sys_not_mounted"
     return "cuda_init_failed"
 
 
-def gpu_required_message(detail: str, cause: GpuUnavailableCause | None = None) -> str:
+def gpu_required_message(
+    detail: str, cause: GpuUnavailableCause | None = None, *, dev: Path = Path("/dev")
+) -> str:
     """The plain refusal sentence, with the observed reason in parentheses.
 
     ``cause`` (from :func:`observe_gpu_unavailable_cause`) selects the fix; without
-    one the sentence names the requirement and the device-node setting.
+    one the sentence names the requirement and the device-node setting. For
+    ``cuda_init_failed`` the fix follows the GPU device providers visible under
+    ``dev`` (``core.gpu_devices``), e.g. the WSL2 driver checks for ``/dev/dxg``.
+    ``detail`` may quote a recorded reason, whose wording stays stable.
     """
     if cause is not None:
-        return f"SIDERIUS real training needs an NVIDIA GPU with CUDA: {_FIX[cause]} ({detail})."
+        return (
+            f"SIDERIUS real training needs an NVIDIA GPU with CUDA: {_fix(cause, dev)} ({detail})."
+        )
     return (
         "SIDERIUS real training needs an NVIDIA GPU with CUDA, and none is "
         f"visible here ({detail}). Run on a machine with a CUDA GPU; in the "

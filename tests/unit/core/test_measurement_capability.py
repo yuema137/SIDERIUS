@@ -260,6 +260,49 @@ class TestAMissingCudaDeviceNamesItsCause:
         (dev / "dxg").symlink_to("/dev/null")  # a character device
         assert observe_gpu_unavailable_cause(dev=dev, sys_root=sys_root) == cause
 
+    def test_a_cuda_init_failure_is_fixed_for_the_visible_provider(self, tmp_path):
+        """#1577: with GPU nodes and /sys visible but CUDA failing, the fix told every
+        host to run nvidia-smi or nvidia-modprobe and to look for /dev/nvidia-uvm. A
+        WSL2 host has none of these (its nvidia-smi is /usr/lib/wsl/lib/nvidia-smi and
+        its driver is the Windows NVIDIA driver). Fails if a WSL2-only /dev gets the
+        native NVIDIA remedy, if a native NVIDIA /dev loses it, or if either remedy
+        names the other provider."""
+        from core.gpu_requirement import gpu_required_message
+
+        (tmp_path / "native").mkdir()
+        (tmp_path / "wsl").mkdir()
+        native, _ = self._roots(tmp_path / "native", node=True, pci=True)
+        wsl, _ = self._roots(tmp_path / "wsl", node=False, pci=True)
+        (wsl / "dxg").symlink_to("/dev/null")  # a character device
+        native_fix = gpu_required_message("d", "cuda_init_failed", dev=native)
+        wsl_fix = gpu_required_message("d", "cuda_init_failed", dev=wsl)
+        assert "nvidia-modprobe -u -c=0" in native_fix and "/usr/lib/wsl" not in native_fix
+        assert "/usr/lib/wsl/lib/nvidia-smi" in wsl_fix and "Windows" in wsl_fix
+        assert "nvidia-modprobe" not in wsl_fix and "/dev/nvidia-uvm is missing" not in wsl_fix
+        for fix in (native_fix, wsl_fix):
+            assert "CUDA failed to initialize" in fix and "CUDA_VISIBLE_DEVICES" in fix
+
+    def test_recorded_no_cuda_reasons_keep_their_identity(self):
+        """#1577 identity: these reasons are recorded (the capability travels in
+        tuning inputs and unit invocations; the tuner persists it as
+        probe_capability_reason) and are mapped back to a cause by exact text. The
+        provider-aware wording lives in the never-recorded fix. Fails if a reason's
+        text changes, which would strand the cause of every record written before."""
+        from core.runtime_control.measurement_capability import NO_CUDA_REASONS
+
+        assert NO_CUDA_REASONS == {
+            "no_device_nodes": (
+                "no CUDA device is visible: no /dev/nvidia<N> device node is present"
+            ),
+            "sys_not_mounted": (
+                "no CUDA device is visible: NVIDIA device nodes are present but /sys is not mounted"
+            ),
+            "cuda_init_failed": (
+                "no CUDA device is visible: NVIDIA device nodes and /sys are present, "
+                "but CUDA failed to initialize"
+            ),
+        }
+
     @pytest.mark.parametrize("cause", ["no_device_nodes", "sys_not_mounted", "cuda_init_failed"])
     def test_the_resolver_carries_the_cause_to_the_capability(self, monkeypatch, cause):
         """Production reachability: the reason the resolver records must map back to

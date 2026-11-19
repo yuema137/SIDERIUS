@@ -50,6 +50,9 @@ class GpuDeviceProvider:
     listing_command: str
     #: What the sandbox adds beside a declared node, in plain words.
     passthrough_note: str
+    #: What to check when this provider's nodes are visible but CUDA still fails to
+    #: initialize (``core.gpu_requirement``'s ``cuda_init_failed`` fix), in plain words.
+    driver_remedy: str
     #: Companion character devices passed when present on the host.
     control_nodes: tuple[Path, ...] = ()
     #: A directory whose character devices are passed when present (MIG caps).
@@ -93,6 +96,12 @@ NVIDIA = GpuDeviceProvider(
     node_display="/dev/nvidia<N>",
     listing_command="ls /dev/nvidia*",
     passthrough_note="read-only /sys and the NVIDIA control nodes",
+    driver_remedy=(
+        "Check the driver on this machine with nvidia-smi. The run sandbox passes the "
+        "NVIDIA control nodes present at launch and cannot create one; if "
+        "/dev/nvidia-uvm is missing on the host, run nvidia-smi (or "
+        "nvidia-modprobe -u -c=0) once on the host, then relaunch."
+    ),
     control_nodes=tuple(
         Path(p)
         for p in (
@@ -113,6 +122,13 @@ WSL2 = GpuDeviceProvider(
     node_display="/dev/dxg",
     listing_command="ls -l /dev/dxg",
     passthrough_note="read-only /sys and the WSL GPU driver libraries (/usr/lib/wsl)",
+    driver_remedy=(
+        "The CUDA driver comes from the Windows NVIDIA driver: check it from inside WSL "
+        "with /usr/lib/wsl/lib/nvidia-smi. If that fails, update the NVIDIA driver in "
+        "Windows (and run wsl --update there), restart WSL, then relaunch. The run "
+        "sandbox mounts /usr/lib/wsl read-only by itself; there are no /dev/nvidia "
+        "control nodes to create under WSL2."
+    ),
     read_only=(SYSFS, Path("/usr/lib/wsl")),
 )
 
