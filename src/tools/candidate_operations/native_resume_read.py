@@ -1,9 +1,10 @@
 """Preserve selected terminal history while verifying authorized append-only progress."""
 
 import os
-from pathlib import Path
 
+from core.native_writer.models import WriterRefusal
 from core.native_writer.resume import reservation_name
+from core.native_writer.state import state_directory
 from tools.native_chain.observation import NativeChainEvidence
 
 from .models import OperationRecord, OperationSnapshot
@@ -17,12 +18,12 @@ def has_continuation(record: OperationRecord) -> bool:
     if record.submission.kind == "native_chain_resume":
         return True
     _, admission = chain_context(record)
-    workspace = Path(admission.workspace)
-    return os.path.lexists(
-        workspace.parent
-        / f".{workspace.name}.siderius-writer"
-        / reservation_name(record.submission.request_id)
-    )
+    try:
+        # The writer owner derives its control directory; never rebuild the rule here.
+        state = state_directory(admission.workspace)
+    except WriterRefusal:
+        return False  # no workspace parent, so no writer state or reservation
+    return os.path.lexists(state / reservation_name(record.submission.request_id))
 
 
 def prefix_equal(baseline: NativeChainEvidence, current: NativeChainEvidence, start: int) -> bool:
