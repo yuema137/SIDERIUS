@@ -1039,9 +1039,12 @@ The `proposal.failure_cause` boundary renders the cause part of the native loop'
 #1554). Its arguments are the exception's parts: `cause` (the headline with the
 final error plus the earlier-attempt block), `final_error`, `source_heading`
 (`The assembled plugin source` or `The assembled loss source`) and `source`. The
-native renderer returns `cause` plus the source lines the final error names as
-`line N`: at most three in-range locations in first-mention order, each with one
-line of context, each line cut to 160 characters, each line printed once. It never
+native renderer returns `cause` plus the source lines named by the final error's
+SyntaxError locations, `(<unknown>, line N)` from `ast.parse` or `(<file>.py, line
+N)`: at most three in-range locations in first-mention order, each with one line of
+context, each line cut to 160 characters, each line printed once. Any other "line
+N" text (a JSON decode error, a traceback into another module) is ignored. Lines
+are counted the way Python counts them, at `\r\n`, `\r` and `\n` only. It never
 includes the full source. It is entered for every repair-exhaustion entry, so a
 profile covering a run that may exhaust repairs must declare it; returning
 `f"{cause}\n\n{source_heading}:\n{source}"` restores the pre-#1554 entry byte for

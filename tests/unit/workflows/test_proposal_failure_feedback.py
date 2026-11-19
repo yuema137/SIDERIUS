@@ -15,9 +15,12 @@ What only these tests catch:
 
 from __future__ import annotations
 
+import ast
 import os
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from agent.prompt_rendering import PromptRenderingProfile, bind_prompt_profile
 from agent.prompt_templates.attempt_history import RepairExhaustedError, earlier_attempts_block
@@ -279,14 +282,17 @@ def test_exhausted_repair_entry_drops_the_source_and_keeps_the_cause():
 
 
 def test_entry_quotes_only_the_source_lines_the_final_error_names():
-    """Location and key lines survive, bounded: at most three named lines, each
-    with one line of context and cut to 160 characters; out-of-range or
-    repeated line numbers add nothing. Fails if the excerpt grows with the
-    source or ignores the error's own line reference."""
+    """Location and key lines survive, bounded: at most three SyntaxError
+    locations, each with one line of context and cut to 160 characters;
+    out-of-range or repeated locations add nothing. Fails if the excerpt grows
+    with the source, ignores the error's own location, quotes a line for a
+    "line N" that is not a location in this source, or counts lines
+    differently from Python."""
     long_line = "x" * 300
     source = "\n".join([*(f"l{n}" for n in range(1, 10)), long_line, "l11", "l12"])
     error = (
-        "invalid syntax (<unknown>, line 10); see line 2, line 2 again, line 5, line 7 and line 99"
+        "invalid syntax (<unknown>, line 10); also (<unknown>, line 2), (<unknown>, line 2), "
+        "(plugin_1.py, line 5), (<unknown>, line 7) and (<unknown>, line 99)"
     )
     entry = repair_exhausted_entry(_exhausted(error, source=source))
     excerpt = entry.split("\n\n", 1)[1]
@@ -302,14 +308,30 @@ def test_entry_quotes_only_the_source_lines_the_final_error_names():
         "  >  5 | l5",
         "     6 | l6",
     ]
-    assert repair_exhausted_entry(_exhausted("no location here")).endswith("no location here")
+    # No SyntaxError location: a JSON decode position or a bare "line N" is not
+    # a line of the plugin, so nothing is quoted.
+    for unrelated in ("no location here", "Expecting value: line 1 column 1 (char 0)"):
+        assert repair_exhausted_entry(_exhausted(unrelated)).endswith(unrelated)
     # Adjacent locations share context lines; each line is printed once.
-    adjacent = repair_exhausted_entry(_exhausted("line 2 and line 3", source=source))
+    adjacent = repair_exhausted_entry(
+        _exhausted("bad (<unknown>, line 2) and (<unknown>, line 3)", source=source)
+    )
     assert adjacent.split("\n\n", 1)[1].splitlines()[1:] == [
         "     1 | l1",
         "  >  2 | l2",
         "  >  3 | l3",
         "     4 | l4",
+    ]
+    # Python counts lines at \r\n, \r and \n only; a form feed inside line 2
+    # must not shift the real SyntaxError's line 3 (str.splitlines would).
+    feed_source = "a = 1\nb = '\x0c'\nc = (\nd = 2\n"
+    with pytest.raises(SyntaxError) as raised:
+        ast.parse(feed_source)
+    feed = repair_exhausted_entry(_exhausted(str(raised.value), source=feed_source))
+    assert feed.split("\n\n", 1)[1].split("\n")[1:] == [
+        "    2 | b = '\x0c'",
+        "  > 3 | c = (",
+        "    4 | d = 2",
     ]
 
 

@@ -32,7 +32,7 @@ repairs raises :class:`RepairExhaustedError`. Its ``str()`` is the full failure
 text, last assembled source included, for logs and tracebacks. The proposer's
 ``previous_failures`` entry is rendered through the ``proposal.failure_cause``
 boundary instead: the headline and earlier-attempt block, plus only the source
-lines the final error names. An experiment-owned profile restores the
+lines the final error's SyntaxError locations name. An experiment-owned profile restores the
 pre-#1554 entry by returning ``cause``, a blank line, ``source_heading`` with a
 colon, and ``source`` (exactly the tail of the ``str()`` text).
 """
@@ -45,7 +45,14 @@ from collections.abc import Sequence
 from agent.prompt_rendering import prompt_boundary
 
 _EARLIER_REPAIRS_HEADING = "Earlier attempt errors (oldest first):"
-_LINE_REFERENCE = re.compile(r"\bline (\d+)\b")
+# The location a SyntaxError gives for the assembled source: ``(<unknown>, line N)``
+# from ``ast.parse`` or ``(<file>.py, line N)`` from compiling the plugin file. A
+# bare "line N" elsewhere (a JSONDecodeError's "line 1 column 1", a traceback
+# into another module) is not a line of this source and is ignored.
+_LINE_REFERENCE = re.compile(r"\((?:<unknown>|[^()]*\.py), line (\d+)\)")
+# Python counts lines at \r\n, \r and \n only; str.splitlines() also splits at
+# \x0b, \x0c, \x1c-\x1e, \x85, \u2028 and \u2029, which would shift every later line.
+_PYTHON_NEWLINE = re.compile(r"\r\n|\r|\n")
 _MAX_NAMED_LOCATIONS = 3
 _EXCERPT_CONTEXT = 1
 _MAX_EXCERPT_LINE_CHARS = 160
@@ -124,14 +131,16 @@ class RepairExhaustedError(ValueError):
 
 
 def _named_source_lines(final_error: str, source: str) -> str:
-    """The source lines ``final_error`` names as ``line N``, with one line of context.
+    """The source lines ``final_error``'s SyntaxError locations name, with one line of context.
 
     At most :data:`_MAX_NAMED_LOCATIONS` distinct in-range locations, in order of
     first mention; each printed line is cut to :data:`_MAX_EXCERPT_LINE_CHARS`
     and printed once even when two locations share context.
     ``""`` when the error names no line of ``source``.
     """
-    lines = source.splitlines()
+    lines = _PYTHON_NEWLINE.split(source)
+    if lines and lines[-1] == "":
+        lines.pop()  # a trailing newline ends the last line; it does not open one
     named: list[int] = []
     for match in _LINE_REFERENCE.finditer(final_error):
         number = int(match.group(1))
@@ -164,7 +173,8 @@ def render_repair_failure_cause(
     """The proposer's view of a repair-exhausted failure, without the full source.
 
     ``cause`` is the headline plus earlier-attempt block; the source contributes
-    only the lines the final error names (location and key lines). Bounded by
+    only the lines the final error's SyntaxError locations name (location and
+    key lines). Bounded by
     the cause, which holds at most one line per distinct attempt error, plus at
     most three excerpts of three lines each.
     """
