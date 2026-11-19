@@ -262,13 +262,59 @@ class TestTheTwoAccountsAreJoinedNotMerged:
         assert training.allocator_peak_mib == 1400
 
 
+class _PhaseDriver:
+    """Reports a setup spike only for samples taken inside the worker's setup phase.
+
+    The worker holds each phase open until this driver has answered a sample whose
+    timestamp lies inside it, so the phase windows never depend on how fast the host
+    boots or schedules the worker (#1578: an index-based series spent its spike on
+    samples taken while a loaded host was still starting the interpreter). A flag is
+    first observed on one call and acted on at the next, because the sampler stamps
+    a sample before it calls the driver.
+    """
+
+    def __init__(self, directory: Path) -> None:
+        self.directory = directory
+        self.armed: set[str] = set()
+
+    def __call__(self, root_pid, device) -> GpuAccountingSnapshot:
+        value = 3_000
+        for phase, spike in (("setup", 20_000), ("training", 3_000)):
+            if (self.directory / f"{phase}.open").exists():
+                if phase in self.armed:
+                    value = spike
+                    (self.directory / f"{phase}.sampled").touch()
+                self.armed.add(phase)
+        return _Driver([value])(root_pid, device)
+
+
+def _phase_gated_worker(directory: Path) -> str:
+    def hold(phase: str) -> str:
+        opened, sampled = directory / f"{phase}.open", directory / f"{phase}.sampled"
+        return (
+            f"open({str(opened)!r}, 'w').close()\n"
+            "gate = time.time() + 600\n"
+            f"while not os.path.exists({str(sampled)!r}) and time.time() < gate:\n"
+            "    time.sleep(0.005)\n"
+            f"os.remove({str(opened)!r})\n"
+        )
+
+    body = _GOOD_WORKER.replace("time.sleep(0.15)\n", hold("setup"), 1)
+    return body.replace("time.sleep(0.25)\n", hold("training"), 1)
+
+
 class TestPhasesGetTheirOwnDriverPeak:
     def test_a_spike_during_setup_does_not_become_the_training_requirement(self, tmp_path):
         """The cumulative-peak trap, directly. A running maximum would
         report 20,000 for training; the window says 3,000."""
-        # Setup runs ~0.15 s, training ~0.25 s, sampled every 10 ms.
-        series = [20_000] * 8 + [3_000] * 200
-        run = _run(tmp_path, _GOOD_WORKER, series)
+        request = _spec(tmp_path).request.model_copy(update={"deadline_seconds": 600.0})
+        run = run_prephase_measurement(
+            _spec(tmp_path, request=request),
+            device=DEVICE,
+            command=_fake_worker(tmp_path, _phase_gated_worker(tmp_path)),
+            device_sampler=_PhaseDriver(tmp_path),
+            poll_seconds=0.01,
+        )
         assert run.phase("setup").driver_tree_peak_mib == 20_000
         assert run.phase("training").driver_tree_peak_mib == 3_000
 

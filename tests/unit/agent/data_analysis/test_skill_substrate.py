@@ -47,6 +47,7 @@ from agent.schemas.data_analysis.skills import (
 from agent.schemas.data_analysis.time import FixedTimePrecisionRequirement
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from core.execution_deadline import execution_deadline
+from tests.helpers.data_analysis_resources import REAL_WORKER_TIMEOUT_SECONDS
 
 
 def _skill_source(
@@ -60,9 +61,9 @@ def _skill_source(
     if sleep:
         body = """
     import subprocess, sys, time
-    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
     runtime.artifact_path("child.pid").write_text(str(child.pid))
-    time.sleep(60)
+    time.sleep(600)
 """
     else:
         usage = (
@@ -288,7 +289,7 @@ def test_out_of_tree_discovery_does_not_import_and_loads_only_after_selection(
     selected = search_skill_cards(snapshot, "describe dataset", limit=1)
     assert selected[0].card.skill_id == "summary_statistics"
     interface = resolve_skill_interface(
-        selected[0], control_directory=tmp_path / "interface", timeout_s=3.0
+        selected[0], control_directory=tmp_path / "interface", timeout_s=REAL_WORKER_TIMEOUT_SECONDS
     )
     assert marker.read_text() == "imported"
     assert "max_items" in interface.parameter_json_schema["properties"]
@@ -299,7 +300,7 @@ def test_out_of_tree_discovery_does_not_import_and_loads_only_after_selection(
 def test_parameters_are_validated_against_the_resolved_schema(tmp_path: Path) -> None:
     skill = discover_skills((_make_pack(tmp_path / "external-pack", _skill_source()),)).skills[0]
     interface = resolve_skill_interface(
-        skill, control_directory=tmp_path / "interface", timeout_s=3.0
+        skill, control_directory=tmp_path / "interface", timeout_s=REAL_WORKER_TIMEOUT_SECONDS
     )
 
     with pytest.raises(SkillExecutorError, match="parameter validation failed"):
@@ -308,7 +309,7 @@ def test_parameters_are_validated_against_the_resolved_schema(tmp_path: Path) ->
             interface,
             {"max_items": 100},
             control_directory=tmp_path / "validation",
-            timeout_s=3.0,
+            timeout_s=REAL_WORKER_TIMEOUT_SECONDS,
         )
 
 
@@ -327,7 +328,9 @@ def test_runtime_owned_numeric_view_is_read_only_and_rejects_hidden_fields(
     tmp_path: Path,
 ) -> None:
     skill = discover_skills((_make_pack(tmp_path / "external-pack", _skill_source()),)).skills[0]
-    skill_input, data = _skill_input(tmp_path, skill, time.monotonic() + 5.0)
+    skill_input, data = _skill_input(
+        tmp_path, skill, time.monotonic() + REAL_WORKER_TIMEOUT_SECONDS
+    )
     descriptor = skill_input.materializations[0]
 
     loaded = load_materialized_view(descriptor, data)
@@ -359,7 +362,9 @@ def test_runtime_owned_numeric_view_is_read_only_and_rejects_hidden_fields(
 
 def test_runtime_owned_time_series_view_has_a_versioned_shape_contract(tmp_path: Path) -> None:
     skill = discover_skills((_make_pack(tmp_path / "external-pack", _skill_source()),)).skills[0]
-    skill_input, data = _skill_input(tmp_path, skill, time.monotonic() + 5.0)
+    skill_input, data = _skill_input(
+        tmp_path, skill, time.monotonic() + REAL_WORKER_TIMEOUT_SECONDS
+    )
     descriptor = skill_input.materializations[0]
     np.savez(
         data,
@@ -457,14 +462,18 @@ def test_environment_lock_is_verified_before_selected_import(tmp_path: Path) -> 
     ).skills[0]
 
     with pytest.raises(SkillExecutorError, match="active runtime has"):
-        resolve_skill_interface(skill, control_directory=tmp_path / "interface", timeout_s=3.0)
+        resolve_skill_interface(
+            skill, control_directory=tmp_path / "interface", timeout_s=REAL_WORKER_TIMEOUT_SECONDS
+        )
     assert not marker.exists()
 
 
 def test_skill_input_refuses_independently_sampled_aligned_bindings(tmp_path: Path) -> None:
     pack_ref = _make_pack(tmp_path / "external-pack", _skill_source())
     skill = discover_skills((pack_ref,)).skills[0]
-    skill_input, _data = _skill_input(tmp_path, skill, time.monotonic() + 5.0)
+    skill_input, _data = _skill_input(
+        tmp_path, skill, time.monotonic() + REAL_WORKER_TIMEOUT_SECONDS
+    )
     payload = skill_input.model_dump(mode="json")
     second = dict(payload["materializations"][0])
     second["materialization_id"] = "view-2"
@@ -496,14 +505,16 @@ def test_bounded_executor_validates_runs_and_certifies_artifacts(tmp_path: Path)
         resolve_skill_interface(
             skill,
             control_directory=store.root / "control" / "interface-1",
-            timeout_s=3.0,
+            timeout_s=REAL_WORKER_TIMEOUT_SECONDS,
         ),
         {"max_items": 5},
         control_directory=store.root / "control" / "validate-1",
-        timeout_s=3.0,
+        timeout_s=REAL_WORKER_TIMEOUT_SECONDS,
     )
     staging = store.staging_directory("invocation-1")
-    skill_input, data = _skill_input(tmp_path, skill, time.monotonic() + 5.0)
+    skill_input, data = _skill_input(
+        tmp_path, skill, time.monotonic() + REAL_WORKER_TIMEOUT_SECONDS
+    )
 
     result = execute_skill(
         result_id="result-1",
@@ -515,7 +526,7 @@ def test_bounded_executor_validates_runs_and_certifies_artifacts(tmp_path: Path)
         staging_directory=staging,
         control_directory=store.root / "control" / "execute-1",
         plan_sha256="4" * 64,
-        timeout_s=3.0,
+        timeout_s=REAL_WORKER_TIMEOUT_SECONDS,
     )
 
     assert result.status == "completed"
@@ -537,19 +548,26 @@ def test_timeout_terminates_the_worker_process_tree(tmp_path: Path) -> None:
         ),
         request_id="request-1",
     )
+    interface = resolve_skill_interface(
+        skill,
+        control_directory=store.root / "control" / "interface-1",
+        timeout_s=REAL_WORKER_TIMEOUT_SECONDS,
+    )
+    # One worker start + skill import, timed on this host now (#1578).
+    baseline_started = time.monotonic()
     validated = validate_skill_parameters(
         skill,
-        resolve_skill_interface(
-            skill,
-            control_directory=store.root / "control" / "interface-1",
-            timeout_s=3.0,
-        ),
+        interface,
         {"max_items": 5},
         control_directory=store.root / "control" / "validate-1",
-        timeout_s=3.0,
+        timeout_s=REAL_WORKER_TIMEOUT_SECONDS,
     )
+    # The timeout must expire after the worker has spawned the child whose
+    # process-tree cleanup this test exercises, so it scales with that baseline;
+    # the skill and its child sleep far longer, so only the timeout ends them.
+    timeout_s = max(2.0, 4 * (time.monotonic() - baseline_started))
     staging = store.staging_directory("invocation-1")
-    skill_input, data = _skill_input(tmp_path, skill, time.monotonic() + 1.0)
+    skill_input, data = _skill_input(tmp_path, skill, time.monotonic() + timeout_s)
 
     result = execute_skill(
         result_id="result-1",
@@ -561,9 +579,7 @@ def test_timeout_terminates_the_worker_process_tree(tmp_path: Path) -> None:
         staging_directory=staging,
         control_directory=store.root / "control" / "execute-1",
         plan_sha256="4" * 64,
-        # Leave enough time for a loaded CI runner to import the worker and
-        # spawn the child whose process-tree cleanup this test exercises.
-        timeout_s=2.0,
+        timeout_s=timeout_s,
     )
 
     assert result.status == "timed_out"
@@ -601,15 +617,22 @@ def test_timed_out_disposition_survives_an_unreaped_descendant(
         ),
         request_id="request-1",
     )
+    interface = resolve_skill_interface(
+        skill,
+        control_directory=store.root / "control" / "interface-1",
+        timeout_s=REAL_WORKER_TIMEOUT_SECONDS,
+    )
+    # One worker start, timed on this host now: the timeout below must expire only
+    # after the child has spawned its grandchild, whatever the host load (#1578).
+    baseline_started = time.monotonic()
     validated = validate_skill_parameters(
         skill,
-        resolve_skill_interface(
-            skill, control_directory=store.root / "control" / "interface-1", timeout_s=30.0
-        ),
+        interface,
         {"max_items": 5},
         control_directory=store.root / "control" / "validate-1",
-        timeout_s=30.0,
+        timeout_s=REAL_WORKER_TIMEOUT_SECONDS,
     )
+    timeout_s = max(1.5, 4 * (time.monotonic() - baseline_started))
     sleep_executable = shutil.which("sleep")
     assert sleep_executable is not None
     grandchild_pid_path = tmp_path / "grandchild.pid"
@@ -617,11 +640,13 @@ def test_timed_out_disposition_survives_an_unreaped_descendant(
         sys.executable,
         "-c",
         "import subprocess, time; "
-        f"p = subprocess.Popen([{sleep_executable!r}, '60']); "
-        f"open({str(grandchild_pid_path)!r}, 'w').write(str(p.pid)); time.sleep(60)",
+        f"p = subprocess.Popen([{sleep_executable!r}, '600']); "
+        f"open({str(grandchild_pid_path)!r}, 'w').write(str(p.pid)); time.sleep(600)",
     ]
     monkeypatch.setattr(executor, "_worker_command", lambda _request, _response: child)
-    skill_input, data = _skill_input(tmp_path, skill, time.monotonic() + 30.0)
+    skill_input, data = _skill_input(
+        tmp_path, skill, time.monotonic() + timeout_s + REAL_WORKER_TIMEOUT_SECONDS
+    )
     assert libc.prctl(pr_set_child_subreaper, 1, 0, 0, 0) == 0
     try:
         result = execute_skill(
@@ -634,7 +659,7 @@ def test_timed_out_disposition_survives_an_unreaped_descendant(
             staging_directory=store.staging_directory("invocation-1"),
             control_directory=store.root / "control" / "execute-1",
             plan_sha256="4" * 64,
-            timeout_s=1.5,
+            timeout_s=timeout_s,
         )
     finally:
         libc.prctl(pr_set_child_subreaper, 0, 0, 0, 0)
@@ -727,16 +752,18 @@ def test_executor_rejects_uncertified_skill_claims(
     interface = resolve_skill_interface(
         skill,
         control_directory=store.root / "control" / "interface-1",
-        timeout_s=3.0,
+        timeout_s=REAL_WORKER_TIMEOUT_SECONDS,
     )
     validated = validate_skill_parameters(
         skill,
         interface,
         {"max_items": 5},
         control_directory=store.root / "control" / "validate-1",
-        timeout_s=3.0,
+        timeout_s=REAL_WORKER_TIMEOUT_SECONDS,
     )
-    skill_input, data = _skill_input(tmp_path, skill, time.monotonic() + 5.0)
+    skill_input, data = _skill_input(
+        tmp_path, skill, time.monotonic() + REAL_WORKER_TIMEOUT_SECONDS
+    )
 
     result = execute_skill(
         result_id="result-1",
@@ -748,7 +775,7 @@ def test_executor_rejects_uncertified_skill_claims(
         staging_directory=store.staging_directory("invocation-1"),
         control_directory=store.root / "control" / "execute-1",
         plan_sha256="4" * 64,
-        timeout_s=3.0,
+        timeout_s=REAL_WORKER_TIMEOUT_SECONDS,
     )
 
     assert result.status == "failed"

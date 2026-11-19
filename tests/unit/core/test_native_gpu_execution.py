@@ -228,7 +228,7 @@ if mode == 'fail':
     print('original child failure', file=sys.stderr); sys.exit(7)
 publish('loaded.json')
 while not (root / 'authorized.json').exists(): time.sleep(.005)
-if mode == 'no-ack': time.sleep(10)
+if mode == 'no-ack': time.sleep(600)  # never acks within any parent schedule
 publish('consumed.json')
 if len(sys.argv) > 3:
     with open(sys.argv[3], 'rb') as barrier:
@@ -238,12 +238,26 @@ print('child completed')
 """
 
 
-@pytest.mark.parametrize("watchdog", [False, True])
-def test_real_child_handshake_owns_group_and_records_consumption(tmp_path, bound_spec, watchdog):
+def _real_child_observer():
+    """A synthetic GPU observer on logical time for the real-child handshake witnesses.
+
+    These tests own the startup handshake, ack window and group cleanup. On wall
+    time the observer's synthetic samples could age past ``max_sample_age_seconds``
+    whenever the host does not schedule its sampling thread for a second, and the
+    run then stops with "GPU observation coverage expired" (#1578). Coverage
+    expiry has its own witnesses in ``test_gpu_runtime_protection``.
+    """
     from tests.unit.core.test_gpu_runtime_protection import observer
 
+    anchor = time.monotonic()
+    return observer(clock=lambda: anchor)
+
+
+@pytest.mark.parametrize("watchdog", [False, True])
+def test_real_child_handshake_owns_group_and_records_consumption(tmp_path, bound_spec, watchdog):
+
     startup, _, publications = startup_fixture(tmp_path, bound_spec)
-    obs = observer()
+    obs = _real_child_observer()
     result = supervise_process(
         [sys.executable, "-c", _CHILD_HANDSHAKE, str(startup.path.parent), "ok"],
         env=dict(os.environ),
@@ -266,10 +280,9 @@ def test_real_child_handshake_owns_group_and_records_consumption(tmp_path, bound
 @pytest.mark.parametrize("rss_kind", ["incomplete", "over-limit"])
 def test_startup_checks_rss_before_publication(tmp_path, bound_spec, monkeypatch, rss_kind):
     from core.runtime_control.process_group import RssObservation
-    from tests.unit.core.test_gpu_runtime_protection import observer
 
     startup, _, publications = startup_fixture(tmp_path, bound_spec)
-    obs = observer()
+    obs = _real_child_observer()
     monkeypatch.setattr(
         "core.runtime_control.observed_subprocess.observe_tree_rss",
         lambda _: RssObservation(
@@ -294,10 +307,9 @@ def test_startup_checks_rss_before_publication(tmp_path, bound_spec, monkeypatch
 
 
 def test_failed_child_retains_original_output_without_loaded_receipt(tmp_path, bound_spec):
-    from tests.unit.core.test_gpu_runtime_protection import observer
 
     startup, _, publications = startup_fixture(tmp_path, bound_spec)
-    obs = observer()
+    obs = _real_child_observer()
     with pytest.raises(subprocess.CalledProcessError) as error:
         supervise_process(
             [sys.executable, "-c", _CHILD_HANDSHAKE, str(startup.path.parent), "fail"],
@@ -315,12 +327,22 @@ def test_failed_child_retains_original_output_without_loaded_receipt(tmp_path, b
 
 
 def test_missing_ack_stops_real_child_with_watchdog_disabled(tmp_path, bound_spec):
-    from tests.unit.core.test_gpu_runtime_protection import observer
+    """Fails if a child that never confirms consumption keeps running, leaves its
+    group behind, or reaches forward when no process watchdog is configured.
+
+    The ack window expiry has two wordings ("observation was late" before the
+    receipt read, "was not confirmed" after a missing receipt); which one fires
+    depends on whether the window closes between those two clock reads, so a
+    loaded host can select either (#1578). Both are this window's refusal, while
+    the shared-allowance refusals ("exhausted") are not.
+    """
 
     startup, _, publications = startup_fixture(tmp_path, bound_spec)
     startup.request = startup.request.model_copy(update={"ack_timeout_seconds": 0.1})
-    obs = observer()
-    with pytest.raises(TimeoutError, match="late") as error:
+    obs = _real_child_observer()
+    with pytest.raises(
+        TimeoutError, match=r"consumption (observation was late|was not confirmed)"
+    ) as error:
         supervise_process(
             [sys.executable, "-c", _CHILD_HANDSHAKE, str(startup.path.parent), "no-ack"],
             env=dict(os.environ),
