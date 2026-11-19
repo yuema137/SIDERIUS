@@ -25,6 +25,7 @@ from agent.cache_consolidator import consolidate
 from agent.llm_bridge import LLMBridge
 from agent.llm_settings import DEFAULT_LLM_PROVIDER
 from agent.llm_transport.contracts import PydanticTransportConfig
+from agent.prompt_rendering import PromptProfileIntegrityError
 from agent.prompt_templates.constraints import append_constraint_disclosure
 from agent.prompt_templates.interpretation.rendering import (
     DEDUP_SYSTEM_PROMPT,
@@ -1122,10 +1123,11 @@ class ResultInterpretationAgent:
                 )
 
             return output
-        except AnalysisBriefResumeMismatchError:
+        except (AnalysisBriefResumeMismatchError, PromptProfileIntegrityError):
             # Resume identity disagreement is not an LLM degradation.  Running
             # the degraded branch would retry the same incompatible brief and,
-            # worse, could make an identity refusal look recoverable.
+            # worse, could make an identity refusal look recoverable. The same
+            # holds for a bound prompt profile that cannot render (#1542).
             raise
         except Exception as e:
             print(f"  [DEGRADED] Interpretation LLM flow failed: {type(e).__name__}: {e}")

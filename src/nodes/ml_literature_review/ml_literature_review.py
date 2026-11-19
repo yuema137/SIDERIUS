@@ -47,6 +47,7 @@ from pydantic import ValidationError
 
 from agent.llm_bridge import LLMBridge
 from agent.llm_settings import DEFAULT_LLM_PROVIDER, default_model_for_provider
+from agent.prompt_rendering import raise_if_prompt_profile_failure
 from agent.prompt_templates.constraints import append_constraint_disclosure
 from agent.prompt_templates.literature_review import (
     DIMENSION_LABELS,
@@ -530,6 +531,7 @@ class MLLiteratureReviewAgent:
                     label="lit_review.search_decision",
                 )
             except Exception as e:  # resilience boundary — a bad call ends the loop, not the run
+                raise_if_prompt_profile_failure(e)  # #1542: never a resilience case
                 logger.warning(
                     "search-decision call failed at round %d: %s; ending loop", rounds, e
                 )
@@ -779,6 +781,7 @@ class MLLiteratureReviewAgent:
             extract.extraction_method = extraction_method
             return extract
         except Exception as e:  # resilience boundary — a bad extract must not abort the run
+            raise_if_prompt_profile_failure(e)  # #1542: never a resilience case
             logger.warning("paper compression failed: %s", e)
             return None
 
@@ -809,6 +812,7 @@ class MLLiteratureReviewAgent:
                 label="lit_review.synthesis",
             )
         except Exception as e:  # resilience boundary
+            raise_if_prompt_profile_failure(e)  # #1542: never a resilience case
             logger.warning("synthesis call failed: %s", e)
             return []
 

@@ -1762,9 +1762,13 @@ class HyperparamTuningAgent:
                     break
 
                 except Exception as e:
+                    from agent.prompt_rendering import raise_if_prompt_profile_failure
                     from core.local_code.failure import raise_if_code_package_failure
 
                     raise_if_code_package_failure(e)
+                    # #1542: a profile that cannot render the planner/reflector
+                    # prompts stops the run; it is never a failed round.
+                    raise_if_prompt_profile_failure(e)
                     if isinstance(e, OutputRetentionError):
                         # Post-consumer output lifecycle is infrastructure,
                         # never evidence about this candidate. Its typed

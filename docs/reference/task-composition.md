@@ -932,7 +932,22 @@ appendix boundary. Supported boundaries are `native_training.appendix`, `proposa
 `generated_program`, `report_synthesis`, `generated_skill_promotion`,
 and `structured_output_repair`. See the decorated functions for exact typed
 input signatures. An undeclared boundary raises when reached; it never silently
-uses another historical profile. These boundaries are not a universal replacement
+uses another historical profile.
+
+Every integrity failure of a bound profile raises one typed, run-fatal error,
+`agent.prompt_rendering.PromptProfileIntegrityError` (a `RuntimeError`, not a
+`ValueError`), whose message names the profile and the boundary. The failures
+are: a reached boundary the profile neither renders nor marks native, provider
+sources that changed during the run, a renderer that raises (the original
+exception is the `__cause__`), a renderer that returns something other than the
+boundary's text type, and a provider identity that differs from the one pinned
+at composition. Handlers that would otherwise turn a failure into recoverable
+feedback re-raise it through `raise_if_prompt_profile_failure` (#1542): the
+native loop's proposal-attempt handler (no `previous_failures` entry is
+written), the proposer's boldness retry, the interpreter's degraded path, the
+tuner's round-failure path and the literature review's resilience boundaries.
+The run stops instead of continuing with different prompts. In the candidate
+worker a raising node fails its body, which already ends the loop. These boundaries are not a universal replacement
 for every message produced by every node.
 
 The `implementor.reference_code` boundary renders the ancestor-source section of

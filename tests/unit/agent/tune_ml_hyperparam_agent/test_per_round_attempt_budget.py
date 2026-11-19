@@ -610,3 +610,27 @@ class TestFormalBudgetDistinctFromTrial:
 
 
 pytestmark = pytest.mark.usefixtures("synthetic_run_authorities")
+
+
+def test_prompt_profile_integrity_failure_stops_the_tuner(agent_with_scripted_skill, tmp_path):
+    """#1542: a bound prompt profile that cannot render the planner prompt is
+    not a failed round. Fails if the round handler absorbs it (the round would
+    be retried and the run would continue with different prompts)."""
+    from agent.prompt_rendering import PromptProfileIntegrityError
+
+    failure = PromptProfileIntegrityError("paper-x", "tuner.training_dynamics", "synthetic")
+    agent, _saved, counter, cleanup = _setup(agent_with_scripted_skill, [], plans=[failure])
+    try:
+        with pytest.raises(PromptProfileIntegrityError):
+            agent.run(
+                _make_input(
+                    tmp_path,
+                    max_rounds=2,
+                    attempts_per_round=2,
+                    attempts_per_formal_round=2,
+                    max_fail_rounds=2,
+                )
+            )
+    finally:
+        cleanup()
+    assert counter["i"] == 0
