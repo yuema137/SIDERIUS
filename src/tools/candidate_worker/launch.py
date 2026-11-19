@@ -21,6 +21,7 @@ from tools.workspace_sandbox.runner import (
     run,
     run_observed,
 )
+from workflows.definition import workflow_trains
 
 from .admission import admit_input_paths
 from .layout import candidate_proposal_dir
@@ -215,7 +216,7 @@ def launch_candidate(
             initial,
             result,
             control / "child.json",
-            training=any(node.capability == "tuning" for node in definition.nodes),
+            training=workflow_trains(definition),
             graph_request=request if graph else None,
         )
         if terminal.status == "paused":

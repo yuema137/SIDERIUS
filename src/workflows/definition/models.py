@@ -431,6 +431,16 @@ class ReusableWorkflowDefinition(DeclarationModel):
         return self
 
 
+def workflow_trains(definition: WorkflowDefinition | ReusableWorkflowDefinition) -> bool:
+    """Whether ``definition`` trains: it declares a ``tuning`` node.
+
+    The one answer to "does this workflow train?", shared by declaration
+    validation, the candidate worker (training admission, terminal
+    reconciliation, receipt checks) and the preparation GPU advisory.
+    """
+    return any(node.capability == "tuning" for node in definition.nodes)
+
+
 class TaskBinding(DeclarationModel):
     """Accepted native identity and readable labels; never a resolver or new hash."""
 
@@ -475,7 +485,7 @@ class ReusableWorkflowDocument(DeclarationModel):
             for item in self.definition.externals
             if item.contract == "native-training.settings"
         ]
-        tuning = any(node.capability == "tuning" for node in self.definition.nodes)
+        tuning = workflow_trains(self.definition)
         if self.training_settings is None:
             if settings_bindings or tuning:
                 raise ValueError("Reusable tuning requires source-owned training_settings")
