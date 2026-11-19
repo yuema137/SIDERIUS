@@ -78,6 +78,36 @@ class TestRefusalAuthority:
         assert "'block' from 'punet'" in str(exc.value)
         refuse_builtin_proposal_under_isolation(proposal, baseline_isolation=False)
 
+    @pytest.mark.parametrize("spelling", ["WaveNet", " punet ", "Transformer", "gated-fno"])
+    def test_bundled_references_are_matched_in_normalised_form(self, spelling):
+        """A claim or reuse target that varies case, padding or '-'/'_' still names
+        a bundled baseline. Fails if either check compares the raw string."""
+        claiming = _with_claim(
+            _make_proposal_output(model_name="fresh_tcn"), "experiment", spelling
+        )
+        with pytest.raises(BaselineIsolationViolation, match=f"'block' from '{spelling}'"):
+            refuse_builtin_proposal_under_isolation(claiming, baseline_isolation=True)
+        reusing = _make_proposal_output(model_name="fresh_tcn")
+        reusing.baseline_config["model_config"]["model_name"] = spelling
+        with pytest.raises(BaselineIsolationViolation, match="reached for the bundled"):
+            refuse_builtin_proposal_under_isolation(reusing, baseline_isolation=True)
+
+    def test_exact_match_refusal_message_is_unchanged(self):
+        """The pre-#1614 refusal text for an exact bundled model name must stay
+        byte-identical (it is what the next proposer reads)."""
+        from ml_models.model_descriptions import BUNDLED_MODEL_TYPES
+
+        with pytest.raises(BaselineIsolationViolation) as exc:
+            refuse_builtin_proposal_under_isolation(
+                _make_proposal_output(model_name="wavenet"), baseline_isolation=True
+            )
+        assert str(exc.value) == (
+            "baseline_isolation is ON and the proposal reached for the bundled "
+            "built-in model type(s) ['wavenet'] (proposal.model_name='wavenet'). The "
+            f"WITHOUT arm excludes every shipped baseline {sorted(BUNDLED_MODEL_TYPES)}; "
+            "propose a new architecture or reuse an agent-generated plugin."
+        )
+
     @pytest.mark.parametrize(
         ("source_type", "source_id"),
         [

@@ -919,12 +919,19 @@ def refuse_builtin_proposal_under_isolation(
         return
     from ml_models.model_descriptions import BUNDLED_MODEL_TYPES, is_bundled_model_type
 
-    reached: set[str] = {proposal.model_name}
+    def names_bundled(name: str) -> bool:
+        # #1614: an LLM-written reference may vary case, padding or '-'/'_';
+        # the bundled authority's keys are lowercase snake_case.
+        return is_bundled_model_type(name.strip().casefold().replace("-", "_"))
+
+    reached: set[str] = (
+        {proposal.model_name} if is_bundled_model_type(proposal.model_name) else set()
+    )
     model_cfg = (proposal.baseline_config or {}).get("model_config") or {}
     reuse_target = model_cfg.get("model_name") if isinstance(model_cfg, dict) else None
-    if isinstance(reuse_target, str):
+    if isinstance(reuse_target, str) and names_bundled(reuse_target):
         reached.add(reuse_target)
-    offending = sorted(name for name in reached if is_bundled_model_type(name))
+    offending = sorted(reached)
     if offending:
         raise BaselineIsolationViolation(
             f"baseline_isolation is ON and the proposal reached for the bundled "
@@ -940,7 +947,7 @@ def refuse_builtin_proposal_under_isolation(
     claims = [
         f"{item.component!r} from {item.source_id!r}"
         for item in proposal.inherited_components
-        if item.source_type == "experiment" and is_bundled_model_type(item.source_id)
+        if item.source_type == "experiment" and names_bundled(item.source_id)
     ]
     if claims:
         raise BaselineIsolationViolation(
