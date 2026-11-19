@@ -48,6 +48,21 @@ def read(record):
     return read_operation_tokens(record.config, record.submission.request_id)
 
 
+def test_writer_state_location_comes_from_the_writer_owner(native_usage, tmp_path, monkeypatch):
+    """#1567: the token reader hand-built ``.<name>.siderius-writer``, a second copy
+    of ``core.native_writer.state.state_directory``. Fails if the reader stops
+    asking the owner: when the owner's location holds no writer state, fenced usage
+    with a ledger must refuse instead of being read as anchored usage."""
+    record, _, _ = native_usage
+    assert read(record).availability == "available"
+    monkeypatch.setattr(
+        "tools.candidate_operations.native_tokens.state_directory",
+        lambda workspace: tmp_path / "owner-moved" / "writer-state",
+    )
+    with pytest.raises(OperationFailure, match="could not be verified"):
+        read(record)
+
+
 @pytest.mark.parametrize("fenced", [False, True])
 def test_prelaunch_identity_not_ready_is_unavailable(chain, fenced):
     record, _ = chain
