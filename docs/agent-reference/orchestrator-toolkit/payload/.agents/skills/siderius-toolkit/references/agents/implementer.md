@@ -33,13 +33,15 @@ this toolkit does not choose them or prescribe a scientific model.
 ## Existing entrypoints and parameters
 
 Python import: `nodes.ml_model_implementor.ml_model_implementor.MLModelImplementor`.
-Native constructor at revision `5ccb436f` (v1.1.0), plus the optional
-`transport` route carrier added by #1533 (OpenAI background mode; see the
-workflow `openai_background` setting):
+Native constructor, generated from the class source (a computed default shows
+its value in parentheses). `transport` is the optional OpenAI background-mode
+route carrier (see the workflow `openai_background` setting):
 
+<!-- generated: constructor nodes.ml_model_implementor.ml_model_implementor.MLModelImplementor -->
 ```text
-MLModelImplementor(provider: str='openai', model_id: str | None=None, max_retries: int | None=None, reasoning_effort: str | None=None, bridge_factory=None, capability_index_path: str | None=None, max_output_tokens: int | None=None, transport: PydanticTransportConfig | None=None, probe_seed: SeedContext | None=None, **kwargs)
+MLModelImplementor(provider: str=IMPLEMENT.provider (= 'openai'), model_id: str | None=IMPLEMENT.model_id (= None), max_retries: int | None=IMPLEMENT.max_retries (= None), reasoning_effort: str | None=IMPLEMENT.reasoning_effort (= None), bridge_factory=None, capability_index_path: str | None=None, max_output_tokens: int | None=None, transport: PydanticTransportConfig | None=None, probe_seed: SeedContext | None=None, **kwargs)
 ```
+<!-- end generated -->
 
 `bridge_factory` is existing dependency injection, not a model-provider choice.
 Use production defaults unless the declared execution environment supplies one.

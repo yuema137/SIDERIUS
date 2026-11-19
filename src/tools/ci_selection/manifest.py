@@ -98,6 +98,15 @@ DIRECTORY_SCANS: dict[str, tuple[str, ...]] = {
         "src/execute_tools/health_checks/resources/health_checks.yaml",
         "src/tools/claude_hooks/templates/",
     ),
+    # The toolkit reference-table check imports every node module, schema and
+    # agent class inside an isolated child process (empty plugin dirs) and
+    # compares the payload tables with them; no static import edge exists.
+    "tests/unit/tools/test_orchestration_reference_tables.py": (
+        "src/nodes/",
+        "src/agent/schemas/",
+        "src/agent/llm_settings.py",
+        "docs/agent-reference/orchestrator-toolkit/payload/.agents/skills/siderius-toolkit/references/",
+    ),
     # The optional-dependency isolation witness imports the gateway only inside
     # a fresh interpreter's script string, beyond static import discovery.
     "tests/unit/agent/llm_bridge/test_optional_dependency.py": (
