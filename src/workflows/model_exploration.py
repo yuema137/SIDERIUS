@@ -2650,7 +2650,7 @@ def run_workflow(
                     }
                     # Sorted: set order varies with PYTHONHASHSEED across processes.
                     for mt in sorted(ref_models):
-                        src = load_model_source(mt)
+                        src = load_model_source(mt, baseline_isolation=launch.baseline_isolation)
                         if src:
                             ref_code[mt] = src
                     if ref_code:

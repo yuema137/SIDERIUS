@@ -57,6 +57,6 @@ def test_optional_checkout_absence_keeps_package_source_available(monkeypatch):
     monkeypatch.setattr(proposal_helpers, "_SIDERIUS_ROOT", None)
     monkeypatch.setattr(watchdog_profile, "SHIPPED_PROFILES_PATH", None)
     monkeypatch.setattr(settings, "DEFAULT_CONFIG_PATH", None)
-    assert "class AE" in proposal_helpers.load_model_source("fcnet")
+    assert "class AE" in proposal_helpers.load_model_source("fcnet", baseline_isolation=False)
     assert watchdog_profile._load_shipped() == {}
     assert settings.load_settings().server.port == 8000
