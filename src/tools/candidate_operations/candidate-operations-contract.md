@@ -34,7 +34,14 @@ run-seed option `submit --run-seed N` ([run seed](#run-seed-issue-983)), the
 host-ledger options `submit --host-ledger DIR --host-budget FILE` and
 `release-reservation --host-ledger DIR --operation-id UUID`
 ([host reservation ledger](#host-reservation-ledger)). Outputs are schema JSON. Submit
-exit zero establishes admission/existing identity, not native success. Status
+exit zero establishes admission/existing identity, not native success. After a
+`candidate` submission is admitted, the CLI prints the #1562 training-without-GPU
+advisory (`tools.candidate_prepare.prepared_gpu_warning`, text owned by
+`core.gpu_requirement.training_gpu_warning`) on stderr as `Warning: ...` when the
+request declares a tuning node and its `devices` name no GPU device node (#1587).
+It warns only: stdout JSON and the exit status are unchanged, preparation
+submissions are not checked (their candidate request is submitted separately),
+and `submit_operation` itself prints nothing. Status
 exit zero includes rejected/failed/unknown observations. Invalid records/config
 produce a nonzero typed error; CLI argument grammar errors use argparse's normal
 nonzero usage response. Exceptions that might include caller content are not

@@ -12,6 +12,7 @@ from pydantic import BaseModel, TypeAdapter
 from core.durable_io import publish_bytes_write_once
 from core.run_seed_lock import run_seed_argument
 from core.runtime_control.budget_intake import HostBudgetFileError, load_host_budget_file
+from tools.candidate_prepare import prepared_gpu_warning
 from tools.candidate_worker.loop_models import OperatorAdvice
 
 from .cancel import request_cancel
@@ -24,6 +25,7 @@ from .models import (
     SUBMISSION,
     CandidateLoopResumeOperation,
     CandidateLoopResumeRequest,
+    CandidateOperation,
     LogReadRequest,
     OperationError,
     OperationFailure,
@@ -112,12 +114,30 @@ def run_request(config: OperationStoreConfig, args: argparse.Namespace) -> BaseM
     submission = SUBMISSION.validate_json(read_bytes(Path(args.request).absolute()))
     if args.command == "submit":
         submission = with_run_seed(submission, args.run_seed)
-        return submit_operation(
+        handle = submit_operation(
             config, submission, launch_environment=os.environ, host=host_scheduling(args)
         )
+        warn_training_without_gpu(submission)
+        return handle
     if submission.kind != "native_chain":
         raise OperationFailure("kind", "review requires native_chain")
     return review_native_chain_operation(config, submission, launch_environment=os.environ)
+
+
+def warn_training_without_gpu(submission: OperationSubmission) -> None:
+    """Print the #1562 advisory on stderr for an admitted candidate that cannot train.
+
+    A candidate request that declares a tuning node but names no GPU device node
+    is refused when it reaches training, after its LLM steps (issue #1587). The
+    text is ``core.gpu_requirement.training_gpu_warning``'s. Warn only: stdout and
+    the exit status are unchanged. Preparation operations are skipped because the
+    candidate request they produce is submitted, and checked, separately.
+    """
+    if not isinstance(submission, CandidateOperation):
+        return
+    warning = prepared_gpu_warning(submission.request)
+    if warning is not None:
+        print(f"Warning: {warning}", file=sys.stderr)
 
 
 def with_run_seed(submission: OperationSubmission, run_seed: int | None) -> OperationSubmission:
