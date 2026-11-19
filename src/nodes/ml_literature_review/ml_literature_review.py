@@ -68,6 +68,7 @@ from agent.schemas.literature_review import (
 )
 from agent.schemas.proposal import AgentCard, ExpertContextItem
 from agent.skills.paper_resolver_skill.wrapper import run_skill
+from core.execution_deadline import raise_if_deadline_exceeded
 from core.generated_artifact_name import validate_generated_artifact_name
 from core.layout import checkout_root, require_checkout
 from core.record_encoding import decode_record, record_json
@@ -532,6 +533,7 @@ class MLLiteratureReviewAgent:
                 )
             except Exception as e:  # resilience boundary — a bad call ends the loop, not the run
                 raise_if_prompt_profile_failure(e)  # #1542: never a resilience case
+                raise_if_deadline_exceeded(e)  # #1603: a refused allocation ends the run
                 logger.warning(
                     "search-decision call failed at round %d: %s; ending loop", rounds, e
                 )
@@ -782,6 +784,7 @@ class MLLiteratureReviewAgent:
             return extract
         except Exception as e:  # resilience boundary — a bad extract must not abort the run
             raise_if_prompt_profile_failure(e)  # #1542: never a resilience case
+            raise_if_deadline_exceeded(e)  # #1603: a refused allocation ends the run
             logger.warning("paper compression failed: %s", e)
             return None
 
@@ -813,6 +816,7 @@ class MLLiteratureReviewAgent:
             )
         except Exception as e:  # resilience boundary
             raise_if_prompt_profile_failure(e)  # #1542: never a resilience case
+            raise_if_deadline_exceeded(e)  # #1603: a refused allocation ends the run
             logger.warning("synthesis call failed: %s", e)
             return []
 

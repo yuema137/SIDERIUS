@@ -21,6 +21,7 @@ from agent.schemas.data_analysis.context import AnalysisBrief, AnalysisQuestion
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
 from agent.schemas.interpretation import InterpretationInput, InterpretationOutput
 from core.durable_io import publish_bytes_write_once
+from core.execution_deadline import active_deadline, stopped_by
 from core.generated_artifact_name import validate_generated_artifact_name
 
 
@@ -206,6 +207,22 @@ def _brief_route(bridge, provider: str, model_id: str | None) -> tuple[str, str]
     return provider, model_id
 
 
+def _raise_if_worker_stopped(exc: Exception) -> None:
+    """Re-raise a refusal by the enclosing deadline instead of recording the brief.
+
+    The brief keeps its own ``timed_out`` record for a provider timeout or a
+    refusal by a shorter nested allocation: the interpretation continues
+    without it. A refusal by the deadline bound around this call (the
+    candidate worker's remaining budget, #1590) refuses every later step too,
+    so it must reach the worker's classification. It is raised before any
+    record is persisted, so a resumed run asks for the brief again (#1603).
+    With no deadline bound nothing changes.
+    """
+    enclosing = active_deadline()
+    if enclosing is not None and stopped_by(exc, enclosing):
+        raise exc
+
+
 def generate_or_resume_analysis_brief(
     *,
     bridge,
@@ -285,6 +302,7 @@ def generate_or_resume_analysis_brief(
         )
         record = _AnalysisBriefGenerationRecord(receipt=receipt, brief=brief)
     except Exception as exc:
+        _raise_if_worker_stopped(exc)
         status = "timed_out" if isinstance(exc, TimeoutError) else "failed"
         failure_code = (
             "invalid_analysis_brief"

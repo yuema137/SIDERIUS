@@ -61,6 +61,7 @@ from agent.skills.training_skill.estimator import SegmentationDimensionUnavailab
 from agent.utils.architectural_pattern_tagger import ARCHITECTURAL_PATTERNS
 from agent.utils.proposer_preflight import estimate_proposal_time
 from core.capability_registry import CapabilityRegistry
+from core.execution_deadline import raise_if_deadline_exceeded
 from core.generated_artifact_name import validate_generated_artifact_name
 from core.hardware_context import HardwareContext
 from core.record_encoding import decode_record, record_json
@@ -2231,7 +2232,8 @@ class MLModelProposalAgent:
                             )
                 except PromptProfileIntegrityError:
                     raise  # #1542: a profile that cannot render stops the run.
-                except (ValidationError, Exception):
+                except (ValidationError, Exception) as retry_error:
+                    raise_if_deadline_exceeded(retry_error)  # #1603: a stop, not a bad retry
                     # Malformed prediction — corrected by the causal-owned
                     # validation block below (P-1 fix). The old assumption
                     # ("let the proposing stage handle it") was wrong: the

@@ -47,6 +47,7 @@ from agent.schemas.interpretation import (
     SecondaryMetricEvidence,
 )
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from core.execution_deadline import raise_if_deadline_exceeded
 from core.generated_artifact_name import validate_generated_artifact_name
 from core.record_encoding import decode_record, record_json
 from execute_tools.metric_order import MetricOrder
@@ -1130,6 +1131,9 @@ class ResultInterpretationAgent:
             # holds for a bound prompt profile that cannot render (#1542).
             raise
         except Exception as e:
+            # #1603: a refused deadline refuses the degraded path's calls too,
+            # and must reach the worker as a stop, not as a degraded digest.
+            raise_if_deadline_exceeded(e)
             print(f"  [DEGRADED] Interpretation LLM flow failed: {type(e).__name__}: {e}")
             print(
                 f"  [DEGRADED] Carrying forward incoming runtime_vocab "
