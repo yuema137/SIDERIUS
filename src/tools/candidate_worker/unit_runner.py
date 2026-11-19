@@ -36,7 +36,8 @@ class NodeUnitRaised(Exception):
     """The unit's native phase raised; its traceback is already in the worker log.
 
     ``failure`` names a classified cause the child reported (#1542:
-    ``"prompt_profile_integrity"``); ``None`` for an ordinary native exception.
+    ``"prompt_profile_integrity"``; #1590: ``"deadline_exceeded"``); ``None`` for
+    an ordinary native exception.
     """
 
     def __init__(self, node_id: str, failure: str | None = None) -> None:

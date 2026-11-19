@@ -941,6 +941,7 @@ boundary fails until this list is updated.
 - `data_analysis.skill_selection`: `src/agent/prompt_templates/data_analysis.py::render_skill_selection_prompt(analysis_input: DataAnalysisInput, candidates: tuple[DiscoveredAnalysisSkill, ...], *, output_schema: dict) -> tuple[str, str]`
 - `data_analysis.structured_output_repair`: `src/agent/prompt_templates/data_analysis.py::render_structured_output_repair_prompt(*, stage: str, output_schema: dict, original_output: object, validation_errors: list[dict]) -> tuple[str, str]`
 - `evaluation.spec`: `src/agent/prompt_templates/evaluation.py::render_evaluation_spec(context: EvaluationPromptContext | None) -> str`
+- `implementor.inherited_components`: `src/nodes/ml_model_implementor/reference_code.py::render_inherited_components_section(components: list[InheritedComponent], supplied_sources: list[str], stage: ReferenceStage) -> str`
 - `implementor.reference_code`: `src/nodes/ml_model_implementor/reference_code.py::render_reference_code_section(reference_code: dict[str, str], stage: ReferenceStage) -> str`
 - `implementor.repair_system`: `src/nodes/ml_model_implementor/repair_prompt.py::render_repair_system_prompt(kind: RepairKind, code_contract: str) -> str`
 - `implementor.validator_feedback`: `src/nodes/ml_model_implementor/validator_feedback.py::render_validator_feedback_section(feedback: str, stage: LaterStage) -> str`
@@ -949,6 +950,8 @@ boundary fails until this list is updated.
 - `interpretation.score_value`: `src/agent/prompt_templates/interpretation/rendering.py::format_interpretation_score(score: float | None) -> str`
 - `native_training.appendix`: `src/agent/prompt_templates/native_training.py::render_native_training_appendix() -> str`
 - `proposal.failure_attempt_history`: `src/agent/prompt_templates/attempt_history.py::render_earlier_attempts(earlier: list[tuple[int, str]], final_error: str, *, heading: str, unit: str) -> str`
+- `proposal.failure_cause`: `src/agent/prompt_templates/attempt_history.py::render_repair_failure_cause(cause: str, final_error: str, source_heading: str, source: str) -> str`
+- `proposal.failure_entry_layout`: `src/agent/prompt_templates/proposal/previous_failures.py::render_multiline_failure_entry(number: int, entry: str) -> str`
 - `proposal.template`: `src/agent/prompt_templates/proposal/__init__.py::load_prompt(filename: str) -> str`
 - `proposal.time_budget_context`: `src/agent/prompt_templates/proposal/budget_context.py::render_proposer_time_budget_context(inp: ProposalInput) -> str`
 - `proposer.parameter_rules`: `src/nodes/ml_model_proposal_agent/parameter_rules.py::render_proposal_parameter_rules(composition_ref: TaskCompositionRef | None, workflow_rules: ParameterRules | None) -> str`
@@ -995,6 +998,14 @@ names the calling request. It is entered only when `reference_code` is nonempty,
 so a profile that does not declare it raises only for a proposal with ancestor
 source. See the [implementor contract](../../src/nodes/ml_model_implementor/ml_model_implementor.md#ancestor-reference-source).
 
+The `implementor.inherited_components` boundary renders the proposal's declared
+`inherited_components` (component, source and evidence; for experiment sources
+whether the ancestor source is supplied) immediately before the ancestor-source
+section of the reasoning, code and repair user prompts (#1540). It is entered only
+when the proposal inherits at least one component, so a proposal that inherits
+nothing never reaches it; a profile that returns `""` restores the pre-#1540
+prompts. See the [implementor contract](../../src/nodes/ml_model_implementor/ml_model_implementor.md#ancestor-reference-source).
+
 The `implementor.validator_feedback` boundary renders the validator-rejection
 section of the implementor's code and repair user prompts; its `stage` argument
 (`"code"` or `"repair"`) names the calling request. It is entered only when
@@ -1021,6 +1032,32 @@ final `RuntimeError`). It is entered only when an earlier attempt exists, so a
 single-attempt failure or first retry is byte-identical to the pre-#1538 /
 pre-#1553 text; a profile that returns `""` restores that text everywhere. See
 `agent/prompt_templates/attempt_history.py`.
+
+The `proposal.failure_cause` boundary renders the cause part of the native loop's
+`previous_failures` entry for an implementor that ran out of repairs
+(`RepairExhaustedError`, a `ValueError`; entry `Node error: ValueError: <cause>`,
+#1554). Its arguments are the exception's parts: `cause` (the headline with the
+final error plus the earlier-attempt block), `final_error`, `source_heading`
+(`The assembled plugin source` or `The assembled loss source`) and `source`. The
+native renderer returns `cause` plus the source lines named by the final error's
+SyntaxError locations, `(<unknown>, line N)` from `ast.parse` or `(<file>.py, line
+N)`: at most three in-range locations in first-mention order, each with one line of
+context, each line cut to 160 characters, each line printed once. Any other "line
+N" text (a JSON decode error, a traceback into another module) is ignored. Lines
+are counted the way Python counts them, at `\r\n`, `\r` and `\n` only. It never
+includes the full source. It is entered for every repair-exhaustion entry, so a
+profile covering a run that may exhaust repairs must declare it; returning
+`f"{cause}\n\n{source_heading}:\n{source}"` restores the pre-#1554 entry byte for
+byte. The exception's `str()` still carries the full source for logs.
+
+The `proposal.failure_entry_layout` boundary renders one numbered item of the
+legacy reasoning prompt's `## Previous Failed Proposals` block (#1555). It is
+entered only for an entry that spans several lines: the native renderer writes
+`  <n>. <first line>` and indents every non-blank continuation line by the width of
+that prefix, leaving blank lines empty. Single-line entries are rendered natively
+as `  <n>. <entry>` and never enter it. Returning `f"  {number}. {entry}"` restores
+the pre-#1555 layout. The pipeline stages serialize `previous_failures` as JSON
+strings and do not use it.
 
 The `tuner.training_dynamics` boundary renders the shared diagnostic line used
 by planner, reflector and interpreter. Native rendering uses shortest round-trip decimal

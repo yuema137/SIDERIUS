@@ -669,6 +669,17 @@ The transport surface is declared by the module that owns it —
 `agent.llm_bridge.LLM_PROVIDER_TRANSPORT_ERRORS`, matched by `isinstance`
 so a provider-SDK subclass nobody enumerated still classifies correctly.
 
+**Exhausted execution deadline (#1590).** Before classifying, the attempt
+handler re-raises a `core.execution_deadline.ExecutionDeadlineExceeded` found in
+the exception or its explicit `__cause__` chain (`raise_if_deadline_exceeded`),
+next to the #1542 prompt-profile and local-code re-raises. A deadline that
+refused one planner/reflector request or retry wait refuses the next as well, so
+it ends the tuner instead of becoming an attempt record. Only an enclosing
+allocation produces it: inside a candidate worker that is the worker's remaining
+wall budget, and the worker then reports the run `timed_out` (fixed path) or the
+node `failed`/`deadline_exceeded` (graph). With no deadline bound, as in
+`run_one_iteration`, the handler is unchanged.
+
 **Scope**: this is the REPORTING half of "an infrastructure failure must not
 consume scientific opportunity". Whether such a failure should also be
 RETRIED into the same scientific opportunity is `D-FAIL-2`'s accounting

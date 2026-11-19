@@ -73,9 +73,10 @@ advisory is reported instead:
   (`tools.workspace_sandbox.gpu.host_gpu_devices()` on the machine that will run
   it; console `add-task` fills it in). It reads its arguments only.
 - Preparation-side reading: `tools.candidate_prepare.prepared_gpu_warning(request:
-  CandidateRunRequest) -> str | None` (module `gpu_warning`). `trains` is "the
-  prepared `preview.document.definition.nodes` contain a `tuning` node", the same
-  test the worker uses for its training receipt reconciliation; `devices` are the
+  CandidateRunRequest) -> str | None` (module `gpu_warning`). `trains` is
+  `workflows.definition.workflow_trains(preview.document.definition)` (the
+  definition declares a `tuning` node), the same predicate the worker uses for
+  training admission and its training receipt reconciliation; `devices` are the
   request's `devices`.
 - Surfaces: the CLI (`python -m tools.candidate_prepare`, both `--request` and
   `--reusable-request`) reads the prepared `candidate_request_path` after a

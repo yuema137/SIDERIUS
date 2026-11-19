@@ -13,11 +13,20 @@ owner ``core.execution_deadline`` (issue #1548). Worker process entries bind it
 around node execution, so ``LLMBridge`` clips request timeouts and refuses a
 retry wait or an OpenAI background completion window that cannot fit the
 worker's remaining budget, instead of leaving that work to the sandbox kill.
+
+A stop by that deadline is reported as running out of time, as the sandbox kill
+at the same limit is (issue #1590): ``run_within`` turns a fixed-path or
+whole-body stop into a ``timed_out`` receipt, and a graph node it stops closes
+``failed``/``deadline_exceeded``. Only the worker's own allocation counts
+(``core.execution_deadline.stopped_by``); a shorter nested allocation, such as a
+Data Analysis wall-time budget, keeps its ordinary failure.
 """
 
 from __future__ import annotations
 
 import time
+import traceback
+from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -26,6 +35,11 @@ if TYPE_CHECKING:
     # Imported lazily: worker entries bind the workspace before heavier imports.
     from agent.skills.generated_pytest import PytestLimit
     from core.execution_deadline import ExecutionDeadline
+
+    from .models import CandidateRunReceipt
+
+#: ``CandidateRunReceipt.error`` prefix of a stop by the worker's own deadline.
+WORKER_DEADLINE_ERROR = "worker_deadline_exceeded"
 
 #: Smallest limit handed to a child once the budget is spent: a positive value
 #: keeps the child's declared-limit contract valid and makes it stop at its
@@ -62,3 +76,28 @@ class WorkerBudget:
         from agent.skills.generated_pytest import PytestLimit
 
         return PytestLimit(seconds=self.remaining_seconds(), source="worker_budget")
+
+
+def run_within(
+    budget: WorkerBudget,
+    initial: CandidateRunReceipt,
+    run: Callable[[], CandidateRunReceipt],
+) -> CandidateRunReceipt:
+    """Run one worker process's native execution inside the worker deadline.
+
+    A stop by that deadline (or by a nested allocation clamped to it) becomes a
+    ``timed_out`` copy of ``initial``: like a sandbox kill at the same limit it
+    claims no native output. Every other exception propagates unchanged.
+    """
+    from core.execution_deadline import stopped_by
+
+    with budget.deadline_scope() as deadline:
+        try:
+            return run()
+        except Exception as error:
+            if not stopped_by(error, deadline):
+                raise
+            traceback.print_exception(error)
+            return initial.model_copy(
+                update={"status": "timed_out", "error": f"{WORKER_DEADLINE_ERROR}: {error}"}
+            )

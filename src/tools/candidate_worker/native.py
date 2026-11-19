@@ -8,6 +8,7 @@ from agent.schemas.proposal import ProposalOutput
 from agent.schemas.validator import ValidatorOutput
 from core.runtime_control.scheduling import HostBudget
 from tools.workflow_preview.config import parse_config
+from workflows.definition import workflow_trains
 from workflows.llm_config import WorkflowLLMConfig
 from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
@@ -136,7 +137,7 @@ def execute_native(
             return execute_fanout(
                 request, initial, composition, config, budget=budget, host_budget=host_budget
             )
-        if any(node.capability == "tuning" for node in request.preview.document.definition.nodes):
+        if workflow_trains(request.preview.document.definition):
             from .training import execute_training
             from .training_admission import admit_training
 

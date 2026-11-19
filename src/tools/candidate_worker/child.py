@@ -7,7 +7,7 @@ from pathlib import Path
 from core.generated_library import bind_generated_library_to_workspace
 from tools.workflow_preview.files import observe_file
 
-from .budget import WorkerBudget
+from .budget import WorkerBudget, run_within
 from .launch import bounded_terminal, publish
 from .models import CandidateRunReceipt, CandidateRunRequest
 from .parallel_models import control_run_budget
@@ -42,8 +42,11 @@ def execute(request_path: Path) -> CandidateRunReceipt:
     host_budget = control_run_budget(request.parallel, control)
     from .native import execute_native
 
-    with budget.deadline_scope():
-        receipt = execute_native(request, initial, budget=budget, host_budget=host_budget)
+    receipt = run_within(
+        budget,
+        initial,
+        lambda: execute_native(request, initial, budget=budget, host_budget=host_budget),
+    )
     graph = request.preview.execution_profile is not None
     if graph:
         receipt = bounded_terminal(initial, receipt)

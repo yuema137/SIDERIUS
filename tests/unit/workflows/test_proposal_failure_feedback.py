@@ -15,13 +15,15 @@ What only these tests catch:
 
 from __future__ import annotations
 
+import ast
 import os
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from agent.prompt_rendering import PromptRenderingProfile, bind_prompt_profile
-from agent.prompt_templates.attempt_history import earlier_attempts_block
-from nodes.ml_model_implementor.ml_model_implementor import _repair_exhausted_message
+from agent.prompt_templates.attempt_history import RepairExhaustedError, earlier_attempts_block
 from nodes.ml_model_proposal_agent.stage_validation import earlier_response_errors
 from tests.integration.workflows.test_chain_candidate_graduation import _llm_config_pseudo
 from tests.unit.workflows.test_model_exploration import (
@@ -31,11 +33,12 @@ from tests.unit.workflows.test_model_exploration import (
     _make_tuning_output,
     _make_validator_output,
 )
-from workflows.model_exploration import run_workflow
+from workflows.model_exploration import _proposal_attempt_failure, run_workflow
 from workflows.proposal_failure_feedback import (
     exhausted_validation_feedback,
     implementation_error_feedback,
     next_attempt_validation_feedback,
+    repair_exhausted_entry,
 )
 from workflows.run_config import WorkflowLaunchConfig
 from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
@@ -86,13 +89,15 @@ def test_profile_returning_empty_restores_pre_1538_bytes(tmp_path):
     block or enters the boundary without an earlier attempt."""
     with bind_prompt_profile(_profile(tmp_path, {})):
         assert exhausted_validation_feedback([(1, "V1")]) == "V1"
-        assert _repair_exhausted_message(
-            "Code generation",
-            "m",
-            "E",
-            [],
-            source_heading="The assembled plugin source",
-            source="S",
+        assert str(
+            RepairExhaustedError(
+                "Code generation",
+                "m",
+                "E",
+                [],
+                source_heading="The assembled plugin source",
+                source="S",
+            )
         ) == (
             "Code generation failed after 1 attempts for 'm': E\n\nThe assembled plugin source:\nS"
         )
@@ -104,13 +109,15 @@ def test_profile_returning_empty_restores_pre_1538_bytes(tmp_path):
         # #1553 retry requests restore their pre-#1553 text as well.
         assert next_attempt_validation_feedback([(1, "V1"), (2, "V2")]) == "V2"
         assert earlier_response_errors([(1, "E1")], "E2") == ""
-        assert _repair_exhausted_message(
-            "Loss generation",
-            "l",
-            "E3",
-            [(1, "E1"), (2, "E2")],
-            source_heading="The assembled loss source",
-            source="S",
+        assert str(
+            RepairExhaustedError(
+                "Loss generation",
+                "l",
+                "E3",
+                [(1, "E1"), (2, "E2")],
+                source_heading="The assembled loss source",
+                source="S",
+            )
         ) == (
             "Loss generation failed after 3 attempts for 'l': E3\n\nThe assembled loss source:\nS"
         )
@@ -143,7 +150,14 @@ def test_run_workflow_feeds_every_rejection_to_the_next_proposal(tmp_path):
             output,
             output,
             output,
-            ValueError("IMPL-ERR"),
+            RepairExhaustedError(
+                "Code generation",
+                "candidate",
+                "IMPL-ERR",
+                [],
+                source_heading="The assembled plugin source",
+                source="PLUGIN-SOURCE",
+            ),
             output,
         ]
         validator.return_value.run.side_effect = [*rejections, _make_validator_output(passed=True)]
@@ -169,7 +183,8 @@ def test_run_workflow_feeds_every_rejection_to_the_next_proposal(tmp_path):
     assert len(calls) == 3
     assert calls[2].args[0].previous_failures == [
         f"V2\n\n{_HEADING}\n  Implementation attempt 1: V1",
-        f"Node error: ValueError: IMPL-ERR\n\n{_HEADING}\n  Implementation attempt 1: V3",
+        "Node error: ValueError: Code generation failed after 1 attempts for 'candidate': "
+        f"IMPL-ERR\n\n{_HEADING}\n  Implementation attempt 1: V3",
     ]
 
 
@@ -229,3 +244,120 @@ def test_run_workflow_gives_each_implementation_attempt_all_earlier_rejections(t
         "V1",
         f"V2\n\n{_HEADING}\n  Implementation attempt 1: V1",
     ]
+
+
+# ---------------------------------------------------------------------------
+# #1554 — the proposer entry carries the cause, not the assembled source
+# ---------------------------------------------------------------------------
+
+_SOURCE = "\n".join(f"source line {n}" for n in range(1, 41))
+
+
+def _exhausted(final_error, history=(), source=_SOURCE):
+    return RepairExhaustedError(
+        "Code generation",
+        "m",
+        final_error,
+        list(history),
+        source_heading="The assembled plugin source",
+        source=source,
+    )
+
+
+def test_exhausted_repair_entry_drops_the_source_and_keeps_the_cause():
+    """#1554: fails if the entry still embeds the assembled source, or loses
+    the headline, the earlier-attempt block or the ``Node error: ValueError:``
+    label; ``str()`` must keep the full text for logs."""
+    exc = _exhausted("E2 shape mismatch", [(1, "E1 name 'x' is not defined")])
+    entry = _proposal_attempt_failure(exc)
+    assert entry == (
+        "Node error: ValueError: Code generation failed after 2 attempts for 'm': "
+        "E2 shape mismatch\n\nEarlier attempt errors (oldest first):\n"
+        "  Attempt 1: E1 name 'x' is not defined"
+    )
+    assert "source line" not in entry and "The assembled plugin source" not in entry
+    assert str(exc).endswith(f"The assembled plugin source:\n{_SOURCE}")
+    # Any other node exception keeps the generic label and its own text.
+    assert _proposal_attempt_failure(ValueError("boom")) == "Node error: ValueError: boom"
+
+
+def test_entry_quotes_only_the_source_lines_the_final_error_names():
+    """Location and key lines survive, bounded: at most three SyntaxError
+    locations, each with one line of context and cut to 160 characters;
+    out-of-range or repeated locations add nothing. Fails if the excerpt grows
+    with the source, ignores the error's own location, quotes a line for a
+    "line N" that is not a location in this source, or counts lines
+    differently from Python."""
+    long_line = "x" * 300
+    source = "\n".join([*(f"l{n}" for n in range(1, 10)), long_line, "l11", "l12"])
+    error = (
+        "invalid syntax (<unknown>, line 10); also (<unknown>, line 2), (<unknown>, line 2), "
+        "(plugin_1.py, line 5), (<unknown>, line 7) and (<unknown>, line 99)"
+    )
+    entry = repair_exhausted_entry(_exhausted(error, source=source))
+    excerpt = entry.split("\n\n", 1)[1]
+    assert excerpt.splitlines() == [
+        "Source lines named by the final error:",
+        "     9 | l9",
+        f"  > 10 | {'x' * 160}",
+        "    11 | l11",
+        "     1 | l1",
+        "  >  2 | l2",
+        "     3 | l3",
+        "     4 | l4",
+        "  >  5 | l5",
+        "     6 | l6",
+    ]
+    # No SyntaxError location: a JSON decode position or a bare "line N" is not
+    # a line of the plugin, so nothing is quoted.
+    for unrelated in ("no location here", "Expecting value: line 1 column 1 (char 0)"):
+        assert repair_exhausted_entry(_exhausted(unrelated)).endswith(unrelated)
+    # Adjacent locations share context lines; each line is printed once.
+    adjacent = repair_exhausted_entry(
+        _exhausted("bad (<unknown>, line 2) and (<unknown>, line 3)", source=source)
+    )
+    assert adjacent.split("\n\n", 1)[1].splitlines()[1:] == [
+        "     1 | l1",
+        "  >  2 | l2",
+        "  >  3 | l3",
+        "     4 | l4",
+    ]
+    # Python counts lines at \r\n, \r and \n only; a form feed inside line 2
+    # must not shift the real SyntaxError's line 3 (str.splitlines would).
+    feed_source = "a = 1\nb = '\x0c'\nc = (\nd = 2\n"
+    with pytest.raises(SyntaxError) as raised:
+        ast.parse(feed_source)
+    feed = repair_exhausted_entry(_exhausted(str(raised.value), source=feed_source))
+    assert feed.split("\n\n", 1)[1].split("\n")[1:] == [
+        "    2 | b = '\x0c'",
+        "  > 3 | c = (",
+        "    4 | d = 2",
+    ]
+
+
+def test_profile_restores_the_pre_1554_entry_bytes(tmp_path):
+    """The siderius-exp pin: a profile whose ``proposal.failure_cause``
+    renderer appends the source heading and source reproduces the old entry,
+    ``Node error: ValueError: <full exception text>``, byte for byte."""
+    pinned = _profile(
+        tmp_path,
+        {
+            "proposal.failure_cause": lambda cause, final_error, source_heading, source: (
+                f"{cause}\n\n{source_heading}:\n{source}"
+            ),
+            "proposal.failure_attempt_history": lambda **_: "",
+        },
+    )
+    with bind_prompt_profile(pinned):
+        exc = _exhausted("E2 at line 3", [(1, "E1")])
+        assert repair_exhausted_entry(exc) == f"Node error: ValueError: {exc}"
+
+
+def test_repair_exhausted_error_survives_pickling():
+    """A raise inside a process pool is pickled; the custom signature would
+    otherwise fail to rebuild the exception and hide the real failure."""
+    import pickle
+
+    exc = _exhausted("E at line 1", [(1, "E0")])
+    copy = pickle.loads(pickle.dumps(exc))
+    assert (str(copy), copy.cause, copy.source) == (str(exc), exc.cause, exc.source)

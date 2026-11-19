@@ -1785,12 +1785,16 @@ class HyperparamTuningAgent:
 
                 except Exception as e:
                     from agent.prompt_rendering import raise_if_prompt_profile_failure
+                    from core.execution_deadline import raise_if_deadline_exceeded
                     from core.local_code.failure import raise_if_code_package_failure
 
                     raise_if_code_package_failure(e)
                     # #1542: a profile that cannot render the planner/reflector
                     # prompts stops the run; it is never a failed round.
                     raise_if_prompt_profile_failure(e)
+                    # #1590: an exhausted execution deadline (a candidate worker's
+                    # remaining budget) refuses every later round too.
+                    raise_if_deadline_exceeded(e)
                     if isinstance(e, OutputRetentionError):
                         # Post-consumer output lifecycle is infrastructure,
                         # never evidence about this candidate. Its typed

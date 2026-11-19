@@ -18,14 +18,23 @@ boundary, so an experiment-owned prompt profile can supply a historical
 rendering per ``stage``. The builders enter it only when a source is supplied;
 an empty mapping renders nothing and never enters the boundary, leaving prompts
 without ancestors byte-identical under native and historical profiles alike.
+
+Inherited components (#1540): the same owner renders the proposal's
+``inherited_components`` (which component, from which source, and why) next to
+the ancestor source, through the separate boundary
+``implementor.inherited_components``. It is entered only when the proposal
+inherits something. The validator's regex patterns are deliberately not
+rendered: showing the verifier's pattern would invite code written to match the
+pattern rather than to carry the component over.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Literal
 
 from agent.prompt_rendering import prompt_boundary
+from agent.schemas.proposal import InheritedComponent
 
 ReferenceStage = Literal["reasoning", "code", "repair"]
 
@@ -97,3 +106,63 @@ def render_reference_code_section(reference_code: dict[str, str], stage: Referen
             "",
         ]
     return "\n".join(lines).rstrip("\n")
+
+
+_SOURCE_KIND = {
+    "experiment": "experiment",
+    "external_agent": "external agent",
+    "human": "human directive",
+}
+
+
+def inherited_components_section(
+    components: Sequence[InheritedComponent],
+    supplied_sources: Iterable[str],
+    stage: ReferenceStage,
+) -> str:
+    """The inherited-components section for one call, or ``""`` without any (#1540).
+
+    ``supplied_sources`` are the ``model_type`` keys whose ancestor source the
+    call also carries (``reference_code``), so each experiment component says
+    whether its source is below. Prompt builders call this, never the boundary
+    directly, so a proposal that inherits nothing neither adds bytes nor
+    requires a profile to declare the boundary.
+    """
+    if not components:
+        return ""
+    return render_inherited_components_section(
+        list(components), sorted(set(supplied_sources)), stage
+    )
+
+
+@prompt_boundary("implementor.inherited_components")
+def render_inherited_components_section(
+    components: list[InheritedComponent], supplied_sources: list[str], stage: ReferenceStage
+) -> str:
+    """Render the claimed components in proposal order; identical for every ``stage``.
+
+    No leading or trailing blank line; each prompt builder owns its separators.
+    """
+    del stage  # The native rendering is stage-independent by design (#1540).
+    lines = [
+        "## Inherited Components (declared by the proposal)",
+        "",
+        "The proposal states that the new model carries over the components below.",
+        "Keep each one in your implementation (written into your own code sections",
+        "under the plugin rules) and change only what the proposal changes.",
+        "",
+    ]
+    for item in components:
+        origin = f"from {_SOURCE_KIND[item.source_type]} `{item.source_id}`"
+        notes = []
+        if item.from_run:
+            notes.append(f"run `{item.from_run}`")
+        if item.source_type == "experiment":
+            notes.append(
+                "ancestor source below"
+                if item.source_id in supplied_sources
+                else "ancestor source not available"
+            )
+        detail = f" ({'; '.join(notes)})" if notes else ""
+        lines.append(f"- `{item.component}`, {origin}{detail}: {item.contribution_evidence}")
+    return "\n".join(lines)

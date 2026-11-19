@@ -850,6 +850,78 @@ def test_resumed_segment_bounds_validator_pytest_by_its_own_worker_budget(
     )
 
 
+def test_resumed_segment_binds_its_worker_deadline(
+    prepared, loop_tuner, interpretation_provider, process_segments, monkeypatch, tmp_path
+):
+    """#1588: the continuation entry must bind the worker's remaining budget as the
+    cooperative execution deadline (#1548) around its native execution, as the fresh
+    child does. Graph units bind their own copy, so LLM-call observations cannot tell;
+    this observes the deadline ``execute_native`` itself runs under in each segment.
+    Fails if ``loop_resume.execute_continuation`` runs ``execute_native`` without a
+    deadline, or with one longer than the request's ``timeout_seconds``."""
+    from core.execution_deadline import remaining_seconds
+    from tools.candidate_worker import native, training
+
+    observed = tmp_path / "native_deadlines.jsonl"
+    real_native = native.execute_native
+
+    def recording_native(request, initial, **kwargs):
+        with observed.open("a") as stream:
+            row = {
+                "continuation": kwargs.get("continuation") is not None,
+                "remaining": remaining_seconds("test.execute_native"),
+            }
+            stream.write(json.dumps(row) + "\n")
+        return real_native(request, initial, **kwargs)
+
+    monkeypatch.setattr(native, "execute_native", recording_native)
+    request = loop_request(prepared, final_iteration=2)
+    config = OperationStoreConfig(
+        state_root=str(tmp_path / "operations"),
+        preparation_roots=(str(tmp_path),),
+        candidate_roots=(str(tmp_path),),
+    )
+    first_id = uuid4()
+    real_tune = training.HyperparamTuningAgent.run
+
+    def pause_after_first_body(self, value):
+        output = real_tune(self, value)
+        if "iteration_001" in value.storage.local.workspace:
+            request_loop_pause(config, first_id)
+        return output
+
+    monkeypatch.setattr(training.HyperparamTuningAgent, "run", pause_after_first_body)
+    submit_operation(
+        config,
+        CandidateOperation(request_id=first_id, request=request),
+        launch_environment={"OPENAI_API_KEY": "offline-stub"},
+    )
+    process_segments()
+    first = read_operation(config, first_id)
+    assert first.receipt is not None and first.receipt.status == "paused", first
+    review = review_loop_resume(config, first_id)
+    next_id = uuid4()
+    submit_operation(
+        config,
+        CandidateLoopResumeOperation(
+            request_id=next_id,
+            request=CandidateLoopResumeRequest(
+                predecessor_operation_id=first_id, expected_receipt_digest=review.receipt_digest
+            ),
+        ),
+        launch_environment={"OPENAI_API_KEY": "offline-stub"},
+    )
+    process_segments()
+    second = read_operation(config, next_id)
+    assert second.receipt is not None and second.receipt.status == "completed", second
+    rows = [json.loads(line) for line in observed.read_text().splitlines()]
+    assert [row["continuation"] for row in rows] == [False, True], rows
+    assert all(
+        row["remaining"] is not None and 0 < row["remaining"] <= request.timeout_seconds
+        for row in rows
+    ), rows
+
+
 @pytest.mark.parametrize("queued", [False, True])
 def test_budgeted_resume_reaches_its_segment_placed_or_queued(
     prepared,

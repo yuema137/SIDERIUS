@@ -1,4 +1,5 @@
-"""The worker's wall budget reaches LLMBridge as the cooperative execution deadline (#1548).
+"""The worker's wall budget reaches LLMBridge as the cooperative execution deadline (#1548),
+and a stop by it is reported as running out of time (#1590).
 
 ``core.execution_deadline`` is the owner LLMBridge reads before each request,
 each retry wait and each OpenAI background admission. These tests replace only
@@ -13,7 +14,11 @@ from pathlib import Path
 
 import pytest
 
-from core.execution_deadline import remaining_seconds
+from core.execution_deadline import (
+    ExecutionDeadlineExceeded,
+    execution_deadline,
+    remaining_seconds,
+)
 from tests.helpers.candidate_fanout import fanout_request
 from tools.candidate_worker import launch_candidate
 from tools.candidate_worker.graph_evidence import read_graph_control
@@ -89,3 +94,70 @@ def test_graph_unit_processes_bind_the_dispatched_remaining_budget(
         invocation = decode_transport(NodeInvocation, read_graph_control(path))
         budget = invocation.worker_budget_seconds
         assert budget is not None and 0 < budget <= request.timeout_seconds, path
+
+
+def _refuse_llm_calls(monkeypatch: pytest.MonkeyPatch, refusal) -> None:
+    """Every LLM call raises what ``refusal()`` raises, inside the caller's context."""
+
+    def call(self, system, user, **kwargs):
+        refusal()
+        raise AssertionError("refusal() must raise")
+
+    monkeypatch.setattr(Provider, "generate", call)
+    monkeypatch.setattr(Provider, "generate_text", call)
+
+
+def _worker_deadline_refusal() -> None:
+    # Created where the bridge would raise it: inside the worker's own scope.
+    raise ExecutionDeadlineExceeded("Execution deadline exhausted at llm.request")
+
+
+def test_fixed_worker_deadline_stop_is_timed_out(prepared, native_runner, monkeypatch):
+    """Defect #1590: since #1548 the worker deadline can stop a run before the sandbox
+    kill, and that stop ended as `failed` (`worker exit 1`) although a kill at the same
+    limit ends `timed_out`. Fails if the receipt is not `timed_out` with the
+    worker-deadline error, or if it claims any native output."""
+    _refuse_llm_calls(monkeypatch, _worker_deadline_refusal)
+    receipt = launch_candidate(prepared)
+    assert receipt.status == "timed_out", receipt.error
+    assert (receipt.error or "").startswith("worker_deadline_exceeded: ")
+    assert receipt.native_output_paths == () and receipt.validation_passed is None
+
+
+def test_fixed_worker_shorter_nested_deadline_stays_failed(prepared, native_runner, monkeypatch):
+    """Defect #1590 (scope): only the worker's own budget is reported as running out
+    of time. A refusal by a shorter nested allocation, such as a Data Analysis
+    wall-time budget, is an ordinary failure. Fails if it is reported `timed_out`."""
+
+    def nested_refusal() -> None:
+        with execution_deadline(1e-9):
+            remaining_seconds("nested.request")
+
+    _refuse_llm_calls(monkeypatch, nested_refusal)
+    receipt = launch_candidate(prepared)
+    assert receipt.status == "failed", receipt.error
+
+
+def test_graph_unit_deadline_stop_closes_node_deadline_exceeded(
+    prepared, native_runner, monkeypatch
+):
+    """Defect #1590 (graph): a graph unit stopped by the worker's remaining budget
+    closed `failed`/`native_failure`, indistinguishable from a crash in the node. The
+    unit runs in an empty context, as a fresh process would, so only its own binding
+    can classify the stop. Fails if no node closes `failed`/`deadline_exceeded`."""
+    from tools.candidate_worker.unit_child import run_invocation_file
+
+    def unit_in_fresh_context(invocation_path):
+        contextvars.Context().run(run_invocation_file, Path(invocation_path))
+
+    monkeypatch.setattr(
+        importlib.import_module("tools.candidate_worker.unit_runner"),
+        "spawn_unit",
+        unit_in_fresh_context,
+    )
+    _refuse_llm_calls(monkeypatch, _worker_deadline_refusal)
+    receipt = launch_candidate(fanout_request(prepared))
+    assert receipt.graph_trace is not None, receipt.error
+    reasons = {(item.state, item.reason) for item in receipt.graph_trace.nodes}
+    assert ("failed", "deadline_exceeded") in reasons, reasons
+    assert ("failed", "native_failure") not in reasons, reasons
