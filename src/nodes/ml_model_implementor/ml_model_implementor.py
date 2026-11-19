@@ -1765,7 +1765,6 @@ class MLModelImplementor:
         max_output_tokens: int | None = None,
         transport: PydanticTransportConfig | None = None,
         probe_seed: SeedContext | None = None,
-        **kwargs,
     ):
         # Issue #983: this implementation's ``validation.probe`` SeedContext;
         # the self-check refuses None (MissingRunSeed).

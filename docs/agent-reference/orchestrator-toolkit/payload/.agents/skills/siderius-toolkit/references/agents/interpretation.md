@@ -23,7 +23,7 @@ route carrier (see the workflow `openai_background` setting):
 
 <!-- generated: constructor nodes.result_interpretation_agent.result_interpretation_agent.ResultInterpretationAgent -->
 ```text
-ResultInterpretationAgent(provider: str=INTERPRET.provider (= 'openai'), model_id: str | None=INTERPRET.model_id (= None), max_retries: int | None=INTERPRET.max_retries (= None), reasoning_effort: str | None=INTERPRET.reasoning_effort (= None), bridge_factory=None, max_output_tokens: int | None=None, transport: PydanticTransportConfig | None=None, **kwargs)
+ResultInterpretationAgent(provider: str=INTERPRET.provider (= 'openai'), model_id: str | None=INTERPRET.model_id (= None), max_retries: int | None=INTERPRET.max_retries (= None), reasoning_effort: str | None=INTERPRET.reasoning_effort (= None), bridge_factory=None, max_output_tokens: int | None=None, transport: PydanticTransportConfig | None=None)
 ```
 <!-- end generated -->
 

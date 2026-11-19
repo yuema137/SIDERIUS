@@ -43,7 +43,7 @@ route carrier (see the workflow `openai_background` setting):
 
 <!-- generated: constructor nodes.ml_code_validator_agent.ml_code_validator_agent.MLCodeValidatorAgent -->
 ```text
-MLCodeValidatorAgent(provider: str=VALIDATE.provider (= 'openai'), model_id: str | None=VALIDATE.model_id (= None), max_retries: int | None=VALIDATE.max_retries (= None), reasoning_effort: str | None=VALIDATE.reasoning_effort (= None), bridge_factory=None, max_output_tokens: int | None=None, transport: PydanticTransportConfig | None=None, probe_seed: SeedContext | None=None, **kwargs)
+MLCodeValidatorAgent(provider: str=VALIDATE.provider (= 'openai'), model_id: str | None=VALIDATE.model_id (= None), max_retries: int | None=VALIDATE.max_retries (= None), reasoning_effort: str | None=VALIDATE.reasoning_effort (= None), bridge_factory=None, max_output_tokens: int | None=None, transport: PydanticTransportConfig | None=None, probe_seed: SeedContext | None=None)
 ```
 <!-- end generated -->
 
