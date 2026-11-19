@@ -745,61 +745,135 @@ class TestQ097StaysBinding:
     )
 
     @staticmethod
-    def _taxonomy_handlers(node: ast.Try, taxonomy: tuple[str, ...]) -> set[str]:
-        """The taxonomy exception names this ``try`` catches (any subset counts)."""
+    def _taxonomy_aliases(tree: ast.Module, taxonomy: tuple[str, ...]) -> dict[str, str]:
+        """Local name -> taxonomy exception name, including ``import X as Y`` aliases."""
+        aliases = {name: name for name in taxonomy}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    if alias.name in taxonomy and alias.asname:
+                        aliases[alias.asname] = alias.name
+        return aliases
+
+    @staticmethod
+    def _taxonomy_handlers(node: ast.Try, aliases: dict[str, str]) -> set[str]:
+        """The taxonomy exceptions this ``try`` catches (any subset counts)."""
         caught: set[str] = set()
         for handler in node.handlers:
             for name in ast.walk(handler.type) if handler.type is not None else ():
-                if isinstance(name, ast.Name) and name.id in taxonomy:
-                    caught.add(name.id)
-                elif isinstance(name, ast.Attribute) and name.attr in taxonomy:
-                    caught.add(name.attr)
+                key = (
+                    name.id
+                    if isinstance(name, ast.Name)
+                    else name.attr
+                    if isinstance(name, ast.Attribute)
+                    else None
+                )
+                if key in aliases:
+                    caught.add(aliases[key])
         return caught
 
     @staticmethod
-    def _is_secondary_evaluation(node: ast.AST) -> bool:
-        """A call that evaluates one secondary: ``secondary.evaluate(...)``,
-        ``sandbox.evaluate_metric(secondary, ...)`` or ``evaluate_one(secondary)``.
+    def _secondary_bindings(fn: ast.AST) -> tuple[set[str], set[str]]:
+        """Names a function binds to secondaries, and to their bound ``evaluate*``.
 
-        The callee name starts with ``evaluate`` and the receiver or an argument
-        names a secondary. A call to a name-matched adapter (``_evaluate_...``)
-        is a delegation, not an evaluation, and is not matched.
+        A ``for`` or comprehension target whose iterable's text names a
+        secondary (``for m in secondaries``,
+        ``for metric in composition.secondary_metrics``) is a secondary
+        receiver; ``ev = secondary.evaluate`` (a plain local assignment) makes
+        ``ev`` an evaluation alias.
+        """
+        receivers: set[str] = set()
+        for node in ast.walk(fn):
+            loops = (
+                [(node.target, node.iter)]
+                if isinstance(node, (ast.For, ast.AsyncFor))
+                else [(gen.target, gen.iter) for gen in node.generators]
+                if isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp))
+                else []
+            )
+            for target, iterable in loops:
+                if "secondar" in ast.unparse(iterable).lower():
+                    receivers |= {n.id for n in ast.walk(target) if isinstance(n, ast.Name)}
+
+        def names_secondary(expr: ast.AST) -> bool:
+            return "secondar" in ast.unparse(expr).lower() or (
+                isinstance(expr, ast.Name) and expr.id in receivers
+            )
+
+        evaluators = {
+            target.id
+            for node in ast.walk(fn)
+            if isinstance(node, ast.Assign)
+            and isinstance(node.value, ast.Attribute)
+            and node.value.attr.startswith("evaluate")
+            and names_secondary(node.value.value)
+            for target in node.targets
+            if isinstance(target, ast.Name)
+        }
+        return receivers, evaluators
+
+    @staticmethod
+    def _is_secondary_evaluation(node: ast.AST, receivers: set[str], evaluators: set[str]) -> bool:
+        """A call that evaluates one secondary.
+
+        Matched: a callee named ``evaluate*`` whose receiver or an argument
+        names a secondary (``secondary.evaluate(...)``,
+        ``sandbox.evaluate_metric(secondary, ...)``, ``evaluate_one(secondary)``,
+        ``m.evaluate(...)`` with ``m`` a loop target over secondaries), or a call
+        of a local alias of a secondary's bound ``evaluate*``. A call to a
+        name-matched adapter (``_evaluate_...``) is a delegation and is not
+        matched.
         """
         if not isinstance(node, ast.Call):
             return False
         func = node.func
+        if isinstance(func, ast.Name) and func.id in evaluators:
+            return True
         name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
         if not name.startswith("evaluate"):
             return False
         parts = [func.value] if isinstance(func, ast.Attribute) else []
         parts += [*node.args, *(keyword.value for keyword in node.keywords)]
-        return any("secondar" in ast.unparse(part).lower() for part in parts)
+        return any(
+            "secondar" in ast.unparse(part).lower()
+            or (isinstance(part, ast.Name) and part.id in receivers)
+            for part in parts
+        )
 
     @classmethod
     def _partial_copies(cls, rel: str, source: str) -> list[str]:
         """Secondary-outcome handling outside the owner, including partial copies (#1544).
 
         Two shapes, each a second place a secondary outcome could be decided:
-        a ``try`` catching ANY taxonomy exception around a secondary evaluation,
-        anywhere but the owner; and a name-matched secondary function (an
-        adapter) that catches ANY taxonomy exception at all.
+        a ``try`` catching ANY taxonomy exception (aliases resolved) around a
+        secondary evaluation, anywhere but the owner; and a name-matched
+        secondary function (an adapter) that catches ANY taxonomy exception.
+
+        Best-effort, static and name-based. Not seen: a secondary held under a
+        name that never mentions ``secondar`` and is not a loop target over one;
+        evaluation through a helper, ``getattr``, ``functools.partial`` or an
+        alias assigned outside the function; an alias bound by ``import module``
+        and used as ``module.NotScoreableError`` under another name; and handlers
+        catching a base class of the taxonomy exceptions.
         """
         tree = ast.parse(source)
         adapters = set(cls._secondary_evaluators_in(source))
+        aliases = cls._taxonomy_aliases(tree, cls.TAXONOMY_HANDLERS)
         found: list[str] = []
         for fn in ast.walk(tree):
             if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             if (rel, fn.name) == cls.OWNER:
                 continue
+            receivers, evaluators = cls._secondary_bindings(fn)
             for node in ast.walk(fn):
                 if not isinstance(node, ast.Try):
                     continue
-                caught = cls._taxonomy_handlers(node, cls.TAXONOMY_HANDLERS)
+                caught = cls._taxonomy_handlers(node, aliases)
                 if not caught:
                     continue
                 evaluates = any(
-                    cls._is_secondary_evaluation(call)
+                    cls._is_secondary_evaluation(call, receivers, evaluators)
                     for statement in node.body
                     for call in ast.walk(statement)
                 )
@@ -929,8 +1003,54 @@ class TestQ097StaysBinding:
                 "        except Exception:\n"
                 "            pass\n",
             ),
+            (
+                "src/nodes/x.py",
+                "def _f(secondaries):\n"
+                "    for m in secondaries:\n"
+                "        try:\n"
+                "            m.evaluate(1)\n"
+                "        except NotScoreableError:\n"
+                "            pass\n",
+            ),
+            (
+                "src/nodes/x.py",
+                "def _f(composition):\n"
+                "    for metric in composition.secondary_metrics:\n"
+                "        try:\n"
+                "            metric.evaluate(1)\n"
+                "        except Exception:\n"
+                "            pass\n",
+            ),
+            (
+                "src/nodes/x.py",
+                "def _f(secondary):\n"
+                "    ev = secondary.evaluate\n"
+                "    try:\n"
+                "        ev(1)\n"
+                "    except Exception:\n"
+                "        pass\n",
+            ),
+            (
+                "src/nodes/x.py",
+                "from x import NotScoreableError as NS\n"
+                "\n"
+                "def _f(secondary):\n"
+                "    try:\n"
+                "        secondary.evaluate(1)\n"
+                "    except NS:\n"
+                "        pass\n",
+            ),
         ],
-        ids=["generic-name-catch-all", "anchor-route-one-handler", "adapter-tuple", "owner-twin"],
+        ids=[
+            "generic-name-catch-all",
+            "anchor-route-one-handler",
+            "adapter-name-with-tuple-handler",
+            "owner-twin",
+            "loop-target-over-secondaries",
+            "loop-over-composition-secondary-metrics",
+            "bound-method-alias",
+            "aliased-exception",
+        ],
     )
     def test_a_partial_copy_of_the_handling_is_caught(self, rel, planted):
         """#1544: the census above flagged a second owner only when it held the
