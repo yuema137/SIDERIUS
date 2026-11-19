@@ -17,14 +17,71 @@ from importlib.metadata import entry_points
 from inspect import signature
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, ParamSpec, TypeVar, cast
+from typing import Any, Literal, ParamSpec, TypeVar, cast
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from core.planner_strategy_identity import source_fingerprint
 
 P = ParamSpec("P")
 T = TypeVar("T", str, tuple[str, str])
+
+
+IntegrityKind = Literal["undeclared", "source_drift", "identity_drift", "renderer_failure"]
+
+_REMEDIES: dict[str, str] = {
+    "undeclared": "declare the boundary in the profile and requalify it, or run without the profile",
+    "source_drift": "restore the provider source the run started with, or requalify the changed source",
+    "identity_drift": "restore the provider source pinned at composition, or requalify and recompose",
+    "renderer_failure": "fix the profile's renderer for this boundary",
+}
+
+
+class PromptProfileIntegrityError(RuntimeError):
+    """An explicitly bound prompt profile cannot render faithfully; the run stops (#1542).
+
+    Raised for every integrity failure of a bound profile: a reached boundary it
+    does not declare (``undeclared``), provider sources that changed during the
+    run (``source_drift``) or since composition (``identity_drift``), and a
+    renderer that raised or returned something other than the boundary's text
+    type (``renderer_failure``). Continuing would silently change the run's
+    prompts (for example by turning the failure into proposer feedback), so
+    callers that convert exceptions into recoverable feedback re-raise it via
+    ``raise_if_prompt_profile_failure``. Deliberately not a ``ValueError``, so
+    handlers for ordinary validation errors do not absorb it.
+    """
+
+    def __init__(
+        self, profile: str, boundary: str | None, reason: str, kind: IntegrityKind
+    ) -> None:
+        self.profile = profile
+        self.boundary = boundary
+        self.reason = reason
+        self.kind = kind
+        target = f"boundary {boundary!r}" if boundary is not None else "its binding"
+        super().__init__(
+            f"Prompt profile {profile!r} cannot render {target}: {reason}. The run stops "
+            f"instead of continuing with different prompts. Remedy: {_REMEDIES[kind]}."
+        )
+
+
+def prompt_profile_failure(exc: BaseException) -> PromptProfileIntegrityError | None:
+    """The integrity error ``exc`` is or explicitly wraps (``raise ... from``), if any."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        if isinstance(current, PromptProfileIntegrityError):
+            return current
+        seen.add(id(current))
+        current = current.__cause__
+    return None
+
+
+def raise_if_prompt_profile_failure(exc: BaseException) -> None:
+    """Re-raise a prompt-profile integrity failure hidden in ``exc``; else return."""
+    failure = prompt_profile_failure(exc)
+    if failure is not None:
+        raise failure
 
 
 class PromptRenderingIdentity(BaseModel):
@@ -151,12 +208,19 @@ def bind_prompt_profile(
 ) -> Iterator[None]:
     if profile is None:
         if expected is not None:
-            raise ValueError("Expected a rendering profile, but none was supplied")
+            raise PromptProfileIntegrityError(
+                expected.name,
+                None,
+                "composition expected this profile, but none was supplied",
+                "identity_drift",
+            )
         binding = None
     else:
         identity = profile.identity()
         if expected is not None and identity != expected:
-            raise ValueError("Prompt renderer changed after composition")
+            raise PromptProfileIntegrityError(
+                profile.name, None, "Prompt renderer changed after composition", "identity_drift"
+            )
         binding = (profile, identity)
     token = _active.set(binding)
     try:
@@ -179,18 +243,41 @@ def prompt_boundary(name: str, *, pair: bool = False) -> Callable[[Callable[P, T
                 return native(*args, **kwargs)
             profile, identity = binding
             if profile.identity() != identity:
-                raise ValueError("Prompt renderer source changed during the run")
+                raise PromptProfileIntegrityError(
+                    profile.name, name, "its provider source changed during the run", "source_drift"
+                )
             if name in profile.native_boundaries:
                 return native(*args, **kwargs)
             renderer = profile.renderers.get(name)
             if renderer is None:
-                raise ValueError(
-                    f"Prompt profile {profile.name!r} does not declare boundary {name!r}"
+                raise PromptProfileIntegrityError(
+                    profile.name,
+                    name,
+                    f"it does not declare boundary {name!r} (no renderer, not native)",
+                    "undeclared",
                 )
             supplied = contract.bind(*args, **kwargs)
             supplied.apply_defaults()
-            value = renderer(**deepcopy(dict(supplied.arguments)))
-            return cast(Any, adapter.validate_python(value, strict=True))
+            try:
+                value = renderer(**deepcopy(dict(supplied.arguments)))
+            except PromptProfileIntegrityError:
+                raise
+            except Exception as exc:
+                raise PromptProfileIntegrityError(
+                    profile.name,
+                    name,
+                    f"its renderer raised {type(exc).__name__}: {exc}",
+                    "renderer_failure",
+                ) from exc
+            try:
+                return cast(Any, adapter.validate_python(value, strict=True))
+            except ValidationError as exc:
+                raise PromptProfileIntegrityError(
+                    profile.name,
+                    name,
+                    f"its renderer returned {type(value).__name__}, not text",
+                    "renderer_failure",
+                ) from exc
 
         return render
 

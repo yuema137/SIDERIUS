@@ -33,7 +33,15 @@ UNIT_MODULE = "tools.candidate_worker.unit_child"
 
 
 class NodeUnitRaised(Exception):
-    """The unit's native phase raised; its traceback is already in the worker log."""
+    """The unit's native phase raised; its traceback is already in the worker log.
+
+    ``failure`` names a classified cause the child reported (#1542:
+    ``"prompt_profile_integrity"``); ``None`` for an ordinary native exception.
+    """
+
+    def __init__(self, node_id: str, failure: str | None = None) -> None:
+        super().__init__(node_id)
+        self.failure = failure
 
 
 def unit_command(invocation_path: str) -> list[str]:
@@ -108,7 +116,7 @@ def result_output(invocation: NodeInvocation, result: NodeUnitResult) -> tuple[N
     if result.outcome == "interrupted":
         raise KeyboardInterrupt
     if result.outcome == "raised":
-        raise NodeUnitRaised(invocation.node_id)
+        raise NodeUnitRaised(invocation.node_id, result.failure)
     if result.output is None or result.record_path is None:
         raise ValueError("returned unit result lacks its output")
     kind = OUTPUT_TYPES[result.phase]

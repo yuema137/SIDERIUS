@@ -11,7 +11,11 @@ from agent.evaluation_context import (
     bind_evaluation_prompt_context,
     build_evaluation_prompt_context,
 )
-from agent.prompt_rendering import PromptRenderingProfile, bind_prompt_profile
+from agent.prompt_rendering import (
+    PromptProfileIntegrityError,
+    PromptRenderingProfile,
+    bind_prompt_profile,
+)
 from agent.prompt_templates.constraints import append_constraint_disclosure
 from agent.prompt_templates.evaluation import append_evaluation_spec, render_evaluation_spec
 from execute_tools.evaluation_spec import EvaluationSpec
@@ -121,7 +125,9 @@ def test_present_profile_requires_admission_and_receives_copyable_input(tmp_path
 
     with bind_evaluation_prompt_context(evaluation, primary, None):
         with bind_prompt_profile(profile(tmp_path)):
-            with pytest.raises(ValueError, match=r"does not declare boundary 'evaluation\.spec'"):
+            with pytest.raises(
+                PromptProfileIntegrityError, match=r"does not declare boundary 'evaluation\.spec'"
+            ):
                 append_evaluation_spec("original")
         with bind_prompt_profile(profile(tmp_path, {"evaluation.spec": override})):
             assert append_evaluation_spec("original") == "original\n\nhistorical evaluation"

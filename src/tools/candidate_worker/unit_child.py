@@ -176,9 +176,14 @@ def run_invocation_file(path: Path) -> None:
                 output=encode_transport(output).decode(),
                 record_path=str(record),
             )
-        except Exception:
+        except Exception as error:
+            from agent.prompt_rendering import prompt_profile_failure
+
             traceback.print_exc()
-            result = finished(outcome="raised")
+            integrity = prompt_profile_failure(error) is not None
+            result = finished(
+                outcome="raised", failure="prompt_profile_integrity" if integrity else None
+            )
         except SystemExit as error:
             code = error.code
             result = finished(

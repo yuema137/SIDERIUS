@@ -592,7 +592,11 @@ three/four-stage path is unchanged and runs in the worker.
 `NodeUnitResult.outcome` keeps the in-process failure semantics: `returned`
 yields the output and record path; `raised` (native exception, traceback
 logged by the child) becomes `failed`/`native_failure` with remaining nodes
-blocked; `exited` re-raises `SystemExit(exit_code)` and `interrupted`
+blocked, except that a raised (or explicitly wrapped) prompt-profile integrity
+error sets `NodeUnitResult.failure="prompt_profile_integrity"` and the node closes
+`failed`/`prompt_profile_integrity` (#1542; `graph.failure_reason`, also for an
+in-process raise; `graph_evidence` accepts both reasons for a failed node without
+a record); `exited` re-raises `SystemExit(exit_code)` and `interrupted`
 re-raises `KeyboardInterrupt` in the worker, as the in-process call propagated
 them. A unit process that exits nonzero without a result (crash, kill) is also
 `failed`/`native_failure` after the worker logs the supervision error; an

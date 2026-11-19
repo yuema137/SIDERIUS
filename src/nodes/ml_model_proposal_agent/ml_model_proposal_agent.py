@@ -33,6 +33,7 @@ from pydantic import ValidationError
 from agent.llm_bridge import LLMBridge
 from agent.llm_settings import DEFAULT_LLM_PROVIDER
 from agent.llm_transport.contracts import PydanticTransportConfig
+from agent.prompt_rendering import PromptProfileIntegrityError
 from agent.prompt_templates.constraints import append_constraint_disclosure
 from agent.prompt_templates.formal_failure import render_formal_failure_feedback
 from agent.prompt_templates.proposal import (
@@ -2228,6 +2229,8 @@ class MLModelProposalAgent:
                                 label="proposer.causal_reasoning",
                                 components=retry_audit["components"],
                             )
+                except PromptProfileIntegrityError:
+                    raise  # #1542: a profile that cannot render stops the run.
                 except (ValidationError, Exception):
                     # Malformed prediction — corrected by the causal-owned
                     # validation block below (P-1 fix). The old assumption

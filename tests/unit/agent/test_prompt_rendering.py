@@ -4,6 +4,7 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from agent.prompt_rendering import (
+    PromptProfileIntegrityError,
     PromptRenderingProfile,
     bind_prompt_profile,
     prompt_boundary,
@@ -50,7 +51,7 @@ def test_explicit_native_and_unknown_boundary(tmp_path):
     profile = _profile(tmp_path, native={"synthetic.message"})
     with bind_prompt_profile(profile):
         assert _message(Context(values=["native"])) == "native!"
-        with pytest.raises(ValueError, match="does not declare"):
+        with pytest.raises(PromptProfileIntegrityError, match="does not declare"):
             render_native_training_appendix()
 
 
@@ -59,9 +60,9 @@ def test_drift_rejected_before_rendering_and_scope_unwinds(tmp_path):
     identity = profile.identity()
     with bind_prompt_profile(profile, expected=identity):
         (tmp_path / "provider.txt").write_text("changed source")
-        with pytest.raises(ValueError, match="source changed"):
+        with pytest.raises(PromptProfileIntegrityError, match="source changed"):
             _message(Context(values=[]))
-    with pytest.raises(ValueError, match="changed after composition"):
+    with pytest.raises(PromptProfileIntegrityError, match="changed after composition"):
         with bind_prompt_profile(profile, expected=identity):
             pytest.fail("must reject before binding")
     assert _message(Context(values=[])) == "!"
@@ -69,8 +70,9 @@ def test_drift_rejected_before_rendering_and_scope_unwinds(tmp_path):
 
 def test_provider_result_cannot_bypass_text_boundary(tmp_path):
     profile = _profile(tmp_path, {"synthetic.message": lambda **_: {"execute": True}})
-    with bind_prompt_profile(profile), pytest.raises(ValidationError):
+    with bind_prompt_profile(profile), pytest.raises(PromptProfileIntegrityError) as raised:
         _message(Context(values=[]))
+    assert isinstance(raised.value.__cause__, ValidationError)
 
 
 def test_implementor_consumes_scoped_appendix_provider(tmp_path):
