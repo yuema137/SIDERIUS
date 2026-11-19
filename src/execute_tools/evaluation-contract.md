@@ -618,7 +618,11 @@ monkeypatches cannot reach its aggregation or emission. This is interpreter/proc
 isolation, not an OS security sandbox against filesystem writes by same-user code.
 `compose_scoring_child_bindings` and `compose_scoring_secondary_metrics` resolve
 only metric/evaluation/judge declarations through the existing owners, never the
-full task composition that would import declared model or loss plugins. Task-owned
+full task composition that would import declared model or loss plugins. Both
+compose through one private owner, `workflows.task_composition._scoring_composition`,
+which reads the manifest, enters its code package, composes the primary metric
+(refusing one the local scoring child cannot evaluate) and composes the declared
+secondaries on request (#1546). Task-owned
 metric and data-path implementations still execute as the trusted scoring authority.
 
 The worker inherits the attempt's environment, plugin roots and
