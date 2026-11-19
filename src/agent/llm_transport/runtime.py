@@ -19,7 +19,12 @@ from pydantic_ai.models.openai import OpenAIResponsesModelSettings
 
 from agent.llm_transport.accounting import AccountingCapture
 from agent.llm_transport.client import PydanticClient
-from agent.llm_transport.contracts import Choice, Completion, Message
+from agent.llm_transport.contracts import (
+    Choice,
+    Completion,
+    Message,
+    attach_measured_failure,
+)
 from agent.llm_transport.providers import build_model
 from agent.llm_transport.requests import translate
 from agent.llm_transport.responses import measured_usage, normalize
@@ -75,23 +80,42 @@ def refused_completion(raw: dict[str, Any], message: str) -> Completion:
     )
 
 
-@contextmanager
-def translated_errors(client: PydanticClient) -> Iterator[None]:
-    """Map adapter failures onto the bridge's existing OpenAI error boundary."""
+def _translate(client: PydanticClient, exc: Exception) -> Exception | None:
+    """The bridge-boundary OpenAI error for an adapter failure, or None to re-raise it."""
     req = httpx2.Request("POST", client.base_url)
+    if isinstance(exc, ModelHTTPError):
+        response = httpx2.Response(exc.status_code, request=req, headers=exc.headers)
+        return APIStatusError(
+            f"{client.provider} returned HTTP {exc.status_code}", response=response, body=exc.body
+        )
+    if isinstance(exc, (ModelTimeoutError, httpx2.TimeoutException)):
+        return APITimeoutError(request=req)
+    if isinstance(exc, (ModelConnectionError, httpx2.RequestError)):
+        return APIConnectionError(request=req)
+    if isinstance(exc, ModelAPIError):
+        return APIError(f"{client.provider} model API failure", request=req, body=None)
+    return None
+
+
+@contextmanager
+def translated_errors(client: PydanticClient, capture: AccountingCapture) -> Iterator[None]:
+    """Map adapter failures onto the bridge's existing OpenAI error boundary.
+
+    A provider can report usage and then fail: an HTTP 200 Responses body with
+    ``error`` set, or an error event after a stream's usage. That measured usage
+    travels on the translated exception (``take_measured_failure``) so the
+    bridge's retry owner records it once for this attempt.
+    """
     try:
         yield
-    except ModelHTTPError as exc:
-        response = httpx2.Response(exc.status_code, request=req, headers=exc.headers)
-        raise APIStatusError(
-            f"{client.provider} returned HTTP {exc.status_code}", response=response, body=exc.body
-        ) from exc
-    except (ModelTimeoutError, httpx2.TimeoutException) as exc:
-        raise APITimeoutError(request=req) from exc
-    except (ModelConnectionError, httpx2.RequestError) as exc:
-        raise APIConnectionError(request=req) from exc
-    except ModelAPIError as exc:
-        raise APIError(f"{client.provider} model API failure", request=req, body=None) from exc
+    except Exception as exc:
+        translated = _translate(client, exc)
+        if translated is None:
+            raise
+        if measured_usage(capture.raw) is not None:
+            message = f"{client.provider} failed after reporting usage: {type(exc).__name__}"
+            attach_measured_failure(translated, refused_completion(capture.raw, message))
+        raise translated from exc
 
 
 async def _create(
@@ -102,7 +126,7 @@ async def _create(
 ) -> "tuple[ModelResponse, list[ModelRequest], ModelRequestParameters, str | None]":
     """Send one create request on a request-local HTTP client."""
     timeout = kwargs.get("timeout", client.timeout)
-    with translated_errors(client):
+    with translated_errors(client, capture):
         async with httpx2.AsyncClient(timeout=timeout, event_hooks={"response": [capture]}) as http:
             model = build_model(client, kwargs["model"], http)
             messages, parameters, json_mode = translate(

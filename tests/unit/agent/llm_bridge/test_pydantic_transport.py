@@ -570,3 +570,100 @@ def test_cross_provider_reflector_uses_own_key_and_cap(wire, tmp_path, monkeypat
     assert json.loads(requests[0].content)["max_tokens"] == 9000
     assert json.loads(requests[1].content)["max_completion_tokens"] == 13000
     assert [record["provider"] for record in rows(tmp_path)] == ["anthropic", "moonshot"]
+
+
+def failed_responses_body():
+    """An HTTP 200 Responses body that reports usage and then a provider error."""
+    return {
+        "id": "resp_failed",
+        "object": "response",
+        "created_at": 1,
+        "status": "failed",
+        "model": "served-responses-model",
+        "error": {"code": "server_error", "message": "upstream failure"},
+        "output": [],
+        "usage": {"input_tokens": 13, "output_tokens": 5, "total_tokens": 18},
+        "parallel_tool_calls": False,
+        "tool_choice": "auto",
+        "tools": [],
+    }
+
+
+def test_provider_error_after_reported_usage_is_accounted_once(wire, tmp_path):
+    """Defect #1549: a 200 Responses body with ``error`` raised a translated APIError and
+    the usage it reported was never recorded. Fails if no usage row is written for the
+    failed attempt, if it is written twice, or if it loses the provider's counts."""
+    requests, responses = wire
+    responses.append((200, failed_responses_body()))
+    client = bridge(
+        tmp_path,
+        provider="openai",
+        model_id="gpt-5",
+        transport=PydanticTransportConfig(protocol="openai-responses"),
+    )
+    with pytest.raises(APIError):
+        client.generate_text("S", "U", label="test.failed_body")
+    assert len(requests) == 1
+    [row] = rows(tmp_path)
+    assert row["tokens"] == {"prompt": 13, "completion": 5, "total": 18}
+    assert row["served_model"] == "served-responses-model"
+    assert row["extra"]["status"] == "invalid_provider_response"
+    assert row["extra"]["provider_error"] == "APIError"
+    assert row["extra"]["transport_attempt"] == 1
+
+
+def test_retried_error_with_usage_writes_one_row_per_attempt(wire, tmp_path):
+    """Defect #1549 (retry path): usage on a retryable HTTP error body was dropped before
+    the bridge retried. Fails if the failed attempt has no row, or if any attempt's usage
+    is counted twice (exactly one row per transport attempt)."""
+    requests, responses = wire
+    error_body = {
+        "type": "error",
+        "error": {"type": "api_error", "message": "overloaded"},
+        "usage": {"input_tokens": 7, "output_tokens": 2},
+    }
+    responses.extend([(500, error_body), (200, anthropic_response())])
+    assert bridge(tmp_path).generate_text("S", "U", label="test.retry_usage") == "ready"
+    assert len(requests) == 2
+    failed, succeeded = rows(tmp_path)
+    assert failed["tokens"] == {"prompt": 7, "completion": 2, "total": 9}
+    assert failed["extra"]["provider_error"] == "APIStatusError"
+    assert failed["extra"]["transport_attempt"] == 1
+    assert succeeded["tokens"] == {"prompt": 13, "completion": 5, "total": 18}
+    assert "transport_attempt" not in succeeded["extra"]
+
+
+def test_stream_error_after_message_start_keeps_measured_usage(wire, tmp_path, monkeypatch):
+    """Defect #1549 (stream path): an Anthropic SDK-internal stream that reported usage in
+    ``message_start`` and then sent an ``error`` event lost that usage. Fails if the
+    failed attempt records no row or other counts."""
+    from anthropic.resources.beta.messages import AsyncMessages
+
+    requests, responses = wire
+    original = AsyncMessages.create
+
+    async def require_stream(self, *args, **kwargs):
+        if not kwargs.get("stream"):
+            raise ValueError("Streaming is required")
+        return await original(self, *args, **kwargs)
+
+    monkeypatch.setattr(AsyncMessages, "create", require_stream)
+    message = anthropic_response([], stop=None)
+    message["usage"] = {"input_tokens": 11, "output_tokens": 0}
+    responses.append(
+        event_stream(
+            [
+                {"type": "message_start", "message": message},
+                {
+                    "type": "error",
+                    "error": {"type": "invalid_request_error", "message": "stream failed"},
+                },
+            ]
+        )
+    )
+    with pytest.raises(APIError):
+        bridge(tmp_path, max_output_tokens=64000).generate_text("S", "U", label="test.stream_err")
+    assert len(requests) == 1
+    [row] = rows(tmp_path)
+    assert row["tokens"] == {"prompt": 11, "completion": 0, "total": 11}
+    assert row["extra"]["transport_attempt"] == 1

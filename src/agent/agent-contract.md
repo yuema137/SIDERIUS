@@ -132,6 +132,7 @@ checkout.
 |---|---|
 | `ValueError: Unknown reflect_provider …` | a reflect route names a provider with no known defaults — supply `base_url`/`api_key` |
 | immediate raise on 4xx (e.g. HTTP 401) | wrong or revoked API key; the bridge does not retry it |
+| any transport error after the provider reported usage | Direct API route: that attempt's usage row is written once (`invalid_provider_response`, with `provider_error` and `transport_attempt`) before the error is retried or raised; see the [transport contract](llm_transport/transport-contract.md#retry-lifecycle-and-errors) |
 | `[LLMBridge.…] N attempts timed out …; raising` | the bounded timeout budget working — raise `request_timeout`, do not loop |
 | `BackgroundWindowRefused` | a visible execution deadline is shorter than the route's completion window; nothing was submitted |
 | `BackgroundWaitExpired` (`TimeoutError`) | an accepted background response missed its `max_wait_seconds`; it was cancelled and its usage recorded — raise the wait or use a shorter window. The `BackgroundDeadlineExpired` subclass (also `ExecutionDeadlineExceeded`) means the visible execution deadline ended the wait |

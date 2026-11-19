@@ -224,11 +224,15 @@ def test_conditional_provider_system_text_reaches_final_request(monkeypatch):
 # Deliberately moved by #1533: opt-in OpenAI background completion windows add
 # llm_transport/background.py and bridge call-site glue; planner prompt bytes are
 # unchanged (previous assembly d512b294...).
+# Deliberately moved by #1549: a transport error that carries provider-measured
+# usage is recorded once by the bridge retry owner (llm_transport/runtime.py,
+# accounting.py, contracts.py, llm_bridge.py); planner prompt bytes are unchanged
+# (previous assembly ab5ef5aa...).
 NATIVE_PLANNER_IDENTITY_PIN = {
     "name": "native-timing-v1",
     "version": "1",
     "content_sha256": "6dc83ad5cbb0f4d51adf68bdbee08cb574de1c7a17fa9463663edd53415e12ad",
-    "assembly_sha256": "ab5ef5aaec3dacaafa70a0dd93364025483a4ace8553aad7ef45f706adc4bc34",
+    "assembly_sha256": "8fa5dc47f2938e36c2bebaeb820b88d4041ade3cb818e789aebb79d2fc881b9d",
 }
 
 

@@ -148,6 +148,27 @@ this refusal is outside the transport retry loop. A response arriving after the
 continuing deadline is accounted for once and then rejected. No tool or model
 fallback is performed.
 
+**Usage on a failed attempt (#1549).** A provider can report usage and still
+fail the request: an HTTP 200 Responses body whose `error` is set (translated to
+`openai.APIError`), an `error` event after an SDK-internal stream's
+`message_start` usage, or a JSON HTTP error body that carries `usage`.
+`runtime.translated_errors` attaches that attempt's measured receipt (a
+`refused_completion` built from the attempt's own `AccountingCapture`) to the
+translated exception when `measured_usage` finds counts; an error without
+reported usage carries nothing. `LLMBridge._call_with_retry` takes it with
+`contracts.take_measured_failure`, which clears it, and passes it to the call
+site's `on_failed_response` before retrying or raising, for `APIConnectionError`,
+`APITimeoutError`, `APIStatusError` (retryable or not) and other `APIError`.
+Each transport attempt has its own capture, so every attempt is recorded at
+most once and a retry never re-records an earlier attempt. The row is the call
+site's ordinary usage row with its content `attempt`, the refusal status
+`invalid_provider_response`, and transport metadata `provider_error` (the
+translated exception class) and `transport_attempt` (1-based, within this
+call). The exception then follows the unchanged retry and error contract. The
+default OpenAI SDK route raises only for non-2xx responses, whose bodies carry
+no usage there, so it records nothing new. Background polling already records
+the accumulated poll usage on its terminal refusals (see below).
+
 `list_models()` is explicitly unsupported on this backend and raises
 `NotImplementedError`. Provider enumeration requires a separately implemented
 contract; a Direct API request adapter does not establish one.
@@ -255,8 +276,8 @@ another route's background carrier (see the workflow contract).
 
 ## Accounting and provenance
 
-The HTTP response hook retains only raw `model` and `usage` fields from JSON or
-SDK-internal SSE responses for local
+The HTTP response hook retains only raw `model` and `usage` fields from JSON
+responses (successful or error bodies) or successful SDK-internal SSE responses for local
 normalization, not prompt or completion bodies. Provider-reported model identity
 is distinct from the configured model ID. Missing reported identity remains
 unknown. Missing usage remains unknown rather than taking Pydantic AI's default
