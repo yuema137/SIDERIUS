@@ -178,9 +178,12 @@ normalized directly; a pending one returns a `BackgroundTicket`.
 **Admission.** Before submission, if a cooperative `execution_deadline` is
 visible to the bridge and its remaining time is shorter than the window
 (7200 s / 28800 s), `BackgroundWindowRefused` (an `ExecutionDeadlineExceeded`)
-is raised and nothing is sent or billed. Budgets the bridge cannot see (for
-example a candidate worker's `timeout_seconds`, enforced by a sandbox kill) are
-not consulted; budget them for the summed waits of sequential steps.
+is raised and nothing is sent or billed. Inside a candidate worker the visible
+deadline is the worker's remaining `timeout_seconds` (`WorkerBudget.deadline_scope`,
+bound at every worker and graph-unit process entry; see the candidate-worker
+contract), so a window longer than that remainder is refused there. Budgets no
+caller binds as a deadline are not consulted; budget them for the summed waits
+of sequential steps.
 
 **Polling.** `finish_background` runs after `_call_with_retry` has returned, so
 an accepted request can never be resubmitted by the transport retry owner. It
