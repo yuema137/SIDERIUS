@@ -85,6 +85,7 @@ if TYPE_CHECKING:
     from workflows.historical_analysis_assets import HistoricalTuningSource
 
 from agent.llm_settings import DEFAULT_LLM_PROVIDER, default_model_for_provider
+from agent.prompt_templates.attempt_history import RepairExhaustedError
 from agent.prompt_templates.implementor.task_blocks import load_implementor_task_blocks
 from agent.prompt_templates.interpretation.task_blocks import load_interpretation_task_blocks
 from agent.prompt_templates.proposal.task_blocks import load_proposal_task_blocks
@@ -183,6 +184,7 @@ from workflows.proposal_failure_feedback import (
     exhausted_validation_feedback,
     implementation_error_feedback,
     next_attempt_validation_feedback,
+    repair_exhausted_entry,
 )
 from workflows.research_history import (
     acquire_iteration_order as _acquire_iteration_order,  # noqa: F401 — compatibility import
@@ -877,6 +879,8 @@ def _proposal_attempt_failure(exc: Exception) -> str:
         return f"CandidateAdmissionError: Candidate admission refused: {exc}"
     if isinstance(exc, BaselineIsolationViolation):
         return f"BaselineIsolationViolation: Candidate proposal refused: {exc}"
+    if isinstance(exc, RepairExhaustedError):
+        return repair_exhausted_entry(exc)
     return f"Node error: {type(exc).__name__}: {exc}"
 
 
@@ -2794,6 +2798,9 @@ def run_workflow(
                 validation = None
                 error_msg = _proposal_attempt_failure(e)
                 print(f"    ERROR: {error_msg}")
+                if isinstance(e, RepairExhaustedError):
+                    # #1554: the source left the proposer entry; the log keeps it.
+                    print(f"    {e.source_heading}:\n{e.source}")
                 previous_failures.append(
                     implementation_error_feedback(error_msg, validation_failures)
                 )

@@ -949,6 +949,8 @@ boundary fails until this list is updated.
 - `interpretation.score_value`: `src/agent/prompt_templates/interpretation/rendering.py::format_interpretation_score(score: float | None) -> str`
 - `native_training.appendix`: `src/agent/prompt_templates/native_training.py::render_native_training_appendix() -> str`
 - `proposal.failure_attempt_history`: `src/agent/prompt_templates/attempt_history.py::render_earlier_attempts(earlier: list[tuple[int, str]], final_error: str, *, heading: str, unit: str) -> str`
+- `proposal.failure_cause`: `src/agent/prompt_templates/attempt_history.py::render_repair_failure_cause(cause: str, final_error: str, source_heading: str, source: str) -> str`
+- `proposal.failure_entry_layout`: `src/agent/prompt_templates/proposal/previous_failures.py::render_multiline_failure_entry(number: int, entry: str) -> str`
 - `proposal.template`: `src/agent/prompt_templates/proposal/__init__.py::load_prompt(filename: str) -> str`
 - `proposal.time_budget_context`: `src/agent/prompt_templates/proposal/budget_context.py::render_proposer_time_budget_context(inp: ProposalInput) -> str`
 - `proposer.parameter_rules`: `src/nodes/ml_model_proposal_agent/parameter_rules.py::render_proposal_parameter_rules(composition_ref: TaskCompositionRef | None, workflow_rules: ParameterRules | None) -> str`
@@ -1021,6 +1023,29 @@ final `RuntimeError`). It is entered only when an earlier attempt exists, so a
 single-attempt failure or first retry is byte-identical to the pre-#1538 /
 pre-#1553 text; a profile that returns `""` restores that text everywhere. See
 `agent/prompt_templates/attempt_history.py`.
+
+The `proposal.failure_cause` boundary renders the cause part of the native loop's
+`previous_failures` entry for an implementor that ran out of repairs
+(`RepairExhaustedError`, a `ValueError`; entry `Node error: ValueError: <cause>`,
+#1554). Its arguments are the exception's parts: `cause` (the headline with the
+final error plus the earlier-attempt block), `final_error`, `source_heading`
+(`The assembled plugin source` or `The assembled loss source`) and `source`. The
+native renderer returns `cause` plus the source lines the final error names as
+`line N`: at most three in-range locations in first-mention order, each with one
+line of context, each line cut to 160 characters, each line printed once. It never
+includes the full source. It is entered for every repair-exhaustion entry, so a
+profile covering a run that may exhaust repairs must declare it; returning
+`f"{cause}\n\n{source_heading}:\n{source}"` restores the pre-#1554 entry byte for
+byte. The exception's `str()` still carries the full source for logs.
+
+The `proposal.failure_entry_layout` boundary renders one numbered item of the
+legacy reasoning prompt's `## Previous Failed Proposals` block (#1555). It is
+entered only for an entry that spans several lines: the native renderer writes
+`  <n>. <first line>` and indents every non-blank continuation line by the width of
+that prefix, leaving blank lines empty. Single-line entries are rendered natively
+as `  <n>. <entry>` and never enter it. Returning `f"  {number}. {entry}"` restores
+the pre-#1555 layout. The pipeline stages serialize `previous_failures` as JSON
+strings and do not use it.
 
 The `tuner.training_dynamics` boundary renders the shared diagnostic line used
 by planner, reflector and interpreter. Native rendering uses shortest round-trip decimal
