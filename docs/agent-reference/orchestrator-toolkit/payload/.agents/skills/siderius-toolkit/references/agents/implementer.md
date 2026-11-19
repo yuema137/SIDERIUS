@@ -39,7 +39,7 @@ route carrier (see the workflow `openai_background` setting):
 
 <!-- generated: constructor nodes.ml_model_implementor.ml_model_implementor.MLModelImplementor -->
 ```text
-MLModelImplementor(provider: str=IMPLEMENT.provider (= 'openai'), model_id: str | None=IMPLEMENT.model_id (= None), max_retries: int | None=IMPLEMENT.max_retries (= None), reasoning_effort: str | None=IMPLEMENT.reasoning_effort (= None), bridge_factory=None, capability_index_path: str | None=None, max_output_tokens: int | None=None, transport: PydanticTransportConfig | None=None, probe_seed: SeedContext | None=None, **kwargs)
+MLModelImplementor(provider: str=IMPLEMENT.provider (= 'openai'), model_id: str | None=IMPLEMENT.model_id (= None), max_retries: int | None=IMPLEMENT.max_retries (= None), reasoning_effort: str | None=IMPLEMENT.reasoning_effort (= None), bridge_factory=None, capability_index_path: str | None=None, max_output_tokens: int | None=None, transport: PydanticTransportConfig | None=None, probe_seed: SeedContext | None=None)
 ```
 <!-- end generated -->
 

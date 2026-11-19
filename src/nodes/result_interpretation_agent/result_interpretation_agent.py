@@ -210,7 +210,6 @@ class ResultInterpretationAgent:
         bridge_factory=None,
         max_output_tokens: int | None = None,
         transport: PydanticTransportConfig | None = None,
-        **kwargs,
     ):
         self._bridge_factory = bridge_factory or LLMBridge
         self._provider = provider

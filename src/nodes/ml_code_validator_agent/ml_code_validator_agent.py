@@ -813,7 +813,6 @@ class MLCodeValidatorAgent:
         max_output_tokens: int | None = None,
         transport: PydanticTransportConfig | None = None,
         probe_seed: SeedContext | None = None,
-        **kwargs,
     ):
         # Issue #983: this validation's ``validation.probe`` SeedContext (run
         # seed plus iteration, node id, attempt); run() refuses None.
