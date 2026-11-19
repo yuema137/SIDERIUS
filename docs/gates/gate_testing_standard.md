@@ -467,8 +467,9 @@ partial `--data_scope` (anything narrower than the full 20 files),
        self-contained — everything in `$WS` was produced by that
        one gate invocation.
    Concretely: `--seed_paths` MUST NOT appear in any new real-
-   training gate command. V18r's launcher already runs this way
-   (`_chain_common.sh:280-283` documents cold-start as valid).
+   training gate command. The launcher already runs this way: the
+   `--seed_paths` parser comment in `scripts/launch/_chain_common.sh`
+   documents an empty seed list as a valid cold start.
    Exception: reproducing a specific historical run whose exact
    seeded state matters — operator-approved on a case-by-case
    basis only.
@@ -487,12 +488,13 @@ partial `--data_scope` (anything narrower than the full 20 files),
    | 4 | `${SIDERIUS_CHAIN_WORKSPACE}/plugins/` | cleared BY step 1 when the workspace is fresh; listed separately because `get_model_description` resolves plugin descriptions from here across iterations |
    | 5 | `reference_data/root_papers_cache/` | RETAIN by default — it caches per-paper EXTRACTS of the fixed root-paper set (deterministic inputs, not run evidence); clear only when the experiment's question includes the lit-review retrieval cost itself |
    | 6 | the runtime-calibration store (`$SIDERIUS_CALIBRATION_DIR`, default `~/.siderius/runtime_calibration/`) | RETAIN — host calibration, not task evidence (the lock RECORDS it and never compares it); clear only for a cold-HOST measurement study |
-   | 7 | the advice file (`--advice` / `--human_advice_file`) | OMIT for a cold run; `launch_prior_baseline_experiment.sh` refuses advice files in BOTH arms because a V20 explorer file names FCNet's 323 M scale |
+   | 7 | the advice file (`--advice` / `--human_advice_file`) | OMIT for a cold run: advice reaches every proposer round, so a file written from earlier campaigns (for example one naming FCNet's 323 M scale) is prior evidence |
 
-   The two-arm prior-art experiment launches through
-   `sdsc_submission_scripts/launch_prior_baseline_experiment.sh`, which
-   already refuses `--seed_paths` and advice files; items 1 and 3 remain
-   the operator's manual pre-launch steps.
+   Campaign and multi-arm experiment launchers are not part of the
+   framework (they were retired from it in b8d1ffb2a); they live in
+   siderius-exp (for example the TIDMAD gold campaign under
+   `campaigns/tidmad_gold/` there) and own their arm-specific refusals. Items 1 and 3 remain the operator's
+   manual pre-launch steps for any cold-start launch.
 
 ### Gate 2 parameter plans (Lite / Regular) — OPT-IN deeper shapes
 
