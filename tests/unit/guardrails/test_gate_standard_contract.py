@@ -21,6 +21,8 @@ epoch is really smaller) and
 from __future__ import annotations
 
 import re
+import shlex
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -265,3 +267,89 @@ def test_every_real_llm_gate_uses_the_pro_config(standard_text):
                     paragraph,
                     re.IGNORECASE,
                 ), f"{superseded} appears without being marked superseded: {paragraph[:200]!r}"
+
+
+# ---------------------------------------------------------------------
+# The canonical command must actually run through today's launcher
+# ---------------------------------------------------------------------
+
+#: The only placeholders the canonical command may use, and what the dry
+#: run substitutes for each. Anything else in angle brackets is refused,
+#: so a new placeholder has to be added here deliberately.
+_PLACEHOLDERS = ("<task-manifest.yaml>", "<task-data-root>")
+_DRY_RUN_MANIFEST = REPO_ROOT / "configs" / "task_composition" / "quickstart.yaml"
+
+
+def test_the_canonical_command_runs_through_the_launcher_dry_run(canonical_command, tmp_path):
+    """#1560. The flag check above asks only the per-iteration parser and
+    keeps a hand list of shell-only flags, so it stayed green while the
+    command named a removed script (`sdsc_submission_scripts/run_chain.sh`),
+    lacked the required `--task_composition` and pointed `--llm_config` at a
+    removed directory.
+
+    Fails when: the documented script no longer exists, `run_chain.sh`
+    refuses the command (unknown flag, missing required flag), the rendered
+    `run_one_iteration.py` argv no longer parses, or the documented LLM
+    profile file is missing. The placeholders are filled with the shipped
+    quickstart manifest and a temporary data directory; `--dry-run` walks
+    the chain without side effects.
+    """
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    command = canonical_command.replace("<task-manifest.yaml>", shlex.quote(str(_DRY_RUN_MANIFEST)))
+    command = command.replace("<task-data-root>", shlex.quote(str(data_root)))
+    command = re.sub(
+        r"(--workspace\s+)(?:[^\s\\$]|\$\([^)]*\))+",
+        lambda m: m.group(1) + shlex.quote(str(tmp_path / "workspace")),
+        command,
+    )
+    assert "<" not in command, (
+        f"the canonical command uses a placeholder outside {_PLACEHOLDERS}: {command!r}"
+    )
+    script = re.search(r"^bash\s+(\S+)", command.strip())
+    assert script, "the canonical command does not start with `bash <script>`"
+    assert (REPO_ROOT / script.group(1)).is_file(), (
+        f"the canonical command runs {script.group(1)}, which is not in this checkout"
+    )
+
+    result = subprocess.run(
+        ["bash", "-c", command.strip() + " --dry-run"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, (
+        f"run_chain.sh refused the canonical command:\n{result.stderr}\n{result.stdout[-2000:]}"
+    )
+    assert "DRY-RUN COMPLETE" in result.stdout
+
+    rendered = re.search(r"run_one_iteration\.py (.*)$", result.stdout, re.MULTILINE)
+    assert rendered, "the dry run rendered no run_one_iteration.py command"
+    args = build_parser().parse_args(shlex.split(rendered.group(1)))
+    assert (REPO_ROOT / args.llm_config).is_file(), (
+        f"the canonical command's --llm_config {args.llm_config} is not in this checkout"
+    )
+
+
+def test_every_shell_script_the_standard_names_exists(standard_text):
+    """#1560. The standard cited `launch_prior_baseline_experiment.sh` for a
+    year after that script left the framework (b8d1ffb2a).
+
+    Fails when: the standard names a `*.sh` file that is not in this
+    checkout. A name with a directory part must exist at that repository
+    path (so a stale `sdsc_submission_scripts/run_chain.sh` fails even
+    though `scripts/launch/run_chain.sh` exists); only a bare file name may
+    resolve under `scripts/launch/`.
+    """
+
+    def exists(name: str) -> bool:
+        if "/" in name:
+            return (REPO_ROOT / name).is_file()
+        return (REPO_ROOT / "scripts" / "launch" / name).is_file()
+
+    missing = sorted(
+        name for name in set(re.findall(r"[\w./-]+\.sh\b", standard_text)) if not exists(name)
+    )
+    assert not missing, f"the gate standard names shell scripts this checkout lacks: {missing}"
