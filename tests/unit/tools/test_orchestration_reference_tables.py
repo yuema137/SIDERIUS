@@ -64,3 +64,25 @@ def test_a_main_that_never_parses_is_refused(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(reference_tables.importlib, "import_module", lambda _name: Module)
     with pytest.raises(RuntimeError, match="returned without parsing"):
         reference_tables.capture_parser("fake.module")
+
+
+def test_a_main_using_parse_known_args_is_captured_not_executed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Defect caught: a node ``main()`` switches to ``parse_known_args`` and
+    the generator runs the node body (with the generator's own argv) instead
+    of stopping at the parser."""
+    ran: list[str] = []
+
+    class Module:
+        @staticmethod
+        def main() -> None:
+            parser = argparse.ArgumentParser()
+            parser.add_argument("--flag")
+            parser.parse_known_args()
+            ran.append("node body")
+
+    monkeypatch.setattr(reference_tables.importlib, "import_module", lambda _name: Module)
+    parser = reference_tables.capture_parser("fake.module")
+    assert [a.dest for a in parser._actions if a.option_strings != ["-h", "--help"]] == ["flag"]
+    assert not ran, "the node body executed after parse_known_args"

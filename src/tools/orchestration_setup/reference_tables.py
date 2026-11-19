@@ -18,7 +18,7 @@ outside the markers is hand-written prose and is never touched.
     python -m tools.orchestration_setup.reference_tables --write   # rewrite regions
 
 CLI parsers are captured by calling the module's ``main()`` with
-``ArgumentParser.parse_args`` replaced by a function that raises the parser
+``ArgumentParser.parse_args`` and ``parse_known_args`` replaced by a function that raises the parser
 back to us, so no node module needs a new public builder. Each node's
 ``main()`` builds its parser before any other effect; a ``main()`` that
 returns without parsing is refused.
@@ -143,6 +143,7 @@ def capture_parser(module_name: str) -> argparse.ArgumentParser:
 
     with (
         mock.patch.object(argparse.ArgumentParser, "parse_args", intercept),
+        mock.patch.object(argparse.ArgumentParser, "parse_known_args", intercept),
         mock.patch.object(sys, "argv", [module_name]),
     ):
         try:

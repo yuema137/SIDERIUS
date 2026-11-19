@@ -101,10 +101,18 @@ DIRECTORY_SCANS: dict[str, tuple[str, ...]] = {
     # The toolkit reference-table check imports every node module, schema and
     # agent class inside an isolated child process (empty plugin dirs) and
     # compares the payload tables with them; no static import edge exists.
+    # Beyond nodes and schemas: the CLI parsers take defaults, choices and
+    # types from llm_settings, the model registry (tuner --force_model help),
+    # run_seed_lock (--run_seed type), the watchdog-policy choices and the
+    # DataScope parser.
     "tests/unit/tools/test_orchestration_reference_tables.py": (
         "src/nodes/",
         "src/agent/schemas/",
         "src/agent/llm_settings.py",
+        "src/ml_models/",
+        "src/core/run_seed_lock.py",
+        "src/core/runtime_control/watchdog_policy.py",
+        "src/execute_tools/dataset_config.py",
         "docs/agent-reference/orchestrator-toolkit/payload/.agents/skills/siderius-toolkit/references/",
     ),
     # The optional-dependency isolation witness imports the gateway only inside
