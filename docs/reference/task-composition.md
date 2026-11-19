@@ -941,6 +941,7 @@ boundary fails until this list is updated.
 - `data_analysis.skill_selection`: `src/agent/prompt_templates/data_analysis.py::render_skill_selection_prompt(analysis_input: DataAnalysisInput, candidates: tuple[DiscoveredAnalysisSkill, ...], *, output_schema: dict) -> tuple[str, str]`
 - `data_analysis.structured_output_repair`: `src/agent/prompt_templates/data_analysis.py::render_structured_output_repair_prompt(*, stage: str, output_schema: dict, original_output: object, validation_errors: list[dict]) -> tuple[str, str]`
 - `evaluation.spec`: `src/agent/prompt_templates/evaluation.py::render_evaluation_spec(context: EvaluationPromptContext | None) -> str`
+- `implementor.inherited_components`: `src/nodes/ml_model_implementor/reference_code.py::render_inherited_components_section(components: list[InheritedComponent], supplied_sources: list[str], stage: ReferenceStage) -> str`
 - `implementor.reference_code`: `src/nodes/ml_model_implementor/reference_code.py::render_reference_code_section(reference_code: dict[str, str], stage: ReferenceStage) -> str`
 - `implementor.repair_system`: `src/nodes/ml_model_implementor/repair_prompt.py::render_repair_system_prompt(kind: RepairKind, code_contract: str) -> str`
 - `implementor.validator_feedback`: `src/nodes/ml_model_implementor/validator_feedback.py::render_validator_feedback_section(feedback: str, stage: LaterStage) -> str`
@@ -994,6 +995,14 @@ the implementor's reasoning, code and repair user prompts; its `stage` argument
 names the calling request. It is entered only when `reference_code` is nonempty,
 so a profile that does not declare it raises only for a proposal with ancestor
 source. See the [implementor contract](../../src/nodes/ml_model_implementor/ml_model_implementor.md#ancestor-reference-source).
+
+The `implementor.inherited_components` boundary renders the proposal's declared
+`inherited_components` (component, source and evidence; for experiment sources
+whether the ancestor source is supplied) immediately before the ancestor-source
+section of the reasoning, code and repair user prompts (#1540). It is entered only
+when the proposal inherits at least one component, so a proposal that inherits
+nothing never reaches it; a profile that returns `""` restores the pre-#1540
+prompts. See the [implementor contract](../../src/nodes/ml_model_implementor/ml_model_implementor.md#ancestor-reference-source).
 
 The `implementor.validator_feedback` boundary renders the validator-rejection
 section of the implementor's code and repair user prompts; its `stage` argument
