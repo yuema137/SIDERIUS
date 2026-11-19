@@ -2481,19 +2481,20 @@ class HyperparamTuningInput(BaseModel):
     # Defense-in-depth SECONDARY sanity checks — the primary admission
     # criterion is predicted total runtime (in-subprocess verification).
     # These catch degenerate counts even when the estimator claims they
-    # are cheap. Schema defaults are None (disabled) so programmatic
-    # callers keep pre-RT5 behavior; the §5 PROVISIONAL operational
-    # values (150k steps / batch 4) are applied by the chain/CLI launch
-    # wiring (RT6), where they are operator-visible configuration.
+    # are cheap. Both are disabled by default on every surface: the schema
+    # default is None, and the standalone tuner CLI and the chain launcher
+    # default to 0, which they map to None. A positive value is an explicit
+    # task or operator choice.
     max_steps_per_attempt: int | None = Field(
         default=None,
         gt=0,
         description=(
             "§5 guardrail: a plan whose resolved optimizer-step count "
             "exceeds this is skipped pre-flight (planner-visible record) "
-            "unless allow_extreme_steps is set. None disables "
-            "(provisional operational value: 150,000 — set by the chain "
-            "launch wiring)."
+            "unless allow_extreme_steps is set. None disables it and is the "
+            "default; the standalone tuner CLI and the chain launcher default "
+            "to 0, which they map to None. Set a positive value only when the "
+            "task or operator requires a step ceiling."
         ),
     )
     min_formal_batch_size: int | None = Field(
@@ -2503,8 +2504,9 @@ class HyperparamTuningInput(BaseModel):
             "§5 guardrail: formal rounds with batch_size below this are "
             "skipped pre-flight — encodes the known launch-overhead "
             "pathology (V18 incident: batch=2). Trial rounds are exempt. "
-            "None disables (provisional operational value: 4 — set by "
-            "the chain launch wiring)."
+            "None disables it and is the default; the standalone tuner CLI "
+            "and the chain launcher default to 0, which they map to None. "
+            "Set a positive floor only when the task or operator requires it."
         ),
     )
     allow_extreme_steps: bool = Field(
@@ -3250,7 +3252,9 @@ class HyperparamTuningInput(BaseModel):
         default_factory=lambda data: default_model_for_provider(data["llm_provider"]),
         description=(
             "Model ID for the planner sub-call (and the default for the "
-            "reflector when not overridden)."
+            "reflector when not overridden). Omitted: the default model of "
+            "llm_provider; a provider without a default model requires an "
+            "explicit value."
         ),
     )
     max_output_tokens: int | None = Field(

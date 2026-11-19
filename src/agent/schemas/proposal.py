@@ -1128,6 +1128,11 @@ class ProposalInput(BaseModel):
         default_factory=list,
         max_length=3,
         exclude_if=lambda value: not value,
+        description="Up to the three most recent Formal-failure summaries "
+        "(newest last), carried by the interpretation-to-proposal protocol: "
+        "facts from tuner iterations whose Formal attempts produced no valid "
+        "candidate. Empty when none. Rendered into the proposer prompt as "
+        "failure evidence; never a valid candidate or incumbent.",
     )
     recent_trial_validity: list[TrialValidityFeedback] = Field(
         default_factory=list,
