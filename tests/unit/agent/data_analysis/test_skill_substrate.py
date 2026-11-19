@@ -48,7 +48,7 @@ from agent.schemas.data_analysis.time import FixedTimePrecisionRequirement
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from core.execution_deadline import execution_deadline
 from tests.helpers.data_analysis_resources import REAL_WORKER_TIMEOUT_SECONDS
-from tests.helpers.process_bounds import host_time_unit
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS, host_time_unit
 
 
 def _skill_source(
@@ -60,11 +60,13 @@ def _skill_source(
 ) -> str:
     marker_line = "" if marker is None else f"Path({str(marker)!r}).write_text('imported')"
     if sleep:
-        body = """
+        body = f"""
     import subprocess, sys, time
-    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"])
+    child = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep({CHILD_PROCESS_BOUND_SECONDS:g})"]
+    )
     runtime.artifact_path("child.pid").write_text(str(child.pid))
-    time.sleep(600)
+    time.sleep({CHILD_PROCESS_BOUND_SECONDS:g})
 """
     else:
         usage = (
@@ -641,8 +643,9 @@ def test_timed_out_disposition_survives_an_unreaped_descendant(
         sys.executable,
         "-c",
         "import subprocess, time; "
-        f"p = subprocess.Popen([{sleep_executable!r}, '600']); "
-        f"open({str(grandchild_pid_path)!r}, 'w').write(str(p.pid)); time.sleep(600)",
+        f"p = subprocess.Popen([{sleep_executable!r}, '{CHILD_PROCESS_BOUND_SECONDS:g}']); "
+        f"open({str(grandchild_pid_path)!r}, 'w').write(str(p.pid)); "
+        f"time.sleep({CHILD_PROCESS_BOUND_SECONDS:g})",
     ]
     monkeypatch.setattr(executor, "_worker_command", lambda _request, _response: child)
     skill_input, data = _skill_input(

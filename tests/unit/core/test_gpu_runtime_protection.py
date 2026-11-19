@@ -108,8 +108,9 @@ def state_fixture(*, clock=None, initial=None):
 #: ``policy(age=CHILD_PROCESS_BOUND_SECONDS)`` unless they test ageing itself: on wall time a sampling thread the host does not
 #: schedule for a second would otherwise stop a healthy child with "GPU
 #: observation coverage expired" (#1578). Ageing has logical-clock witnesses.
-#: Their children also sleep far longer than any detection needs, so only the
-#: guard's stop can end them.
+#: Their children sleep ``CHILD_PROCESS_BOUND_SECONDS``: far longer than any
+#: detection needs, so only the guard's stop can end them, yet a guard regression
+#: fails within the shared child bound rather than after ten minutes (#1593).
 
 
 def observer(*, sampler=None, selected=None, clock=time.monotonic, initial=None):
@@ -346,7 +347,10 @@ def test_actual_occupancy_stop_retains_child_output_and_does_not_become_oom():
 
     obs = observer(sampler=rising, selected=policy(age=CHILD_PROCESS_BOUND_SECONDS))
     with pytest.raises(ProcessControlError) as caught:
-        run(obs, "import time; print('owned output', flush=True); time.sleep(600)")
+        run(
+            obs,
+            f"import time; print('owned output', flush=True); time.sleep({CHILD_PROCESS_BOUND_SECONDS:g})",
+        )
     error = caught.value
     assert "occupancy" in error.decision.reason
     assert "owned output" in error.stdout
@@ -362,7 +366,7 @@ def test_zero_exit_after_term_still_carries_original_guard_stop(tmp_path):
         return snapshot(1500 if ready.exists() else 100)
 
     obs = observer(sampler=sample, selected=policy(age=CHILD_PROCESS_BOUND_SECONDS, grace=0.5))
-    source = f"import signal,time,pathlib; signal.signal(signal.SIGTERM, lambda *_: exit(0)); pathlib.Path({str(ready)!r}).touch(); time.sleep(600)"
+    source = f"import signal,time,pathlib; signal.signal(signal.SIGTERM, lambda *_: exit(0)); pathlib.Path({str(ready)!r}).touch(); time.sleep({CHILD_PROCESS_BOUND_SECONDS:g})"
     with pytest.raises(ProcessControlError) as caught:
         run(obs, source)
     assert caught.value.lifecycle.returncode == 0
@@ -380,7 +384,7 @@ def test_inflight_query_join_timeout_is_bounded_and_late_write_discarded():
     obs = observer(sampler=blocked, selected=policy(age=0.1, join_ms=10))
     try:
         with pytest.raises(ProcessControlError):
-            run(obs, "import time; time.sleep(600)")
+            run(obs, f"import time; time.sleep({CHILD_PROCESS_BOUND_SECONDS:g})")
         assert entered.is_set()
         before = obs.protection_receipt().model_dump_json()
         assert obs.protection_receipt().join_timed_out
@@ -523,7 +527,8 @@ def test_primary_interrupt_survives_monitor_and_stop_failures(monkeypatch):
 def test_guard_kills_only_owned_group_and_escalates_ignoring_term(tmp_path):
     ready = tmp_path / "ready"
     foreign = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(600)"], start_new_session=True
+        [sys.executable, "-c", f"import time; time.sleep({CHILD_PROCESS_BOUND_SECONDS:g})"],
+        start_new_session=True,
     )
     obs = observer(
         sampler=lambda *_: snapshot(1500 if ready.exists() else 100),
@@ -532,7 +537,7 @@ def test_guard_kills_only_owned_group_and_escalates_ignoring_term(tmp_path):
     source = (
         "import signal,time,pathlib,subprocess,sys; "
         "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
-        f"pathlib.Path({str(ready)!r}).touch(); time.sleep(600)"
+        f"pathlib.Path({str(ready)!r}).touch(); time.sleep({CHILD_PROCESS_BOUND_SECONDS:g})"
     )
     try:
         with pytest.raises(ProcessControlError) as caught:
@@ -555,7 +560,7 @@ def test_grace_drains_large_child_output_before_exit(tmp_path):
     source += (
         "def stop(*_):\n sys.stdout.write('x'*1048576); sys.stdout.flush(); sys.exit(0)\n"
         "signal.signal(signal.SIGTERM, stop)\n"
-        f"pathlib.Path({str(ready)!r}).touch()\ntime.sleep(600)\n"
+        f"pathlib.Path({str(ready)!r}).touch()\ntime.sleep({CHILD_PROCESS_BOUND_SECONDS:g})\n"
     )
     with pytest.raises(ProcessControlError) as caught:
         run(obs, source)
@@ -681,11 +686,11 @@ def test_guard_cleans_owned_descendant_and_leader_reaps_it(tmp_path):
     )
     source = (
         "import signal,subprocess,sys,time,pathlib\n"
-        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(600)'])\n"
+        f"child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep({CHILD_PROCESS_BOUND_SECONDS:g})'])\n"
         "def stop(*_):\n child.wait(timeout=2); sys.exit(0)\n"
         "signal.signal(signal.SIGTERM, stop)\n"
         f"pathlib.Path({str(ready)!r}).write_text(str(child.pid))\n"
-        "time.sleep(600)\n"
+        f"time.sleep({CHILD_PROCESS_BOUND_SECONDS:g})\n"
     )
     with pytest.raises(ProcessControlError) as caught:
         run(obs, source)
@@ -902,7 +907,8 @@ def test_real_child_recovers_from_skew_then_foreign_occupancy_stops_only_owned_g
     ready = tmp_path / "ready"
     count = 0
     foreign = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(600)"], start_new_session=True
+        [sys.executable, "-c", f"import time; time.sleep({CHILD_PROCESS_BOUND_SECONDS:g})"],
+        start_new_session=True,
     )
 
     def sampling(*_):
@@ -917,7 +923,10 @@ def test_real_child_recovers_from_skew_then_foreign_occupancy_stops_only_owned_g
     obs = observer(sampler=sampling, selected=policy(age=CHILD_PROCESS_BOUND_SECONDS))
     try:
         with pytest.raises(ProcessControlError) as caught:
-            run(obs, f"import pathlib,time; pathlib.Path({str(ready)!r}).touch(); time.sleep(600)")
+            run(
+                obs,
+                f"import pathlib,time; pathlib.Path({str(ready)!r}).touch(); time.sleep({CHILD_PROCESS_BOUND_SECONDS:g})",
+            )
         assert "occupancy" in caught.value.decision.reason
         assert obs.protection_receipt().inconsistent_observations == 1
         assert caught.value.lifecycle.group_cleanup.final.status == "absent"

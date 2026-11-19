@@ -216,8 +216,9 @@ pathlib.Path(sys.argv[1]).touch()
 """
 
 
-_CHILD_HANDSHAKE = """
+_CHILD_HANDSHAKE = f"""
 import json, os, pathlib, sys, time
+SLEEP_SECONDS = {CHILD_PROCESS_BOUND_SECONDS:g}
 root = pathlib.Path(sys.argv[1]); mode = sys.argv[2]
 request = json.loads((root / 'request.json').read_text())
 message = dict(nonce=request['nonce'], child_pid=os.getpid(),
@@ -229,7 +230,7 @@ if mode == 'fail':
     print('original child failure', file=sys.stderr); sys.exit(7)
 publish('loaded.json')
 while not (root / 'authorized.json').exists(): time.sleep(.005)
-if mode == 'no-ack': time.sleep(600)  # never acks within any parent schedule
+if mode == 'no-ack': time.sleep(SLEEP_SECONDS)  # never acks within any parent schedule
 publish('consumed.json')
 if len(sys.argv) > 3:
     with open(sys.argv[3], 'rb') as barrier:
