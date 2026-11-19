@@ -307,12 +307,11 @@ def execute_continuation(path: Path) -> CandidateRunReceipt:
     host_budget = control_run_budget(request.parallel, path.parent)
     from .native import execute_native
 
-    receipt = bounded_terminal(
-        initial,
-        execute_native(
+    with budget.deadline_scope():
+        terminal = execute_native(
             request, initial, continuation=binding, budget=budget, host_budget=host_budget
-        ),
-    )
+        )
+    receipt = bounded_terminal(initial, terminal)
     publish(path.parent / "child.json", receipt, bounded=True)
     return receipt
 

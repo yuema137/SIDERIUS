@@ -42,7 +42,8 @@ def execute(request_path: Path) -> CandidateRunReceipt:
     host_budget = control_run_budget(request.parallel, control)
     from .native import execute_native
 
-    receipt = execute_native(request, initial, budget=budget, host_budget=host_budget)
+    with budget.deadline_scope():
+        receipt = execute_native(request, initial, budget=budget, host_budget=host_budget)
     graph = request.preview.execution_profile is not None
     if graph:
         receipt = bounded_terminal(initial, receipt)

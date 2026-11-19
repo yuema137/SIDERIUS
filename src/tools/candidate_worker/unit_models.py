@@ -148,10 +148,6 @@ class ValidationUnit(BaseModel):
     inputs: NativeInputs
     proposal: ProposalOutput
     implementation: ImplementorOutput
-    #: Issue #984 — what remained of the worker's `WorkerBudget` when the worker
-    #: dispatched this unit; ``None`` when the worker had no budget. The unit
-    #: re-anchors it at entry, so it bounds the validator's pytest child.
-    worker_budget_seconds: PositiveFloat | None
 
 
 class LiteratureUnit(BaseModel):
@@ -206,6 +202,11 @@ class NodeInvocation(BaseModel):
     iteration: PositiveInt
     storage: StorageConfig
     unit: PhaseUnit
+    #: Issues #984/#1548 — what remained of the worker's `WorkerBudget` when the
+    #: worker dispatched this unit; ``None`` when the worker had no budget. The unit
+    #: re-anchors it at entry for every phase: it binds the unit's cooperative
+    #: execution deadline (seen by LLMBridge) and bounds the validator's pytest child.
+    worker_budget_seconds: PositiveFloat | None
     #: B3-4b: dispatched concurrently; the child attributes its token rows to this
     #: unit. Omitted when serial, so serial invocation bytes are unchanged.
     parallel: bool = Field(default=False, exclude_if=lambda value: not value)

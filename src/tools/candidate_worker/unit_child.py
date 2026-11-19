@@ -37,7 +37,8 @@ def execute_unit(
 
     Native modules are imported here, after the entry checked the inherited
     generated-library binding (import order is an execution invariant).
-    ``budget`` is the validation unit's re-anchored worker budget (issue #984).
+    ``budget`` is the unit's re-anchored worker budget (issues #984, #1548); the
+    validation phase also bounds its pytest child with it.
     """
     from .invocation import invocation_from_storage
     from .layout import tuning_input_path
@@ -122,19 +123,16 @@ def execute_unit(
 
 
 def _unit_budget(invocation: "NodeInvocation") -> "WorkerBudget | None":
-    """Re-anchor the dispatching worker's remaining budget in this process (issue #984).
+    """Re-anchor the dispatching worker's remaining budget in this process (#984, #1548).
 
     Anchored right after the invocation is read, so spawn and decode time are
     not charged: like the worker's own anchor, the value is an upper bound and
-    the outer sandbox limit still governs.
+    the outer sandbox limit still governs. ``None`` when the worker had no budget.
     """
     from .budget import WorkerBudget
-    from .unit_models import ValidationUnit
 
-    unit = invocation.unit
-    if not isinstance(unit, ValidationUnit) or unit.worker_budget_seconds is None:
-        return None
-    return WorkerBudget.start(unit.worker_budget_seconds)
+    seconds = invocation.worker_budget_seconds
+    return None if seconds is None else WorkerBudget.start(seconds)
 
 
 def run_invocation_file(path: Path) -> None:
@@ -169,6 +167,8 @@ def run_invocation_file(path: Path) -> None:
                     composition, physical_data_root=invocation.physical_data_root
                 ),
                 bind_token_unit(invocation.node_id) if invocation.parallel else nullcontext(),
+                # The worker's remaining wall budget, seen by LLMBridge (#1548).
+                budget.deadline_scope() if budget is not None else nullcontext(),
             ):
                 output, record = execute_unit(invocation, composition, budget)
             result = finished(

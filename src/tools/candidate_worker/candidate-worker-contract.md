@@ -409,17 +409,49 @@ anchors one `budget.WorkerBudget` from `CandidateRunRequest.timeout_seconds` and
 passes it explicitly through `execute_native`/`execute_loop`/`execute_fanout`/
 `run_candidate_phases` to `phases.run_validation`, which bounds the validator's
 pytest child by `pytest_limit()`, the `remaining_seconds()` as a
-`PytestLimit(source="worker_budget")` (issue #984). On a graph profile the
-validation node runs in a unit process: `unit_dispatch.node_invocation` records
-the budget's `remaining_seconds()` at dispatch as
-`ValidationUnit.worker_budget_seconds` (`None` without a budget), and
-`unit_child.run_invocation_file` re-anchors a `WorkerBudget` from it right after
-reading the invocation and passes it to `phases.run_validation`. Every anchor
+`PytestLimit(source="worker_budget")` (issue #984). On a graph profile every
+node runs in a unit process: `unit_dispatch.node_invocation` records the
+budget's `remaining_seconds()` at dispatch as `NodeInvocation.worker_budget_seconds`
+for every phase (`None` without a budget), and `unit_child.run_invocation_file`
+re-anchors a `WorkerBudget` from it right after reading the invocation and passes
+it to `execute_unit` (validation uses it for `phases.run_validation`). Every anchor
 follows the launch it measures from, so the value is an upper bound; the
 sandbox limit still governs. A spent
 budget yields a minimal positive limit, failing the pytest check at its first
 deadline poll. Direct callers that pass no budget run pytest group-supervised
 without a deadline.
+
+The same remainder is the LLM execution deadline (issue #1548).
+`WorkerBudget.deadline_scope()` binds `core.execution_deadline.execution_deadline(
+remaining_seconds())`, the cooperative deadline `LLMBridge` reads. `child.execute`
+and `loop_resume.execute_continuation` bind it around `execute_native` (covering
+in-process phases, judge adaptors and the loop stop judge), and
+`unit_child.run_invocation_file` binds it around `execute_unit` when the invocation
+carries a budget (no binding when `worker_budget_seconds` is `None`). Units are
+separate processes, so the binding is per process; no worker thread makes an LLM
+call outside it (the Direct API facade's helper thread receives the already
+clipped timeout). Effects, all owned by the bridge and transport:
+- each request timeout is clipped to the remaining time (`llm.request`);
+- a retry wait that cannot fit raises `ExecutionDeadlineExceeded` (`deadline_sleep`,
+  `llm.retry`). Retries on HTTP 429 stay unbounded in count; inside a worker they
+  are bounded by this deadline, and outside one nothing changes;
+- an OpenAI background completion window longer than the remainder is refused
+  before submission (`BackgroundWindowRefused`), and background waits are clipped
+  to it, so a worker using that route needs `timeout_seconds` at least the window;
+- judge calls (`agent.judge.call`) record `timed_out` evidence on expiry, as before;
+- a nested allocation (Data Analysis) takes the smaller of the two deadlines.
+
+Because each anchor is taken after its launch, this deadline expires no earlier
+than the sandbox kill: in-flight work is still ended by the kill and the receipt
+stays `timed_out`. The deadline acts earlier only where an operation cannot fit
+(a retry wait, a background window). That `ExecutionDeadlineExceeded` (a
+`TimeoutError`) follows the existing failure paths: in a graph unit it is an
+ordinary raised exception (`NodeUnitRaised`, node `failed` with reason
+`native_failure`, traceback in `worker.log`); in the fixed path it ends the child
+non-zero and the receipt is `failed` (`worker exit 1`); the bridge's content-repair
+loop does not catch it. Node-level resilience handlers that catch `Exception`
+around an LLM call see each later call fail at its first deadline check, so they
+end promptly rather than retry. The bridge source is unchanged by this binding.
 
 The optional `training_output` receipt field contains the model name and native
 output SHA-256. It is omitted entirely for legacy receipts. Reconcile and later
@@ -540,8 +572,8 @@ three/four-stage path is unchanged and runs in the worker.
   `physical_data_root`, `node_id`, `iteration`, the selected native `storage`,
   and a phase payload discriminated by `phase` (`ProposalUnit`,
   `ImplementationUnit`, `ValidationUnit`, `LiteratureUnit`,
-  `InterpretationUnit`, `TuningUnit`). `ValidationUnit.worker_budget_seconds`
-  carries the remaining worker budget (issue #984, above). A proposal after a literature review
+  `InterpretationUnit`, `TuningUnit`). `NodeInvocation.worker_budget_seconds`
+  carries the remaining worker budget for every phase (issues #984 and #1548, above). A proposal after a literature review
   carries the review evidence already applied. `TuningUnit` carries the
   predecessor outputs of the branch `adaptor_phase.tuning_branch` selected in
   the worker (the selection adaptor's contribution, else the only branch), `chain_formal_incumbent_reference` and
