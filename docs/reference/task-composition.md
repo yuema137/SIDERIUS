@@ -1012,8 +1012,14 @@ feedback re-raise it through `raise_if_prompt_profile_failure` (#1542): the
 native loop's proposal-attempt handler (no `previous_failures` entry is
 written), the proposer's boldness retry, the interpreter's degraded path, the
 tuner's round-failure path and the literature review's resilience boundaries.
-The run stops instead of continuing with different prompts. In the candidate
-worker a raising node fails its body, which already ends the loop.
+The run stops instead of continuing with different prompts. The error's
+`kind` selects the remedy in its message: `undeclared` (declare the boundary in
+the profile and requalify it, or run without the profile), `source_drift` and
+`identity_drift` (restore or requalify the provider source), `renderer_failure`
+(fix the renderer). In the candidate worker a raising node fails its body, which
+already ends the loop; the node's graph evidence records
+`failed`/`prompt_profile_integrity` instead of `native_failure`, including when
+the error was raised in a unit child process.
 
 ## Structural preflight estimation
 

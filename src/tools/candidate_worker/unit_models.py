@@ -226,6 +226,9 @@ class NodeUnitResult(BaseModel):
     node_id: str
     phase: NativePhase
     outcome: Literal["returned", "raised", "exited", "interrupted"]
+    #: Set only for `raised`: the phase raised a prompt-profile integrity error
+    #: (#1542), which the parent records as a distinct graph reason.
+    failure: Literal["prompt_profile_integrity"] | None = None
     output: str | None = None
     record_path: str | None = None
     exit_code: int | str | None = None

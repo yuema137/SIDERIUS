@@ -17,7 +17,7 @@ from importlib.metadata import entry_points
 from inspect import signature
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, ParamSpec, TypeVar, cast
+from typing import Any, Literal, ParamSpec, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
@@ -27,28 +27,41 @@ P = ParamSpec("P")
 T = TypeVar("T", str, tuple[str, str])
 
 
+IntegrityKind = Literal["undeclared", "source_drift", "identity_drift", "renderer_failure"]
+
+_REMEDIES: dict[str, str] = {
+    "undeclared": "declare the boundary in the profile and requalify it, or run without the profile",
+    "source_drift": "restore the provider source the run started with, or requalify the changed source",
+    "identity_drift": "restore the provider source pinned at composition, or requalify and recompose",
+    "renderer_failure": "fix the profile's renderer for this boundary",
+}
+
+
 class PromptProfileIntegrityError(RuntimeError):
     """An explicitly bound prompt profile cannot render faithfully; the run stops (#1542).
 
     Raised for every integrity failure of a bound profile: a reached boundary it
-    does not declare, provider sources that changed during the run or since
-    composition, a renderer that raised, or a renderer that returned something
-    other than the boundary's text type. Continuing would silently change the
-    run's prompts (for example by turning the failure into proposer feedback),
-    so callers that convert exceptions into recoverable feedback re-raise it via
+    does not declare (``undeclared``), provider sources that changed during the
+    run (``source_drift``) or since composition (``identity_drift``), and a
+    renderer that raised or returned something other than the boundary's text
+    type (``renderer_failure``). Continuing would silently change the run's
+    prompts (for example by turning the failure into proposer feedback), so
+    callers that convert exceptions into recoverable feedback re-raise it via
     ``raise_if_prompt_profile_failure``. Deliberately not a ``ValueError``, so
     handlers for ordinary validation errors do not absorb it.
     """
 
-    def __init__(self, profile: str, boundary: str | None, reason: str) -> None:
+    def __init__(
+        self, profile: str, boundary: str | None, reason: str, kind: IntegrityKind
+    ) -> None:
         self.profile = profile
         self.boundary = boundary
         self.reason = reason
+        self.kind = kind
         target = f"boundary {boundary!r}" if boundary is not None else "its binding"
         super().__init__(
             f"Prompt profile {profile!r} cannot render {target}: {reason}. The run stops "
-            "instead of continuing with different prompts; declare the boundary in the "
-            "profile (and requalify it) or run without the profile."
+            f"instead of continuing with different prompts. Remedy: {_REMEDIES[kind]}."
         )
 
 
@@ -196,14 +209,17 @@ def bind_prompt_profile(
     if profile is None:
         if expected is not None:
             raise PromptProfileIntegrityError(
-                expected.name, None, "composition expected this profile, but none was supplied"
+                expected.name,
+                None,
+                "composition expected this profile, but none was supplied",
+                "identity_drift",
             )
         binding = None
     else:
         identity = profile.identity()
         if expected is not None and identity != expected:
             raise PromptProfileIntegrityError(
-                profile.name, None, "Prompt renderer changed after composition"
+                profile.name, None, "Prompt renderer changed after composition", "identity_drift"
             )
         binding = (profile, identity)
     token = _active.set(binding)
@@ -228,7 +244,7 @@ def prompt_boundary(name: str, *, pair: bool = False) -> Callable[[Callable[P, T
             profile, identity = binding
             if profile.identity() != identity:
                 raise PromptProfileIntegrityError(
-                    profile.name, name, "its provider source changed during the run"
+                    profile.name, name, "its provider source changed during the run", "source_drift"
                 )
             if name in profile.native_boundaries:
                 return native(*args, **kwargs)
@@ -238,6 +254,7 @@ def prompt_boundary(name: str, *, pair: bool = False) -> Callable[[Callable[P, T
                     profile.name,
                     name,
                     f"it does not declare boundary {name!r} (no renderer, not native)",
+                    "undeclared",
                 )
             supplied = contract.bind(*args, **kwargs)
             supplied.apply_defaults()
@@ -247,13 +264,19 @@ def prompt_boundary(name: str, *, pair: bool = False) -> Callable[[Callable[P, T
                 raise
             except Exception as exc:
                 raise PromptProfileIntegrityError(
-                    profile.name, name, f"its renderer raised {type(exc).__name__}: {exc}"
+                    profile.name,
+                    name,
+                    f"its renderer raised {type(exc).__name__}: {exc}",
+                    "renderer_failure",
                 ) from exc
             try:
                 return cast(Any, adapter.validate_python(value, strict=True))
             except ValidationError as exc:
                 raise PromptProfileIntegrityError(
-                    profile.name, name, f"its renderer returned {type(value).__name__}, not text"
+                    profile.name,
+                    name,
+                    f"its renderer returned {type(value).__name__}, not text",
+                    "renderer_failure",
                 ) from exc
 
         return render

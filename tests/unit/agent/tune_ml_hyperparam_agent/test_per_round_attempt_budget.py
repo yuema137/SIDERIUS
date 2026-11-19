@@ -618,7 +618,9 @@ def test_prompt_profile_integrity_failure_stops_the_tuner(agent_with_scripted_sk
     be retried and the run would continue with different prompts)."""
     from agent.prompt_rendering import PromptProfileIntegrityError
 
-    failure = PromptProfileIntegrityError("paper-x", "tuner.training_dynamics", "synthetic")
+    failure = PromptProfileIntegrityError(
+        "paper-x", "tuner.training_dynamics", "synthetic", "renderer_failure"
+    )
     agent, _saved, counter, cleanup = _setup(agent_with_scripted_skill, [], plans=[failure])
     try:
         with pytest.raises(PromptProfileIntegrityError):

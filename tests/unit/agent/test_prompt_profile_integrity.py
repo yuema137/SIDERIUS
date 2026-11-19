@@ -45,48 +45,66 @@ def _profile(tmp_path, renderers, native=()):
 
 
 def _integrity(boundary=_BOUNDARY):
-    return PromptProfileIntegrityError("paper-x", boundary, "synthetic test failure")
+    return PromptProfileIntegrityError(
+        "paper-x", boundary, "synthetic test failure", "renderer_failure"
+    )
 
 
 @pytest.mark.parametrize(
-    ("renderers", "reason"),
+    ("renderers", "reason", "kind", "remedy"),
     [
-        ({}, "does not declare boundary"),
+        ({}, "does not declare boundary", "undeclared", "declare the boundary in the profile"),
         (
             {_BOUNDARY: lambda text: (_ for _ in ()).throw(ValueError("refuse"))},
             "ValueError: refuse",
+            "renderer_failure",
+            "fix the profile's renderer",
         ),
-        ({_BOUNDARY: lambda text: 7}, "returned int, not text"),
+        (
+            {_BOUNDARY: lambda text: 7},
+            "returned int, not text",
+            "renderer_failure",
+            "fix the profile's renderer",
+        ),
     ],
     ids=["undeclared", "renderer-raises", "renderer-returns-non-text"],
 )
 def test_bound_profile_failures_are_typed_and_name_profile_and_boundary(
-    tmp_path, renderers, reason
+    tmp_path, renderers, reason, kind, remedy
 ):
+    """Fails if a failure kind escapes as a plain ValueError (absorbable by
+    validation handlers) or if the message loses the profile, the boundary or
+    the remedy that matches its cause."""
     with bind_prompt_profile(_profile(tmp_path, renderers)):
         with pytest.raises(PromptProfileIntegrityError) as raised:
             _probe("x")
     error = raised.value
     assert not isinstance(error, ValueError)
-    assert (error.profile, error.boundary) == ("paper-x", _BOUNDARY)
-    assert reason in str(error) and "paper-x" in str(error) and _BOUNDARY in str(error)
+    assert (error.profile, error.boundary, error.kind) == ("paper-x", _BOUNDARY, kind)
+    message = str(error)
+    assert reason in message and "paper-x" in message and _BOUNDARY in message
+    assert f"Remedy: {remedy}" in message
 
 
 def test_source_drift_during_the_run_is_typed(tmp_path):
     profile = _profile(tmp_path, {_BOUNDARY: lambda text: "pinned"})
     with bind_prompt_profile(profile):
         (tmp_path / "provider.txt").write_text("changed bytes")
-        with pytest.raises(PromptProfileIntegrityError, match="changed during the run"):
+        with pytest.raises(PromptProfileIntegrityError, match="changed during the run") as raised:
             _probe("x")
+    assert raised.value.kind == "source_drift"
+    assert "Remedy: restore the provider source the run started with" in str(raised.value)
 
 
 def test_changed_identity_at_binding_is_typed(tmp_path):
     profile = _profile(tmp_path, {})
     expected = profile.identity()
     (tmp_path / "provider.txt").write_text("changed bytes")
-    with pytest.raises(PromptProfileIntegrityError, match="changed after composition"):
+    with pytest.raises(PromptProfileIntegrityError, match="changed after composition") as raised:
         with bind_prompt_profile(profile, expected=expected):
             pass
+    assert raised.value.kind == "identity_drift"
+    assert "Remedy: restore the provider source pinned at composition" in str(raised.value)
 
 
 def test_wrapped_integrity_failure_is_found_through_explicit_causes():
@@ -198,3 +216,20 @@ def test_literature_review_resilience_boundaries_do_not_swallow_it(tmp_path):
     agent.bridge.generate.side_effect = _integrity("constraints.disclosure")
     with pytest.raises(PromptProfileIntegrityError):
         agent._synthesize(make_input(), [RP])
+
+
+def test_worker_records_a_distinct_reason_for_the_stop():
+    """The worker's graph evidence names the stop (in-process or reported by a
+    unit child) instead of the generic native failure. Fails if either source
+    of the classification is ignored."""
+    from tools.candidate_worker.graph import failure_reason
+    from tools.candidate_worker.unit_runner import NodeUnitRaised
+
+    assert failure_reason(NodeUnitRaised("n", "prompt_profile_integrity")) == (
+        "prompt_profile_integrity"
+    )
+    wrapped = ValueError("wrapped")
+    wrapped.__cause__ = _integrity()
+    assert failure_reason(wrapped) == "prompt_profile_integrity"
+    assert failure_reason(NodeUnitRaised("n")) == "native_failure"
+    assert failure_reason(RuntimeError("ordinary")) == "native_failure"
