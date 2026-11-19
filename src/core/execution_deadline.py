@@ -18,7 +18,20 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ExecutionDeadlineExceeded(TimeoutError):
-    """The caller's continuing allocation cannot admit another operation."""
+    """The caller's continuing allocation cannot admit another operation.
+
+    ``expires_at`` is the monotonic expiry of the allocation that refused: the one
+    passed explicitly, otherwise the deadline active where the error is created
+    (subclasses inherit this), or ``None`` without one. ``stopped_by`` uses it to
+    tell which allocation stopped an operation.
+    """
+
+    def __init__(self, *args: object, expires_at: float | None = None) -> None:
+        super().__init__(*args)
+        if expires_at is None:
+            active = _active.get()
+            expires_at = None if active is None else active.expires_at
+        self.expires_at = expires_at
 
 
 class ExecutionBudgetReceipt(BaseModel):
@@ -40,7 +53,9 @@ class ExecutionDeadline:
         self.last_boundary = boundary
         remaining = self.expires_at - time.monotonic()
         if remaining <= 0:
-            raise ExecutionDeadlineExceeded(f"Execution deadline exhausted at {boundary}")
+            raise ExecutionDeadlineExceeded(
+                f"Execution deadline exhausted at {boundary}", expires_at=self.expires_at
+            )
         return remaining
 
     def receipt(self, status: Literal["completed", "failed", "deadline_exceeded"]):
@@ -71,6 +86,54 @@ def execution_deadline(seconds: float) -> Iterator[ExecutionDeadline]:
         yield deadline
     finally:
         _active.reset(token)
+
+
+def _cause_chain(error: BaseException) -> Iterator[BaseException]:
+    """``error`` and its explicit ``__cause__`` chain, each exception once."""
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = current.__cause__
+
+
+def deadline_failure(error: BaseException) -> ExecutionDeadlineExceeded | None:
+    """The deadline refusal in ``error`` or its explicit ``__cause__`` chain, if any."""
+    return next(
+        (item for item in _cause_chain(error) if isinstance(item, ExecutionDeadlineExceeded)),
+        None,
+    )
+
+
+def raise_if_deadline_exceeded(error: BaseException) -> None:
+    """Re-raise a deadline refusal hidden in ``error``; else return.
+
+    For broad retry handlers: an allocation that refused one operation refuses
+    the next as well, so the refusal must end the caller instead of counting as
+    one failed attempt.
+    """
+    failure = deadline_failure(error)
+    if failure is not None:
+        raise failure
+
+
+def stopped_by(error: BaseException, deadline: ExecutionDeadline) -> bool:
+    """Whether ``error`` or its explicit ``__cause__`` chain is a refusal by ``deadline``.
+
+    A nested allocation clamped to ``deadline`` has the same expiry, so its refusal
+    counts (``deadline`` was the binding limit); a refusal by a shorter nested
+    allocation, or by an unrelated deadline, does not.
+    """
+    return any(
+        isinstance(item, ExecutionDeadlineExceeded) and item.expires_at == deadline.expires_at
+        for item in _cause_chain(error)
+    )
+
+
+def active_deadline() -> ExecutionDeadline | None:
+    """The deadline bound in this context, or None."""
+    return _active.get()
 
 
 def remaining_seconds(boundary: str) -> float | None:

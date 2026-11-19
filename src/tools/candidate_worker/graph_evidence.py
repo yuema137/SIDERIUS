@@ -152,7 +152,7 @@ def read_traced_record(entry: GraphNodeEvidence, *, bounded: bool = True) -> byt
 
 # Reasons a node closed without a native record may carry, by terminal state.
 _UNDISPATCHED_REASONS: dict[GraphState, frozenset[GraphReason]] = {
-    "failed": frozenset(("native_failure", "prompt_profile_integrity")),
+    "failed": frozenset(("native_failure", "prompt_profile_integrity", "deadline_exceeded")),
     "blocked": frozenset(("dependency_not_successful",)),
     "skipped": readiness.SKIP_REASONS,
 }

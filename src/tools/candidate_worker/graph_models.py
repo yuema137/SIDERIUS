@@ -20,6 +20,8 @@ GraphReason = Literal[
     "native_failure",
     # A bound prompt profile could not render; the body stops (#1542).
     "prompt_profile_integrity",
+    # The worker's remaining wall budget stopped the node (#1590).
+    "deadline_exceeded",
     "validation_rejected",
     "route_not_selected",
     # Adaptor outcomes (B6-3); `judge_failure` is reserved for LLM strategies (B6-8).

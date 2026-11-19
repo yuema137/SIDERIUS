@@ -228,9 +228,10 @@ class NodeUnitResult(BaseModel):
     phase: NativePhase
     outcome: Literal["returned", "raised", "exited", "interrupted"]
     #: Set only for `raised`: the phase raised a prompt-profile integrity error
-    #: (#1542), which the parent records as a distinct graph reason.
+    #: (#1542), or the worker's remaining budget bound in this unit stopped it
+    #: (#1590); the parent records either as a distinct graph reason.
     #: Omitted when unset, so result bytes for every other outcome are unchanged.
-    failure: Literal["prompt_profile_integrity"] | None = Field(
+    failure: Literal["prompt_profile_integrity", "deadline_exceeded"] | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
     output: str | None = None

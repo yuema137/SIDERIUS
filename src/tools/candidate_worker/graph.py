@@ -83,16 +83,23 @@ def execute_fanout(
 
 
 def failure_reason(error: BaseException) -> GraphReason:
-    """The graph reason of a node that raised: a prompt-profile integrity stop
-    (#1542), whether raised in-process or reported by its unit child, or an
-    ordinary native failure."""
-    from agent.prompt_rendering import prompt_profile_failure
+    """The graph reason of a node that raised, whether raised in-process or
+    reported by its unit child: a prompt-profile integrity stop (#1542), a stop
+    by the worker's remaining budget (#1590), or an ordinary native failure.
 
-    reported = isinstance(error, unit_runner.NodeUnitRaised) and (
-        error.failure == "prompt_profile_integrity"
-    )
-    if reported or prompt_profile_failure(error) is not None:
+    An in-process node runs inside the worker process's deadline scope
+    (``budget.run_within``); nested allocations have closed when the failure is
+    classified, so the active deadline is the worker's own.
+    """
+    from agent.prompt_rendering import prompt_profile_failure
+    from core.execution_deadline import active_deadline, stopped_by
+
+    reported = error.failure if isinstance(error, unit_runner.NodeUnitRaised) else None
+    if reported == "prompt_profile_integrity" or prompt_profile_failure(error) is not None:
         return "prompt_profile_integrity"
+    worker = active_deadline()
+    if reported == "deadline_exceeded" or (worker is not None and stopped_by(error, worker)):
+        return "deadline_exceeded"
     return "native_failure"
 
 
