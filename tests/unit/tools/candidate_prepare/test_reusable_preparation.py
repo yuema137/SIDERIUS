@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pytest
 
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tools.candidate_prepare import (
     ReusableCandidatePreparationRequest,
     preflight_reusable_candidate,
@@ -333,7 +334,7 @@ def test_concurrent_claim_has_one_writer(reusable, monkeypatch):
 
     def align(binding):
         original(binding)
-        ready.wait(timeout=10)
+        ready.wait(timeout=CHILD_PROCESS_BOUND_SECONDS)
 
     monkeypatch.setattr(launch, "verify_origin", align)
     monkeypatch.setattr(
@@ -409,7 +410,9 @@ def test_native_composition_failure_keeps_failed_capture(reusable, monkeypatch):
     )
 
     def execute(profile, argv):
-        child = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+        child = subprocess.run(
+            argv, capture_output=True, text=True, timeout=CHILD_PROCESS_BOUND_SECONDS
+        )
         return ExecutionResult(
             status="failed" if child.returncode else "completed",
             returncode=child.returncode,

@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tools.orchestration_setup.assembly import MANIFEST_NAME, assemble
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -52,7 +53,7 @@ def test_real_cli_installs_discoverable_payload_without_mutating_sources(inputs)
         capture_output=True,
         text=True,
         check=False,
-        timeout=30,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
     assert result.returncode == 0, result.stderr
     receipt = json.loads(result.stdout)

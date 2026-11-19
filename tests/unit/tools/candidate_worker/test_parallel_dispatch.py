@@ -26,6 +26,7 @@ from core.runtime_control.pair_admission import ResolvedGpuCeiling
 from core.runtime_control.process_group import observe_group
 from core.runtime_control.scheduling import GpuHardwareClass, GpuSlot, HostBudget
 from tests.helpers.candidate_fanout import UNROUTED_TRACE_SHA256, fanout_request, trace_projection
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tools.candidate_worker import launch_candidate, parallel_dispatch
 from tools.candidate_worker.graph_evidence import verify_graph_trace
 from tools.candidate_worker.models import CandidateRunReceipt
@@ -290,7 +291,7 @@ def test_sigterm_kills_every_running_unit_process_group(prepared, native_runner,
     monkeypatch.setattr(parallel_dispatch, "start_unit", first_in_process)
 
     def terminate_when_both_run():
-        deadline = time.monotonic() + 30
+        deadline = time.monotonic() + CHILD_PROCESS_BOUND_SECONDS
         while len(started) < 2 and time.monotonic() < deadline:
             time.sleep(0.05)
         os.kill(os.getpid(), signal.SIGTERM)

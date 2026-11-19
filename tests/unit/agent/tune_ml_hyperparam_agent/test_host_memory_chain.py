@@ -46,6 +46,7 @@ from agent.skills.evaluate_vram_skill.isolated_probe import (
 from agent.skills.evaluate_vram_skill.preflight_adapter import adapt_result
 from agent.skills.evaluate_vram_skill.probe_budgets import InconclusivePreflight
 from nodes.ml_hyperparameter_tune_agent.records import classify_attempt_failure_disposition
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 
 MIB = 1024**2
 
@@ -91,7 +92,7 @@ def adapted(tmp_path_factory) -> dict:
             result_path=str(tmp_path / "result.json"),
             worker_memory_limit_bytes=256 * MIB,
         ),
-        deadline_seconds=60.0,
+        deadline_seconds=CHILD_PROCESS_BOUND_SECONDS,
         command=[sys.executable, str(script)],
     )
 

@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
+
 REPO = Path(__file__).resolve().parents[3]
 ENTRY = REPO / "scripts/runtime/campaign_admission.py"
 
@@ -33,7 +35,7 @@ def _invoke(
         text=True,
         capture_output=True,
         check=False,
-        timeout=10,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
 
 

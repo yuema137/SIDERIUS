@@ -8,6 +8,8 @@ import time
 
 import pytest
 
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
+
 
 @pytest.mark.skipif(not hasattr(time, "tzset"), reason="requires host timezone selection")
 @pytest.mark.parametrize("zone", ["UTC", "America/Los_Angeles", "Asia/Shanghai"])
@@ -46,6 +48,6 @@ print(json.dumps({"passed": True}))
         text=True,
         capture_output=True,
         check=True,
-        timeout=30,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
     assert json.loads(result.stdout) == {"passed": True}

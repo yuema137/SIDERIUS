@@ -9,6 +9,7 @@ import pytest
 from agent.skills.evaluate_vram_skill.isolated_probe import run_isolated_preflight
 from core.local_code import LocalCodeError, bind_code_package
 from core.runtime_control.gpu_measurement_runner import run_prephase_measurement
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tests.unit.agent.evaluate_vram_skill.test_isolated_preflight import _spec as isolated_spec
 from tests.unit.core.test_gpu_measurement_runner import DEVICE, _Driver
 from tests.unit.core.test_gpu_measurement_runner import _spec as measurement_spec
@@ -43,7 +44,7 @@ def test_resource_parent_refuses_before_generic_missing_report_classification(
             run_isolated_preflight(
                 isolated_spec(tmp_path),
                 command=command,
-                deadline_seconds=20,
+                deadline_seconds=CHILD_PROCESS_BOUND_SECONDS,
                 poll_seconds=0.01,
             )
     assert raised.value.report.package_digest == package.identity.digest

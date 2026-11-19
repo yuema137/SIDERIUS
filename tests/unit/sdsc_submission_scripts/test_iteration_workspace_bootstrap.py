@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
+
 _REPO = Path(__file__).resolve().parents[3]
 _RUNNER = _REPO / "src/workflows/run_one_iteration.py"
 _REPORT_PREFIX = "BOOTSTRAP_REPORT="
@@ -146,7 +148,7 @@ def test_cold_entry_selects_workspace_before_registry_loading(tmp_path: Path, ro
         env=env,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
         check=False,
     )
     assert result.returncode == (2 if route == "missing-workspace" else 0), (

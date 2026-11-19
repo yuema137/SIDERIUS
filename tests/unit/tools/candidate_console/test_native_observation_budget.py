@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from core.runtime_control.process_group import GroupCleanup, GroupObservation
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tests.unit.tools.candidate_console.test_http import client
 from tests.unit.tools.candidate_console.test_native_chain import native_config
 from tests.unit.tools.candidate_operations.test_native_chain import chain
@@ -56,7 +57,7 @@ def test_large_history_public_status_policy(chain, console_config, tmp_path):
         ],
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
     assert result.returncode == 0, result.stderr
     cli = json.loads(result.stdout)

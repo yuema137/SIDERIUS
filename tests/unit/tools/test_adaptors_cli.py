@@ -90,8 +90,10 @@ def _run_fixture(manifest: Path, control: Path, **parameters: object):
     )
 
 
-_STARTUP_DELAY_SECONDS = 6.0
-_AUTHOR_TIMEOUT_SECONDS = 4.0
+#: Floor of the author timeout; the effective one scales with a measured run.
+_AUTHOR_TIMEOUT_FLOOR_SECONDS = 4.0
+#: Bounds an undelayed baseline run; only a failing run waits for it.
+_BASELINE_TIMEOUT_SECONDS = 600.0
 
 
 def _delay_child_startup(monkeypatch, seconds: float) -> None:
@@ -114,15 +116,30 @@ def _delay_child_startup(monkeypatch, seconds: float) -> None:
 
 def test_author_timeout_starts_at_entered_not_at_launch(tmp_path: Path, monkeypatch) -> None:
     # Defect: counting startup against the author's timeout made fast adaptors
-    # fail whenever startup was slower than their timeout. Startup is forced to
-    # 6 s (> the 4 s author timeout), so only a deadline that starts at `entered`
-    # lets this run finish; the fast adaptor then has 4 s for its post-entry work.
+    # fail whenever startup was slower than their timeout. Startup is forced past
+    # the author timeout, so only a deadline that starts at `entered` lets this run
+    # finish; the adaptor then has the whole author timeout for its post-entry work.
+    # Both durations scale with an undelayed run timed on this host now, so a
+    # loaded host cannot push post-entry work past the timeout (#1578), while a
+    # launch-based deadline still must fail (startup delay > author timeout).
     _, manifest = _project(tmp_path)
-    _set_timeout(manifest, _AUTHOR_TIMEOUT_SECONDS)
-    _delay_child_startup(monkeypatch, _STARTUP_DELAY_SECONDS)
+    _set_timeout(manifest, _BASELINE_TIMEOUT_SECONDS)
+    _, baseline = _run_fixture(manifest, tmp_path / "baseline")
+    author_timeout = max(_AUTHOR_TIMEOUT_FLOOR_SECONDS, 3 * baseline)
+    startup_delay = author_timeout + 2.0
+    _set_timeout(manifest, author_timeout)
+    _delay_child_startup(monkeypatch, startup_delay)
+    # The separate pre-entry allowance must still cover the forced delay.
+    from workflows.custom_adaptors import process
+
+    monkeypatch.setattr(
+        process,
+        "STARTUP_ALLOWANCE_SECONDS",
+        max(process.STARTUP_ALLOWANCE_SECONDS, startup_delay + _BASELINE_TIMEOUT_SECONDS),
+    )
     output, elapsed = _run_fixture(manifest, tmp_path / "fast")
     assert output.author[0][0]["source_ref"] == "sd0"
-    assert elapsed > _STARTUP_DELAY_SECONDS  # The hook really delayed startup.
+    assert elapsed > startup_delay > author_timeout  # The hook really delayed startup.
 
 
 def test_author_timeout_stops_a_running_adaptor(tmp_path: Path) -> None:

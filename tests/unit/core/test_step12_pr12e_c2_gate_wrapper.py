@@ -27,6 +27,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tests.helpers.step12_pr12e_gate_iteration import DEFAULT_TARGET, REPO_ROOT
 from tests.helpers.step12_pr12e_restore_harness import read_process_ledger, same_interpreter
 
@@ -166,7 +167,7 @@ class TestTheWrapperDoesNotRewriteTheLaunch:
             capture_output=True,
             text=True,
             cwd=str(REPO_ROOT),
-            timeout=60,
+            timeout=CHILD_PROCESS_BOUND_SECONDS,
         )
         assert proc.returncode != 0
         assert "'--' separator" in proc.stderr

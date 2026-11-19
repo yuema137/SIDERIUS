@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tools.setup_review.inspection import inspect_declaration
 from tools.setup_review.models import SetupReviewRequest
 from tools.setup_review.review import main
@@ -436,7 +437,7 @@ runpy.run_module('tools.setup_review.review', run_name='__main__')
         cwd=tmp_path,
         text=True,
         capture_output=True,
-        timeout=20,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
     assert result.returncode == 0, result.stderr
     assert "Setup review skipped" in result.stdout

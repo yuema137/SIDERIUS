@@ -9,6 +9,8 @@ from pathlib import Path
 
 import yaml
 
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
+
 
 def test_actual_chain_does_not_submit_again_after_package_refusal(tmp_path):
     repo = Path(__file__).resolve().parents[3]
@@ -52,7 +54,7 @@ run_chain
         cwd=tmp_path,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
     assert result.returncode == 3, result.stdout + result.stderr
     assert (tmp_path / "submissions").read_text().splitlines() == ["1"]
