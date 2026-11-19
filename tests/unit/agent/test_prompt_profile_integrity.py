@@ -233,3 +233,17 @@ def test_worker_records_a_distinct_reason_for_the_stop():
     assert failure_reason(wrapped) == "prompt_profile_integrity"
     assert failure_reason(NodeUnitRaised("n")) == "native_failure"
     assert failure_reason(RuntimeError("ordinary")) == "native_failure"
+
+
+def test_unit_result_bytes_are_unchanged_when_no_failure_is_reported():
+    """The new worker transport field is omitted when unset, so every ordinary
+    unit result keeps its pre-#1542 bytes. Fails if the field serializes as null."""
+    from tools.candidate_worker.unit_models import NodeUnitResult
+    from tools.candidate_worker.unit_transport import encode_transport
+
+    ordinary = encode_transport(NodeUnitResult(node_id="n", phase="proposal", outcome="raised"))
+    assert b"failure" not in ordinary
+    flagged = NodeUnitResult(
+        node_id="n", phase="proposal", outcome="raised", failure="prompt_profile_integrity"
+    )
+    assert b'"failure":"prompt_profile_integrity"' in encode_transport(flagged)
