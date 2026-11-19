@@ -201,10 +201,14 @@ A successful data command ends with `Data ready in .../data/NAME`.
    missing: no device node was passed; device nodes were passed but `/sys` is not
    mounted (CUDA error 304: the run did not get the automatic passthrough, so check
    that the task lists a GPU device node and run `check --gpu`); or CUDA
-   failed to start with both present (check the driver with `nvidia-smi`; if
-   `/dev/nvidia-uvm` is missing on the host, run `nvidia-smi` or
-   `nvidia-modprobe -u -c=0` once on the host, because the sandbox cannot create
-   it; and do not set `CUDA_VISIBLE_DEVICES` to an empty value).
+   failed to start with both present. For that last case the message names the
+   driver check for your kind of GPU node. On a native Linux NVIDIA machine, check
+   the driver with `nvidia-smi`; if `/dev/nvidia-uvm` is missing on the host, run
+   `nvidia-smi` or `nvidia-modprobe -u -c=0` once on the host, because the sandbox
+   cannot create it. Under WSL2 (`/dev/dxg`), the driver is the Windows NVIDIA
+   driver: run `/usr/lib/wsl/lib/nvidia-smi` inside WSL, and update the driver in
+   Windows if it fails. In both cases, do not set `CUDA_VISIBLE_DEVICES` to an
+   empty value.
 
    Older entries that list control nodes such as `/dev/nvidia-uvm` or
    `/dev/nvidiactl` in `candidate_devices` keep working, but a listed node missing

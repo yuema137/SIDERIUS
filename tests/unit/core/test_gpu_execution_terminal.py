@@ -13,6 +13,7 @@ import pytest
 from core.runtime_control import native_gpu_execution as native
 from core.runtime_control.gpu_execution_evidence import GpuExecutionReceipt
 from core.sandbox_layout import training_checkpoint_path
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tests.unit.core.test_checkpoint_inference_measurement import bound_spec
 from tests.unit.core.test_gpu_runtime_protection import observer, snapshot
 from tests.unit.core.test_native_gpu_execution import selected_state
@@ -58,7 +59,7 @@ def test_runtime_stop_keeps_raw_child_and_cleans_only_current_attempt(tmp_path, 
                 sys.executable,
                 "-c",
                 "import pathlib, sys, time; print('started candidate', flush=True); "
-                "pathlib.Path(sys.argv[1]).touch(); time.sleep(600)",
+                f"pathlib.Path(sys.argv[1]).touch(); time.sleep({CHILD_PROCESS_BOUND_SECONDS:g})",
                 str(printed),
             ],
             env=dict(os.environ),

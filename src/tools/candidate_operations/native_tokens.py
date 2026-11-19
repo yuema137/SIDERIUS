@@ -3,6 +3,8 @@
 import os
 from pathlib import Path
 
+from core.native_writer.models import WriterRefusal
+from core.native_writer.state import state_directory
 from tools.candidate_worker.token_models import CandidateTokenSnapshot
 from tools.candidate_worker.tokens import canonical, now, read_ledger_snapshot
 from tools.native_chain.observation import NativeChainEvidence
@@ -35,8 +37,12 @@ def retained_anchor(evidence: NativeChainEvidence) -> tuple[str, str] | None:
 def _anchors(record: OperationRecord, workspace: Path) -> set[tuple[str, str]] | None:
     request, _ = chain_context(record)
     fence = Path(request.envelope) / ".native-chain-operation/binding.json"
-    writer_state = workspace.parent / f".{workspace.name}.siderius-writer"
-    if not os.path.lexists(fence) or not os.path.lexists(writer_state):
+    try:
+        # The writer owner derives its control directory; never rebuild the rule here.
+        writer_state: Path | None = state_directory(workspace)
+    except WriterRefusal:
+        writer_state = None  # no workspace parent, so no writer state either
+    if not os.path.lexists(fence) or writer_state is None or not os.path.lexists(writer_state):
         budget = ControlBudget()
         node = load_node(record.config, record.submission.request_id, budget, record=record)
         if record.submission.kind == "native_chain_resume":

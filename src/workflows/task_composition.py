@@ -2432,15 +2432,54 @@ class ScoringChildComposition:
     secondary_metrics: tuple[EvaluationMetric, ...]
 
 
+@dataclass(frozen=True)
+class _ScoringManifest:
+    """One scoring child's manifest, opened once (#1546).
+
+    Held only inside :func:`_scoring_composition`, while the manifest's code
+    package is active, so every declaration composes against the same package.
+    """
+
+    raw: dict[str, Any]
+    directory: str
+    metric: EvaluationMetric
+
+    def secondaries(self) -> tuple[EvaluationMetric, ...]:
+        """The declared secondary metrics, through the run's composition authority."""
+        composed, _, _, _ = _compose_secondary_metrics(
+            self.raw, self.directory, self.metric.spec.id
+        )
+        return composed
+
+
+@contextmanager
+def _scoring_composition(manifest_path: str) -> Iterator[_ScoringManifest]:
+    """The one owner of the scoring child's composition sequence (#1546).
+
+    Reads the manifest, enters its code package and composes the primary
+    metric, refusing a primary the local scoring child cannot evaluate. Both
+    scoring-child entries (:func:`compose_scoring_child_bindings` and
+    :func:`compose_scoring_secondary_metrics`) compose through it, and neither
+    resolves candidate model/loss plugins or other training declarations.
+    """
+    from execute_tools.evaluation_metric import EvaluationMetric
+
+    resolved_manifest = os.path.abspath(manifest_path)
+    raw = _read_manifest(resolved_manifest)
+    directory = os.path.dirname(resolved_manifest)
+    with composition_package(raw.get("code_package"), directory):
+        metric, _, _ = _compose_metric(_section(raw, "metric", resolved_manifest), directory)
+        if not isinstance(metric, EvaluationMetric):
+            raise TaskCompositionError(
+                "this metric requires complete candidate evaluation, not the local scoring child"
+            )
+        yield _ScoringManifest(raw=raw, directory=directory, metric=metric)
+
+
 def compose_scoring_secondary_metrics(manifest_path: str) -> tuple[EvaluationMetric, ...]:
     """Resolve secondary metrics without loading model or training declarations."""
-    resolved = os.path.abspath(manifest_path)
-    raw = _read_manifest(resolved)
-    directory = os.path.dirname(resolved)
-    with composition_package(raw.get("code_package"), directory):
-        primary, _, _ = _compose_metric(_section(raw, "metric", resolved), directory)
-        secondaries, _, _, _ = _compose_secondary_metrics(raw, directory, primary.spec.id)
-    return secondaries
+    with _scoring_composition(manifest_path) as manifest:
+        return manifest.secondaries()
 
 
 def compose_scoring_child_bindings(
@@ -2480,24 +2519,19 @@ def compose_scoring_child_bindings(
             run MUST NOT silently score with TIDMAD's metric; that is the
             C-P56-1 failure class one layer down.
     """
-    resolved_manifest = os.path.abspath(manifest_path)
-    raw = _read_manifest(resolved_manifest)
-    from execute_tools.evaluation_metric import EvaluationMetric
     from workflows.evaluation_composition import compose_evaluation, require_evaluation_runtime
 
     composition: ScoringChildComposition | None = None
-    directory = os.path.dirname(resolved_manifest)
-    with composition_package(raw.get("code_package"), directory):
-        metric, _, _ = _compose_metric(_section(raw, "metric", resolved_manifest), directory)
-        if not isinstance(metric, EvaluationMetric):
-            raise TaskCompositionError(
-                "this metric requires complete candidate evaluation, not the local scoring child"
-            )
-        if "evaluation" in raw:
-            secondaries, _, _, _ = _compose_secondary_metrics(raw, directory, metric.spec.id)
-            judge_task, _ = _compose_judge_task(raw, directory)
+    with _scoring_composition(manifest_path) as manifest:
+        metric = manifest.metric
+        if "evaluation" in manifest.raw:
+            secondaries = manifest.secondaries()
+            judge_task, _ = _compose_judge_task(manifest.raw, manifest.directory)
             evaluation = compose_evaluation(
-                raw, directory, {m.spec.id: m.spec for m in (metric, *secondaries)}, judge_task
+                manifest.raw,
+                manifest.directory,
+                {m.spec.id: m.spec for m in (metric, *secondaries)},
+                judge_task,
             )
             require_evaluation_runtime(evaluation)
             composition = ScoringChildComposition(

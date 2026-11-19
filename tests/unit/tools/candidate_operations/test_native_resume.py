@@ -243,6 +243,21 @@ def _seeded_lock(workspace, run_seed, source):
     )
 
 
+def test_continuation_reservation_location_comes_from_the_writer_owner(history, monkeypatch):
+    """#1567 (red-team sweep): ``has_continuation`` hand-built the writer state path
+    instead of asking ``core.native_writer.state.state_directory``. Fails if it
+    stops asking the owner: with the owner's location empty, a published
+    reservation must no longer count as a continuation."""
+    from tools.candidate_operations import native_resume_read
+
+    root, _, record, _, _ = history
+    reserve(record)
+    assert native_resume_read.has_continuation(root)
+    owner_moved = Path(root.native_chain_admission.workspace).parent / "owner-moved"
+    monkeypatch.setattr(native_resume_read, "state_directory", lambda workspace: owner_moved)
+    assert not native_resume_read.has_continuation(root)
+
+
 def test_adopted_suffix_is_current_but_old_terminal_and_prefix_are_immutable(history):
     root, path, record, child_path, current = history
     original = (path / "native-chain-terminal.json").read_bytes()
