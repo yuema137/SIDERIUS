@@ -905,9 +905,15 @@ def refuse_builtin_proposal_under_isolation(
     (``ml_models.model_descriptions.BUNDLED_MODEL_TYPES``), so the two
     refusals cannot name different baselines. A non-isolated run is untouched.
 
+    The same refusal covers ``inherited_components`` (#1614): an
+    ``experiment`` claim whose ``source_id`` is a bundled type is refused and
+    named, so the next proposal designs those components from scratch or cites
+    an agent-generated experiment. ``external_agent`` / ``human`` claims carry
+    namespaced ids (``<prefix>:<identifier>``) that never denote a model type.
+
     Raises:
         BaselineIsolationViolation: naming every bundled type the proposal
-            reached for.
+            reached for, or every bundled experiment claim.
     """
     if not baseline_isolation:
         return
@@ -926,6 +932,23 @@ def refuse_builtin_proposal_under_isolation(
             f"{proposal.model_name!r}). The WITHOUT arm excludes every shipped "
             f"baseline {sorted(BUNDLED_MODEL_TYPES)}; propose a new architecture "
             "or reuse an agent-generated plugin."
+        )
+    # #1614: an experiment claim names a chain model by model_type, so a claim on
+    # a bundled type asks the implementor to carry a shipped baseline's parts.
+    # external_agent / human claims are namespaced references to findings and
+    # directives ('<prefix>:<id>'), never a model_type, and load no source.
+    claims = [
+        f"{item.component!r} from {item.source_id!r}"
+        for item in proposal.inherited_components
+        if item.source_type == "experiment" and is_bundled_model_type(item.source_id)
+    ]
+    if claims:
+        raise BaselineIsolationViolation(
+            "baseline_isolation is ON and the proposal's inherited_components claim "
+            f"bundled built-in model type(s) as experiment ancestors: {', '.join(claims)}. "
+            f"The WITHOUT arm excludes every shipped baseline {sorted(BUNDLED_MODEL_TYPES)}; "
+            "design those components from scratch, or cite an agent-generated experiment "
+            "as the ancestor."
         )
 
 

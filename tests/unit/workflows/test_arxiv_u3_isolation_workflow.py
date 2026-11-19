@@ -69,10 +69,47 @@ class TestRefusalAuthority:
             _make_proposal_output(model_name="fresh_tcn"), baseline_isolation=True
         )
 
+    def test_a_bundled_experiment_ancestor_claim_is_refused_and_named(self):
+        """#1614: fails if an isolated proposal can claim a shipped baseline as its
+        experiment ancestor, or if the refusal stops naming the claim."""
+        proposal = _with_claim(_make_proposal_output(model_name="fresh_tcn"), "experiment", "punet")
+        with pytest.raises(BaselineIsolationViolation) as exc:
+            refuse_builtin_proposal_under_isolation(proposal, baseline_isolation=True)
+        assert "'block' from 'punet'" in str(exc.value)
+        refuse_builtin_proposal_under_isolation(proposal, baseline_isolation=False)
+
+    @pytest.mark.parametrize(
+        ("source_type", "source_id"),
+        [
+            ("experiment", "fresh_generated_tcn"),
+            ("external_agent", "arxiv:wavenet"),
+            ("human", "human:punet_like_please"),
+        ],
+    )
+    def test_claims_that_name_no_bundled_model_type_pass(self, source_type, source_id):
+        """Only an experiment claim names a chain model by model_type; namespaced
+        external/human ids never do, and a generated experiment is allowed."""
+        proposal = _with_claim(
+            _make_proposal_output(model_name="fresh_tcn"), source_type, source_id
+        )
+        refuse_builtin_proposal_under_isolation(proposal, baseline_isolation=True)
+
     def test_without_isolation_a_builtin_candidate_is_untouched(self):
         refuse_builtin_proposal_under_isolation(
             _make_proposal_output(model_name="punet"), baseline_isolation=False
         )
+
+
+def _with_claim(proposal, source_type: str, source_id: str):
+    from agent.schemas.proposal import InheritedComponent
+
+    claim = InheritedComponent(
+        component="block",
+        source_type=source_type,
+        source_id=source_id,
+        contribution_evidence="Claimed carry-over.",
+    )
+    return proposal.model_copy(update={"inherited_components": [claim]})
 
 
 def _run(workspace: str, *, isolation: bool, proposal_name: str, out: dict | None = None):
@@ -315,28 +352,33 @@ class TestWorkflowReachabilityAndThreading:
         assert "baseline_isolation" not in lock
 
 
-class TestIsolatedAncestorSourceIsWithheld:
-    """#1541 reproduction through the production loop: a proposal under
-    isolation that claims an experiment ancestor named like a bundled baseline
-    must not hand that baseline's source to the implementor."""
+class TestIsolatedBundledAncestorClaim:
+    """#1541/#1614 through the production loop. Under isolation a proposal that
+    claims an experiment ancestor named like a bundled baseline is refused and
+    named before implementation; the refusal reaches the next proposal through
+    the failure feedback and the run continues. Without isolation the claim is
+    implemented with the ancestor source (#1537)."""
 
-    def _ancestor_proposal(self):
+    def _proposal(self, *, claim):
         from agent.schemas.proposal import InheritedComponent
 
+        components = (
+            [
+                InheritedComponent(
+                    component="dilated_causal_conv",
+                    source_type="experiment",
+                    source_id="wavenet",
+                    contribution_evidence="Claimed carry-over from the bundled baseline.",
+                )
+            ]
+            if claim
+            else []
+        )
         return _make_proposal_output(model_name="fresh_tcn").model_copy(
-            update={
-                "inherited_components": [
-                    InheritedComponent(
-                        component="dilated_causal_conv",
-                        source_type="experiment",
-                        source_id="wavenet",
-                        contribution_evidence="Claimed carry-over from the bundled baseline.",
-                    )
-                ]
-            }
+            update={"inherited_components": components}
         )
 
-    def _implementor_reference_code(self, tmp_path, *, isolation):
+    def _run(self, tmp_path, *, isolation, proposals):
         workspace = str(tmp_path / f"ws_{isolation}")
         os.makedirs(workspace)
         composition = compose_run_task_bindings(str(QUICKSTART))
@@ -349,7 +391,7 @@ class TestIsolatedAncestorSourceIsWithheld:
             patch("workflows.model_exploration.HyperparamTuningAgent") as tuner,
         ):
             interp.return_value.run.return_value = _make_interpretation_output()
-            proposer.return_value.run.return_value = self._ancestor_proposal()
+            proposer.return_value.run.side_effect = proposals
             implementor.return_value.run.return_value = _make_implementor_output(
                 model_type="fresh_tcn"
             )
@@ -362,6 +404,7 @@ class TestIsolatedAncestorSourceIsWithheld:
                     source_paths=[],
                     max_iterations=1,
                     start_iteration=1,
+                    max_proposal_attempts=2,
                     baseline_isolation=isolation,
                     data_dir=workspace,
                 ),
@@ -370,13 +413,29 @@ class TestIsolatedAncestorSourceIsWithheld:
                 llm_config=_llm_config_pseudo(),
                 task_composition=composition,
             )
-            return implementor.return_value.run.call_args.args[0].reference_code
+            return (
+                [call.args[0] for call in proposer.return_value.run.call_args_list],
+                [call.args[0] for call in implementor.return_value.run.call_args_list],
+            )
 
-    def test_isolated_run_withholds_bundled_ancestor_source(self, tmp_path):
-        """Fails before #1541: the ancestor loader fell back to models_sandbox
-        and put the bundled WaveNet source into the implementor's prompts."""
-        assert "wavenet" not in self._implementor_reference_code(tmp_path, isolation=True)
+    def test_isolated_claim_is_refused_and_fed_back_to_the_next_proposal(self, tmp_path):
+        """Fails before #1614: the claiming proposal reached the implementor.
+        Also fails if the refusal crashes the run or loses the claim's name."""
+        propose_inputs, implementor_inputs = self._run(
+            tmp_path,
+            isolation=True,
+            proposals=[self._proposal(claim=True), self._proposal(claim=False)],
+        )
+        assert len(propose_inputs) == 2 and len(implementor_inputs) == 1
+        assert implementor_inputs[0].inherited_components == []
+        assert "wavenet" not in implementor_inputs[0].reference_code
+        [feedback] = propose_inputs[1].previous_failures
+        assert feedback.startswith("BaselineIsolationViolation: Candidate proposal refused:")
+        assert "'dilated_causal_conv' from 'wavenet'" in feedback
+        assert "design those components from scratch" in feedback
 
     def test_non_isolated_run_still_receives_the_ancestor_source(self, tmp_path):
-        reference = self._implementor_reference_code(tmp_path, isolation=False)
-        assert "class CausalConv1d" in reference["wavenet"]
+        _, implementor_inputs = self._run(
+            tmp_path, isolation=False, proposals=[self._proposal(claim=True)]
+        )
+        assert "class CausalConv1d" in implementor_inputs[0].reference_code["wavenet"]
