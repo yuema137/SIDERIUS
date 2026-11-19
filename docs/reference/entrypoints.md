@@ -40,11 +40,17 @@ or `/dev/dxg` under WSL2) as a character device → pass device nodes in
 `candidate_devices`; nodes but no `/sys/bus/pci/devices` → `/sys` is not mounted,
 CUDA error 304 (the console run sandbox mounts it read-only by itself for a task listing
 a GPU device node; `check --gpu` confirms); both present → CUDA failed to
-initialize: check the driver; the sandbox passes the NVIDIA control nodes present at
-launch and cannot create one, so if `/dev/nvidia-uvm` is missing on the host run
-`nvidia-smi` (or `nvidia-modprobe -u -c=0`) once on the host, then relaunch; and do not
-set an empty `CUDA_VISIBLE_DEVICES`; the
-capability's `unavailability_reason` is one of `NO_CUDA_REASONS` per cause); other
+initialize: check the driver of the provider whose GPU nodes are visible
+(`GpuDeviceProvider.driver_remedy`, chosen by `core.gpu_requirement.visible_providers`;
+every provider, labelled, when none or several are visible). Native NVIDIA: the sandbox
+passes the NVIDIA control nodes present at launch and cannot create one, so if
+`/dev/nvidia-uvm` is missing on the host run `nvidia-smi` (or `nvidia-modprobe -u -c=0`)
+once on the host, then relaunch. WSL2: check the Windows NVIDIA driver from inside WSL
+with `/usr/lib/wsl/lib/nvidia-smi`, update it in Windows (and `wsl --update`) if that
+fails, restart WSL and relaunch. Either way, do not set an empty
+`CUDA_VISIBLE_DEVICES`. The fix text is operator-facing and never recorded; the
+capability's `unavailability_reason` is one of `NO_CUDA_REASONS` per cause, a recorded
+identity kept byte-stable (it still reads "NVIDIA device nodes", issue #1577)); other
 unavailability reasons (for example a missing dataset) keep the bounded-probe
 wording. The chain header prints `Compute device   : NVIDIA GPU with CUDA required
 (checked before any model call)` for real chains and `not checked (pseudo-mode; ...)`

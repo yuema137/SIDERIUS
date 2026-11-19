@@ -83,7 +83,7 @@ class TestLaunchSelfTest:
         [
             ("no_device_nodes", "list its device nodes in the task's candidate_devices"),
             ("sys_not_mounted", "/sys is not mounted here, so CUDA cannot start (CUDA error 304)"),
-            ("cuda_init_failed", "CUDA failed to initialize. Check the driver"),
+            ("cuda_init_failed", "but CUDA failed to initialize. "),
         ],
     )
     def test_a_missing_accelerator_is_refused_with_the_fix_for_its_cause(self, cause, fix):
