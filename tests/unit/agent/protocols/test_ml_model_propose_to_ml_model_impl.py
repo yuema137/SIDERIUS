@@ -106,6 +106,21 @@ class TestLocalFullSpec:
         assert result.test_dir == os.path.join(expected_root, "tests")
         assert result.loss_dir == os.path.join(expected_root, "losses")
 
+    def test_inherited_components_survive_the_hop(self, proposal_output, storage):
+        """#1540: the implementor must see which components the proposal keeps.
+        Fails if the protocol drops the field (the implementor then guesses from
+        prose next to the full ancestor sources)."""
+        from agent.schemas.proposal import InheritedComponent
+
+        claimed = InheritedComponent(
+            component="dilated_causal_conv",
+            source_type="experiment",
+            source_id="wavenet",
+            contribution_evidence="Best recovery on low-frequency files.",
+        )
+        proposal = proposal_output.model_copy(update={"inherited_components": [claimed]})
+        assert local_full_spec(proposal, storage).inherited_components == [claimed]
+
     def test_custom_loss_spec_none_forwards_as_none(self, proposal_output, storage):
         """The fixture proposal_output has no custom_loss_spec (defaults to
         None). The protocol must forward None unchanged — this is the

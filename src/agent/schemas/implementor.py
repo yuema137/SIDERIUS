@@ -24,7 +24,7 @@ from agent.schemas.hyperparam_tuning import (
 from agent.schemas.model_io_contract import ModelIOContract
 from agent.schemas.model_probe import ModelProbeContext
 from agent.schemas.output_types import OutputTypeName
-from agent.schemas.proposal import CustomLossSpec
+from agent.schemas.proposal import CustomLossSpec, InheritedComponent
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
 from core.capability_registry import CapabilityContractSnapshot, CapabilityMetadata
@@ -389,6 +389,14 @@ class ImplementorInput(BaseModel):
         "On each retry the LLM receives the validation error and its previous "
         "code, and produces a targeted fix. Total attempts = 1 + max_retries. "
         "Set to 0 to disable self-correction.",
+    )
+    inherited_components: list[InheritedComponent] = Field(
+        default_factory=list,
+        description="The proposal's inherited_components, mapped field-to-field by the "
+        "propose->impl protocol (issue #1540): which component the new model carries over, "
+        "from which source (experiment model_type, external agent or human directive) and "
+        "why. Rendered next to reference_code in the reasoning, code and every repair "
+        "prompt. Empty list = the proposal inherits nothing (no prompt bytes).",
     )
     reference_code: dict[str, str] = Field(
         default_factory=dict,

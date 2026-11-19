@@ -967,3 +967,43 @@ def test_every_repair_request_carries_the_code_calls_contract(agent_with_mocks, 
     for repair in repairs:
         assert repair.args[0].endswith(contract)
         assert "previous prompt" not in repair.args[0]
+
+
+# ---------------------------------------------------------------------------
+# Inherited components reach every implementation call (#1540)
+# ---------------------------------------------------------------------------
+
+_INHERITED_MARKER = "INHERITED-COMPONENT-MARKER"
+
+
+def test_inherited_components_reach_reasoning_code_and_every_repair(
+    agent_with_mocks, inp, monkeypatch
+):
+    """Each stateless call must see which components the proposal keeps, once.
+    Fails on the #1540 defect (no call saw the claims) or if a repair repeats
+    them per error-history entry."""
+    from agent.schemas.proposal import InheritedComponent
+
+    inp.inherited_components = [
+        InheritedComponent(
+            component=_INHERITED_MARKER,
+            source_type="external_agent",
+            source_id="arxiv:1609.03499",
+            contribution_evidence="Long context addresses the drift bottleneck.",
+        )
+    ]
+    errors = iter(["first repair trigger", "second repair trigger", None])
+    monkeypatch.setattr(agent_with_mocks, "_validate_code", lambda *_: next(errors))
+    agent_with_mocks.run(inp)
+    calls = (
+        agent_with_mocks.bridge.generate_text.call_args_list
+        + agent_with_mocks.bridge.generate.call_args_list
+    )
+    assert [recorded.kwargs["label"] for recorded in calls] == [
+        "implementor.reasoning",
+        "implementor.code",
+        "implementor.repair",
+        "implementor.repair",
+    ]
+    for recorded in calls:
+        assert recorded.args[1].count(_INHERITED_MARKER) == 1, recorded.kwargs["label"]
