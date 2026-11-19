@@ -247,3 +247,18 @@ def test_unit_result_bytes_are_unchanged_when_no_failure_is_reported():
         node_id="n", phase="proposal", outcome="raised", failure="prompt_profile_integrity"
     )
     assert b'"failure":"prompt_profile_integrity"' in encode_transport(flagged)
+
+
+def test_repair_system_boundary_reached_undeclared_is_typed(tmp_path):
+    """``implementor.repair_system`` (#1574) is entered on every repair; a
+    historical profile without it must stop with the typed error and the
+    declare-or-requalify remedy, not a ValueError a handler could absorb."""
+    from nodes.ml_model_implementor.ml_model_implementor import _build_repair_system_prompt
+    from tests.unit.agent.ml_model_implementor.test_step00_prompt_goldens import fixture_input
+
+    profile = _profile(tmp_path, {}, native={"native_training.appendix"})
+    with bind_prompt_profile(profile):
+        with pytest.raises(PromptProfileIntegrityError) as raised:
+            _build_repair_system_prompt(fixture_input())
+    assert (raised.value.boundary, raised.value.kind) == ("implementor.repair_system", "undeclared")
+    assert "Remedy: declare the boundary in the profile" in str(raised.value)
