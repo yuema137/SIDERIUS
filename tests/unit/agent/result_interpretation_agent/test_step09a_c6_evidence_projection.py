@@ -738,6 +738,75 @@ class TestQ097StaysBinding:
             for h in node.handlers
         ]
 
+    #: The one function allowed to wrap a secondary evaluation in the taxonomy.
+    OWNER: ClassVar[tuple[str, str]] = (
+        "src/execute_tools/evaluation_metric.py",
+        "evaluate_declared_secondaries",
+    )
+
+    @staticmethod
+    def _taxonomy_handlers(node: ast.Try, taxonomy: tuple[str, ...]) -> set[str]:
+        """The taxonomy exception names this ``try`` catches (any subset counts)."""
+        caught: set[str] = set()
+        for handler in node.handlers:
+            for name in ast.walk(handler.type) if handler.type is not None else ():
+                if isinstance(name, ast.Name) and name.id in taxonomy:
+                    caught.add(name.id)
+                elif isinstance(name, ast.Attribute) and name.attr in taxonomy:
+                    caught.add(name.attr)
+        return caught
+
+    @staticmethod
+    def _is_secondary_evaluation(node: ast.AST) -> bool:
+        """A call that evaluates one secondary: ``secondary.evaluate(...)``,
+        ``sandbox.evaluate_metric(secondary, ...)`` or ``evaluate_one(secondary)``.
+
+        The callee name starts with ``evaluate`` and the receiver or an argument
+        names a secondary. A call to a name-matched adapter (``_evaluate_...``)
+        is a delegation, not an evaluation, and is not matched.
+        """
+        if not isinstance(node, ast.Call):
+            return False
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+        if not name.startswith("evaluate"):
+            return False
+        parts = [func.value] if isinstance(func, ast.Attribute) else []
+        parts += [*node.args, *(keyword.value for keyword in node.keywords)]
+        return any("secondar" in ast.unparse(part).lower() for part in parts)
+
+    @classmethod
+    def _partial_copies(cls, rel: str, source: str) -> list[str]:
+        """Secondary-outcome handling outside the owner, including partial copies (#1544).
+
+        Two shapes, each a second place a secondary outcome could be decided:
+        a ``try`` catching ANY taxonomy exception around a secondary evaluation,
+        anywhere but the owner; and a name-matched secondary function (an
+        adapter) that catches ANY taxonomy exception at all.
+        """
+        tree = ast.parse(source)
+        adapters = set(cls._secondary_evaluators_in(source))
+        found: list[str] = []
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if (rel, fn.name) == cls.OWNER:
+                continue
+            for node in ast.walk(fn):
+                if not isinstance(node, ast.Try):
+                    continue
+                caught = cls._taxonomy_handlers(node, cls.TAXONOMY_HANDLERS)
+                if not caught:
+                    continue
+                evaluates = any(
+                    cls._is_secondary_evaluation(call)
+                    for statement in node.body
+                    for call in ast.walk(statement)
+                )
+                if evaluates or fn.name in adapters:
+                    found.append(f"{rel}::{fn.name}:{node.lineno} catches {sorted(caught)}")
+        return found
+
     def test_the_secondary_evaluator_has_exactly_one_owner(self):
         """The C2 half of the inversion (C1 inverted the binder half into
         `tests/unit/workflows/test_step10_p2b_c1_secondary_declaration.py`).
@@ -794,6 +863,18 @@ class TestQ097StaysBinding:
             f"exactly one function may CONTAIN the try/except taxonomy; found it in: {owners}. "
             "Every other name-matching function must be a thin adapter that DELEGATES to it."
         )
+        copies = [
+            copy
+            for root in ("src/nodes", "src/agent", "src/core", "src/execute_tools", "src/workflows")
+            for path in sorted((REPO_ROOT / root).rglob("*.py"))
+            for copy in self._partial_copies(
+                path.relative_to(REPO_ROOT).as_posix(), path.read_text(encoding="utf-8")
+            )
+        ]
+        assert not copies, (
+            "secondary-outcome handling outside evaluate_declared_secondaries, even a partial "
+            f"copy of its taxonomy, decides a secondary outcome a second way: {copies}"
+        )
 
     def test_the_taxonomy_detector_FIRES_on_a_planted_second_copy(self):
         """Anti-vacuity: the NEW half of the guard, proven to actually see a
@@ -810,6 +891,63 @@ class TestQ097StaysBinding:
             "        pass\n"
         ).body[0]
         assert self._try_handler_types(planted) == list(self.TAXONOMY_HANDLERS)
+
+    @pytest.mark.parametrize(
+        ("rel", "planted"),
+        [
+            (
+                "src/nodes/x.py",
+                "def _finish(secondaries, out):\n"
+                "    for secondary in secondaries:\n"
+                "        try:\n"
+                "            out.append(secondary.evaluate({0: 'd'}))\n"
+                "        except Exception:\n"
+                "            pass\n",
+            ),
+            (
+                "src/nodes/x.py",
+                "def _run(sandbox, secondary):\n"
+                "    try:\n"
+                "        return sandbox.evaluate_metric(secondary, sample_set=None)\n"
+                "    except NotScoreableError:\n"
+                "        return None\n",
+            ),
+            (
+                "src/execute_tools/x.py",
+                "def _evaluate_task_owned_secondaries(args):\n"
+                "    try:\n"
+                "        return evaluate_declared_secondaries((), lambda s: s)\n"
+                "    except (ScopeViolationError, KeyError):\n"
+                "        raise\n",
+            ),
+            (
+                "src/execute_tools/evaluation_metric.py",
+                "def evaluate_declared_secondaries_v2(secondaries, evaluate_one):\n"
+                "    for secondary in secondaries:\n"
+                "        try:\n"
+                "            evaluate_one(secondary)\n"
+                "        except Exception:\n"
+                "            pass\n",
+            ),
+        ],
+        ids=["generic-name-catch-all", "anchor-route-one-handler", "adapter-tuple", "owner-twin"],
+    )
+    def test_a_partial_copy_of_the_handling_is_caught(self, rel, planted):
+        """#1544: the census above flagged a second owner only when it held the
+        COMPLETE three-handler set, so a copy of part of it passed. Each plant
+        keeps one or two handlers, under a name the old census either did not
+        match or matched without objecting. Fails if any plant goes unseen."""
+        assert self._partial_copies(rel, planted), f"partial copy not detected: {planted!r}"
+
+    def test_the_partial_copy_detector_matches_the_owners_real_shape(self):
+        """Anti-vacuity: without its exemption, the owner itself is flagged, so
+        the evaluation-call shape matches real production code, not only plants."""
+        owner_file, owner = self.OWNER
+        source = (REPO_ROOT / owner_file).read_text(encoding="utf-8")
+        assert any(
+            f"::{owner}:" in copy for copy in self._partial_copies("not/the/owner.py", source)
+        )
+        assert not self._partial_copies(owner_file, source)
 
     def test_the_shared_owner_really_does_contain_the_taxonomy(self):
         """The premise: `evaluate_declared_secondaries` is not itself a
