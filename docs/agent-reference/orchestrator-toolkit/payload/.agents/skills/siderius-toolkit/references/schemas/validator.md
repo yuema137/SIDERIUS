@@ -30,7 +30,7 @@ Import: `agent.schemas.validator.ValidatorInput`.
 | model_description | str | required | [] | Plain-English description of the architecture from the proposal. Passed to the LLM reviewer so it can assess spec alignment. |
 | mathematical_definition | str | required | [] | Precise mathematical/architectural specification from the proposal. Passed to the LLM reviewer to verify the implementation matches the spec. |
 | llm_provider | Literal['openai', 'gemini', 'deepseek', 'anthropic', 'moonshot', 'zai'] | 'openai' | [] | LLM provider for the code review step. |
-| llm_model_id | str | factory: default_model_for_provider(data['llm_provider']) | [] | Specific model ID passed to the provider for code review. |
+| llm_model_id | str | factory: default_model_for_provider(data['llm_provider']) | [] | Specific model ID passed to the provider for code review. Omitted: the default model of llm_provider; a provider without a default model requires an explicit value. |
 | expert_advice | str \| agent.schemas.hyperparam_tuning.ExpertAdvice | '' | [] | Structured guidance from upstream agents or orchestrators. Accepts a plain string or a structured ExpertAdvice object. |
 | human_advice | str \| None | None | [] | Optional human-provided guidance (highest priority — overrides expert_advice). When present, injected into the LLM prompt as high-priority context. |
 | model_probe_context | agent.schemas.model_probe.ModelProbeContext \| None | None | [] | Task-owned validation input identity, transported without reinterpretation. |

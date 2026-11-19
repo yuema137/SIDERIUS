@@ -6,6 +6,7 @@
   // Human-readable tuning stop reasons (HyperparamTuningOutput.termination_reason) for the pause summary.
   const TUNING_STOP_LABELS = {
     aborted_fail_rounds: 'consecutive tuning rounds failed until the failure limit',
+    aborted_infeasible_rounds: 'consecutive tuning rounds broke a declared constraint until the failure limit',
     aborted_by_gate: 'stopped by a validity gate',
     scope_violation: 'a data scope violation',
     infrastructure_abort: 'an infrastructure or environment check failed',

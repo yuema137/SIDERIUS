@@ -16,6 +16,7 @@ from uuid import uuid4
 import pytest
 
 from core.runtime_control.process_group import observe_group
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tests.unit.tools.candidate_worker.conftest import prepared
 from tools.candidate_operations import (
     CandidateOperation,
@@ -200,7 +201,7 @@ def test_child_terminates_live_sandbox_group_and_records_cancelled(claimed, monk
 
     def operator():
         try:
-            deadline = time.monotonic() + 60
+            deadline = time.monotonic() + CHILD_PROCESS_BOUND_SECONDS
             while not (leader.exists() and leader.read_text().strip()):
                 if time.monotonic() > deadline:
                     raise TimeoutError("sandbox group never started")
@@ -213,9 +214,10 @@ def test_child_terminates_live_sandbox_group_and_records_cancelled(claimed, monk
     thread.start()
     started = time.monotonic()
     status = execute(path)
-    thread.join(timeout=60)
+    thread.join(timeout=CHILD_PROCESS_BOUND_SECONDS)
     assert not isinstance(outcome[0], BaseException), outcome
-    assert status == 0 and time.monotonic() - started < 60
+    # Well below the 600 s sandbox group the cancellation must cut short.
+    assert status == 0 and time.monotonic() - started < CHILD_PROCESS_BOUND_SECONDS
     assert observe_group(int(leader.read_text())).status == "absent"
     snapshot = read_operation(config, record.submission.request_id)
     assert snapshot.state == "completed" and snapshot.cancel_requested

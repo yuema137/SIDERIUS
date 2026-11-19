@@ -26,6 +26,7 @@ from agent.schemas.data_analysis.action_identity import (
     GeneratedProgramGenerationProvenance,
 )
 from core.runtime_control.process_group import process_group_alive
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS, host_time_unit
 
 #: Seed a non-deterministic program executes under in these tests (issue #983).
 PROGRAM_SEED = 13
@@ -128,7 +129,7 @@ def _execute(
         parameters={},
         output_directory=output,
         control_directory=tmp_path / "control",
-        timeout_s=2.0,
+        timeout_s=CHILD_PROCESS_BOUND_SECONDS,
         max_host_memory_gb=1.0,
         program_seed=PROGRAM_SEED,
     )
@@ -568,43 +569,77 @@ def _execute_stand_in(sandbox: AnalysisCodeSandbox, tmp_path: Path, *, timeout_s
     )
 
 
+def _pre_publication_seconds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> float:
+    """Wall time from entering execution to the published request, timed now.
+
+    The same stand-in path without probe delay or publication stall: program
+    persistence, the probe launch and the request write. The allocation of the
+    precision witness below must cover this before its own stalls start.
+    """
+    from agent.data_analysis import analysis_code_sandbox as module
+
+    baseline = tmp_path / "baseline"
+    baseline.mkdir()
+    sandbox = _stand_in_sandbox(baseline, monkeypatch, probe_delay_s=0.0)
+    publish = module.publish_bytes_write_once
+    published: list[float] = []
+
+    def timed_publish(path: str, payload: bytes) -> None:
+        publish(path, payload)
+        published.append(time.monotonic())
+
+    with monkeypatch.context() as patch:
+        patch.setattr(module, "publish_bytes_write_once", timed_publish)
+        started = time.monotonic()
+        _execute_stand_in(sandbox, baseline, timeout_s=0.5)
+    return published[0] - started
+
+
 @pytest.mark.allow_real_subprocess
-@pytest.mark.parametrize(("ignores_sigterm", "bound_s"), [(False, 0.75), (True, 1.75)])
+@pytest.mark.parametrize(("ignores_sigterm", "bound_units"), [(False, 1.5), (True, 3.5)])
 def test_generated_program_stops_at_the_continuing_allocation_within_the_termination_bound(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     ignores_sigterm: bool,
-    bound_s: float,
+    bound_units: float,
 ) -> None:
     """#1447: probe, request publication and SIGTERM reaping are charged to the allocation.
 
     The caller passes ``min(per_skill_timeout_s, remaining)`` before the
-    probe. A 0.5 s probe plus a 0.5 s publication stall, followed by the full
-    timeout from launch, or the 1 s grace waited out on a zombie leader,
-    overrun expiry by about 1-2 s. Enforcement leaves only the poll interval,
-    or the SIGTERM grace for a child that ignores SIGTERM.
+    probe. In units ``u`` (0.5 s on an idle host, so the idle-host test is
+    unchanged): a 1 u probe plus a 1 u publication stall, followed by the full
+    timeout from launch, or the 2 u grace waited out on a zombie leader,
+    overrun expiry by about 2 u. Enforcement leaves only the poll interval
+    (bound 1.5 u), or the 2 u SIGTERM grace for a child that ignores SIGTERM
+    (bound 3.5 u). ``u`` also covers four times the measured path to
+    publication, so a loaded host cannot spend the 3 u allocation before the
+    request is published (#1578).
     """
     from agent.data_analysis import analysis_code_sandbox as module
+    from agent.data_analysis import process_termination
     from core.execution_deadline import execution_deadline
 
+    unit = max(host_time_unit(), 4 * _pre_publication_seconds(tmp_path, monkeypatch))
+    monkeypatch.setattr(process_termination, "TERMINATION_GRACE_S", 2 * unit)
     sandbox = _stand_in_sandbox(
-        tmp_path, monkeypatch, probe_delay_s=0.5, ignores_sigterm=ignores_sigterm
+        tmp_path, monkeypatch, probe_delay_s=unit, ignores_sigterm=ignores_sigterm
     )
     publish = module.publish_bytes_write_once
     published_at: list[float] = []
 
     def stalled_publish(path: str, payload: bytes) -> None:
         publish(path, payload)
-        time.sleep(0.5)
+        time.sleep(unit)
         published_at.append(time.monotonic())
 
     monkeypatch.setattr(module, "publish_bytes_write_once", stalled_publish)
-    with execution_deadline(1.5) as allocation:
-        receipt = _execute_stand_in(sandbox, tmp_path, timeout_s=1.5)
+    with execution_deadline(3 * unit) as allocation:
+        receipt = _execute_stand_in(sandbox, tmp_path, timeout_s=3 * unit)
+        assert published_at, "the allocation expired before the request was published"
         overrun_s = time.monotonic() - max(allocation.expires_at, *published_at)
 
     assert receipt.status == "timed_out"
-    assert overrun_s < bound_s
+    assert overrun_s < bound_units * unit
     assert receipt.worker_pid is not None
     assert not process_group_alive(receipt.worker_pid)
 
@@ -617,15 +652,18 @@ def test_capability_probe_cannot_run_past_the_continuing_allocation(
 
     The timeout is reported as ``timed_out`` without launching generated code;
     a probe cut by the allocation is not evidence that isolation is missing.
+    In units ``u`` (``host_time_unit``): a 10 u probe under a 2 u allocation
+    would overrun by about 8 u if not cut; the bound is 1 u.
     """
     from core.execution_deadline import execution_deadline
 
-    sandbox = _stand_in_sandbox(tmp_path, monkeypatch, probe_delay_s=5.0)
-    with execution_deadline(1.0) as allocation:
-        receipt = _execute_stand_in(sandbox, tmp_path, timeout_s=1.0)
+    unit = host_time_unit()
+    sandbox = _stand_in_sandbox(tmp_path, monkeypatch, probe_delay_s=10 * unit)
+    with execution_deadline(2 * unit) as allocation:
+        receipt = _execute_stand_in(sandbox, tmp_path, timeout_s=2 * unit)
         overrun_s = time.monotonic() - allocation.expires_at
 
-    assert overrun_s < 0.5
+    assert overrun_s < unit
     assert receipt.status == "timed_out"
     assert receipt.worker_pid is None
     assert not (tmp_path / "control" / "request.json").exists()

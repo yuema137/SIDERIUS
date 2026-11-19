@@ -34,10 +34,12 @@ def test_runtime_stop_keeps_raw_child_and_cleans_only_current_attempt(tmp_path, 
     unrelated = training_checkpoint_path(tmp_path, "synthetic", "other")
     current.write_text("partial")
     unrelated.write_text("preserve")
-    started = time.monotonic()
+    # The fault appears only after the child has printed, whatever the host load
+    # (#1578: a 0.07 s wall-clock switch could stop the child before it printed).
+    printed = tmp_path / "printed"
 
     def samples(*args):
-        if time.monotonic() - started < 0.07:
+        if not printed.exists():
             return snapshot()
         if fault == "breach":
             return snapshot(used=1500)
@@ -45,7 +47,9 @@ def test_runtime_stop_keeps_raw_child_and_cleans_only_current_attempt(tmp_path, 
 
     @native.record_protected_phase("training")
     def execute(sandbox, exp_id, run_name, model_type):
-        obs = observer(sampler=samples)
+        # Logical time: sample ageing has its own witnesses; this test owns the stop.
+        anchor = time.monotonic()
+        obs = observer(sampler=samples, clock=lambda: anchor)
         state.current_observer = obs
         native.run_native_subprocess(
             sandbox,
@@ -53,7 +57,9 @@ def test_runtime_stop_keeps_raw_child_and_cleans_only_current_attempt(tmp_path, 
             [
                 sys.executable,
                 "-c",
-                "import time;print('started candidate',flush=True);time.sleep(10)",
+                "import pathlib, sys, time; print('started candidate', flush=True); "
+                "pathlib.Path(sys.argv[1]).touch(); time.sleep(600)",
+                str(printed),
             ],
             env=dict(os.environ),
             preexec_fn=None,

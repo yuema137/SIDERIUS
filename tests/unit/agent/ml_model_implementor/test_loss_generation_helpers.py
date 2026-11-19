@@ -19,11 +19,12 @@ See ``docs/design/enable_loss_inventory.md`` § Commit L4.
 from __future__ import annotations
 
 from nodes.ml_model_implementor.ml_model_implementor import (
+    IMPLEMENTOR_LOSS_CODE_CONTRACT,
     IMPLEMENTOR_LOSS_CODE_PROMPT,
     IMPLEMENTOR_LOSS_REASONING_PROMPT,
-    IMPLEMENTOR_LOSS_REPAIR_PROMPT,
     LOSS_PLUGIN_TEMPLATE,
     _assemble_loss_plugin,
+    _build_loss_repair_system_prompt,
     _dummy_tensor_validate_loss,
     _loss_class_name,
 )
@@ -340,7 +341,7 @@ class TestLossPrompts:
         for name, prompt in [
             ("IMPLEMENTOR_LOSS_REASONING_PROMPT", IMPLEMENTOR_LOSS_REASONING_PROMPT),
             ("IMPLEMENTOR_LOSS_CODE_PROMPT", IMPLEMENTOR_LOSS_CODE_PROMPT),
-            ("IMPLEMENTOR_LOSS_REPAIR_PROMPT", IMPLEMENTOR_LOSS_REPAIR_PROMPT),
+            ("loss repair system prompt", _build_loss_repair_system_prompt()),
         ]:
             assert isinstance(prompt, str), name
             assert prompt.strip(), f"{name} is empty"
@@ -373,10 +374,12 @@ class TestLossPrompts:
         ):
             assert f'"{field}"' in IMPLEMENTOR_LOSS_CODE_PROMPT, field
 
-    def test_repair_prompt_repeats_signature_anchor(self):
-        """Repair prompt must remind the LLM of the forward signature so
-        a wrong sig from attempt N doesn't survive into attempt N+1."""
-        assert "forward(self, inputs, targets)" in IMPLEMENTOR_LOSS_REPAIR_PROMPT
+    def test_repair_prompt_carries_the_full_code_contract(self):
+        """#1574: a loss repair is a stateless request, so its system prompt
+        must carry the loss code contract itself (signature, scalar return,
+        six fields), not refer to a "previous prompt" it never received."""
+        assert IMPLEMENTOR_LOSS_CODE_CONTRACT in _build_loss_repair_system_prompt()
+        assert "previous prompt" not in _build_loss_repair_system_prompt()
 
 
 # ---------------------------------------------------------------------------

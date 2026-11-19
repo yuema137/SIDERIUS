@@ -29,6 +29,7 @@ from execute_tools.validation_execution import (
 )
 from ml_models.models_format_sandbox import AEConfig, LossConfig
 from tests.helpers import validation_execution_client
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 
 
 class PrivateObservable(DynamicObservable):
@@ -129,7 +130,7 @@ def test_explicit_binding_reaches_fresh_child_and_nested_local_binding_refuses()
         cwd=Path(__file__).resolve().parents[3],
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
         check=False,
     )
     assert child.returncode == 0, child.stderr

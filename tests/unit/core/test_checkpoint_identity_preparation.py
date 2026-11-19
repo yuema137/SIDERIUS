@@ -6,6 +6,7 @@ import hashlib
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -32,6 +33,11 @@ from core.runtime_control.process_group import (
     SignalObservation,
 )
 from core.sandbox_layout import training_checkpoint_path
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
+
+#: Allocation for a real worker process expected to succeed (or refuse on its own):
+#: the shared child bound. Logical-clock witnesses keep the small default below.
+_REAL_WORKER_SECONDS = CHILD_PROCESS_BOUND_SECONDS
 
 
 def fixture(tmp_path, *, seconds=5):
@@ -89,7 +95,7 @@ def prepare(request, limits, tmp_path):
 
 
 def test_real_cpu_worker_returns_known_bytes_and_owns_cleanup(tmp_path):
-    request, limits = fixture(tmp_path)
+    request, limits = fixture(tmp_path, seconds=_REAL_WORKER_SECONDS)
     outcome = prepare(request, limits, tmp_path)
     assert outcome.status == "available", outcome.detail
     assert outcome.reference == reference(request)
@@ -117,14 +123,14 @@ def test_fixed_worker_import_does_not_load_model_or_torch():
         ],
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=_REAL_WORKER_SECONDS,
     )
     assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.parametrize("kind", ["missing_marker", "symlink", "fifo", "directory", "missing_file"])
 def test_unavailable_native_artifact_never_produces_reference(tmp_path, kind):
-    request, limits = fixture(tmp_path)
+    request, limits = fixture(tmp_path, seconds=_REAL_WORKER_SECONDS)
     path = Path(request.checkpoint_path)
     if kind == "missing_marker":
         (tmp_path / "_OK_attempt").unlink()
@@ -344,7 +350,7 @@ def test_identity_adapter_uses_actual_package_guard_and_preserves_refusal(
     from core.subprocess_env import subprocess_env
     from tests.unit.core.test_local_code_failure import package_and_env
 
-    request, limits = fixture(tmp_path)
+    request, limits = fixture(tmp_path, seconds=_REAL_WORKER_SECONDS)
     package = package_and_env(tmp_path, monkeypatch)
     seen = []
     original = subprocess.Popen
@@ -376,7 +382,7 @@ def test_cold_package_wrapped_worker_path_never_imports_torch_or_models(tmp_path
     from core.subprocess_env import subprocess_env
     from tests.unit.core.test_local_code_failure import package_and_env
 
-    request, limits = fixture(tmp_path)
+    request, limits = fixture(tmp_path, seconds=_REAL_WORKER_SECONDS)
     package = package_and_env(tmp_path, monkeypatch)
     request_path = tmp_path / "input.json"
     request_path.write_text(request.model_dump_json())
@@ -407,22 +413,47 @@ def test_cold_package_wrapped_worker_path_never_imports_torch_or_models(tmp_path
 
 
 def test_blocked_worker_read_is_stopped_by_parent_cpu_deadline(tmp_path):
-    request, limits = fixture(tmp_path, seconds=0.8)
-    request_path = tmp_path / "input.json"
-    request_path.write_text(request.model_dump_json())
+    """Fails if the parent's work deadline does not stop a worker blocked inside the
+    checkpoint read, or leaves its group behind.
+
+    The deadline counts from launch, so it must outlast interpreter start and the
+    worker import before the read. It scales with the same child timed up to the
+    read on this host now (#1578: a fixed 0.8 s fired before the read under load);
+    the blocked read outlasts any such deadline, so only the kill can end it.
+    """
     entered = tmp_path / "read_started"
-    code = (
-        "import time; from pathlib import Path; "
-        "from core.runtime_control import checkpoint_identity_worker_main as worker\n"
-        "def blocked(*args, **kwargs):\n"
-        f"    Path({str(entered)!r}).touch()\n"
-        "    time.sleep(20)\n"
-        "worker.stream_file_identity=blocked\n"
-        f"worker.main([{str(request_path)!r}])\n"
+
+    def child(request_path, block):
+        return (
+            "import os, time; from pathlib import Path; "
+            "from core.runtime_control import checkpoint_identity_worker_main as worker\n"
+            "def blocked(*args, **kwargs):\n"
+            f"    Path({str(entered)!r}).touch()\n"
+            + ("    time.sleep(600)\n" if block else "    os._exit(0)\n")
+            + "worker.stream_file_identity=blocked\n"
+            f"worker.main([{str(request_path)!r}])\n"
+        )
+
+    baseline_request, baseline_limits = fixture(tmp_path, seconds=_REAL_WORKER_SECONDS)
+    request_path = tmp_path / "input.json"
+    request_path.write_text(baseline_request.model_dump_json())
+    started = time.monotonic()
+    supervision.supervise_subprocess(
+        [sys.executable, "-c", child(request_path, block=False)],
+        env=dict(os.environ),
+        preexec_fn=None,
+        capture_stdout=True,
+        limits=baseline_limits,
     )
+    seconds = max(0.8, 4 * (time.monotonic() - started))
+    assert entered.exists()
+    entered.unlink()
+
+    request, limits = fixture(tmp_path, seconds=seconds)
+    request_path.write_text(request.model_dump_json())
     with pytest.raises(ProcessSupervisionError) as caught:
         supervision.supervise_subprocess(
-            [sys.executable, "-c", code],
+            [sys.executable, "-c", child(request_path, block=True)],
             env=dict(os.environ),
             preexec_fn=None,
             capture_stdout=True,

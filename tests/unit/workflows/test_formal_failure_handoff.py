@@ -147,3 +147,26 @@ def test_analysis_brief_receives_failed_formal_facts_in_cold_start(tmp_path):
     ]
     assert evidence["failed_formal_attempts"][0]["invalid_count"] == 1
     assert "No prior experimental evidence exists" not in evidence["statement"]
+
+
+def test_infeasible_formal_names_its_constraint_in_the_rendered_feedback():
+    """#1527: the Formal renderer must not flatten a constraint rejection into a crash."""
+    from agent.prompt_templates.formal_failure import render_formal_failure_feedback
+
+    record = _trial("formal-infeasible", status="error_scoring", gates=False)
+    record["is_trial"] = False
+    record["failure_type"] = "infeasible"
+    record["evaluation_result"] = {
+        "constraints": [{"detail": "constraint err <= 5.0 violated: 9.0", "satisfied": False}]
+    }
+    feedback = _build_formal_validity_feedback(
+        [record],
+        model_type="synthetic_model",
+        healthgate_mode="blocking",
+        required_gate_ids=frozenset(BLOCKING_IDS),
+    )
+    assert feedback is not None
+    assert (feedback.infeasible_count, feedback.execution_failure_count) == (1, 0)
+    text = render_formal_failure_feedback([feedback])
+    assert "0 execution failures, 1 infeasible." in text
+    assert "infeasible=['constraint err <= 5.0 violated: 9.0']" in text

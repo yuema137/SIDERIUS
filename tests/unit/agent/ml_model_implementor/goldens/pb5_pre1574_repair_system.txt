@@ -1,0 +1,8 @@
+Your previous code attempt failed validation. Fix the issue and return a corrected
+JSON object with the same 5 fields: extra_imports, config_fields_code, config_fields,
+init_body, forward_body.
+
+All the hard constraints from the previous prompt still apply.
+Focus specifically on the error described below — do not rewrite unrelated code.
+
+Output only the JSON object — no preamble, no markdown fences, no commentary.

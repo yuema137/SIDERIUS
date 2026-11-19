@@ -940,3 +940,30 @@ def test_validator_rejection_reaches_code_and_every_repair_call(agent_with_mocks
     ]
     for recorded in calls:
         assert recorded.args[1].count(_REJECTION_MARKER) == 1, recorded.kwargs["label"]
+
+
+# ---------------------------------------------------------------------------
+# Repair requests carry the code call's hard constraints (#1574)
+# ---------------------------------------------------------------------------
+
+
+def test_every_repair_request_carries_the_code_calls_contract(agent_with_mocks, inp, monkeypatch):
+    """A repair is a stateless request: its system prompt must hold the same
+    output contract, import allow-list, helper-class ban, output shape and
+    native-training appendix as the code call. Fails on the #1574 defect (the
+    repair system prompt only said the constraints "still apply") and if the
+    two calls' contracts drift apart."""
+    inp.forward_contract = inp.forward_contract.model_copy(
+        update={"output_shape": "[B, 7, T] float32 (marker shape)"}
+    )
+    errors = iter(["first repair trigger", "second repair trigger", None])
+    monkeypatch.setattr(agent_with_mocks, "_validate_code", lambda *_: next(errors))
+    agent_with_mocks.run(inp)
+    code_call, *repairs = agent_with_mocks.bridge.generate.call_args_list
+    assert [call.kwargs["label"] for call in repairs] == ["implementor.repair"] * 2
+    contract = code_call.args[0][code_call.args[0].index("Output a JSON object") :]
+    assert "[B, 7, T] float32 (marker shape)" in contract
+    assert "STRICT ALLOW-LIST" in contract and "helper classes" in contract
+    for repair in repairs:
+        assert repair.args[0].endswith(contract)
+        assert "previous prompt" not in repair.args[0]

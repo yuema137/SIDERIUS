@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tools.candidate_operations.files import publish
 from tools.candidate_operations.models import SpawnFailure
 from tools.candidate_operations.store import claim, locked_store
@@ -60,7 +61,7 @@ except SystemExit:
         env=env,
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
     assert result.returncode == 0, result.stderr
     assert not sentinel.exists(), "read-only CLI executed a discoverable model plugin"
@@ -86,6 +87,9 @@ import tools.candidate_operations.child
 import tools.candidate_operations.host_queue
 """
     result = subprocess.run(
-        [sys.executable, "-c", probe], capture_output=True, text=True, timeout=30
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
     assert result.returncode == 0, result.stderr

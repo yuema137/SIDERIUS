@@ -45,6 +45,7 @@ from agent.skills.evaluate_vram_skill.preflight_worker_main import (
     _classify,
 )
 from core.preflight_estimation import active_preflight_identity
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 
 MIB = 1024**2
 
@@ -79,7 +80,7 @@ def _run(tmp_path: Path, payload: dict) -> dict:
     """worker subprocess -> IsolatedProbeResult -> adapt_result."""
     probe = run_isolated_preflight(
         _spec(tmp_path),
-        deadline_seconds=30.0,
+        deadline_seconds=CHILD_PROCESS_BOUND_SECONDS,
         command=_emitting_worker(tmp_path, payload),
     )
     return adapt_result(probe.model_dump())

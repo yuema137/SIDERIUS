@@ -19,6 +19,7 @@ from core.runtime_control.observed_subprocess import (
     ProcessSupervisionError,
     supervise_process,
 )
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 
 
 def run(body, **kwargs):
@@ -35,7 +36,7 @@ def limits(**kwargs):
     return ProcessLimits(
         **dict(
             dict(
-                deadline_seconds=2,
+                deadline_seconds=CHILD_PROCESS_BOUND_SECONDS,
                 rss_limit_bytes=256 * 1024**2,
                 poll_seconds=0.01,
                 grace_seconds=0.05,
@@ -277,7 +278,7 @@ def test_monitor_module_import_has_no_model_or_torch_side_effect():
         ],
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
     assert result.returncode == 0, result.stderr
 

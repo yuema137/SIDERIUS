@@ -98,7 +98,9 @@ class ValidatorInput(BaseModel):
     )
     llm_model_id: str = Field(
         default_factory=lambda data: default_model_for_provider(data["llm_provider"]),
-        description="Specific model ID passed to the provider for code review.",
+        description="Specific model ID passed to the provider for code review. "
+        "Omitted: the default model of llm_provider; a provider without a "
+        "default model requires an explicit value.",
     )
     expert_advice: ExpertAdviceInput = Field(
         default="",

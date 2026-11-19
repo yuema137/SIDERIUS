@@ -920,7 +920,10 @@ class ExperimentRecord(RecordModel):
         description=(
             "Step 06 — the structured not-scoreable result when the produced "
             "deliverable failed the metric's scoreability contract BEFORE any scorer "
-            "arithmetic ran (``status='error_scoring'``, ``failure_type='not_scoreable'``): "
+            "arithmetic ran (``status='error_scoring'``, ``failure_type='not_scoreable'``), "
+            "or when declared feasibility constraints refused the evaluation "
+            "(``failure_type='infeasible'`` for a measured violation, #1527; "
+            "``'not_scoreable'`` for an unmeasured constraint): "
             "which contract, which requirement, which input identity. None otherwise. "
             "Never set together with ``metric_result``."
         ),
@@ -1918,7 +1921,9 @@ class HyperparamTuningInput(BaseModel):
             "a row exhaust their attempt budget without a success, the tuner "
             "exits with termination_reason='aborted_fail_rounds' and (if the "
             "burst was gate-dominated) populates gate_exhaustion via Trigger "
-            "B for the next-iteration proposer."
+            "B for the next-iteration proposer. The same threshold is the "
+            "infeasible brake (#1527): this many measured-infeasible rounds in "
+            "a row exit with termination_reason='aborted_infeasible_rounds'."
         ),
     )
 
@@ -2481,19 +2486,20 @@ class HyperparamTuningInput(BaseModel):
     # Defense-in-depth SECONDARY sanity checks — the primary admission
     # criterion is predicted total runtime (in-subprocess verification).
     # These catch degenerate counts even when the estimator claims they
-    # are cheap. Schema defaults are None (disabled) so programmatic
-    # callers keep pre-RT5 behavior; the §5 PROVISIONAL operational
-    # values (150k steps / batch 4) are applied by the chain/CLI launch
-    # wiring (RT6), where they are operator-visible configuration.
+    # are cheap. Both are disabled by default on every surface: the schema
+    # default is None, and the standalone tuner CLI and the chain launcher
+    # default to 0, which they map to None. A positive value is an explicit
+    # task or operator choice.
     max_steps_per_attempt: int | None = Field(
         default=None,
         gt=0,
         description=(
             "§5 guardrail: a plan whose resolved optimizer-step count "
             "exceeds this is skipped pre-flight (planner-visible record) "
-            "unless allow_extreme_steps is set. None disables "
-            "(provisional operational value: 150,000 — set by the chain "
-            "launch wiring)."
+            "unless allow_extreme_steps is set. None disables it and is the "
+            "default; the standalone tuner CLI and the chain launcher default "
+            "to 0, which they map to None. Set a positive value only when the "
+            "task or operator requires a step ceiling."
         ),
     )
     min_formal_batch_size: int | None = Field(
@@ -2503,8 +2509,9 @@ class HyperparamTuningInput(BaseModel):
             "§5 guardrail: formal rounds with batch_size below this are "
             "skipped pre-flight — encodes the known launch-overhead "
             "pathology (V18 incident: batch=2). Trial rounds are exempt. "
-            "None disables (provisional operational value: 4 — set by "
-            "the chain launch wiring)."
+            "None disables it and is the default; the standalone tuner CLI "
+            "and the chain launcher default to 0, which they map to None. "
+            "Set a positive floor only when the task or operator requires it."
         ),
     )
     allow_extreme_steps: bool = Field(
@@ -3250,7 +3257,9 @@ class HyperparamTuningInput(BaseModel):
         default_factory=lambda data: default_model_for_provider(data["llm_provider"]),
         description=(
             "Model ID for the planner sub-call (and the default for the "
-            "reflector when not overridden)."
+            "reflector when not overridden). Omitted: the default model of "
+            "llm_provider; a provider without a default model requires an "
+            "explicit value."
         ),
     )
     max_output_tokens: int | None = Field(
@@ -4106,6 +4115,7 @@ class HyperparamTuningOutput(RecordModel):
     termination_reason: Literal[
         "completed",
         "aborted_fail_rounds",
+        "aborted_infeasible_rounds",
         "aborted_by_gate",
         "scope_violation",
         "infrastructure_abort",
@@ -4114,7 +4124,10 @@ class HyperparamTuningOutput(RecordModel):
         description=(
             "Why the loop exited. 'completed' = reached max_rounds successful "
             "rounds; 'aborted_fail_rounds' = max_fail_rounds consecutive "
-            "rounds exhausted their attempt budgets; 'aborted_by_gate' = "
+            "rounds exhausted their attempt budgets; "
+            "'aborted_infeasible_rounds' = max_fail_rounds consecutive rounds "
+            "ended measured-infeasible (a declared feasibility constraint was "
+            "violated, #1527; status='partial'); 'aborted_by_gate' = "
             "HISTORICAL (records predating the F-SCANC-1 retirement of the "
             "SKIP_ITER gate action; the Literal member stays so those "
             "records deserialize, and no current code path produces it — "

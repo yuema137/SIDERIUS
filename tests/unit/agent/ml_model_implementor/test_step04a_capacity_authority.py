@@ -41,12 +41,11 @@ from nodes.ml_model_implementor.ml_model_implementor import (
     IMPLEMENTOR_CODE_PROMPT,
     IMPLEMENTOR_LOSS_CODE_PROMPT,
     IMPLEMENTOR_LOSS_REASONING_PROMPT,
-    IMPLEMENTOR_LOSS_REPAIR_PROMPT,
     IMPLEMENTOR_REASONING_PROMPT,
-    IMPLEMENTOR_REPAIR_PROMPT,
     _build_reasoning_system_prompt,
     _render_capacity_budget,
 )
+from nodes.ml_model_implementor.repair_prompt import render_repair_system_prompt
 
 GOLDENS = Path(__file__).parent / "goldens"
 
@@ -181,10 +180,12 @@ def test_the_prompt_renders_end_to_end_with_and_without_hardware():
 _IMPLEMENTOR_TEMPLATES = {
     "IMPLEMENTOR_REASONING_PROMPT": IMPLEMENTOR_REASONING_PROMPT,
     "IMPLEMENTOR_CODE_PROMPT": IMPLEMENTOR_CODE_PROMPT,
-    "IMPLEMENTOR_REPAIR_PROMPT": IMPLEMENTOR_REPAIR_PROMPT,
+    # #1574: a repair system prompt = these instructions + the code contract,
+    # which IMPLEMENTOR_CODE_PROMPT / IMPLEMENTOR_LOSS_CODE_PROMPT already cover.
+    "repair instructions (model)": render_repair_system_prompt("model", ""),
     "IMPLEMENTOR_LOSS_REASONING_PROMPT": IMPLEMENTOR_LOSS_REASONING_PROMPT,
     "IMPLEMENTOR_LOSS_CODE_PROMPT": IMPLEMENTOR_LOSS_CODE_PROMPT,
-    "IMPLEMENTOR_LOSS_REPAIR_PROMPT": IMPLEMENTOR_LOSS_REPAIR_PROMPT,
+    "repair instructions (loss)": render_repair_system_prompt("loss", ""),
 }
 
 

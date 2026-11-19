@@ -30,6 +30,7 @@ from agent.prompt_templates.literature_review import render_synthesis_prompt
 from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.literature_review import LiteratureReviewInput, LiteratureReviewOutput
 from agent.schemas.protocols.interpreter_to_ml_literature_review import local_typed_evidence
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _REQUIRED_ARGS = [
@@ -551,7 +552,7 @@ def test_cold_script_transports_task_to_real_synthesis_and_storage(tmp_path, omi
         env=env,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
     output_path = workspace / "ml_literature_review_v1.json"
     if omit_task:

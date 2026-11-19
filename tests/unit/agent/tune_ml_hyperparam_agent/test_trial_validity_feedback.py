@@ -159,6 +159,54 @@ class TestTheDistinctionsSurvive:
         assert result.invalid_count == 1
         assert result.execution_failure_count == 0
 
+    def test_infeasible_trial_is_judged_and_names_its_violated_constraint(self):
+        """#1527: a constraint rejection is negative evidence, not absent evidence.
+
+        Classified by status alone it would read as an execution failure, and
+        the proposer would never learn which constraint to satisfy.
+        """
+        infeasible = _trial("infeasible", status="error_scoring", gates=False)
+        infeasible["failure_type"] = "infeasible"
+        infeasible["evaluation_result"] = {
+            "constraints": [
+                {"detail": "constraint quality >= 0.5 satisfied: 0.8", "satisfied": True},
+                {"detail": "constraint err <= 5.0 violated: 9.0", "satisfied": False},
+            ]
+        }
+        result = _build([infeasible, _trial("crashed", status="error_scoring")])
+        assert result.infeasible_count == 1
+        assert result.execution_failure_count == 1
+        violations = {o.exp_id: o.constraint_violations for o in result.outcomes}
+        assert violations == {
+            "infeasible": ["constraint err <= 5.0 violated: 9.0"],
+            "crashed": [],
+        }
+        text = TestTheRenderedBlock._render([result])
+        assert "1 execution failure(s), 1 infeasible" in text
+        assert "infeasible=(constraint err <= 5.0 violated: 9.0)" in text
+        dumped = result.model_dump(mode="json")
+        assert dumped["infeasible_count"] == 1
+        assert "constraint_violations" not in dumped["outcomes"][1]
+
+    def test_an_infeasible_brake_stop_reaches_the_proposer(self):
+        """#1527: the proposer must learn tuning stopped on unreached constraints.
+
+        The flag is omitted from the dump when false, so a run without the
+        brake keeps its bytes (the pre-08a golden below pins that case).
+        """
+        infeasible = _trial("infeasible", status="error_scoring", gates=False)
+        infeasible["failure_type"] = "infeasible"
+        stopped = _build_trial_validity_feedback(
+            [infeasible],
+            formal_skipped_for_no_valid_winner=False,
+            healthgate_mode="blocking",
+            required_gate_ids=frozenset(BLOCKING_IDS),
+            stopped_by_infeasible_rounds=True,
+        )
+        assert stopped is not None and stopped.model_dump()["stopped_by_infeasible_rounds"]
+        assert "aborted_infeasible_rounds" in TestTheRenderedBlock._render([stopped])
+        assert "stopped_by_infeasible_rounds" not in _build([infeasible]).model_dump()
+
     def test_validity_unknown_is_not_invalidity(self):
         """Gates that could not judge are not gates that rejected."""
         result = _build([_trial("ungated", gates=False)])

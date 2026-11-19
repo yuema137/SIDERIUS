@@ -34,6 +34,7 @@ from core.sandbox_executor import (
     _subprocess_rss_gb,
 )
 from execute_tools.data_paths import bind_physical_data_root
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
 # ==========================================
@@ -488,7 +489,9 @@ for role in ("training", "inference", "scoring"):
     child = subprocess.run(
         [sys.executable, '-I', '-c',
          'import json,resource;print(json.dumps(resource.getrlimit(resource.RLIMIT_AS)))'],
-        preexec_fn=hook, capture_output=True, text=True, check=True, timeout=10,
+        # 300 s = tests.helpers.process_bounds.CHILD_PROCESS_BOUND_SECONDS (this
+        # code runs in a child that cannot import the tests package).
+        preexec_fn=hook, capture_output=True, text=True, check=True, timeout=300,
     )
     observed[role] = json.loads(child.stdout)
 assert all(tuple(value) == expected for value in observed.values())
@@ -504,7 +507,7 @@ print(json.dumps({'expected': expected, 'observed': observed}))
         env=environment,
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
     assert result.returncode == 0, result.stderr
     receipt = json.loads(result.stdout)

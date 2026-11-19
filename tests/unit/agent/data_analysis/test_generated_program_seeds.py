@@ -19,6 +19,7 @@ import agent.data_analysis.generated_program_runner as runner
 from agent.data_analysis.analysis_code_sandbox import executed_program_seeds
 from agent.data_analysis.sampling_seed import program_seed
 from core.generated_seed_scan import scan_seed_calls
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from tests.unit.agent.data_analysis.test_analysis_code_sandbox import _persist_program
 
 #: random.random() and np.random.rand() right after seeding with 13.
@@ -103,7 +104,7 @@ def test_runner_seeds_every_program_from_its_request(tmp_path):
         ],
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
         check=False,
     )
     assert completed.returncode == 0, completed.stderr

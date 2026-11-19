@@ -77,6 +77,7 @@ from execute_tools.historical_model_inference import (
 )
 from ml_models.models_format_sandbox import DtypeAdmissibility, LossTypeName
 from ml_models.models_sandbox import registered_model_construction_implementation_sha256
+from tests.helpers.process_bounds import host_time_unit
 
 
 def _ref(
@@ -803,16 +804,18 @@ def test_worker_stops_at_the_deadline_without_waiting_out_the_grace_on_a_zombie_
 ) -> None:
     """#1480: request publication is charged to the deadline and SIGTERM is reaped.
 
-    A controlled child that exits on SIGTERM replaces the worker, and a 1.0 s
-    publication stall stands in for an fsync stall under I/O load. A supervisor
-    that waits on the group without reaping the leader keeps the zombie leader
-    observable and overruns the deadline by the full 1.0 s grace; one that
-    grants its timeout from launch overruns by the stall. Enforcement leaves
-    only the poll interval and the child's exit time.
+    In units ``u`` (``host_time_unit``, 0.5 s on an idle host, so the idle-host
+    test is unchanged): a controlled child that exits on SIGTERM replaces the
+    worker, and a 2 u publication stall stands in for an fsync stall under I/O
+    load. A supervisor that waits on the group without reaping the leader keeps
+    the zombie leader observable and overruns the deadline by the full 2 u
+    grace; one that grants its timeout from launch overruns by the stall.
+    Enforcement leaves only the poll interval and the child's exit time (bound
+    1.5 u).
     """
+    from agent.data_analysis import process_termination
     from execute_tools import historical_model_inference
 
-    capability, request, runtime_inputs, _ = _fixture(tmp_path)
     publish = historical_model_inference.publish_bytes_write_once
     popen = historical_model_inference.subprocess.Popen
     # An interpreter still paging in its startup under host load cannot act on
@@ -820,18 +823,51 @@ def test_worker_stops_at_the_deadline_without_waiting_out_the_grace_on_a_zombie_
     sleep_executable = shutil.which("sleep")
     assert sleep_executable is not None
 
-    def stalled_publish(path: str, payload: bytes) -> None:
-        publish(path, payload)
-        if Path(path).name == "worker_request.json":
-            time.sleep(1.0)
-
     def controlled_child(cmd: list[str], *args, **kwargs):
         assert cmd[1:3] == ["-m", "agent.data_analysis.historical_inference_worker_main"]
         return popen([sleep_executable, "60"], *args, **kwargs)
 
+    def pre_publication_seconds() -> float:
+        """The same path to the published worker request, without the stall, timed now."""
+        baseline = tmp_path / "baseline"
+        baseline.mkdir()
+        capability, request, runtime_inputs, _ = _fixture(baseline)
+        published: list[float] = []
+
+        def timed_publish(path: str, payload: bytes) -> None:
+            publish(path, payload)
+            if Path(path).name == "worker_request.json":
+                published.append(time.monotonic())
+
+        request = request.model_copy(
+            update={
+                "resource_envelope": AnalysisResourceEnvelope(
+                    wall_time_budget_s=600.0, per_skill_timeout_s=0.5
+                ),
+                "deadline_monotonic_s": time.monotonic() + 600.0,
+            }
+        )
+        with monkeypatch.context() as patch:
+            patch.setattr(historical_model_inference, "publish_bytes_write_once", timed_publish)
+            patch.setattr(historical_model_inference.subprocess, "Popen", controlled_child)
+            started = time.monotonic()
+            capability.run_historical_inference(request, runtime_inputs)
+        return published[0] - started
+
+    # ``u`` also covers four times that path, so a loaded host cannot spend the
+    # 3 u deadline before the worker request is published (#1578).
+    unit = max(host_time_unit(), 4 * pre_publication_seconds())
+    monkeypatch.setattr(process_termination, "TERMINATION_GRACE_S", 2 * unit)
+    capability, request, runtime_inputs, _ = _fixture(tmp_path)
+
+    def stalled_publish(path: str, payload: bytes) -> None:
+        publish(path, payload)
+        if Path(path).name == "worker_request.json":
+            time.sleep(2 * unit)
+
     monkeypatch.setattr(historical_model_inference, "publish_bytes_write_once", stalled_publish)
     monkeypatch.setattr(historical_model_inference.subprocess, "Popen", controlled_child)
-    deadline = time.monotonic() + 1.5
+    deadline = time.monotonic() + 3 * unit
     request = request.model_copy(
         update={
             "resource_envelope": AnalysisResourceEnvelope(
@@ -846,7 +882,7 @@ def test_worker_stops_at_the_deadline_without_waiting_out_the_grace_on_a_zombie_
 
     assert result.receipt.status == "timed_out"
     assert result.receipt.failure_code == "inference_timeout"
-    assert overrun_s < 0.75
+    assert overrun_s < 1.5 * unit
 
 
 def test_invalid_checkpoint_returns_typed_failure_not_partial_success(tmp_path: Path) -> None:

@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from workflows import literature_config
 from workflows.launch_identity import resolve_lit_review_enabled
 
@@ -34,7 +35,7 @@ for name in ('workflows.run_one_iteration', 'workflows.model_exploration',
         capture_output=True,
         text=True,
         check=False,
-        timeout=30,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
     )
     assert result.returncode == 0, result.stderr
     assert not list(tmp_path.iterdir())

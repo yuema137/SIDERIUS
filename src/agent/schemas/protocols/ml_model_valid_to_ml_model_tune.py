@@ -210,7 +210,7 @@ def local_validated_model(
     max_fail_rounds: int = 3,
     # --- Runtime-control operator surface (RT5/RT6, runtime design §4/§5) ---
     # Defaults mirror the schema (guardrails disabled, watchdog off); the
-    # chain/CLI layers supply the §5 provisional operational values.
+    # chain/CLI layers also default the guardrails to disabled (0 -> None).
     max_steps_per_attempt: int | None = None,
     min_formal_batch_size: int | None = None,
     allow_extreme_steps: bool = False,
@@ -330,7 +330,9 @@ def local_validated_model(
         cross-architecture comparable measurement. The outer loop aborts
         with ``termination_reason='aborted_fail_rounds'`` after
         ``max_fail_rounds`` consecutive rounds exhaust their inner
-        budget. See docs/resource_estimator_implement.md §11.
+        budget, and with ``'aborted_infeasible_rounds'`` after that many
+        consecutive measured-infeasible rounds (#1527). See
+        docs/resource_estimator_implement.md §11.
     """
     # Prepend planner-visible warnings to expert_advice so the tuner's planner
     # knows up front about (a) implementation deviating from the spec and

@@ -49,6 +49,8 @@ import re
 import subprocess
 from pathlib import Path
 
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 COMMON = REPO_ROOT / "scripts" / "launch" / "_chain_common.sh"
 
@@ -113,7 +115,7 @@ def _run_bash(script: str, **env: str) -> subprocess.CompletedProcess:
         ["bash", "-c", script],
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
         cwd=str(REPO_ROOT),
         env=dict(os.environ, **env),
     )

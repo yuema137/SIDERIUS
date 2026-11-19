@@ -1203,6 +1203,7 @@ def _compute_termination_state(
     max_fail_rounds: int,
     scope_violation_reason: str | None = None,
     evidence_channel_failure: str | None = None,
+    consecutive_infeasible_rounds: int = 0,
 ) -> tuple[str, str]:
     """Compute ``(run_status, termination_reason)`` from loop-exit state.
 
@@ -1219,7 +1220,11 @@ def _compute_termination_state(
       1. ``completed_rounds >= max_rounds`` → ``("completed", "completed")``.
       2. ``consecutive_fails >= max_fail_rounds`` → ``("partial",
          "aborted_fail_rounds")``.
-      3. Fallback → ``("partial", "completed")``.
+      3. ``consecutive_infeasible_rounds >= max_fail_rounds`` → ``("partial",
+         "aborted_infeasible_rounds")`` (#1527: the declared constraints were
+         not met in that many completed rounds in a row). Steps 2 and 3
+         cannot both hold: each kind of round resets the other counter.
+      4. Fallback → ``("partial", "completed")``.
 
     F-SCANC-1 (operator decision packet v1, 2026-08-26): the
     ``gate_aborted`` input and its ``("partial", "aborted_by_gate")``
@@ -1240,6 +1245,8 @@ def _compute_termination_state(
         return "completed", "completed"
     if consecutive_fails >= max_fail_rounds:
         return "partial", "aborted_fail_rounds"
+    if consecutive_infeasible_rounds >= max_fail_rounds:
+        return "partial", "aborted_infeasible_rounds"
     return "partial", "completed"
 
 

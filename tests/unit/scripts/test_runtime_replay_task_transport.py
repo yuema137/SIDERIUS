@@ -22,6 +22,7 @@ from execute_tools.task_data_path import (
     TaskProbeDataSpec,
     resolve_task_scope_capability,
 )
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 from workflows.task_composition import compose_run_task_bindings
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -80,7 +81,7 @@ def _cli(tmp_path, *args):
         env=env,
         capture_output=True,
         text=True,
-        timeout=90,
+        timeout=CHILD_PROCESS_BOUND_SECONDS,
         check=False,
     )
 

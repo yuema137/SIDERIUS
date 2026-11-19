@@ -28,13 +28,13 @@ from agent.schemas.implementor import ImplementorInput, ImplementorTaskBlocks
 from agent.schemas.proposal import CustomLossSpec
 from agent.schemas.task_config import ForwardContract
 from nodes.ml_model_implementor.ml_model_implementor import (
-    IMPLEMENTOR_LOSS_REPAIR_PROMPT,
-    IMPLEMENTOR_REPAIR_PROMPT,
     MLModelImplementor,
     _build_code_prompt,
     _build_loss_repair_prompt,
+    _build_loss_repair_system_prompt,
     _build_reasoning_prompt,
     _build_repair_prompt,
+    _build_repair_system_prompt,
 )
 from tests.helpers.constraint_disclosure import without_incomplete_disclosure
 from tests.helpers.golden import assert_golden
@@ -213,17 +213,45 @@ class TestPB5ModelPrompts:
 
 
 class TestPB5RepairPrompts:
-    def test_repair_system_constants(self):
+    def test_repair_system_prompts(self):
+        """Since #1574 a repair's system prompt carries the code call's contract."""
         assert_golden(
-            IMPLEMENTOR_REPAIR_PROMPT,
+            _build_repair_system_prompt(fixture_input()),
             GOLDENS / "pb5_repair_system.txt",
             surface="PB-5 repair system",
         )
         assert_golden(
-            IMPLEMENTOR_LOSS_REPAIR_PROMPT,
+            _build_loss_repair_system_prompt(),
             GOLDENS / "pb5_loss_repair_system.txt",
             surface="PB-5 loss repair system",
         )
+
+    def test_profile_restores_pre_1574_repair_system_prompts(self, tmp_path):
+        """The siderius-exp pin: a profile returning the historical constant per
+        ``kind`` reproduces the repair system prompts captured before #1574
+        (``pb5_pre1574_*``, the former goldens of the removed constants). Fails
+        if a builder bypasses the ``implementor.repair_system`` boundary or
+        decorates its output."""
+        from agent.prompt_rendering import PromptRenderingProfile, bind_prompt_profile
+
+        historical = {
+            kind: (GOLDENS / f"pb5_pre1574_{name}repair_system.txt").read_text(encoding="utf-8")
+            for kind, name in (("model", ""), ("loss", "loss_"))
+        }
+        source = tmp_path / "provider.txt"
+        source.write_text("pre-1574 repair system renderer")
+        profile = PromptRenderingProfile(
+            "pre-1574",
+            "1",
+            {"implementor.repair_system": lambda kind, code_contract: historical[kind]},
+            frozenset({"native_training.appendix"}),
+            {"source": source},
+        )
+        with bind_prompt_profile(profile):
+            model = _build_repair_system_prompt(fixture_input())
+            loss = _build_loss_repair_system_prompt()
+        assert_golden(model, GOLDENS / "pb5_pre1574_repair_system.txt", surface="pre-1574 model")
+        assert_golden(loss, GOLDENS / "pb5_pre1574_loss_repair_system.txt", surface="pre-1574 loss")
 
     def test_repair_user_first_attempt_empty_history(self):
         u = _build_repair_prompt(_FROZEN_CODE_DICT, _FROZEN_ERROR, fixture_input(), [])

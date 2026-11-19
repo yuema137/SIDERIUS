@@ -45,6 +45,7 @@ from execute_tools.deliverable_spec import (
     DeliverableNaming,
     default_deliverable_naming,
 )
+from execute_tools.evaluation_aggregation import is_measured_infeasibility
 from execute_tools.evaluation_child import evaluation_record_fields
 from execute_tools.evaluation_metric import (
     NotScoreableError,
@@ -67,6 +68,7 @@ from execute_tools.training_history import (
 # records -> policy, feedback (both leaves); runtime -> records. Still acyclic,
 # and enforced by tests/unit/nodes/test_node_public_boundary.py.
 from nodes.ml_hyperparameter_tune_agent.contracts import (
+    INFEASIBLE_FAILURE_TYPE,
     AdmissionOutcome,
     AttemptExecution,
     AttemptIdentity,
@@ -74,6 +76,9 @@ from nodes.ml_hyperparameter_tune_agent.contracts import (
     RunBindings,
     RunExitSnapshot,
     TrainingOutcome,
+    completes_round,
+    is_infeasible_outcome,
+    next_infeasible_streak,
 )
 from nodes.ml_hyperparameter_tune_agent.feedback import (
     _build_formal_validity_feedback,
@@ -927,7 +932,14 @@ def _build_scoring_failure_record(
     meaning, ``health_feedback.PRE_GATE_ERROR_STATUSES``). They differ in what
     the planner is told: a crash inside the scorer versus a deliverable that
     never reached the scorer, named requirement by requirement.
+
+    #1527: a refusal whose only failures are measured constraint violations
+    (``is_measured_infeasibility``) carries ``failure_type="infeasible"``. It
+    is a judged outcome, so the attempt loop completes the round on it instead
+    of retrying (``AttemptSignal.COMPLETE_ROUND``).
     """
+    evidence = getattr(exc, "evaluation_result", None)
+    infeasible = evidence is not None and is_measured_infeasibility(evidence)
     if isinstance(exc, NotScoreableError):
         failures = exc.result.verdict.failures
         named = "; ".join(
@@ -951,9 +963,11 @@ def _build_scoring_failure_record(
             "satisfy what the metric requires (missing file, channel, attrs or wrong "
             "storage dtype). Inspect the inference/output path before retrying this config."
         )
-        if any(f.requirement.startswith("constraint:") for f in failures):
-            # #1295: a declared task constraint was violated or unmeasurable. The
-            # candidate is infeasible, not broken; it is never selected.
+        failure_type = "not_scoreable"
+        if infeasible:
+            # #1295/#1527: every declared constraint was measured and at least
+            # one was violated. The candidate is infeasible, not broken; it is
+            # never selected, and the round ends on this judged outcome.
             discovery = (
                 "Training, inference and scoring completed, but the result violates "
                 "declared task constraints, so it is infeasible and cannot be selected."
@@ -963,7 +977,21 @@ def _build_scoring_failure_record(
                 "(see the conclusion). Change the configuration toward satisfying "
                 "every constraint before optimizing the objective further."
             )
-        failure_type = "not_scoreable"
+            failure_type = INFEASIBLE_FAILURE_TYPE
+        elif any(f.requirement.startswith("constraint:") for f in failures):
+            # A constraint could not be judged (no finite value, a failed
+            # measurement) or another requirement failed beside it. That is
+            # missing evidence, not infeasibility; the attempt is retried.
+            discovery = (
+                "Training and inference completed, but the evaluation could not judge "
+                "every declared task constraint (see the conclusion), so the result is "
+                "not scoreable and cannot be selected."
+            )
+            memory_update = (
+                "Not-scoreable evaluation — a declared constraint had no finite measured "
+                "value or another evaluation requirement failed. Inspect the measurement "
+                "and evaluation path before retrying this config."
+            )
     else:
         error_msg = f"{type(exc).__name__}: {exc}"
         short_msg = error_msg[-500:] if len(error_msg) > 500 else error_msg
@@ -1003,7 +1031,6 @@ def _build_scoring_failure_record(
     if isinstance(exc, NotScoreableError):
         # Step 06 C4 — the structured refusal, on the record (additive).
         record["metric_refusal"] = exc.result.model_dump(mode="json")
-        evidence = getattr(exc, "evaluation_result", None)
         if evidence is not None:
             record["evaluation_result"] = evidence.model_dump(mode="json")
         measurements = getattr(exc, "measurement_results", ())
@@ -1086,8 +1113,7 @@ def _resume_progress(
     completed_round_indices = {
         (record.get("memory") or {}).get("round_index")
         for record in existing_history
-        if record.get("status") in {"success", "failed_mode_collapse"}
-        and (record.get("memory") or {}).get("round_index") is not None
+        if completes_round(record) and (record.get("memory") or {}).get("round_index") is not None
     }
     attempt_prefix = f"{model_type}_{run_name}_"
     attempt_suffixes: list[int] = []
@@ -1099,6 +1125,60 @@ def _resume_progress(
         if suffix.isdigit():
             attempt_suffixes.append(int(suffix))
     return len(completed_round_indices), max(attempt_suffixes, default=0)
+
+
+def _resume_infeasible_streak(
+    existing_history: list[dict[str, Any]],
+    *,
+    max_rounds: int,
+    attempts_per_round: int,
+    attempts_per_formal_round: int,
+) -> int:
+    """Rebuild the #1527 consecutive measured-infeasible round count from records.
+
+    A resumed run must brake where an uninterrupted one would. Tuner records
+    carry ``memory.round_index`` and ``memory.attempt_in_round``; in history
+    order, a new round starts when the index changes or the attempt number
+    does not increase (a failed round is retried at the same index, and so is
+    a round interrupted by the restart being resumed). Each round then:
+
+    * holds a completing record: advance the streak by that outcome;
+    * reached its attempt budget without one, or ended on a
+      ``skipped_infrastructure_failure`` record (the live loop ends a round
+      early on a terminal pre-phase infrastructure failure): it failed, which
+      resets. An interrupted round that happens to end on such a record is
+      also read as failed; that can only delay the brake, never advance it;
+    * neither: it was interrupted, so the live loop never counted it and the
+      streak is unchanged.
+
+    The budget is ``attempts_per_formal_round`` for round index ``max_rounds``
+    (the formal round) and ``attempts_per_round`` otherwise, as in ``run()``.
+    """
+    rounds: list[list[dict[str, Any]]] = []
+    previous: tuple[int, int] | None = None
+    for record in existing_history:
+        memory = record.get("memory") or {}
+        index, attempt = memory.get("round_index"), memory.get("attempt_in_round")
+        if not isinstance(index, int) or not isinstance(attempt, int):
+            continue
+        if previous is None or index != previous[0] or attempt <= previous[1]:
+            rounds.append([])
+        rounds[-1].append(record)
+        previous = (index, attempt)
+
+    streak = 0
+    for records in rounds:
+        completing = [r for r in records if completes_round(r)]
+        index = records[0]["memory"]["round_index"]
+        budget = attempts_per_formal_round if index == max_rounds else attempts_per_round
+        attempts = max(r["memory"]["attempt_in_round"] for r in records)
+        if completing:
+            streak = next_infeasible_streak(
+                streak, round_infeasible=is_infeasible_outcome(completing[-1])
+            )
+        elif attempts >= budget or records[-1].get("status") == INFRASTRUCTURE_FAILURE_STATUS:
+            streak = next_infeasible_streak(streak, round_infeasible=False)
+    return streak
 
 
 def publish_run_output(output_path: str, agent_output: HyperparamTuningOutput) -> None:
@@ -1166,6 +1246,7 @@ def finalize_run_output(
     completed_rounds = exit_snapshot.completed_rounds
     total_attempts = exit_snapshot.total_attempts
     consecutive_fails = exit_snapshot.consecutive_fails
+    consecutive_infeasible = exit_snapshot.consecutive_infeasible_rounds
     _scope_violation_reason = exit_snapshot.scope_violation_reason
     _evidence_channel_failure = exit_snapshot.evidence_channel_failure
     _skipped_formal_for_no_valid_winner = exit_snapshot.skipped_formal_for_no_valid_winner
@@ -1184,6 +1265,7 @@ def finalize_run_output(
         max_fail_rounds=max_fail_rounds_setting,
         scope_violation_reason=_scope_violation_reason,
         evidence_channel_failure=_evidence_channel_failure,
+        consecutive_infeasible_rounds=consecutive_infeasible,
     )
     all_records = sandbox.get_summary()
     # F-12d-30 — the RUN's own scientific gate set, not the process default.
@@ -1229,6 +1311,7 @@ def finalize_run_output(
         formal_skipped_for_no_valid_winner=_skipped_formal_for_no_valid_winner,
         healthgate_mode=agent_input.healthgate_mode,
         required_gate_ids=bindings.run_scientific_gate_ids,
+        stopped_by_infeasible_rounds=termination_reason == "aborted_infeasible_rounds",
     )
     if trial_validity_feedback is not None:
         print(
@@ -1236,7 +1319,12 @@ def finalize_run_output(
             f"{trial_validity_feedback.invalid_count} gate-invalid, "
             f"{trial_validity_feedback.unknown_validity_count} validity-unknown, "
             f"{trial_validity_feedback.execution_failure_count} execution failures "
-            f"of {trial_validity_feedback.trial_records_considered} trial(s). "
+            + (
+                f"and {trial_validity_feedback.infeasible_count} infeasible "
+                if trial_validity_feedback.infeasible_count
+                else ""
+            )
+            + f"of {trial_validity_feedback.trial_records_considered} trial(s). "
             f"Surfacing to next proposer.",
             flush=True,
         )
@@ -1319,6 +1407,7 @@ def finalize_run_output(
             model_type=agent_input.model_type,
             healthgate_mode=agent_input.healthgate_mode,
             required_gate_ids=bindings.run_scientific_gate_ids,
+            stopped_by_infeasible_rounds=termination_reason == "aborted_infeasible_rounds",
         ),
         # Phase 6.6 WS-B B.3 — flush per-attempt VRAM-gate rejections.
         # Empty list when every attempt was feasible. Orchestrator
@@ -1442,6 +1531,13 @@ def finalize_run_output(
             f"\nAborted after {consecutive_fails} consecutive fail-rounds "
             f"(max_fail_rounds={max_fail_rounds_setting}); "
             f"{completed_rounds}/{max_rounds} rounds completed across "
+            f"{total_attempts} total attempts."
+        )
+    elif termination_reason == "aborted_infeasible_rounds":
+        print(
+            f"\nAborted after {consecutive_infeasible} consecutive infeasible rounds "
+            f"(max_fail_rounds={max_fail_rounds_setting}): the declared constraints "
+            f"were not met; {completed_rounds}/{max_rounds} rounds completed across "
             f"{total_attempts} total attempts."
         )
     else:

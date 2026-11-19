@@ -32,6 +32,7 @@ from agent.skills.evaluate_vram_skill.isolated_probe import (
 )
 from agent.skills.evaluate_vram_skill.preflight_adapter import adapt_result
 from core.preflight_estimation import active_preflight_identity
+from tests.helpers.process_bounds import CHILD_PROCESS_BOUND_SECONDS
 
 GIB = 1024**3
 
@@ -108,7 +109,7 @@ def classified_roundtrip(
     )
     probe = run_isolated_preflight(
         spec,
-        deadline_seconds=30.0,
+        deadline_seconds=CHILD_PROCESS_BOUND_SECONDS,
         command=[sys.executable, str(script), str(input_path), str(result_path)],
     )
     return probe, adapt_result(probe.model_dump())
@@ -292,6 +293,6 @@ def test_worker_checks_identity_before_model_or_task_data(tmp_path):
             update={"content_sha256": "0" * 64}
         ),
     )
-    result = run_isolated_preflight(spec, deadline_seconds=30)
+    result = run_isolated_preflight(spec, deadline_seconds=CHILD_PROCESS_BOUND_SECONDS)
     assert result.outcome == "PROBE_INFRASTRUCTURE_FAILURE"
     assert "changed after composition or worker dispatch" in result.detail

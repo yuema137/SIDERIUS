@@ -547,6 +547,13 @@ class TestRetryRecovery:
         # Repair label was used on the retry.
         labels = [c.kwargs.get("label") for c in agent_with_mocks.bridge.generate.call_args_list]
         assert labels == ["implementor.loss.code", "implementor.loss.repair"]
+        # #1574: the stateless repair request carries the loss code call's
+        # whole contract (signature, scalar return, six fields, allow-list).
+        code_system, repair_system = (
+            c.args[0] for c in agent_with_mocks.bridge.generate.call_args_list
+        )
+        contract = code_system[code_system.index("Output a JSON object") :]
+        assert repair_system.endswith(contract)
 
         assert prov.action == "generated"
         # File written with the GOOD code's forward body.
