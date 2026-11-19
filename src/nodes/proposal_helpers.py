@@ -176,6 +176,19 @@ def _guess_source(model_type: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+#: Built-in model type -> the ``models_sandbox.py`` classes that make up its
+#: source. Every key is a bundled baseline (asserted against
+#: ``BUNDLED_MODEL_TYPES`` by the source-lookup tests, #1541).
+_MODEL_CLASS_MAP: dict[str, list[str]] = {
+    "punet": ["PositionalUNet", "DoubleConv", "Down", "Up", "OutConv", "PositionalEncoding"],
+    "fcnet": ["AE"],
+    "transformer": ["TransformerModel"],
+    "wavenet": ["CausalConv1d", "WaveNetBlock", "SimpleWaveNet"],
+    "rnn": ["Seq2SeqEncoder", "Seq2SeqDecoder", "RNNSeq2Seq"],
+    "gated_fno": ["FullSpectrumGatedConv1d", "GatedFNO"],
+}
+
+
 def load_model_source(model_type: str, *, baseline_isolation: bool) -> str | None:
     """
     Load the source code for a model.
@@ -224,20 +237,14 @@ def load_model_source(model_type: str, *, baseline_isolation: bool) -> str | Non
             with open(path, encoding="utf-8") as f:
                 return f.read()
 
-    # Try built-in models — extract from models_sandbox.py
+    # Try built-in models — extract from models_sandbox.py. This step can only
+    # return bundled baseline source, so it is unreachable under isolation
+    # whatever BUNDLED_MODEL_TYPES contains (#1541, defence in depth).
+    if baseline_isolation:
+        return None
     sandbox_path = package_root() / "ml_models" / "models_sandbox.py"
     if not os.path.isfile(sandbox_path):
         return None
-
-    # Map model_type to class names
-    _MODEL_CLASS_MAP = {
-        "punet": ["PositionalUNet", "DoubleConv", "Down", "Up", "OutConv", "PositionalEncoding"],
-        "fcnet": ["AE"],
-        "transformer": ["TransformerModel"],
-        "wavenet": ["CausalConv1d", "WaveNetBlock", "SimpleWaveNet"],
-        "rnn": ["Seq2SeqEncoder", "Seq2SeqDecoder", "RNNSeq2Seq"],
-        "gated_fno": ["FullSpectrumGatedConv1d", "GatedFNO"],
-    }
 
     class_names = _MODEL_CLASS_MAP.get(model_type)
     if not class_names:

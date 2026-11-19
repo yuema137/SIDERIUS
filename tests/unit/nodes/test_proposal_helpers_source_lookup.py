@@ -96,3 +96,26 @@ class TestBaselineIsolationExcludesBundledSource:
         assert isolated[0]["source_code"] is None
         plain = enrich_candidates_with_source([{"model_type": "punet"}], baseline_isolation=False)
         assert "class PositionalUNet" in plain[0]["source_code"]
+
+
+class TestBundledSourceGuardDoesNotDependOnOneAuthority:
+    """#1541 defence in depth: the models_sandbox extraction can only return
+    bundled baseline source, so isolation must not rely on BUNDLED_MODEL_TYPES
+    (a description.md scan) staying equal to the extraction's class map."""
+
+    def test_every_extractable_type_is_a_declared_bundled_baseline(self):
+        """Fails when a built-in class family is added to the extraction map
+        without a bundled description, i.e. without the authority that the
+        description, proposal and source guards all key on."""
+        from ml_models.model_descriptions import BUNDLED_MODEL_TYPES
+
+        assert set(proposal_helpers._MODEL_CLASS_MAP) <= set(BUNDLED_MODEL_TYPES)
+
+    def test_sandbox_extraction_is_unreachable_under_isolation(self, monkeypatch):
+        """Even if the bundled authority missed a type, an isolated run gets no
+        models_sandbox source. Fails if the extraction step runs under isolation."""
+        import ml_models.model_descriptions as descriptions
+
+        monkeypatch.setattr(descriptions, "is_bundled_model_type", lambda name: False)
+        assert load_model_source("wavenet", baseline_isolation=True) is None
+        assert load_model_source("wavenet", baseline_isolation=False)
