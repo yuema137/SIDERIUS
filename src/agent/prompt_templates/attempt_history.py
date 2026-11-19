@@ -26,13 +26,36 @@ enter it only when an earlier attempt exists, so a single-attempt failure or a
 first retry is byte-identical to the pre-#1538 / pre-#1553 text under native and
 historical profiles; an experiment-owned profile restores that text everywhere
 by returning ``""``.
+
+Repair exhaustion (#1554). A generate-validate-repair loop that runs out of
+repairs raises :class:`RepairExhaustedError`. Its ``str()`` is the full failure
+text, last assembled source included, for logs and tracebacks. The proposer's
+``previous_failures`` entry is rendered through the ``proposal.failure_cause``
+boundary instead: the headline and earlier-attempt block, plus only the source
+lines the final error's SyntaxError locations name. An experiment-owned profile restores the
+pre-#1554 entry by returning ``cause``, a blank line, ``source_heading`` with a
+colon, and ``source`` (exactly the tail of the ``str()`` text).
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 
 from agent.prompt_rendering import prompt_boundary
+
+_EARLIER_REPAIRS_HEADING = "Earlier attempt errors (oldest first):"
+# The location a SyntaxError gives for the assembled source: ``(<unknown>, line N)``
+# from ``ast.parse`` or ``(<file>.py, line N)`` from compiling the plugin file. A
+# bare "line N" elsewhere (a JSONDecodeError's "line 1 column 1", a traceback
+# into another module) is not a line of this source and is ignored.
+_LINE_REFERENCE = re.compile(r"\((?:<unknown>|[^()]*\.py), line (\d+)\)")
+# Python counts lines at \r\n, \r and \n only; str.splitlines() also splits at
+# \x0b, \x0c, \x1c-\x1e, \x85, \u2028 and \u2029, which would shift every later line.
+_PYTHON_NEWLINE = re.compile(r"\r\n|\r|\n")
+_MAX_NAMED_LOCATIONS = 3
+_EXCERPT_CONTEXT = 1
+_MAX_EXCERPT_LINE_CHARS = 160
 
 
 def earlier_attempts_block(
@@ -69,3 +92,91 @@ def render_earlier_attempts(
         text = "same error as the final attempt" if error == final_error else error
         lines.append(f"  {label}: {text}")
     return "\n".join(lines)
+
+
+class RepairExhaustedError(ValueError):
+    """A generate-validate-repair loop ended with an error after its last repair.
+
+    ``str()`` keeps the established failure text (#1538): the headline with the
+    final error, the earlier-attempt block, then the last assembled source. The
+    proposer entry is rendered from the parts (:func:`render_repair_failure_cause`),
+    so the source never reaches ``previous_failures`` (#1554). The type stays a
+    ``ValueError`` for every existing handler.
+    """
+
+    def __init__(
+        self,
+        what: str,
+        name: str,
+        final_error: str,
+        error_history: Sequence[tuple[int, str]],
+        source_heading: str,
+        source: str,
+    ) -> None:
+        history = earlier_attempts_block(
+            error_history, final_error, heading=_EARLIER_REPAIRS_HEADING, unit="Attempt"
+        )
+        headline = (
+            f"{what} failed after {len(error_history) + 1} attempts for '{name}': {final_error}"
+        )
+        self.cause = f"{headline}\n\n{history}" if history else headline
+        self.final_error = final_error
+        self.source_heading = source_heading
+        self.source = source
+        self._parts = (what, name, final_error, tuple(error_history), source_heading, source)
+        super().__init__(f"{self.cause}\n\n{source_heading}:\n{source}")
+
+    def __reduce__(self):
+        return (type(self), self._parts)
+
+
+def _named_source_lines(final_error: str, source: str) -> str:
+    """The source lines ``final_error``'s SyntaxError locations name, with one line of context.
+
+    At most :data:`_MAX_NAMED_LOCATIONS` distinct in-range locations, in order of
+    first mention; each printed line is cut to :data:`_MAX_EXCERPT_LINE_CHARS`
+    and printed once even when two locations share context.
+    ``""`` when the error names no line of ``source``.
+    """
+    lines = _PYTHON_NEWLINE.split(source)
+    if lines and lines[-1] == "":
+        lines.pop()  # a trailing newline ends the last line; it does not open one
+    named: list[int] = []
+    for match in _LINE_REFERENCE.finditer(final_error):
+        number = int(match.group(1))
+        if 1 <= number <= len(lines) and number not in named:
+            named.append(number)
+        if len(named) == _MAX_NAMED_LOCATIONS:
+            break
+    if not named:
+        return ""
+    width = len(str(len(lines)))
+    excerpt = ["Source lines named by the final error:"]
+    shown: set[int] = set()
+    for number in named:
+        first = max(1, number - _EXCERPT_CONTEXT)
+        last = min(len(lines), number + _EXCERPT_CONTEXT)
+        for current in range(first, last + 1):
+            if current in shown:
+                continue
+            shown.add(current)
+            marker = ">" if current in named else " "
+            text = lines[current - 1][:_MAX_EXCERPT_LINE_CHARS]
+            excerpt.append(f"  {marker} {current:>{width}} | {text}".rstrip())
+    return "\n".join(excerpt)
+
+
+@prompt_boundary("proposal.failure_cause")
+def render_repair_failure_cause(
+    cause: str, final_error: str, source_heading: str, source: str
+) -> str:
+    """The proposer's view of a repair-exhausted failure, without the full source.
+
+    ``cause`` is the headline plus earlier-attempt block; the source contributes
+    only the lines the final error's SyntaxError locations name (location and
+    key lines). Bounded by
+    the cause, which holds at most one line per distinct attempt error, plus at
+    most three excerpts of three lines each.
+    """
+    excerpt = _named_source_lines(final_error, source)
+    return f"{cause}\n\n{excerpt}" if excerpt else cause

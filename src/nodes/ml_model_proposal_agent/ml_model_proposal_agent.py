@@ -42,6 +42,7 @@ from agent.prompt_templates.proposal import (
     render_literature_review_evidence,
 )
 from agent.prompt_templates.proposal.budget_context import render_proposer_time_budget_context
+from agent.prompt_templates.proposal.previous_failures import previous_failure_items
 from agent.prompts import _format_known_constraints_block
 from agent.schemas.health_feedback import TrialValidityFeedback
 from agent.schemas.hyperparam_tuning import GateExhaustionInfo
@@ -1291,8 +1292,7 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
 
     if inp.previous_failures:
         lines.append("## Previous Failed Proposals (DO NOT repeat these mistakes)")
-        for i, failure in enumerate(inp.previous_failures, 1):
-            lines.append(f"  {i}. {failure}")
+        lines.extend(previous_failure_items(inp.previous_failures))
         lines.append("")
 
     # Phase N (§14.N) — aggregate-window cross-iteration gate-exhaustion
