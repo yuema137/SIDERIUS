@@ -4,8 +4,10 @@ Preparation never refuses a run for lacking a GPU: it cannot know where the run
 will launch, and a workflow without training needs none. When the prepared
 worker request declares a ``tuning`` node and its ``devices`` name no GPU device
 node, the run's training admission will refuse it (no CPU execution mode), so
-the CLI and the console Run review show this warning beforehand. The wording is
-owned by ``core.gpu_requirement.training_gpu_warning``.
+``python -m tools.candidate_prepare`` prints this warning beforehand. The wording
+is owned by ``core.gpu_requirement.training_gpu_warning``. The console Run review
+shows the same condition with its own #1136 wording
+(``package_mounts.gpu_warnings``, ``compute-requirement.js``), not this text.
 """
 
 from __future__ import annotations
