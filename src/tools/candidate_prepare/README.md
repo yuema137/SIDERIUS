@@ -35,9 +35,9 @@ absent, have existing parents, and be separate from each other and all inputs.
    }
    ```
 
-   `candidate_devices` gives the candidate this machine's GPUs. The candidate
-   trains a model, and training needs an NVIDIA GPU, so an empty list is
-   refused at launch. Print the right list for this machine with:
+   `candidate_devices` gives the candidate this machine's GPUs. This route
+   proposes, implements and validates a model but does not train it, so an
+   empty list also works. Print the GPU list for this machine with:
 
    ```bash
    .venv/bin/python -c "from tools.workspace_sandbox.gpu import host_gpu_devices; print(list(host_gpu_devices()))"
@@ -124,7 +124,10 @@ helps write your external project files; it does not use a different backend.
    `preflight_reusable_candidate(request)` performs read-only admission, without
    task imports or directory creation; preparation always repeats it freshly.
 4. Check the top-level `receipt.json` in the newly reported run directory.
-   Success is `status: "prepared"` and CLI exit zero. `workflow.py.snapshot`
+   Success is `status: "prepared"` and CLI exit zero. If your workflow trains
+   but the request lists no GPU, the CLI also prints a `Warning:` line. The run
+   would be refused when it reaches training, so write a fresh request on the
+   machine that will run it (the recipe fills in its GPUs) and prepare again. `workflow.py.snapshot`
    contains your exact authored v2 bytes; `binding.json` identifies their selected
    project base and native inputs. `inputs/workflow.resolved.py` is generated v1
    input for the existing worker. Edit your authored source for future runs,

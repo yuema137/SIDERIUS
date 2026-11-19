@@ -1,5 +1,6 @@
 """Offline native candidate preparation shared by Python and JSON callers."""
 
+from .gpu_warning import prepared_gpu_warning
 from .launch import prepare_candidate
 from .models import CandidatePreparationReceipt, CandidatePreparationRequest
 from .resolution import (
@@ -16,6 +17,7 @@ __all__ = [
     "ResolvedReusableCandidate",
     "ReusableCandidateLocations",
     "prepare_candidate",
+    "prepared_gpu_warning",
     "resolve_reusable_candidate",
 ]
 
