@@ -136,7 +136,10 @@ code. Claim retention therefore does not imply source-loading parity.
 The validator reports a claim the implementation does not carry as unverified;
 naming an earlier iteration's model does not itself cause the worker to refuse
 a later iteration. The existing isolation
-policy applies when the native seed requests it. `local_full_spec` constructs
+policy applies when the native seed requests it. Under `baseline_isolation` a proposal that
+`refuse_builtin_proposal_under_isolation` refuses (bundled model name, reuse target, or
+bundled experiment ancestor claim, #1614) fails that body's proposal node with no retry,
+unlike the native loop, which feeds the refusal back as `previous_failures`. `local_full_spec` constructs
 implementation input; managed model/test/loss directories and task/advice/hardware
 context are added through existing helpers. `local_all_fields` constructs the
 validator input, using the same native routing authority and immediate upstream

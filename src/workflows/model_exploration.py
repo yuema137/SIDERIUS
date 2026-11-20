@@ -905,20 +905,33 @@ def refuse_builtin_proposal_under_isolation(
     (``ml_models.model_descriptions.BUNDLED_MODEL_TYPES``), so the two
     refusals cannot name different baselines. A non-isolated run is untouched.
 
+    The same refusal covers ``inherited_components`` (#1614): an
+    ``experiment`` claim whose ``source_id`` is a bundled type is refused and
+    named, so the next proposal designs those components from scratch or cites
+    an agent-generated experiment. ``external_agent`` / ``human`` claims carry
+    namespaced ids (``<prefix>:<identifier>``) that never denote a model type.
+
     Raises:
         BaselineIsolationViolation: naming every bundled type the proposal
-            reached for.
+            reached for, or every bundled experiment claim.
     """
     if not baseline_isolation:
         return
     from ml_models.model_descriptions import BUNDLED_MODEL_TYPES, is_bundled_model_type
 
-    reached: set[str] = {proposal.model_name}
+    def names_bundled(name: str) -> bool:
+        # #1614: an LLM-written reference may vary case, padding or '-'/'_';
+        # the bundled authority's keys are lowercase snake_case.
+        return is_bundled_model_type(name.strip().casefold().replace("-", "_"))
+
+    reached: set[str] = (
+        {proposal.model_name} if is_bundled_model_type(proposal.model_name) else set()
+    )
     model_cfg = (proposal.baseline_config or {}).get("model_config") or {}
     reuse_target = model_cfg.get("model_name") if isinstance(model_cfg, dict) else None
-    if isinstance(reuse_target, str):
+    if isinstance(reuse_target, str) and names_bundled(reuse_target):
         reached.add(reuse_target)
-    offending = sorted(name for name in reached if is_bundled_model_type(name))
+    offending = sorted(reached)
     if offending:
         raise BaselineIsolationViolation(
             f"baseline_isolation is ON and the proposal reached for the bundled "
@@ -926,6 +939,23 @@ def refuse_builtin_proposal_under_isolation(
             f"{proposal.model_name!r}). The WITHOUT arm excludes every shipped "
             f"baseline {sorted(BUNDLED_MODEL_TYPES)}; propose a new architecture "
             "or reuse an agent-generated plugin."
+        )
+    # #1614: an experiment claim names a chain model by model_type, so a claim on
+    # a bundled type asks the implementor to carry a shipped baseline's parts.
+    # external_agent / human claims are namespaced references to findings and
+    # directives ('<prefix>:<id>'), never a model_type, and load no source.
+    claims = [
+        f"{item.component!r} from {item.source_id!r}"
+        for item in proposal.inherited_components
+        if item.source_type == "experiment" and names_bundled(item.source_id)
+    ]
+    if claims:
+        raise BaselineIsolationViolation(
+            "baseline_isolation is ON and the proposal's inherited_components claim "
+            f"bundled built-in model type(s) as experiment ancestors: {', '.join(claims)}. "
+            f"The WITHOUT arm excludes every shipped baseline {sorted(BUNDLED_MODEL_TYPES)}; "
+            "design those components from scratch, or cite an agent-generated experiment "
+            "as the ancestor."
         )
 
 
